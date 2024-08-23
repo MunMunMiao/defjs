@@ -1,0 +1,30 @@
+{
+  "name": "@defjs/cli",
+  "type": "module",
+  "version": "0.0.0",
+  "description": "",
+  "publishConfig": {
+    "directory": "dist"
+  },
+  "scripts": {
+    "dev": "bun src/main.ts",
+    "build": "bun scripts/build.ts",
+    "lint": "biome check",
+    "lint:fix": "biome check --write"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/defjs/defjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/defjs/defjs/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "typescript": "5.5.4"
+  }
+}

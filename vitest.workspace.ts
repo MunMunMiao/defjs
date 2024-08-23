@@ -53,4 +53,15 @@ export default defineWorkspace([
       globalSetup: 'packages/core/test-setup.ts',
     },
   },
+  {
+    resolve: {
+      alias: {
+        '@src': join(process.cwd(), 'packages/cli/src'),
+      },
+    },
+    test: {
+      name: 'cli',
+      include: ['packages/cli/src/**/*.spec.ts'],
+    },
+  },
 ])
