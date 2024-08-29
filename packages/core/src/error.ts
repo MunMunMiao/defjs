@@ -6,8 +6,6 @@ export const ERR_NETWORK = new Error('ERR_NETWORK')
 
 export const ERR_NOT_FOUND_HANDLER = new Error('ERR_NOT_FOUND_HANDLER')
 
-export const ERR_OBSERVE = new Error('ERR_OBSERVE')
-
 export const ERR_NOT_SET_ALIAS = new Error('ERR_NOT_SET_ALIAS')
 
 export const ERR_UNSUPPORTED_FIELD_TYPE = new Error('ERR_UNSUPPORTED_FIELD_TYPE')

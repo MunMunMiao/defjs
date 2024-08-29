@@ -64,7 +64,7 @@ bun install @defjs/core
    * @description Define the request api request in the lib/api directory of the project
    */
   const useGetUser = defineRequest('/v1/user/:id')
-    .withField(
+    .withInput(
       field(0).withParam()
     )
 

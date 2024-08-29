@@ -13,7 +13,6 @@ export enum FieldType {
 }
 
 export interface FieldMetadata<T = undefined> {
-  required: boolean
   alias: Map<FieldType, string | undefined>
   validators: ValidatorFn<T>[]
   asyncValidator: AsyncValidatorFn<T>[]
@@ -37,8 +36,6 @@ export function field<T>(): Field<T | undefined>
 export function field<T>(defaultValue: T): Field<T>
 export function field<T = undefined>(defaultValue?: T): Field<T> {
   const meta: FieldMetadata<T> = {
-    // todo
-    required: typeof defaultValue !== 'undefined',
     alias: new Map<FieldType, string>(),
     validators: [],
     asyncValidator: [],
@@ -87,6 +84,14 @@ export function field<T = undefined>(defaultValue?: T): Field<T> {
   }
   return getter
 }
+
+export function defineJson() {}
+
+export function defineForm() {}
+
+export function defineURLForm() {}
+
+export function defineGraphQL() {}
 
 type ExtractFieldValue<T> = T extends Field<infer V>
   ? V

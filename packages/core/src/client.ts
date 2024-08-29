@@ -4,8 +4,6 @@ import type { InterceptorFn } from './interceptor'
 
 export interface ClientOptions {
   host: string
-  /** Default: true  */
-  strict?: boolean
   interceptors?: InterceptorFn[]
   handler?: HttpHandler
   /** @todo: Add support for query params serializer */
@@ -14,8 +12,6 @@ export interface ClientOptions {
 
 export interface ClientConfig {
   host: string
-  // todo
-  strict: boolean
   handler: HttpHandler
   interceptors?: InterceptorFn[]
 }
@@ -42,7 +38,6 @@ export function getClientConfig(client: Client): ClientConfig {
 export function createClient(options: ClientOptions): Client {
   const conf: ClientConfig = {
     host: options.host,
-    strict: options.strict ?? true,
     interceptors: options.interceptors ?? [],
     handler: options.handler || fetchHandler,
   }

@@ -146,7 +146,7 @@ describe('Request', () => {
     })
 
     test('should throw error when define input but not use', async () => {
-      const useRequest = defineRequest('POST', '/').withField(field<number>())
+      const useRequest = defineRequest('POST', '/').withInput(field<number>())
       const { doRequest } = useRequest()
 
       await expect(doRequest()).rejects.toThrowError()
@@ -214,18 +214,8 @@ describe('Request', () => {
       }
     })
 
-    test('should observe is body', async () => {
-      const useRequest = defineRequest<{ id: number }>('POST', '/').withField({
-        id: field(1).withJson(),
-      })
-      const { doRequest, getInitValue } = useRequest()
-      const resp = await doRequest(getInitValue(), { client: testClient })
-
-      expect(resp).toEqual({ id: 1 })
-    })
-
-    test('should observe is response', async () => {
-      const useRequest = defineRequest('GET', '/').withObserve('response')
+    test('should result is response', async () => {
+      const useRequest = defineRequest('GET', '/')
       const { doRequest } = useRequest()
       const resp = await doRequest({ client: testClient })
 
@@ -237,7 +227,7 @@ describe('Request', () => {
 
     test('should throw error when field valid error', async () => {
       const err = new Error('Invalid value')
-      const useRequest = defineRequest('POST', '/').withField({
+      const useRequest = defineRequest('POST', '/').withInput({
         id: field(0)
           .withJson()
           .withValidators(value => {
@@ -257,7 +247,7 @@ describe('Request', () => {
     })
 
     test('should field value is null', async () => {
-      const useRequest = defineRequest('POST', '/').withField({
+      const useRequest = defineRequest('POST', '/').withInput({
         id: field<number | null>().withJson(),
       })
       const { doRequest } = useRequest()
@@ -267,7 +257,7 @@ describe('Request', () => {
     test('should valid input value', async () => {
       const err = new Error('Invalid value')
       const useRequest = defineRequest('POST', '/')
-        .withField({
+        .withInput({
           id: field<number>().withJson(),
           name: field<string>().withJson(),
         })
@@ -352,13 +342,6 @@ describe('Request', () => {
       expect(isSet).toBeTruthy()
     })
 
-    test('should throw error when set error observe', async () => {
-      const useRequest = defineRequest('GET', '/').withObserve('123' as any)
-
-      const { doRequest } = useRequest()
-      await expect(doRequest({ client: testClient })).rejects.toThrowError()
-    })
-
     test('should use global client', async () => {
       setGlobalClient(testClient)
       const useRequest = defineRequest('GET', '/')
@@ -378,12 +361,13 @@ describe('Request', () => {
 
     test('should use doRequest when input one param', async () => {
       setGlobalClient(testClient)
-      const useRequest = defineRequest('POST', '/').withField(field(0).withJson())
+      const useRequest = defineRequest('POST', '/').withInput(field(0).withJson())
       const { doRequest, getInitValue } = useRequest()
       let input = getInitValue()
       input = 10
       await expect(doRequest(input)).resolves.toBe(10)
 
+      // @ts-ignore
       await expect(doRequest()).rejects.toThrowError()
       restGlobalClient()
     })
@@ -396,7 +380,7 @@ describe('Request', () => {
 
       test('should be ok with when parse transform response body', async () => {
         const useRequest = defineRequest('POST', '/account')
-          .withField({
+          .withInput({
             id: field(0).withJson(),
             name: field('').withJson(),
           })
