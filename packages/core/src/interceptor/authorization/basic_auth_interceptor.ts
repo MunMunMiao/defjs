@@ -1,3 +1,4 @@
+import { HttpHeaders } from '@src/headers'
 import type { InterceptorFn } from '../interceptor'
 
 export type BasicCredential = {
@@ -21,7 +22,7 @@ export function basicAuthInterceptor(fn: () => BasicCredential, options?: BasicA
   }
 
   return (req, next) => {
-    const headers = req.headers || new Headers()
+    const headers = req.headers || new HttpHeaders()
     headers.set('Authorization', `Basic ${encode(fn())}`)
     req.headers = headers
     return next(req)

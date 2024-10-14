@@ -1,16 +1,24 @@
 import { ERR_ABORTED, ERR_TIMEOUT, HttpErrorResponse } from '@src/error'
+import type { HttpHandler } from '@src/handler'
 import { __concatChunks, __getContentLength, __getContentType, __parseBody } from '@src/handler/util'
 import { type HttpRequest, __detectContentTypeHeader, __serializeBody } from '@src/request'
 import { type HttpResponse, type HttpResponseBody, __makeResponse } from '@src/response'
 
 export function __createRequest(request: HttpRequest): Request {
-  const url = new URL(request.endpoint, request.host)
+  let url = request.host + request.endpoint
 
   if (request.queryParams) {
-    url.search = request.queryParams.toString()
+    url += `?${request.queryParams.toString()}`
   }
 
-  const headers = request.headers ?? new Headers()
+  const headers = new Headers()
+
+  if (request.headers) {
+    request.headers.forEach((value, key) => {
+      headers.append(key, value)
+    })
+  }
+
   if (!headers.has('Content-Type')) {
     const detectedType = __detectContentTypeHeader(request.body)
     if (detectedType) {
@@ -120,4 +128,10 @@ export async function fetchHandler(httpRequest: HttpRequest): Promise<HttpRespon
     headers,
     body,
   })
+}
+
+export type ProvideFetchHandlerOptions = {}
+
+export function provideFetchHandler(options?: ProvideFetchHandlerOptions): HttpHandler {
+  return fetchHandler
 }

@@ -1,3 +1,5 @@
+import { HttpHeaders } from '@src/headers'
+import { HttpParams } from '@src/params'
 import { __stringify__urlSearchParams } from '@src/stringify'
 import { type Client, getClientConfig, getGlobalClient, isClient } from './client'
 import { type HttpContext, makeHttpContext } from './context'
@@ -44,9 +46,9 @@ export interface HttpRequest {
 
   body?: Blob | ArrayBuffer | FormData | URLSearchParams | object | string | number | boolean | null
 
-  headers?: Headers
+  headers?: HttpHeaders
 
-  queryParams?: URLSearchParams
+  queryParams?: HttpParams
 
   /** default：json */
   responseType?: HttpResponseType
@@ -265,8 +267,8 @@ export function defineRequest<Output>(...args: unknown[]): DefineRequest<undefin
         host: clientOptions?.host,
         method,
         endpoint,
-        queryParams: new URLSearchParams(),
-        headers: new Headers(),
+        queryParams: new HttpParams(),
+        headers: new HttpHeaders(),
         body: undefined,
         withCredentials,
         responseType,
@@ -415,8 +417,8 @@ export async function __fillRequestFromField(
 
   if (isField(fieldOrFieldGroup)) {
     let params: Map<string, string> | undefined
-    let queryParams: URLSearchParams | undefined
-    let headers: Headers | undefined
+    let queryParams: HttpParams | undefined
+    let headers: HttpHeaders | undefined
     let body: any = undefined
     const validValue: any = getValidValue(input, fieldOrFieldGroup())
     const meta = __getFieldMetadata(fieldOrFieldGroup)
@@ -480,9 +482,9 @@ export async function __fillRequestFromField(
 
   if (isFieldGroup(fieldOrFieldGroup) && inputIsObject(input)) {
     let params = new Map<string, string>()
-    let queryParams = new URLSearchParams()
-    let headers = new Headers()
-    let urlForm = new URLSearchParams()
+    let queryParams = new HttpParams()
+    let headers = new HttpHeaders()
+    let urlForm = new HttpParams()
     let formData = new FormData()
     const json = {}
     let body: any = undefined

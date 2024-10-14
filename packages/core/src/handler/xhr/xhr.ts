@@ -1,4 +1,6 @@
 import { ERR_ABORTED, ERR_NETWORK, ERR_TIMEOUT, ERR_UNKNOWN, HttpErrorResponse } from '@src/error'
+import type { HttpHandler } from '@src/handler'
+import { HttpHeaders } from '@src/headers'
 import { type HttpRequest, __detectContentTypeHeader, __serializeBody } from '@src/request'
 import { type HttpResponse, type HttpResponseBody, __makeResponse } from '@src/response'
 import { __getContentType, __parseBody } from '../util'
@@ -26,9 +28,9 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
     const uploadProgress = httpRequest.uploadProgress
     const downloadProgress = httpRequest.downloadProgress
 
-    const url = new URL(httpRequest.endpoint, httpRequest.host)
+    let url = httpRequest.host + httpRequest.endpoint
     if (httpRequest.queryParams) {
-      url.search = httpRequest.queryParams.toString()
+      url += `?${httpRequest.queryParams.toString()}`
     }
 
     xhr.open(httpRequest.method, url, true)
@@ -37,7 +39,8 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
       xhr.withCredentials = true
     }
 
-    const headers = httpRequest.headers ?? new Headers()
+    const headers = httpRequest.headers ?? new HttpHeaders()
+
     headers.forEach((value, key) => {
       xhr.setRequestHeader(key, value)
     })
@@ -49,7 +52,7 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
     if (!headers.has('Content-Type')) {
       const detectedType = __detectContentTypeHeader(httpRequest.body)
       if (detectedType) {
-        headers.set('Content-Type', detectedType)
+        xhr.setRequestHeader('Content-Type', detectedType)
       }
     }
 
@@ -173,4 +176,10 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
 
     xhr.send(reqBody)
   })
+}
+
+export type ProvideXHRHandlerOptions = {}
+
+export function provideXHRHandler(options?: ProvideXHRHandlerOptions): HttpHandler {
+  return xhrHandler
 }
