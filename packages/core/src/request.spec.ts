@@ -13,7 +13,7 @@ import {
   __serializeBody,
   defineRequest,
 } from './request'
-import { ERR_ABORTED, ERR_NOT_FOUND_HANDLER, ERR_NOT_SET_ALIAS, ERR_TIMEOUT } from './response'
+import { ERR_ABORTED, ERR_NOT_FOUND_HANDLER, ERR_TIMEOUT } from './response'
 
 describe('Request', () => {
   const testClient = createClient({ host: inject('testServerHost') })
@@ -445,7 +445,7 @@ describe('Request', () => {
           endpoint: '/v1/:uid/:username',
         }) as HttpRequest
 
-      test('should fill fieldGroup is working', async () => {
+      test('should content type is from urlencoded', async () => {
         const data = { id: 1, name: 'Jack' }
         const hq = baseHttpRequest()
         const fields = {
@@ -470,6 +470,8 @@ describe('Request', () => {
           name: field('John').withParam('username').withJson(),
           content: field('Hello World!').withJson(),
           status: field<number[]>([]).withQuery('s'),
+          age: field<number>().withQuery('age'),
+          ages: field<number[]>().withQuery('ags'),
         }
 
         await __fillRequestFromField(hq, fields, {
@@ -477,44 +479,31 @@ describe('Request', () => {
           name: 'Alice',
           content: 'Hello Alice!',
           status: [1, 2, 3, 4, 5],
+          age: undefined,
+          ages: [undefined],
         })
 
         expect(hq.endpoint).toEqual('/v1/10/Alice')
-        expect(hq.queryParams?.toString()).toEqual('s=1&s=2&s=3&s=4&s=5')
+        expect(hq.queryParams?.toString()).toEqual('s=1&s=2&s=3&s=4&s=5&ags=undefined')
         expect(hq.body).toEqual({ uid: 10, name: 'Alice', content: 'Hello Alice!' })
       })
 
       test('should fill field is working', async () => {
         const hq = baseHttpRequest()
-        await __fillRequestFromField(hq, field(1).withParam('uid').withBody().withQuery('id').withHeader('id'), 10)
+        await __fillRequestFromField(
+          hq,
+          {
+            id: field(1).withParam('uid').withBody().withQuery('id').withHeader('id'),
+          },
+          {
+            id: 10,
+          },
+        )
 
         expect(hq.endpoint).toEqual('/v1/10/undefined')
         expect(hq.queryParams?.toString()).toEqual('id=10')
         expect(hq.headers?.get('id')).toEqual('10')
-      })
-
-      test('should fill single field to body with form', async () => {
-        const hq = baseHttpRequest()
-        await __fillRequestFromField(hq, field(1).withForm('id'), 10)
-
-        expect(hq.body).toBeInstanceOf(FormData)
-        expect((hq.body as FormData).get('id')).toEqual('10')
-      })
-
-      test('should fill single field to body with url form', async () => {
-        const hq = baseHttpRequest()
-        await __fillRequestFromField(hq, field(1).withUrlForm('id'), 10)
-
-        expect(hq.body).toBeInstanceOf(URLSearchParams)
-        expect((hq.body as URLSearchParams).get('id')).toEqual('10')
-      })
-
-      test('should fill single field to body with json', async () => {
-        const hq = baseHttpRequest()
-        await __fillRequestFromField(hq, field<{ id: number }>().withJson(), { id: 1 })
-
-        expect(hq.body).toBeInstanceOf(Object)
-        expect((hq.body as { id: number }).id).toEqual(1)
+        expect(hq.body).toEqual(10)
       })
 
       test('should fill field group to body with body', async () => {
@@ -545,64 +534,21 @@ describe('Request', () => {
       test('should field value is null', async () => {
         const hq = baseHttpRequest()
         const err = new Error('Invalid value')
-        const fieldGroup = field<{ id: number }>()
-          .withQuery()
-          .withValidators(value => {
-            if (value && value?.id < 10) {
-              throw err
-            }
-          })
+        const fieldGroup = {
+          id: field<number>()
+            .withQuery()
+            .withValidators(value => {
+              if (value && value < 10) {
+                throw err
+              }
+            }),
+        }
 
         try {
           await __fillRequestFromField(hq, fieldGroup, { id: null })
         } catch (e) {
           expect(e).toBe(err)
         }
-      })
-
-      test('should throw error when field not set alias', async () => {
-        const hq = baseHttpRequest()
-
-        try {
-          await __fillRequestFromField(hq, field<{ id: number }>({ id: 1 }).withQuery(), undefined)
-        } catch (e) {
-          expect(e).toBe(ERR_NOT_SET_ALIAS)
-        }
-
-        try {
-          await __fillRequestFromField(hq, field<{ id: number }>({ id: 1 }).withParam(), undefined)
-        } catch (e) {
-          expect(e).toBe(ERR_NOT_SET_ALIAS)
-        }
-
-        try {
-          await __fillRequestFromField(hq, field<{ id: number }>({ id: 1 }).withHeader(), undefined)
-        } catch (e) {
-          expect(e).toBe(ERR_NOT_SET_ALIAS)
-        }
-
-        try {
-          await __fillRequestFromField(hq, field<{ id: number }>({ id: 1 }).withForm(), undefined)
-        } catch (e) {
-          expect(e).toBe(ERR_NOT_SET_ALIAS)
-        }
-
-        try {
-          await __fillRequestFromField(hq, field<{ id: number }>({ id: 1 }).withUrlForm(), undefined)
-        } catch (e) {
-          expect(e).toBe(ERR_NOT_SET_ALIAS)
-        }
-      })
-
-      test('should throw error when field not Field', async () => {
-        const hq = baseHttpRequest()
-        await expect(__fillRequestFromField(hq, {}, undefined)).rejects.toThrowError()
-      })
-
-      test('should throw error when field value not supported', async () => {
-        const hq = baseHttpRequest()
-        await expect(__fillRequestFromField(hq, field({ id: Symbol('') }).withHeader(), { id: Symbol('') })).rejects.toThrowError()
-        await expect(__fillRequestFromField(hq, { id: field(Symbol('')).withHeader() }, { id: Symbol('') })).rejects.toThrowError()
       })
     })
   })

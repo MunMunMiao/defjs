@@ -1,11 +1,11 @@
 import { type Client, getClientConfig, getGlobalClient } from './client'
 import { type HttpContext, makeHttpContext } from './context'
-import { type Field, FieldType, __getFieldMetadata, doValid, isField, isFieldGroup } from './field'
+import { type Field, FieldType, __getFieldMetadata, doValid, isFieldGroup } from './field'
 import type { HttpHandler } from './handler'
 import { getGlobalHttpHandler } from './handler/handler'
 import type { InterceptorFn } from './interceptor'
 import { makeInterceptorChain } from './interceptor/interceptor'
-import { ERR_NOT_FOUND_HANDLER, ERR_NOT_SET_ALIAS, ERR_UNSUPPORTED_FIELD_TYPE, type HttpResponse, __makeResponse } from './response'
+import { ERR_NOT_FOUND_HANDLER, type HttpResponse, __makeResponse } from './response'
 import type { AsyncValidatorFn, ValidatorFn } from './validator'
 
 export type HttpResponseType = 'arraybuffer' | 'blob' | 'json' | 'text'
@@ -29,8 +29,10 @@ export interface HttpProgressEvent {
 
 export type HttpProgressFn = (event: HttpProgressEvent) => void
 
-// No suitable scenario was found.
-// export type TransformRequestFn<Input = unknown> = (input: Input, request: HttpRequest) => HttpRequest['body']
+/**
+ * No suitable scenario was found.
+ * export type TransformRequestFn<Input = unknown> = (input: Input, request: HttpRequest) => HttpRequest['body']
+ */
 export type TransformResponseFn<Output = unknown> = (response: HttpResponse<unknown>) => Output
 
 export interface HttpRequest {
@@ -129,8 +131,10 @@ export function __buildFieldDefaultValue<Input>(input?: Input): RequestInputValu
   return undefined as unknown as RequestInputValue<Input>
 }
 
+type IsOptionalObject<T> = Partial<T> extends T ? true : false
+
 export type UseRequestFn<Input, Output> = {
-  doRequest: undefined extends RequestInputValue<Input>
+  doRequest: IsOptionalObject<Input> extends true
     ? (input?: RequestInputValue<Input>) => Promise<HttpResponse<Output>>
     : (input: RequestInputValue<Input>) => Promise<HttpResponse<Output>>
 
@@ -171,8 +175,7 @@ export function defineRequest<Output>(method: string, endpoint: string): DefineR
 export function defineRequest<Output>(...args: unknown[]): DefineRequest<undefined, Output> {
   let method: string
   let endpoint: string
-  let requiredInput = false
-  let field: Field<any> | Record<PropertyKey, Field<any>> | undefined
+  let field: Record<PropertyKey, Field<any>> | undefined
   let interceptors: InterceptorFn[] = []
   let responseType: HttpResponseType = 'json'
   let context: HttpContext | undefined
@@ -235,40 +238,36 @@ export function defineRequest<Output>(...args: unknown[]): DefineRequest<undefin
     }
 
     const doRequest = async (...args: unknown[]) => {
+      let input: unknown
+
+      if (args.length === 1) {
+        input = args[0]
+      }
+
+      if (validators.length > 0) {
+        for (const fn of validators) {
+          fn(input)
+        }
+      }
+
+      const req: HttpRequest = {
+        host: clientOptions?.host,
+        method,
+        endpoint,
+        queryParams: new URLSearchParams(),
+        headers: new Headers(),
+        body: undefined,
+        withCredentials,
+        responseType,
+        context: context || makeHttpContext(),
+        uploadProgress,
+        downloadProgress,
+        timeout,
+        abort: AbortSignal.any(abortSignal),
+      }
+
       try {
-        let input: unknown
-
-        if (requiredInput && args.length === 1) {
-          input = args[0]
-        }
-
-        if (requiredInput && !input) {
-          throw new Error(`Because the request has input, the argument must be the input value`)
-        }
-
-        if (validators.length > 0) {
-          for (const fn of validators) {
-            fn(input)
-          }
-        }
-
-        const req: HttpRequest = {
-          host: clientOptions?.host,
-          method,
-          endpoint,
-          queryParams: new URLSearchParams(),
-          headers: new Headers(),
-          body: undefined,
-          withCredentials,
-          responseType,
-          context: context || makeHttpContext(),
-          uploadProgress,
-          downloadProgress,
-          timeout,
-          abort: AbortSignal.any(abortSignal),
-        }
-
-        if (requiredInput && field) {
+        if (input && field) {
           await __fillRequestFromField(req, field, input)
         }
 
@@ -299,7 +298,6 @@ export function defineRequest<Output>(...args: unknown[]): DefineRequest<undefin
 
   fn.withField = value => {
     field = value
-    requiredInput = true
     return fn
   }
 
@@ -344,7 +342,7 @@ export function __fillUrl(endpoint: string, params: Map<string, string>): string
 
 export async function __fillRequestFromField(
   request: HttpRequest,
-  fieldOrFieldGroup: Field<any> | Record<PropertyKey, Field<any>>,
+  fieldGroup: Record<PropertyKey, Field<any>>,
   input: unknown,
 ): Promise<void> {
   function inputIsObject(input: unknown): input is Record<PropertyKey, unknown> {
@@ -360,9 +358,10 @@ export async function __fillRequestFromField(
       case typeof value === 'boolean':
       case typeof value === 'number':
       case typeof value === 'string':
+      case typeof value === 'undefined':
         return String(value)
       default:
-        throw new Error('Unsupported value type')
+        throw new Error(`Unsupported value type: ${typeof value}`)
     }
   }
 
@@ -371,7 +370,11 @@ export async function __fillRequestFromField(
       for (const v of value) {
         sp.append(key, serializeToString(v))
       }
-    } else {
+
+      return sp
+    }
+
+    if (typeof value !== 'undefined') {
       sp.set(key, serializeToString(value))
     }
     return sp
@@ -382,9 +385,12 @@ export async function __fillRequestFromField(
       for (const v of value) {
         setValue(sp, key, serializeToString(v))
       }
+      return sp
     }
 
-    sp.set(key, serializeToString(value))
+    if (typeof value !== 'undefined') {
+      sp.set(key, serializeToString(value))
+    }
     return sp
   }
 
@@ -399,72 +405,7 @@ export async function __fillRequestFromField(
     }
   }
 
-  if (isField(fieldOrFieldGroup)) {
-    let params: Map<string, string> | undefined
-    let queryParams: URLSearchParams | undefined
-    let headers: Headers | undefined
-    let body: any = undefined
-    const validValue: any = getValidValue(input, fieldOrFieldGroup())
-    const meta = __getFieldMetadata(fieldOrFieldGroup)
-
-    await doValid([...meta.validators, ...meta.asyncValidator], validValue)
-
-    for (const [type, aliasName] of meta.alias) {
-      switch (type) {
-        case FieldType.Query: {
-          if (!aliasName) {
-            throw ERR_NOT_SET_ALIAS
-          }
-          queryParams = appendValue(new URLSearchParams(), aliasName, validValue)
-          break
-        }
-        case FieldType.Param: {
-          if (!aliasName) {
-            throw ERR_NOT_SET_ALIAS
-          }
-          params = setValue(new Map<string, string>(), aliasName, validValue)
-          break
-        }
-        case FieldType.Header: {
-          if (!aliasName) {
-            throw ERR_NOT_SET_ALIAS
-          }
-          headers = appendValue(new Headers(), aliasName, validValue)
-          break
-        }
-        case FieldType.Form: {
-          if (!aliasName) {
-            throw ERR_NOT_SET_ALIAS
-          }
-          body = appendValue(new FormData(), aliasName, validValue)
-          break
-        }
-        case FieldType.UrlForm: {
-          if (!aliasName) {
-            throw ERR_NOT_SET_ALIAS
-          }
-          body = appendValue(new URLSearchParams(), aliasName, validValue)
-          break
-        }
-        case FieldType.Json:
-        case FieldType.Body:
-          body = validValue
-          break
-      }
-    }
-
-    if (params) {
-      request.endpoint = __fillUrl(request.endpoint, params)
-    }
-
-    request.queryParams = queryParams
-    request.headers = headers
-    request.body = body
-
-    return
-  }
-
-  if (isFieldGroup(fieldOrFieldGroup) && inputIsObject(input)) {
+  if (isFieldGroup(fieldGroup) && inputIsObject(input)) {
     let params = new Map<string, string>()
     let queryParams = new URLSearchParams()
     let headers = new Headers()
@@ -474,7 +415,7 @@ export async function __fillRequestFromField(
     let body: any = undefined
     let lastBodyField: FieldType.Body | FieldType.UrlForm | FieldType.Json | FieldType.Form | undefined
 
-    for (const [propertyKey, field] of Object.entries(fieldOrFieldGroup)) {
+    for (const [propertyKey, field] of Object.entries(fieldGroup)) {
       const meta = __getFieldMetadata(field)
 
       for (const [type, aliasName] of meta.alias) {
@@ -539,9 +480,5 @@ export async function __fillRequestFromField(
         request.body = json
         break
     }
-
-    return
   }
-
-  throw ERR_UNSUPPORTED_FIELD_TYPE
 }

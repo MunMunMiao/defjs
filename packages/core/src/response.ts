@@ -8,8 +8,6 @@ export const ERR_NOT_FOUND_HANDLER = new Error('ERR_NOT_FOUND_HANDLER')
 
 export const ERR_OBSERVE = new Error('ERR_OBSERVE')
 
-export const ERR_NOT_SET_ALIAS = new Error('ERR_NOT_SET_ALIAS')
-
 export const ERR_UNSUPPORTED_FIELD_TYPE = new Error('ERR_UNSUPPORTED_FIELD_TYPE')
 
 export const ERR_INVALID_CLIENT = new Error('ERR_INVALID_CLIENT')
@@ -65,4 +63,13 @@ export function __makeResponse<R>(options?: MakeResponseOptions<R>): HttpRespons
     body,
     error,
   }
+}
+
+export type HttpStreamResponse<R> = {
+  readonly url: string
+  readonly status: number
+  readonly statusText: string
+  readonly headers: Headers
+  readonly body: R | null
+  readonly error?: Error | string | unknown
 }

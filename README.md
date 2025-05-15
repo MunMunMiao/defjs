@@ -121,3 +121,4 @@ Check out the [🚧 defjs.org](https://defjs.org) to get started.
 - [Google API design guide](https://cloud.google.com/apis/design)
 - [Tanstack Query](https://tanstack.com/query)
 - [Rxjs](https://rxjs.dev)
+- [Fetch-event-source](https://github.com/Azure/fetch-event-source)

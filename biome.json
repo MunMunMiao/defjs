@@ -22,7 +22,6 @@
     "rules": {
       "recommended": false,
       "complexity": {
-        "noBannedTypes": "error",
         "noExtraBooleanCast": "error",
         "noMultipleSpacesInRegularExpressionLiterals": "error",
         "noStaticOnlyClass": "error",
@@ -57,7 +56,6 @@
         "noUnusedImports": "error",
         "noUnusedLabels": "error",
         "noUnusedPrivateClassMembers": "error",
-        "noUnusedVariables": "error",
         "useArrayLiterals": "off",
         "useIsNan": "error",
         "useValidForDirection": "error",

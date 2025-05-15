@@ -1,6 +1,5 @@
-import { type Server, createServer } from 'node:http'
-import { createApp, createRouter, defineEventHandler, eventHandler, getQuery, handleCors, readBody, toNodeListener } from 'h3'
-import type { GlobalSetupContext } from 'vitest/node'
+import { createApp, createRouter, defineEventHandler, eventHandler, getQuery, handleCors, readBody, toWebHandler } from 'h3'
+import type { TestProject } from 'vitest/node'
 
 declare module 'vitest' {
   export interface ProvidedContext {
@@ -8,10 +7,10 @@ declare module 'vitest' {
   }
 }
 
-let testServer: Server
+let testServer: Bun.Server
 let testServerAddr: string
 
-export function setup({ provide }: GlobalSetupContext) {
+export function setup({ provide }: TestProject) {
   const app = createApp()
 
   app.use(
@@ -30,10 +29,6 @@ export function setup({ provide }: GlobalSetupContext) {
 
   app.use(
     createRouter()
-      .head(
-        '/',
-        eventHandler(() => new Response(undefined, { status: 204 })),
-      )
       .get(
         '/',
         eventHandler(() => new Response(undefined, { status: 200 })),
@@ -89,22 +84,17 @@ export function setup({ provide }: GlobalSetupContext) {
       ),
   )
 
-  testServer = createServer(toNodeListener(app)).listen(() => {
-    const addr = testServer.address()
-    if (typeof addr === 'object' && addr !== null) {
-      testServerAddr = `http://localhost:${addr.port}`
-      provide('testServerHost', testServerAddr)
-    } else {
-      throw new Error('Cannot get test server address')
-    }
-
-    console.log(`Test server is running on ${testServerAddr}`)
+  testServer = Bun.serve({
+    port: 3000,
+    fetch: req => {
+      const handler = toWebHandler(app)
+      return handler(req)
+    },
   })
+  testServerAddr = `http://localhost:${testServer.port}`
+  console.log(`Test server is running on ${testServerAddr}`)
 }
 
-export function teardown() {
-  testServer.closeAllConnections()
-  testServer.close(() => {
-    console.log(`Stop test server ${testServerAddr}`)
-  })
+export async function teardown() {
+  await testServer.stop(true)
 }

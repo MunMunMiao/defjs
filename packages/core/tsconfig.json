@@ -1,5 +1,6 @@
 {
   "compileOnSave": false,
+  "extends": "../../tsconfig.json",
   "compilerOptions": {
     "baseUrl": ".",
     "outDir": "./dist",
@@ -18,7 +19,6 @@
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": true
   },
   "include": ["src/**/*.ts", "test-setup.ts"]

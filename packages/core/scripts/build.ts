@@ -52,4 +52,4 @@ async function main() {
   await afterBuild()
 }
 
-main()
+await main()

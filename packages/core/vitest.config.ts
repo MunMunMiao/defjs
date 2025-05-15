@@ -2,7 +2,6 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    watch: false,
     coverage: {
       enabled: true,
       provider: 'istanbul',
@@ -13,6 +12,12 @@ export default defineConfig({
       thresholds: {
         ['100']: true,
       },
+    },
+    browser: {
+      enabled: false,
+      provider: 'webdriverio',
+      headless: true,
+      instances: [{ browser: 'chromium' }, { browser: 'firefox' }, { browser: 'webkit' }],
     },
   },
 })
