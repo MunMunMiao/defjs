@@ -1,6 +1,6 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.8.3/schema.json",
-  "organizeImports": { "enabled": true },
+  "$schema": "https://biomejs.dev/schemas/2.4.8/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "javascript": {
     "globals": ["Bun"],
     "formatter": {
@@ -18,22 +18,24 @@
   },
   "linter": {
     "enabled": true,
-    "include": ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.js", "**/*.,js", "**/*.json"],
+    "includes": ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.js", "**/*.,js", "**/*.json"],
     "rules": {
       "recommended": false,
       "complexity": {
         "noExtraBooleanCast": "error",
-        "noMultipleSpacesInRegularExpressionLiterals": "error",
         "noStaticOnlyClass": "error",
         "noUselessCatch": "error",
         "noUselessConstructor": "error",
         "noUselessTypeConstraint": "error",
-        "noWith": "error",
         "useOptionalChain": "error",
         "noUselessFragments": "error",
         "noUselessRename": "error",
         "useArrowFunction": "error",
-        "useFlatMap": "error"
+        "useFlatMap": "error",
+        "noAdjacentSpacesInRegex": "error",
+        "noArguments": "error",
+        "noCommaOperator": "error",
+        "useWhile": "error"
       },
       "correctness": {
         "noConstAssign": "error",
@@ -42,7 +44,6 @@
         "noEmptyPattern": "error",
         "noGlobalObjectCalls": "error",
         "noInvalidConstructorSuper": "error",
-        "noInvalidNewBuiltin": "error",
         "noNonoctalDecimalEscape": "error",
         "noPrecisionLoss": "error",
         "noSelfAssign": "error",
@@ -56,11 +57,12 @@
         "noUnusedImports": "error",
         "noUnusedLabels": "error",
         "noUnusedPrivateClassMembers": "error",
-        "useArrayLiterals": "off",
         "useIsNan": "error",
         "useValidForDirection": "error",
         "useYield": "error",
-        "noConstructorReturn": "error"
+        "noConstructorReturn": "error",
+        "noInvalidBuiltinInstantiation": "error",
+        "useValidTypeof": "error"
       },
       "style": {
         "noInferrableTypes": "error",
@@ -70,21 +72,16 @@
         "useConsistentArrayType": "error",
         "useForOf": "error",
         "useLiteralEnumMembers": "error",
-        "noArguments": "error",
-        "noVar": "error",
         "useConst": "error",
-        "noCommaOperator": "error",
         "noNegationElse": "error",
         "useBlockStatements": "error",
         "useExportType": "error",
         "useImportType": "error",
         "useNumberNamespace": "error",
         "useSelfClosingElements": "error",
-        "useShorthandArrayType": "error",
         "useShorthandAssign": "error",
-        "useSingleCaseStatement": "error",
         "useSingleVarDeclarator": "error",
-        "useWhile": "error"
+        "useArrayLiterals": "off"
       },
       "suspicious": {
         "noAsyncPromiseExecutor": "error",
@@ -114,7 +111,8 @@
         "noUnsafeNegation": "error",
         "useGetterReturn": "error",
         "useNamespaceKeyword": "error",
-        "useValidTypeof": "error"
+        "noWith": "error",
+        "noVar": "error"
       }
     }
   }

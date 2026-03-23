@@ -267,7 +267,11 @@ export function defineRequest<Output>(...args: unknown[]): DefineRequest<undefin
       }
 
       try {
-        if (input && field) {
+        if (typeof input === 'undefined' && field) {
+          throw new TypeError('Request input is required')
+        }
+
+        if (field) {
           await __fillRequestFromField(req, field, input)
         }
 

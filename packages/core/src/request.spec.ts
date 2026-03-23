@@ -1,5 +1,5 @@
 import { describe, expect, inject, test, vi } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { cloneClient, createClient, restGlobalClient, setGlobalClient } from './client'
 import { makeHttpContext } from './context'
 import { field } from './field'

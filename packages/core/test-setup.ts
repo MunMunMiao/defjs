@@ -1,4 +1,6 @@
-import { createApp, createRouter, defineEventHandler, eventHandler, getQuery, handleCors, readBody, toWebHandler } from 'h3'
+import { createServer, type Server } from 'node:http'
+import { createApp, createRouter, defineEventHandler, eventHandler, getQuery, handleCors, readBody } from 'h3'
+import { toNodeListener } from 'h3/node'
 import type { TestProject } from 'vitest/node'
 
 declare module 'vitest' {
@@ -7,10 +9,10 @@ declare module 'vitest' {
   }
 }
 
-let testServer: Bun.Server
+let testServer: Server | undefined
 let testServerAddr: string
 
-export function setup({ provide }: TestProject) {
+export async function setup({ provide }: TestProject) {
   const app = createApp()
 
   app.use(
@@ -84,17 +86,35 @@ export function setup({ provide }: TestProject) {
       ),
   )
 
-  testServer = Bun.serve({
-    port: 3000,
-    fetch: req => {
-      const handler = toWebHandler(app)
-      return handler(req)
-    },
+  testServer = createServer(toNodeListener(app))
+  await new Promise<void>((resolve, reject) => {
+    testServer?.once('error', reject)
+    testServer?.listen(0, '127.0.0.1', () => resolve())
   })
-  testServerAddr = `http://localhost:${testServer.port}`
+
+  const address = testServer.address()
+  if (!address || typeof address === 'string') {
+    throw new TypeError('Failed to resolve test server address')
+  }
+
+  testServerAddr = `http://127.0.0.1:${address.port}`
+  provide('testServerHost', testServerAddr)
   console.log(`Test server is running on ${testServerAddr}`)
 }
 
 export async function teardown() {
-  await testServer.stop(true)
+  if (!testServer) {
+    return
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    testServer?.close(error => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolve()
+    })
+  })
 }

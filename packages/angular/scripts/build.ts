@@ -15,6 +15,7 @@ async function build() {
           noBanner: true,
         },
         compilationOptions: {
+          preferredConfigPath: './tsconfig.build.json',
           followSymlinks: false,
         },
       }),
