@@ -69,3 +69,5 @@ export {
   max,
   pattern,
 } from './validator'
+
+export * from './schema'

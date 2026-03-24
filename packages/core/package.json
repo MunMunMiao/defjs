@@ -19,6 +19,8 @@
     "build": "bun scripts/build.ts",
     "lint": "biome check",
     "lint:fix": "biome check --write",
+    "test:schema": "vitest run --config vitest.schema.config.ts",
+    "test:schema:types": "tsc -p tsconfig.schema.json",
     "pub": "cd dist && bun publish"
   }
 }
