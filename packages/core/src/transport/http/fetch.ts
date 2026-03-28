@@ -1,14 +1,14 @@
 import type { HttpRequest } from '../../http'
 import { detectHttpContentType, serializeHttpBody } from '../../http_utils'
 import {
-  __makeResponse,
   ERR_ABORTED,
   ERR_INVALID_CLIENT_ENDPOINT,
   ERR_TIMEOUT,
   type HttpResponse,
   type HttpResponseBody,
+  makeResponse,
 } from '../../response'
-import { __concatChunks, __getContentLength, __getContentType, __parseBody } from './utils'
+import { concatChunks, getContentLength, getContentType, parseBody } from './utils'
 
 type RequestInitWithDuplex = RequestInit & {
   duplex?: 'half'
@@ -16,13 +16,11 @@ type RequestInitWithDuplex = RequestInit & {
 
 export const ERR_STREAMING_REQUEST_UNSUPPORTED = new Error('ERR_STREAMING_REQUEST_UNSUPPORTED')
 
-export function __isReadableStreamBody(
-  body: HttpRequest['body'] | ReturnType<typeof serializeHttpBody>,
-): body is ReadableStream<Uint8Array> {
+export function isReadableStreamBody(body: HttpRequest['body'] | ReturnType<typeof serializeHttpBody>): body is ReadableStream<Uint8Array> {
   return typeof ReadableStream !== 'undefined' && body instanceof ReadableStream
 }
 
-export function __supportsStreamingRequestBody(): boolean {
+export function supportsStreamingRequestBody(): boolean {
   if (typeof Request !== 'function' || typeof ReadableStream === 'undefined') {
     return false
   }
@@ -86,7 +84,7 @@ function wrapUploadProgressStream(
   })
 }
 
-export function __createRequestInit(request: HttpRequest): RequestInitWithDuplex {
+export function createFetchRequestInit(request: HttpRequest): RequestInitWithDuplex {
   const headers = request.headers ?? new Headers()
   if (!headers.has('Content-Type')) {
     const detectedType = detectHttpContentType(request.body)
@@ -109,8 +107,8 @@ export function __createRequestInit(request: HttpRequest): RequestInitWithDuplex
     credentials,
   }
 
-  if (__isReadableStreamBody(body)) {
-    if (!__supportsStreamingRequestBody()) {
+  if (isReadableStreamBody(body)) {
+    if (!supportsStreamingRequestBody()) {
       throw ERR_STREAMING_REQUEST_UNSUPPORTED
     }
 
@@ -125,7 +123,7 @@ export function __createRequestInit(request: HttpRequest): RequestInitWithDuplex
   return init
 }
 
-export function __createRequest(request: HttpRequest): Request {
+export function createFetchRequest(request: HttpRequest): Request {
   const url = createRequestUrl(request)
 
   if (typeof request.queryString === 'string') {
@@ -134,7 +132,7 @@ export function __createRequest(request: HttpRequest): Request {
     url.search = request.queryParams.toString()
   }
 
-  return new Request(url, __createRequestInit(request))
+  return new Request(url, createFetchRequestInit(request))
 }
 
 function createRequestUrl(request: HttpRequest): URL {
@@ -162,7 +160,7 @@ function createRequestUrl(request: HttpRequest): URL {
 
 export async function fetchHandler(httpRequest: HttpRequest): Promise<HttpResponse<unknown>> {
   const downloadProgress = httpRequest.downloadProgress
-  const request = __createRequest(httpRequest)
+  const request = createFetchRequest(httpRequest)
   const abortSignal = httpRequest.abort
   let response: Response
 
@@ -174,18 +172,18 @@ export async function fetchHandler(httpRequest: HttpRequest): Promise<HttpRespon
     if (abortSignal?.aborted && abortSignal.reason instanceof Error) {
       switch (true) {
         case abortSignal.reason.name === 'AbortError':
-          return __makeResponse({ error: ERR_ABORTED })
+          return makeResponse({ error: ERR_ABORTED })
         case abortSignal.reason.name === 'TimeoutError':
-          return __makeResponse({ error: ERR_TIMEOUT })
+          return makeResponse({ error: ERR_TIMEOUT })
       }
     }
 
-    return __makeResponse({ error })
+    return makeResponse({ error })
   }
 
   const { headers, status, statusText, url } = response
-  const contentLength = __getContentLength(headers)
-  const contentType = __getContentType(headers)
+  const contentLength = getContentLength(headers)
+  const contentType = getContentType(headers)
   let body: HttpResponseBody = null
 
   /* istanbul ignore if -- @preserve */
@@ -211,16 +209,16 @@ export async function fetchHandler(httpRequest: HttpRequest): Promise<HttpRespon
       })
     }
 
-    const chunksAll = __concatChunks(chunks, receivedLength)
+    const chunksAll = concatChunks(chunks, receivedLength)
 
     try {
-      body = __parseBody({
+      body = parseBody({
         request: httpRequest,
         content: chunksAll,
         contentType,
       })
     } catch (error) {
-      return __makeResponse({
+      return makeResponse({
         error,
         status,
         statusText,
@@ -230,7 +228,7 @@ export async function fetchHandler(httpRequest: HttpRequest): Promise<HttpRespon
     }
   }
 
-  return __makeResponse({
+  return makeResponse({
     status,
     statusText,
     headers,

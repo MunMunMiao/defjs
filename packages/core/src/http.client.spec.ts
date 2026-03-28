@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, restGlobalClient, setGlobalClient } from './client'
 import { defineRequest } from './index'
-import { __makeResponse, ERR_NOT_FOUND_GLOBAL_CLIENT } from './response'
+import { ERR_NOT_FOUND_GLOBAL_CLIENT, makeResponse } from './response'
 import { schema } from './schema'
 
 describe('request http runtime with client config', () => {
@@ -26,7 +26,7 @@ describe('request http runtime with client config', () => {
         http: {
           handler: async request => {
             capturedRequestUrl = `${request.endpoint}?${request.queryString ?? ''}`
-            return __makeResponse({
+            return makeResponse({
               body: null,
               status: 200,
             })
@@ -65,7 +65,7 @@ describe('request http runtime with client config', () => {
       endpoint: 'https://example.com/api',
       http: {
         handler: async request =>
-          __makeResponse({
+          makeResponse({
             body: {
               endpoint: request.baseEndpoint,
             },

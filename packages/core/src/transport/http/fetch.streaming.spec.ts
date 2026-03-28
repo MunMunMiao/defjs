@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest'
 import type { HttpRequest } from '../../http'
-import { __createRequest, __supportsStreamingRequestBody, ERR_STREAMING_REQUEST_UNSUPPORTED, fetchHandler } from './fetch'
+import { createFetchRequest, ERR_STREAMING_REQUEST_UNSUPPORTED, fetchHandler, supportsStreamingRequestBody } from './fetch'
 
 describe('Fetch handler streaming', () => {
   test('should throw when runtime does not support streaming request bodies', () => {
@@ -16,7 +16,7 @@ describe('Fetch handler streaming', () => {
 
     vi.stubGlobal('Request', FakeRequest)
 
-    expect(__supportsStreamingRequestBody()).toBe(false)
+    expect(supportsStreamingRequestBody()).toBe(false)
 
     const requestConfig: HttpRequest = {
       baseEndpoint: 'https://example.com',
@@ -29,7 +29,7 @@ describe('Fetch handler streaming', () => {
       }),
     }
 
-    expect(() => __createRequest(requestConfig)).toThrow(ERR_STREAMING_REQUEST_UNSUPPORTED)
+    expect(() => createFetchRequest(requestConfig)).toThrow(ERR_STREAMING_REQUEST_UNSUPPORTED)
 
     vi.unstubAllGlobals()
   })
@@ -43,7 +43,7 @@ describe('Fetch handler streaming', () => {
       },
     })
 
-    if (!__supportsStreamingRequestBody()) {
+    if (!supportsStreamingRequestBody()) {
       await expect(
         fetchHandler({
           body: stream,

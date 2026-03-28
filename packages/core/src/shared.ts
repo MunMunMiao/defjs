@@ -3,7 +3,7 @@ import { type HttpContext, makeHttpContext } from './context'
 import type { HttpProgressFn, HttpRequest, HttpResponseType } from './http'
 import type { InterceptorFn } from './interceptor'
 import { makeInterceptorChain } from './interceptor/interceptor'
-import { __makeResponse, ERR_ABORTED, ERR_INVALID_CLIENT_ENDPOINT, ERR_TIMEOUT, type HttpResponse } from './response'
+import { ERR_ABORTED, ERR_INVALID_CLIENT_ENDPOINT, ERR_TIMEOUT, type HttpResponse, makeResponse } from './response'
 import { type AnyCompatibleSchema, type CompatibleInputOf, type CompatibleOutputOf, parseCompatibleSchema, SchemaError } from './schema'
 
 export type RequestBuildValue = readonly unknown[] | Record<string, unknown> | string | number | boolean | null | undefined
@@ -358,7 +358,7 @@ export async function applyRequestInterceptors(request: HttpRequest, interceptor
   let finalRequest = request
   const captureHandler = async (nextRequest: HttpRequest) => {
     finalRequest = nextRequest
-    return __makeResponse({
+    return makeResponse({
       body: null,
       status: 204,
     })

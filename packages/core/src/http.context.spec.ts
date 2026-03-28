@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, restGlobalClient, setGlobalClient } from './client'
 import { makeHttpContext, makeHttpContextToken } from './context'
 import { defineRequest } from './index'
-import { __makeResponse } from './response'
+import { makeResponse } from './response'
 
 describe('request http runtime context', () => {
   beforeEach(() => {
@@ -27,7 +27,7 @@ describe('request http runtime context', () => {
         http: {
           handler: async request => {
             seenHeader = request.headers?.get('x-transaction-id') ?? null
-            return __makeResponse({
+            return makeResponse({
               body: null,
               status: 200,
             })

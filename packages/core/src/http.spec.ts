@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, restGlobalClient, setGlobalClient } from './client'
 import type { HttpRequest } from './http'
 import { defineRequest } from './index'
-import { __makeResponse } from './response'
+import { makeResponse } from './response'
 import { schema } from './schema'
 
 describe('request http runtime', () => {
@@ -79,7 +79,7 @@ describe('request http runtime', () => {
         handler: async request => {
           callCount += 1
           capturedRequest = request as typeof capturedRequest
-          return __makeResponse({
+          return makeResponse({
             body: {
               ok: true,
             },
@@ -154,7 +154,7 @@ describe('request http runtime', () => {
         endpoint: 'https://example.com',
         http: {
           handler: async request =>
-            __makeResponse({
+            makeResponse({
               body: {
                 ok: request.queryParams?.get('value'),
               },
@@ -191,7 +191,7 @@ describe('request http runtime', () => {
         endpoint: 'https://example.com',
         http: {
           handler: async () =>
-            __makeResponse({
+            makeResponse({
               body: {
                 ignored: true,
               },

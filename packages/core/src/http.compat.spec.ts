@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, restGlobalClient, setGlobalClient } from './client'
 import { defineRequest } from './index'
-import { __makeResponse } from './response'
+import { makeResponse } from './response'
 import { type StandardSchemaLike, schema } from './schema'
 
 describe('request http runtime compatibility', () => {
@@ -62,7 +62,7 @@ describe('request http runtime compatibility', () => {
         endpoint: 'https://example.com',
         http: {
           handler: async request =>
-            __makeResponse({
+            makeResponse({
               body: {
                 ok: true,
                 parsedId: Number(request.queryParams?.get('id')),
@@ -105,19 +105,19 @@ describe('request http runtime compatibility', () => {
         handler: async ({ endpoint }) => {
           switch (endpoint) {
             case '/json-text':
-              return __makeResponse({
+              return makeResponse({
                 body: { id: 1 },
                 headers: new Headers([['content-type', 'application/json']]),
                 status: 200,
               })
             case '/plain-text':
-              return __makeResponse({
+              return makeResponse({
                 body: 'zen-kit',
                 headers: new Headers([['content-type', 'text/plain']]),
                 status: 200,
               })
             default:
-              return __makeResponse({
+              return makeResponse({
                 body: null,
                 status: 404,
               })

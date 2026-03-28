@@ -1,5 +1,5 @@
 import type { HttpRequest } from '../../http'
-import { __makeResponse, ERR_INVALID_CLIENT_ENDPOINT, type HttpResponse } from '../../response'
+import { ERR_INVALID_CLIENT_ENDPOINT, type HttpResponse, makeResponse } from '../../response'
 import type { HttpHandler } from './handler'
 
 export function makeFakeHandler(init?: {
@@ -41,7 +41,7 @@ export function makeFakeHandler(init?: {
 
       onRequestBefore?.(req)
 
-      const resp = __makeResponse({
+      const resp = makeResponse({
         url: url.toString(),
         status: status || 0,
         statusText: statusText || '',

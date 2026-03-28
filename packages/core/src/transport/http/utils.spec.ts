@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../../http'
-import { __concatChunks, __getContentLength, __getContentType, __parseBody } from './utils'
+import { concatChunks, getContentLength, getContentType, parseBody } from './utils'
 
 describe('Handler util', () => {
   test('should concatenate chunks', () => {
     const chunks = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6])]
     const totalLength = 6
-    const result = __concatChunks(chunks, totalLength)
+    const result = concatChunks(chunks, totalLength)
     expect(result).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6]))
   })
 
@@ -16,7 +16,7 @@ describe('Handler util', () => {
         endpoint: '/v1/user',
         method: 'GET',
       }
-      expect(__parseBody({ request, contentType: '', content: new Uint8Array([]) })).toBeNull()
+      expect(parseBody({ request, contentType: '', content: new Uint8Array([]) })).toBeNull()
     })
 
     test('should be null when content is set to empty', async () => {
@@ -25,7 +25,7 @@ describe('Handler util', () => {
         method: 'GET',
         responseType: 'json',
       }
-      expect(__parseBody({ request, contentType: '', content: new Uint8Array([]) })).toBeNull()
+      expect(parseBody({ request, contentType: '', content: new Uint8Array([]) })).toBeNull()
     })
 
     test('should be json when content and response type set', async () => {
@@ -37,7 +37,7 @@ describe('Handler util', () => {
       const responseBody = { id: 1 }
       const response = Response.json(responseBody)
       const content = await response.arrayBuffer().then(buffer => new Uint8Array(buffer))
-      expect(__parseBody({ request, contentType: '', content })).toEqual(responseBody)
+      expect(parseBody({ request, contentType: '', content })).toEqual(responseBody)
     })
 
     test('should be text when content and response type set', async () => {
@@ -49,7 +49,7 @@ describe('Handler util', () => {
       const responseText = 'Hello Word!'
       const response = new Response(responseText)
       const content = await response.arrayBuffer().then(buffer => new Uint8Array(buffer))
-      expect(__parseBody({ request, contentType: '', content })).toEqual(responseText)
+      expect(parseBody({ request, contentType: '', content })).toEqual(responseText)
     })
 
     test('should be blob when content and response type set', async () => {
@@ -64,9 +64,9 @@ describe('Handler util', () => {
           'Content-Type': 'text/plain',
         },
       })
-      const contentType = __getContentType(response.headers)
+      const contentType = getContentType(response.headers)
       const content = await response.arrayBuffer().then(buffer => new Uint8Array(buffer))
-      expect(__parseBody({ request, contentType, content })).toBeInstanceOf(Blob)
+      expect(parseBody({ request, contentType, content })).toBeInstanceOf(Blob)
     })
 
     test('should be arrayBuffer when content and response type set', async () => {
@@ -81,9 +81,9 @@ describe('Handler util', () => {
           'Content-Type': 'text/plain',
         },
       })
-      const contentType = __getContentType(response.headers)
+      const contentType = getContentType(response.headers)
       const content = await response.arrayBuffer().then(buffer => new Uint8Array(buffer))
-      expect(__parseBody({ request, contentType, content })).toBeInstanceOf(ArrayBuffer)
+      expect(parseBody({ request, contentType, content })).toBeInstanceOf(ArrayBuffer)
     })
 
     test('should be null when content and response type set', async () => {
@@ -97,26 +97,26 @@ describe('Handler util', () => {
           'Content-Type': 'text/plain',
         },
       })
-      const contentType = __getContentType(response.headers)
-      expect(__parseBody({ request, contentType, content: new Uint8Array(0) })).toBeNull()
+      const contentType = getContentType(response.headers)
+      expect(parseBody({ request, contentType, content: new Uint8Array(0) })).toBeNull()
     })
   })
 
   test('should get content length', () => {
     const header = new Headers()
-    expect(__getContentLength(header)).toEqual(0)
+    expect(getContentLength(header)).toEqual(0)
 
     header.set('Content-Length', 'Hello Word!')
-    expect(__getContentLength(header)).toEqual(0)
+    expect(getContentLength(header)).toEqual(0)
 
     header.set('Content-Length', '3')
-    expect(__getContentLength(header)).toEqual(3)
+    expect(getContentLength(header)).toEqual(3)
   })
 
   test('should get content type', () => {
     const header = new Headers()
     header.set('Content-Type', 'application/json')
-    const result = __getContentType(header)
+    const result = getContentType(header)
     expect(result).toEqual('application/json')
   })
 })

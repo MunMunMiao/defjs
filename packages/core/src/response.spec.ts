@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest'
-import { __makeResponse } from './response'
+import { makeResponse } from './response'
 
 describe('Response', () => {
   test('should make response', () => {
-    const res = __makeResponse({
+    const res = makeResponse({
       status: 200,
       statusText: 'OK',
       body: 'Hello World!',
@@ -14,7 +14,7 @@ describe('Response', () => {
   })
 
   test('should make error response', () => {
-    const res = __makeResponse({
+    const res = makeResponse({
       status: 500,
       statusText: 'Server Error',
       body: 'Server Error',
@@ -25,7 +25,7 @@ describe('Response', () => {
   })
 
   test('should make network error response', () => {
-    const res = __makeResponse()
+    const res = makeResponse()
     expect(res.status).toBe(0)
     expect(res.statusText).toBe('')
   })

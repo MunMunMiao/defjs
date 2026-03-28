@@ -40,7 +40,7 @@ export type MakeResponseOptions<R> = {
   error?: Error | string | unknown
 }
 
-export function __makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R> {
+export function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R> {
   const status = options?.status ?? 0
   const ok = status >= 200 && status < 300
   const statusText = options?.statusText ?? ''

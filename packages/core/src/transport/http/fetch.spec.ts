@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../../http'
 import { ERR_INVALID_CLIENT_ENDPOINT } from '../../response'
-import { __createRequest, __createRequestInit, __supportsStreamingRequestBody, ERR_STREAMING_REQUEST_UNSUPPORTED } from './fetch'
+import { createFetchRequest, createFetchRequestInit, ERR_STREAMING_REQUEST_UNSUPPORTED, supportsStreamingRequestBody } from './fetch'
 
 describe('Fetch handler request creation', () => {
   test('should create a request', async () => {
@@ -16,7 +16,7 @@ describe('Fetch handler request creation', () => {
       body: { id: 1 },
       withCredentials: true,
     }
-    const request = __createRequest(requestConfig)
+    const request = createFetchRequest(requestConfig)
 
     expect(request.url).toEqual(new URL(requestConfig.endpoint, requestConfig.baseEndpoint).toString())
     expect(await request.json()).toEqual(body)
@@ -33,7 +33,7 @@ describe('Fetch handler request creation', () => {
       queryParams: new URLSearchParams({ id: '1' }),
     }
 
-    const { url } = __createRequest(requestConfig)
+    const { url } = createFetchRequest(requestConfig)
     const { searchParams } = new URL(url)
     expect(searchParams.get('id')).toEqual('1')
   })
@@ -48,7 +48,7 @@ describe('Fetch handler request creation', () => {
       },
     }
 
-    const request = __createRequest(requestConfig)
+    const request = createFetchRequest(requestConfig)
     expect(request.headers.get('Content-Type')).toEqual('application/json')
   })
 
@@ -58,7 +58,7 @@ describe('Fetch handler request creation', () => {
       method: 'GET',
     }
 
-    expect(() => __createRequest(requestConfig)).toThrowError(ERR_INVALID_CLIENT_ENDPOINT)
+    expect(() => createFetchRequest(requestConfig)).toThrowError(ERR_INVALID_CLIENT_ENDPOINT)
   })
 
   test('should reject requests with invalid baseEndpoint', () => {
@@ -68,7 +68,7 @@ describe('Fetch handler request creation', () => {
       method: 'GET',
     }
 
-    expect(() => __createRequest(requestConfig)).toThrowError(ERR_INVALID_CLIENT_ENDPOINT)
+    expect(() => createFetchRequest(requestConfig)).toThrowError(ERR_INVALID_CLIENT_ENDPOINT)
   })
 
   test('should auto set duplex half for ReadableStream body', () => {
@@ -84,12 +84,12 @@ describe('Fetch handler request creation', () => {
       }),
     }
 
-    if (!__supportsStreamingRequestBody()) {
-      expect(() => __createRequest(requestConfig)).toThrow(ERR_STREAMING_REQUEST_UNSUPPORTED)
+    if (!supportsStreamingRequestBody()) {
+      expect(() => createFetchRequest(requestConfig)).toThrow(ERR_STREAMING_REQUEST_UNSUPPORTED)
       return
     }
 
-    const init = __createRequestInit(requestConfig)
+    const init = createFetchRequestInit(requestConfig)
     expect(init.duplex).toBe('half')
   })
 })

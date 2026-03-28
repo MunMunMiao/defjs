@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { __makeResponse, ERR_ABORTED, ERR_TIMEOUT } from './response'
+import { ERR_ABORTED, ERR_TIMEOUT, makeResponse } from './response'
 import { SchemaError, schema } from './schema'
 import {
   createDefinitionError,
@@ -25,7 +25,7 @@ describe('shared error helpers', () => {
 
   test('should create settled responses and normalize transport errors', () => {
     const settled = toSettledResponse(
-      __makeResponse({
+      makeResponse({
         body: {
           ok: true,
         },
@@ -56,7 +56,7 @@ describe('shared error helpers', () => {
 
   test('should create definition and runtime errors', () => {
     const badResponse = toSettledResponse(
-      __makeResponse({
+      makeResponse({
         body: {
           message: 'bad request',
         },

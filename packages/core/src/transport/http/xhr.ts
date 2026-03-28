@@ -1,7 +1,6 @@
 import type { HttpRequest } from '../../http'
 import { detectHttpContentType, serializeHttpBody } from '../../http_utils'
 import {
-  __makeResponse,
   ERR_ABORTED,
   ERR_INVALID_CLIENT_ENDPOINT,
   ERR_NETWORK,
@@ -9,8 +8,9 @@ import {
   ERR_UNKNOWN,
   type HttpResponse,
   type HttpResponseBody,
+  makeResponse,
 } from '../../response'
-import { __getContentType, __parseBody } from './utils'
+import { getContentType, parseBody } from './utils'
 
 export function extractHeaders(value: string): Headers {
   const headers = new Headers()
@@ -28,7 +28,7 @@ export function extractHeaders(value: string): Headers {
 export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unknown>> {
   return new Promise(resolve => {
     if (typeof globalThis.XMLHttpRequest !== 'function') {
-      resolve(__makeResponse({ error: new Error('XMLHttpRequest is not supported') }))
+      resolve(makeResponse({ error: new Error('XMLHttpRequest is not supported') }))
       return
     }
 
@@ -72,7 +72,7 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
 
     const reqBody = serializeHttpBody(httpRequest.body)
     if (typeof ReadableStream !== 'undefined' && reqBody instanceof ReadableStream) {
-      resolve(__makeResponse({ error: new Error('ERR_STREAMING_REQUEST_UNSUPPORTED') }))
+      resolve(makeResponse({ error: new Error('ERR_STREAMING_REQUEST_UNSUPPORTED') }))
       return
     }
     const xhrBody = reqBody as Exclude<typeof reqBody, ReadableStream<Uint8Array>>
@@ -80,18 +80,18 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
     const onLoad = () => {
       const { status, statusText, responseURL, response } = xhr
       const headers = extractHeaders(xhr.getAllResponseHeaders())
-      const contentType = __getContentType(headers)
+      const contentType = getContentType(headers)
       let body: HttpResponseBody = null
 
       try {
-        body = __parseBody({
+        body = parseBody({
           request: httpRequest,
           contentType,
           content: response,
         })
       } catch (error) {
         resolve(
-          __makeResponse({
+          makeResponse({
             error,
             status,
             statusText,
@@ -102,7 +102,7 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
       }
 
       resolve(
-        __makeResponse({
+        makeResponse({
           body,
           headers,
           status,
@@ -129,7 +129,7 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
       }
 
       resolve(
-        __makeResponse({
+        makeResponse({
           error,
           status: xhr.status,
           statusText: xhr.statusText,

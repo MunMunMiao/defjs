@@ -1,6 +1,6 @@
 import type { HttpRequest } from '../../http'
-import { __makeResponse, ERR_ABORTED, ERR_TIMEOUT, type HttpResponse } from '../../response'
-import { __createRequest } from '../http/fetch'
+import { ERR_ABORTED, ERR_TIMEOUT, type HttpResponse, makeResponse } from '../../response'
+import { createFetchRequest } from '../http/fetch'
 import { createLineParser, createMessageParser, type EventStreamMessage, readStreamBytes } from './parser'
 
 export type { EventStreamMessage } from './parser'
@@ -339,11 +339,11 @@ function createEventStreamRequest(request: HttpRequest, headers: Headers, abort?
     abort,
   }
 
-  return __createRequest(nextRequest)
+  return createFetchRequest(nextRequest)
 }
 
 function createOpenInfo(response: Response): EventStreamOpenInfo {
-  const openResponse = __makeResponse<null>({
+  const openResponse = makeResponse<null>({
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
