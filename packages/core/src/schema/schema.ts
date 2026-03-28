@@ -3,7 +3,7 @@ const TYPES = Symbol('schema.types')
 const OMIT = Symbol('schema.omit')
 type Path = Array<number | string>
 type ParseMode = 'field' | 'value'
-type RefineResult = boolean | Error | null | string | undefined | void
+type RefineResult = boolean | Error | null | string | undefined
 type RefineCheck<T> = (value: Readonly<T>) => RefineResult
 type LiteralValue = boolean | null | number | string
 
@@ -39,19 +39,12 @@ export class SchemaError extends Error {
 
 interface SchemaMethods extends SchemaLike {
   alias(alias: string): this
-  default(value: Exclude<TypeOf<this>, undefined>): Schema<
-    InputOf<this> | undefined,
-    Exclude<TypeOf<this>, undefined>,
-    false
-  >
+  default(value: Exclude<TypeOf<this>, undefined>): Schema<InputOf<this> | undefined, Exclude<TypeOf<this>, undefined>, false>
   null(): Schema<InputOf<this> | null, TypeOf<this> | null, IsOptionalOutput<this>>
   nullish(): Schema<InputOf<this> | null | undefined, TypeOf<this> | null | undefined, true>
   optional(): Schema<InputOf<this> | undefined, TypeOf<this> | undefined, true>
   parse(value: unknown): TypeOf<this>
-  refine(
-    check: RefineCheck<TypeOf<this>>,
-    message?: string,
-  ): this
+  refine(check: RefineCheck<TypeOf<this>>, message?: string): this
 }
 
 export type Schema<Input = unknown, Output = Input, OptionalOut extends boolean = false> = SchemaMethods & {
@@ -66,11 +59,7 @@ type OptionalOutputSchema = {
 export type TypeOf<T> = T extends SchemaLike ? T[typeof TYPES]['output'] : never
 export type InputOf<T> = T extends SchemaLike ? T[typeof TYPES]['input'] : never
 
-export type FieldOutput<S> = S extends SchemaLike
-  ? S extends OptionalOutputSchema
-    ? Exclude<TypeOf<S>, undefined>
-    : TypeOf<S>
-  : never
+export type FieldOutput<S> = S extends SchemaLike ? (S extends OptionalOutputSchema ? Exclude<TypeOf<S>, undefined> : TypeOf<S>) : never
 
 export type ObjectShape = Readonly<Record<string, any>>
 
@@ -92,7 +81,7 @@ type UnionOutput<T extends readonly SchemaLike[]> = {
   [K in keyof T]: T[K] extends SchemaLike ? TypeOf<T[K]> : never
 }[number]
 
-export type ArraySchema<S extends SchemaLike> = Schema<Array<InputOf<S>>, Array<TypeOf<S>>>
+export type ArraySchema<S extends SchemaLike> = Schema<InputOf<S>[], TypeOf<S>[]>
 export type ObjectSchema<T extends Record<string, any>> = Schema<ObjectInput<T>, ObjectOutput<T>>
 export type RecordSchema<S extends SchemaLike> = Schema<Record<string, InputOf<S>>, Record<string, FieldOutput<S>>>
 export type TupleSchema<T extends readonly SchemaLike[]> = Schema<TupleOutput<T>, TupleOutput<T>>
@@ -113,7 +102,7 @@ type Refinement<T> = {
 
 type BaseDefinition = {
   flags: SchemaFlags
-  refinements: ReadonlyArray<Refinement<any>>
+  refinements: readonly Refinement<any>[]
 }
 
 type PrimitiveKind = 'arrayBuffer' | 'blob' | 'boolean' | 'file' | 'null' | 'number' | 'string'
@@ -273,9 +262,7 @@ export function createLiteralSchema<const T extends LiteralValue>(value: T): Sch
   }) as Schema<T | undefined, T>
 }
 
-export function createEnumSchema<const T extends readonly [string, ...string[]]>(
-  values: T,
-): Schema<T[number] | undefined, T[number]> {
+export function createEnumSchema<const T extends readonly [string, ...string[]]>(values: T): Schema<T[number] | undefined, T[number]> {
   return makeSchema({
     expected: values.map(item => JSON.stringify(item)).join(' | '),
     flags: createFlags(),
@@ -288,9 +275,7 @@ export function createEnumSchema<const T extends readonly [string, ...string[]]>
 export function createObjectEnumSchema<const T extends Record<string, number | string>>(
   value: T,
 ): Schema<T[keyof T] | undefined, T[keyof T]> {
-  const values = Object.values(value).filter(
-    (item): item is T[keyof T] => typeof item === 'number' || typeof item === 'string',
-  )
+  const values = Object.values(value).filter((item): item is T[keyof T] => typeof item === 'number' || typeof item === 'string')
 
   if (values.length === 0) {
     throw new TypeError('enum schema requires at least one string or number value')
@@ -305,9 +290,7 @@ export function createObjectEnumSchema<const T extends Record<string, number | s
   }) as Schema<T[keyof T] | undefined, T[keyof T]>
 }
 
-export function createArraySchema<S extends SchemaLike>(
-  item: S,
-): ArraySchema<S> {
+export function createArraySchema<S extends SchemaLike>(item: S): ArraySchema<S> {
   assertSchema(item, 'array item')
 
   return makeSchema({
@@ -318,9 +301,7 @@ export function createArraySchema<S extends SchemaLike>(
   }) as ArraySchema<S>
 }
 
-export function createObjectSchema<const T extends Record<string, any>>(
-  shape: T,
-): ObjectSchema<T> {
+export function createObjectSchema<const T extends Record<string, any>>(shape: T): ObjectSchema<T> {
   if (!isPlainObject(shape)) {
     throw new TypeError('object schema requires a plain object')
   }
@@ -334,9 +315,7 @@ export function createObjectSchema<const T extends Record<string, any>>(
   }) as ObjectSchema<T>
 }
 
-export function createRecordSchema<S extends SchemaLike>(
-  value: S,
-): RecordSchema<S> {
+export function createRecordSchema<S extends SchemaLike>(value: S): RecordSchema<S> {
   assertSchema(value, 'record value')
 
   return makeSchema({
@@ -347,9 +326,7 @@ export function createRecordSchema<S extends SchemaLike>(
   }) as RecordSchema<S>
 }
 
-export function createTupleSchema<const T extends readonly [SchemaLike, ...SchemaLike[]]>(
-  items: T,
-): TupleSchema<T> {
+export function createTupleSchema<const T extends readonly [SchemaLike, ...SchemaLike[]]>(items: T): TupleSchema<T> {
   for (const item of items) {
     assertSchema(item, 'tuple item')
   }
@@ -362,9 +339,7 @@ export function createTupleSchema<const T extends readonly [SchemaLike, ...Schem
   }) as TupleSchema<T>
 }
 
-export function createUnionSchema<const T extends readonly [SchemaLike, ...SchemaLike[]]>(
-  options: T,
-): UnionSchema<T> {
+export function createUnionSchema<const T extends readonly [SchemaLike, ...SchemaLike[]]>(options: T): UnionSchema<T> {
   for (const option of options) {
     assertSchema(option, 'or option')
   }
@@ -584,12 +559,7 @@ function parsePrimitiveValue(
   return applyRefinements(schema, input, path)
 }
 
-function parseEnumValue(
-  schema: RuntimeSchema,
-  definition: EnumDefinition<any>,
-  input: unknown,
-  path: Path,
-): ParseResult<unknown> {
+function parseEnumValue(schema: RuntimeSchema, definition: EnumDefinition<any>, input: unknown, path: Path): ParseResult<unknown> {
   if (!definition.values.includes(input)) {
     return failure(issue(path, 'invalid_enum', definition.expected, input))
   }
@@ -597,12 +567,7 @@ function parseEnumValue(
   return applyRefinements(schema, input, path)
 }
 
-function parseLiteralValue(
-  schema: RuntimeSchema,
-  definition: LiteralDefinition<any>,
-  input: unknown,
-  path: Path,
-): ParseResult<unknown> {
+function parseLiteralValue(schema: RuntimeSchema, definition: LiteralDefinition<any>, input: unknown, path: Path): ParseResult<unknown> {
   if (!Object.is(input, definition.value)) {
     return failure(issue(path, 'invalid_literal', definition.expected, input))
   }
@@ -610,12 +575,7 @@ function parseLiteralValue(
   return applyRefinements(schema, input, path)
 }
 
-function parseArrayValue(
-  schema: RuntimeSchema,
-  definition: ArrayDefinition,
-  input: unknown,
-  path: Path,
-): ParseResult<unknown[]> {
+function parseArrayValue(schema: RuntimeSchema, definition: ArrayDefinition, input: unknown, path: Path): ParseResult<unknown[]> {
   if (!Array.isArray(input)) {
     return failure(issue(path, 'invalid_type', 'array', input))
   }
@@ -709,12 +669,7 @@ function parseRecordValue(
   return applyRefinements(schema, output, path) as ParseResult<Record<string, unknown>>
 }
 
-function parseTupleValue(
-  schema: RuntimeSchema,
-  definition: TupleDefinition,
-  input: unknown,
-  path: Path,
-): ParseResult<unknown[]> {
+function parseTupleValue(schema: RuntimeSchema, definition: TupleDefinition, input: unknown, path: Path): ParseResult<unknown[]> {
   if (!Array.isArray(input)) {
     return failure(issue(path, 'invalid_type', 'tuple', input))
   }
@@ -741,12 +696,7 @@ function parseTupleValue(
   return applyRefinements(schema, output, path) as ParseResult<unknown[]>
 }
 
-function parseUnionValue(
-  schema: RuntimeSchema,
-  definition: UnionDefinition,
-  input: unknown,
-  path: Path,
-): ParseResult<unknown> {
+function parseUnionValue(schema: RuntimeSchema, definition: UnionDefinition, input: unknown, path: Path): ParseResult<unknown> {
   for (const option of definition.options) {
     const result = parseValue(option as RuntimeSchema, input, path, 'value')
     if (result.ok) {
@@ -762,7 +712,7 @@ function applyRefinements(schema: RuntimeSchema, value: unknown, path: Path): Pa
   const definition = schema[DEFINITION]
 
   for (const refinement of definition.refinements) {
-      const result = refinement.check(value as never)
+    const result = refinement.check(value as never)
 
     if (result === false) {
       issues.push(issue(path, 'custom', expectedType(definition), value, refinement.message))
@@ -876,10 +826,7 @@ function readObjectShape(shape: ObjectShape): ObjectShape {
   const descriptors = Object.getOwnPropertyDescriptors(shape)
 
   for (const [key, descriptor] of Object.entries(descriptors)) {
-    const value =
-      typeof descriptor.get === 'function'
-        ? descriptor.get.call(shape)
-        : descriptor.value
+    const value = typeof descriptor.get === 'function' ? descriptor.get.call(shape) : descriptor.value
 
     output[key] = value
   }
@@ -893,13 +840,7 @@ function assertSchema(value: unknown, label: string): asserts value is SchemaLik
   }
 }
 
-function issue(
-  path: Path,
-  code: SchemaIssue['code'],
-  expected: string,
-  received: unknown,
-  message?: string,
-): SchemaIssue {
+function issue(path: Path, code: SchemaIssue['code'], expected: string, received: unknown, message?: string): SchemaIssue {
   return {
     code,
     expected,

@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'vitest'
-import { makeFakeHandler } from '../../handler/test_handler'
+import type { HttpRequest } from '../../http'
 import { type BasicCredential, basicAuthInterceptor } from '../../interceptor/authorization/basic_auth_interceptor'
 import { makeInterceptorChain } from '../../interceptor/interceptor'
-import type { HttpRequest } from '../../request'
+import { makeFakeHandler } from '../../transport/http/test_handler'
 
 describe('Basic Auth Interceptor', () => {
   test('should use basic auth', async () => {
     const hq: HttpRequest = {
-      host: 'https://example.com',
+      baseEndpoint: 'https://example.com',
       endpoint: '/v1/user',
       method: 'GET',
     }

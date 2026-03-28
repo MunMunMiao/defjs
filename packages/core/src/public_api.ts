@@ -1,73 +1,123 @@
 export {
-  type ClientOptions,
-  type ClientConfig,
   type Client,
-  isClient,
+  type ClientConfig,
+  type ClientHttpOptions,
+  type ClientOptions,
+  type ClientSseOptions,
+  type ClientWebSocketOptions,
+  cloneClient,
   createClient,
   createGlobalClient,
+  DEFAULT_HTTP_OPTIONS,
+  DEFAULT_QUERY_PARAMS_SERIALIZER,
+  DEFAULT_SSE_OPTIONS,
+  DEFAULT_WEB_SOCKET_OPTIONS,
   getGlobalClient,
-  setGlobalClient,
+  isClient,
+  type QueryParamsSerializer,
   restGlobalClient,
-  cloneClient,
+  setGlobalClient,
+  type WebSocketBeforeConnect,
+  type WebSocketHeartbeatOptions,
+  type WebSocketQueueOptions,
+  type WebSocketReconnectOptions,
 } from './client'
 
 export {
   type HttpContext,
   type HttpContextToken,
-  makeHttpContextToken,
-  makeHttpContext,
   isHttpContextToken,
+  makeHttpContext,
+  makeHttpContextToken,
 } from './context'
-
-export * from './handler'
-
+export type {
+  HttpAwaitResult,
+  HttpProgressEvent,
+  HttpProgressFn,
+  HttpRequest,
+  HttpRequestRef,
+  HttpResponseType,
+  RequestDefinition,
+  RequestEndpoint,
+  RequestErrorData,
+  RequestOutputShape,
+  RequestSuccessData,
+  ResponseGroupItem,
+  UseRequestConfig,
+  UseRequestEndpointFn,
+} from './http'
+export { createUseRequest, defineRequest } from './http'
+export * from './interceptor'
 export {
-  type HttpResponseType,
-  type HttpProgressEvent,
-  type HttpProgressFn,
-  type HttpRequest,
-  type UseRequestFn,
-  type RequestInputValue,
-  type UseRequestOptions,
-  defineRequest,
-} from './request'
-
-export {
-  type MakeResponseOptions,
-  type HttpResponse,
-  type HttpResponseBody,
   ERR_ABORTED,
-  ERR_TIMEOUT,
+  ERR_INVALID_CLIENT,
+  ERR_INVALID_HTTP_CONTEXT_TOKEN,
   ERR_NETWORK,
+  ERR_NOT_FOUND_GLOBAL_CLIENT,
   ERR_NOT_FOUND_HANDLER,
   ERR_OBSERVE,
-  ERR_UNSUPPORTED_FIELD_TYPE,
-  ERR_INVALID_CLIENT,
-  ERR_NOT_FOUND_GLOBAL_CLIENT,
-  ERR_INVALID_HTTP_CONTEXT_TOKEN,
+  ERR_TIMEOUT,
   ERR_UNKNOWN,
+  ERR_UNSUPPORTED_FIELD_TYPE,
+  type HttpResponse,
+  type HttpResponseBody,
+  type MakeResponseOptions,
 } from './response'
-
-export * from './interceptor'
-
+export * from './schema'
+export type {
+  DefinitionError,
+  HttpStatusError,
+  RequestBodyOptions,
+  RequestBuilder,
+  RequestBuildHandler,
+  RequestBuildValue,
+  RequestError,
+  RequestFormDataFileLike,
+  RequestFormDataScalar,
+  RequestFormDataValue,
+  SettledResponse,
+  TransportError,
+} from './shared'
+export type {
+  EventSchemas,
+  EventStreamData,
+  EventStreamDefinition,
+  EventStreamEndpoint,
+  EventStreamRef,
+  StreamAwaitResult,
+  StreamOpenInfo,
+  UseEventStreamConfig,
+  UseEventStreamEndpointFn,
+} from './sse'
+export { createUseEventStream, defineEventStream } from './sse'
+export * from './transport'
 export {
-  type Field,
-  field,
-  isField,
-  isFieldGroup,
-  doValid,
-} from './field'
-
-export {
-  type ValidatorFn,
   type AsyncValidatorFn,
-  required,
-  requiredTrue,
-  minLength,
+  max,
   maxLength,
   min,
-  max,
+  minLength,
   pattern,
+  required,
+  requiredTrue,
+  type ValidatorFn,
 } from './validator'
-
-export * from './schema'
+export type {
+  SocketAwaitResult,
+  SocketSchemas,
+  UseWebSocketConfig,
+  UseWebSocketEndpointFn,
+  WebSocketCloseInfo,
+  WebSocketConnectionInfo,
+  WebSocketDefinition,
+  WebSocketEndpoint,
+  WebSocketHeartbeatConfig,
+  WebSocketIncomingData,
+  WebSocketOutgoingData,
+  WebSocketQueueConfig,
+  WebSocketReconnectConfig,
+  WebSocketRef,
+  WebSocketSession,
+  WebSocketState,
+} from './web_socket'
+export { createUseWebSocket, defineWebSocket } from './web_socket'

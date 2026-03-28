@@ -19,6 +19,12 @@
     "build": "bun scripts/build.ts",
     "lint": "biome check",
     "lint:fix": "biome check --write",
+    "test:bun": "vitest run --config vitest.config.bun.ts",
+    "test:browser:chrome": "vitest run --config vitest.config.browser.chrome.ts",
+    "test:browser:firefox": "vitest run --config vitest.config.browser.firefox.ts",
+    "test:browser:safari": "vitest run --config vitest.config.browser.safari.ts",
+    "test:deno": "vitest run --config vitest.config.deno.ts",
+    "test:node": "vitest run --config vitest.config.node.ts",
     "test:schema": "vitest run --config vitest.schema.config.ts",
     "test:schema:types": "tsc -p tsconfig.schema.json",
     "pub": "cd dist && bun publish"

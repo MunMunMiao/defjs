@@ -3,6 +3,15 @@ import { _array } from './array'
 import { _arrayBuffer } from './arraybuffer'
 import { _blob } from './blob'
 import { _boolean } from './boolean'
+import {
+  type AnyCompatibleSchema,
+  type CompatibleInputOf,
+  type CompatibleOutputOf,
+  isCompatibleSchema,
+  isStandardSchemaLike,
+  parseCompatibleSchema,
+  type StandardSchemaLike,
+} from './compatible'
 import { _enum } from './enum'
 import { _file } from './file'
 import { _literal } from './literal'
@@ -15,6 +24,7 @@ import {
   type AnySchema,
   type FieldOutput,
   type InputOf,
+  isSchema,
   type ObjectInput,
   type ObjectOutput,
   type ObjectShape,
@@ -22,19 +32,16 @@ import {
   SchemaError,
   type SchemaIssue,
   type TypeOf,
-  isSchema,
 } from './schema'
 import { _string } from './string'
 import { _tuple } from './tuple'
 import { _unknown } from './unknown'
 
-export {
-  isSchema,
-  SchemaError,
-}
-
 export type {
+  AnyCompatibleSchema,
   AnySchema,
+  CompatibleInputOf,
+  CompatibleOutputOf,
   FieldOutput,
   InputOf,
   ObjectInput,
@@ -42,8 +49,10 @@ export type {
   ObjectShape,
   Schema,
   SchemaIssue,
+  StandardSchemaLike,
   TypeOf,
 }
+export { isCompatibleSchema, isSchema, isStandardSchemaLike, parseCompatibleSchema, SchemaError }
 
 export const schema = {
   any: _any,

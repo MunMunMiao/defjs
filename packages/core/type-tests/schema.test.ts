@@ -1,10 +1,6 @@
 import { schema, type TypeOf } from '../src/schema'
 
-type Equal<A, B> = [A] extends [B]
-  ? [B] extends [A]
-    ? true
-    : false
-  : false
+type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
 
 const profileSchema = schema.object({
@@ -125,12 +121,7 @@ const optionalSchema = schema.object({
   name: schema.string().optional(),
 })
 
-type OptionalDoesNotBecomeUndefinedUnion = Expect<
-  Equal<
-    TypeOf<typeof optionalSchema>,
-    { name?: string }
-  >
->
+type OptionalDoesNotBecomeUndefinedUnion = Expect<Equal<TypeOf<typeof optionalSchema>, { name?: string }>>
 
 // @ts-expect-error optional key schema should not equal a required undefined union
 type OptionalIsNotRequiredUndefined = Expect<Equal<TypeOf<typeof optionalSchema>, { name: string | undefined }>>

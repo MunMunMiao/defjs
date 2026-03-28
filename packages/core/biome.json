@@ -4,6 +4,6 @@
   "extends": ["../../biome.json"],
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**/*", "!dist", "!dist/**"]
+    "includes": ["**/*", "!coverage", "!coverage/**", "!dist", "!dist/**"]
   }
 }

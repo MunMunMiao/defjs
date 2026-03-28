@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { makeFakeHandler } from '../handler/test_handler'
+import type { HttpRequest } from '../http'
 import { type InterceptorFn, makeInterceptorChain } from '../interceptor/interceptor'
-import type { HttpRequest } from '../request'
+import { makeFakeHandler } from '../transport/http/test_handler'
 
 describe('interceptor', () => {
   it('should work', async () => {
@@ -40,8 +40,8 @@ describe('interceptor', () => {
     })
     const chain = makeInterceptorChain([fun1, fun2, fun3])
     const req: HttpRequest = {
+      baseEndpoint: 'https://api.github.com',
       method: 'GET',
-      host: 'https://api.github.com',
       endpoint: '/user',
     }
 

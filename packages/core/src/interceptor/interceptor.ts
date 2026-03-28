@@ -1,6 +1,6 @@
-import type { HttpHandler } from '../handler'
-import type { HttpRequest } from '../request'
+import type { HttpRequest } from '../http'
 import type { HttpResponse } from '../response'
+import type { HttpHandler } from '../transport/http/handler'
 
 export type InterceptorFn = (req: HttpRequest, next: HttpHandler) => Promise<HttpResponse<unknown>>
 
