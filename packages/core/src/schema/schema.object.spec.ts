@@ -10,12 +10,16 @@ describe('schema object and composite values', () => {
       active: schema.boolean(),
     })
 
-    expect(profile.parse({ id: 'u_1' })).toEqual({
+    const [err1, val1] = profile.parse({ id: 'u_1' })
+    expect(err1).toBeNull()
+    expect(val1).toEqual({
       active: false,
       id: 'u_1',
       score: 0,
     })
-    expect(profile.parse({ id: 'u_1', nickname: undefined })).toEqual({
+    const [err2, val2] = profile.parse({ id: 'u_1', nickname: undefined })
+    expect(err2).toBeNull()
+    expect(val2).toEqual({
       active: false,
       id: 'u_1',
       score: 0,
@@ -29,16 +33,21 @@ describe('schema object and composite values', () => {
       theme: schema.string().null(),
     })
 
-    expect(requestSchema.parse({})).toEqual({
+    const [err1, val1] = requestSchema.parse({})
+    expect(err1).toBeNull()
+    expect(val1).toEqual({
       locale: 'zh-CN',
       theme: null,
     })
-    expect(requestSchema.parse({ timezone: null })).toEqual({
+    const [err2, val2] = requestSchema.parse({ timezone: null })
+    expect(err2).toBeNull()
+    expect(val2).toEqual({
       locale: 'zh-CN',
       theme: null,
       timezone: null,
     })
-    expect(() => requestSchema.parse({ theme: 'dark' })).not.toThrow()
+    const [err3] = requestSchema.parse({ theme: 'dark' })
+    expect(err3).toBeNull()
   })
 
   test('maps alias input key without changing output key', () => {
@@ -47,7 +56,9 @@ describe('schema object and composite values', () => {
       page: schema.number().default(1),
     })
 
-    expect(querySchema.parse({ page_size: 50 })).toEqual({
+    const [err, val] = querySchema.parse({ page_size: 50 })
+    expect(err).toBeNull()
+    expect(val).toEqual({
       page: 1,
       pageSize: 50,
     })
@@ -62,8 +73,11 @@ describe('schema object and composite values', () => {
     const raw = { ext: 'png', size: 128 }
     const metadata = ['skip', 'validation']
 
-    expect(uploadSchema.parse({ metadata, raw })).toEqual({ metadata, raw })
-    expect(() => uploadSchema.parse({ raw: 'bad' })).toThrowError(SchemaError)
+    const [err1, val1] = uploadSchema.parse({ metadata, raw })
+    expect(err1).toBeNull()
+    expect(val1).toEqual({ metadata, raw })
+    const [err2] = uploadSchema.parse({ raw: 'bad' })
+    expect(err2).toBeInstanceOf(SchemaError)
   })
 
   test('parses literal, enum and union values', () => {
@@ -74,29 +88,55 @@ describe('schema object and composite values', () => {
       schema.number(),
     )
 
-    expect(status.parse(undefined)).toBe('draft')
-    expect(channel.parse(undefined)).toBe('web')
-    expect(id.parse('u_123')).toBe('u_123')
-    expect(id.parse(9)).toBe(9)
-    expect(schema.literal('ok').parse(undefined)).toBe('ok')
-    expect(() => status.parse('archived')).toThrowError(SchemaError)
-    expect(() => channel.parse(false)).toThrowError(SchemaError)
-    expect(() => schema.literal('ok').parse('no')).toThrowError(SchemaError)
-    expect(() => id.parse(false)).toThrowError(SchemaError)
+    const [s1err, s1val] = status.parse(undefined)
+    expect(s1err).toBeNull()
+    expect(s1val).toBe('draft')
+    const [c1err, c1val] = channel.parse(undefined)
+    expect(c1err).toBeNull()
+    expect(c1val).toBe('web')
+    const [i1err, i1val] = id.parse('u_123')
+    expect(i1err).toBeNull()
+    expect(i1val).toBe('u_123')
+    const [i2err, i2val] = id.parse(9)
+    expect(i2err).toBeNull()
+    expect(i2val).toBe(9)
+    const [l1err, l1val] = schema.literal('ok').parse(undefined)
+    expect(l1err).toBeNull()
+    expect(l1val).toBe('ok')
+    const [se] = status.parse('archived')
+    expect(se).toBeInstanceOf(SchemaError)
+    const [ce] = channel.parse(false)
+    expect(ce).toBeInstanceOf(SchemaError)
+    const [le] = schema.literal('ok').parse('no')
+    expect(le).toBeInstanceOf(SchemaError)
+    const [ie] = id.parse(false)
+    expect(ie).toBeInstanceOf(SchemaError)
   })
 
   test('supports tuple and record structures for request payloads', () => {
     const coordinate = schema.tuple([schema.number(), schema.number().default(30)])
     const headers = schema.record(schema.string())
 
-    expect(coordinate.parse([120])).toEqual([120, 30])
-    expect(coordinate.parse([120, 31])).toEqual([120, 31])
-    expect(headers.parse({ 'x-trace-id': 'trace-1' })).toEqual({ 'x-trace-id': 'trace-1' })
-    expect(headers.parse({})).toEqual({})
-    expect(() => coordinate.parse('bad')).toThrowError(SchemaError)
-    expect(() => coordinate.parse([120, 'bad'])).toThrowError(SchemaError)
-    expect(() => headers.parse({ retry: 1 })).toThrowError(SchemaError)
-    expect(() => headers.parse([])).toThrowError(SchemaError)
+    const [c1err, c1val] = coordinate.parse([120])
+    expect(c1err).toBeNull()
+    expect(c1val).toEqual([120, 30])
+    const [c2err, c2val] = coordinate.parse([120, 31])
+    expect(c2err).toBeNull()
+    expect(c2val).toEqual([120, 31])
+    const [h1err, h1val] = headers.parse({ 'x-trace-id': 'trace-1' })
+    expect(h1err).toBeNull()
+    expect(h1val).toEqual({ 'x-trace-id': 'trace-1' })
+    const [h2err, h2val] = headers.parse({})
+    expect(h2err).toBeNull()
+    expect(h2val).toEqual({})
+    const [ce1] = coordinate.parse('bad')
+    expect(ce1).toBeInstanceOf(SchemaError)
+    const [ce2] = coordinate.parse([120, 'bad'])
+    expect(ce2).toBeInstanceOf(SchemaError)
+    const [he1] = headers.parse({ retry: 1 })
+    expect(he1).toBeInstanceOf(SchemaError)
+    const [he2] = headers.parse([])
+    expect(he2).toBeInstanceOf(SchemaError)
   })
 
   test('supports blob file and arrayBuffer payloads', () => {
@@ -108,15 +148,30 @@ describe('schema object and composite values', () => {
     const avatar = new File(['avatar'], 'avatar.png', { type: 'image/png' })
     const bytes = new ArrayBuffer(4)
 
-    expect(body.parse(bytes)).toBe(bytes)
-    expect(cover.parse(pdf)).toBe(pdf)
-    expect(attachment.parse(avatar)).toBe(avatar)
-    expect(body.parse(undefined)).toBeInstanceOf(ArrayBuffer)
-    expect(cover.parse(undefined)).toBeInstanceOf(Blob)
-    expect(attachment.parse(undefined)).toBeInstanceOf(File)
-    expect(() => body.parse({})).toThrowError(SchemaError)
-    expect(() => cover.parse('bad')).toThrowError(SchemaError)
-    expect(() => attachment.parse(pdf)).toThrowError(SchemaError)
+    const [be1, bv1] = body.parse(bytes)
+    expect(be1).toBeNull()
+    expect(bv1).toBe(bytes)
+    const [ce1, cv1] = cover.parse(pdf)
+    expect(ce1).toBeNull()
+    expect(cv1).toBe(pdf)
+    const [ae1, av1] = attachment.parse(avatar)
+    expect(ae1).toBeNull()
+    expect(av1).toBe(avatar)
+    const [be2, bv2] = body.parse(undefined)
+    expect(be2).toBeNull()
+    expect(bv2).toBeInstanceOf(ArrayBuffer)
+    const [ce2, cv2] = cover.parse(undefined)
+    expect(ce2).toBeNull()
+    expect(cv2).toBeInstanceOf(Blob)
+    const [ae2, av2] = attachment.parse(undefined)
+    expect(ae2).toBeNull()
+    expect(av2).toBeInstanceOf(File)
+    const [be3] = body.parse({})
+    expect(be3).toBeInstanceOf(SchemaError)
+    const [ce3] = cover.parse('bad')
+    expect(ce3).toBeInstanceOf(SchemaError)
+    const [ae3] = attachment.parse(pdf)
+    expect(ae3).toBeInstanceOf(SchemaError)
   })
 
   test('treats null-prototype objects as plain objects', () => {
@@ -124,7 +179,9 @@ describe('schema object and composite values', () => {
       'x-request-id': 'trace-2',
     }) as Record<string, string>
 
-    expect(schema.record(schema.string()).parse(input)).toEqual({
+    const [err, val] = schema.record(schema.string()).parse(input)
+    expect(err).toBeNull()
+    expect(val).toEqual({
       'x-request-id': 'trace-2',
     })
   })
@@ -134,7 +191,9 @@ describe('schema object and composite values', () => {
       id: schema.string(),
     })
 
-    expect(base.parse({ id: 'u_1', extra: 'ignored' })).toEqual({ id: 'u_1' })
+    const [err, val] = base.parse({ id: 'u_1', extra: 'ignored' })
+    expect(err).toBeNull()
+    expect(val).toEqual({ id: 'u_1' })
   })
 
   test('strict rejects unknown keys like json.Decoder.DisallowUnknownFields', () => {
@@ -144,31 +203,31 @@ describe('schema object and composite values', () => {
       })
       .strict()
 
-    expect(strictUser.parse({ id: 'u_1' })).toEqual({ id: 'u_1' })
+    const [e1, v1] = strictUser.parse({ id: 'u_1' })
+    expect(e1).toBeNull()
+    expect(v1).toEqual({ id: 'u_1' })
 
-    expect(() => strictUser.parse({ id: 'u_1', extra: 'no' })).toThrowError(SchemaError)
+    const [e2] = strictUser.parse({ id: 'u_1', extra: 'no' })
+    expect(e2).toBeInstanceOf(SchemaError)
 
-    try {
-      strictUser.parse({ id: 'u_1', extra: 'no', also: 1 })
-    } catch (error) {
-      const issues = (error as SchemaError).issues
-      expect(issues).toEqual([
-        {
-          code: 'unrecognized_keys',
-          expected: 'declared field',
-          message: 'Unrecognized key "extra"',
-          path: ['extra'],
-          received: 'no',
-        },
-        {
-          code: 'unrecognized_keys',
-          expected: 'declared field',
-          message: 'Unrecognized key "also"',
-          path: ['also'],
-          received: 1,
-        },
-      ])
-    }
+    const [e3] = strictUser.parse({ id: 'u_1', extra: 'no', also: 1 })
+    expect(e3).toBeInstanceOf(SchemaError)
+    expect(e3?.issues).toEqual([
+      {
+        code: 'unrecognized_keys',
+        expected: 'declared field',
+        message: 'Unrecognized key "extra"',
+        path: ['extra'],
+        received: 'no',
+      },
+      {
+        code: 'unrecognized_keys',
+        expected: 'declared field',
+        message: 'Unrecognized key "also"',
+        path: ['also'],
+        received: 1,
+      },
+    ])
   })
 
   test('passthrough keeps unknown keys verbatim', () => {
@@ -178,7 +237,9 @@ describe('schema object and composite values', () => {
       })
       .passthrough()
 
-    expect(loose.parse({ id: 'u_1', extra: 'kept', count: 7 })).toEqual({
+    const [err, val] = loose.parse({ id: 'u_1', extra: 'kept', count: 7 })
+    expect(err).toBeNull()
+    expect(val).toEqual({
       id: 'u_1',
       extra: 'kept',
       count: 7,
@@ -191,7 +252,9 @@ describe('schema object and composite values', () => {
     })
 
     const round = base.strict().strip()
-    expect(round.parse({ id: 'u_1', extra: 'dropped' })).toEqual({ id: 'u_1' })
+    const [err, val] = round.parse({ id: 'u_1', extra: 'dropped' })
+    expect(err).toBeNull()
+    expect(val).toEqual({ id: 'u_1' })
   })
 
   test('respects alias under strict mode', () => {
@@ -201,8 +264,11 @@ describe('schema object and composite values', () => {
       })
       .strict()
 
-    expect(renamed.parse({ page_size: 20 })).toEqual({ pageSize: 20 })
+    const [e1, v1] = renamed.parse({ page_size: 20 })
+    expect(e1).toBeNull()
+    expect(v1).toEqual({ pageSize: 20 })
 
-    expect(() => renamed.parse({ page_size: 20, pageSize: 99 })).toThrowError(SchemaError)
+    const [e2] = renamed.parse({ page_size: 20, pageSize: 99 })
+    expect(e2).toBeInstanceOf(SchemaError)
   })
 })

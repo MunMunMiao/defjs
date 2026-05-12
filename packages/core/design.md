@@ -72,22 +72,58 @@ endpoint 定义层当前接受两类 schema：
 
 ### 设计哲学：对齐 Go `encoding/json`
 
-`@defjs/core/schema` 模仿 Go struct ↔ JSON 序列化/反序列化语义，让 TS 开发者获得 Go 后端开发者熟悉的 DX：
+`@defjs/core/schema` 模仿 Go struct ↔ JSON 语义，让 TS 开发者获得 Go 后端开发者熟悉的 DX。**schema 是双向 codec** —— 任何 `.transform()` 必须显式声明 `decode + encode`，保证 round-trip 完整性。与 io-ts / Effect Schema 一致，与 zod 4.1 `z.codec()` 同构。
+
+#### 类型对偶：值类型 vs 指针
+
+Go 区分**值类型**和**指针类型** —— 前者缺字段填零值，后者缺字段为 `nil`、可接受显式 `null`。schema 通过 **`.nullish()`**（同时开 `optional + nullable`）精确对偶 Go 指针；`.optional()` 是更严的子集（只允许缺字段，拒绝显式 `null`）。
+
+| Go 字段 | schema 写法 | `parse(合法值)` | `parse(非法值)` | `parse(undefined)` | `parse(null)` | `encode` |
+|---|---|---|---|---|---|---|
+| `string` | `schema.string()` | `"x"` → `"x"` | `123` → throw | `""` | throw | `"x"` → `"x"` |
+| `*string` | `schema.string().nullish()` | `"x"` → `"x"` | `123` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
+| `int` | `schema.number()` | `42` → `42` | `"x"` → throw | `0` | throw | `42` → `42` |
+| `*int` | `schema.number().nullish()` | `42` → `42` | `"x"` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
+| `int64`（`json:",string"`）| `schema.bigint()` | `42n` / `"42"` → `42n` | `42`(number) → throw § | `0n` | throw | `42n` → `"42"` § |
+| `*int64`（`json:",string"`）| `schema.bigint().nullish()` | `42n` / `"42"` → `42n` | `42`(number) → throw § | `undefined` | `null` | `undefined` → ⌀ ‡ |
+| `bool` | `schema.boolean()` | `true` → `true` | `1` → throw | `false` | throw | `true` → `true` |
+| `*bool` | `schema.boolean().nullish()` | `true` → `true` | `1` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
+| `time.Time` | `schema.date()` | `Date` / `"2026-05-12T10:00:00Z"` / `1747036800000` → `Date` † | `"not-a-date"` → throw | `new Date(0)` (epoch) | throw | `Date` → ISO 字符串 † |
+| `*time.Time` | `schema.date().nullish()` | `Date` / ISO 字符串 / 数字 → `Date` † | `"not-a-date"` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
+| `struct{...}` | `schema.object({...})` | `{...}` → 解析后值 | `"x"` → throw | 全字段递归零值 | throw | `{...}` → alias 重命名 |
+| `*struct{...}` | `schema.object({...}).nullish()` | `{...}` → 解析后值 | `"x"` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
+| `[]T` slice | `schema.array(T)` | `[a, b]` → 递归 parse | `"x"` → throw | `[]` | throw ※ | `[...]` → 递归 encode |
+| `map[K]V` | `schema.record(V)` | `{k: v}` → 递归 parse | `"x"` → throw | `{}` | throw ※ | `{...}` → 递归 encode |
+
+- `†` `schema.date()` 内置双向 wire 桥接：parse 接受任何 `new Date()` 可解析的输入（`Date` 实例 / ISO 字符串 / epoch 数字 / 任意），Invalid Date 抛 `invalid_type`；encode 输出 ISO 字符串。等价于 Go `time.Time` 的 `MarshalJSON` / `UnmarshalJSON`。**注意 footgun**：`boolean` 输入也会被 `new Date()` 接受 —— `new Date(true)` = `1970-01-01T00:00:00.001Z`（epoch + 1ms，Valid Date），**不抛错**。这是"直接交给 `new Date`"取舍的代价。
+- `‡` `⌀` 表示在 object 字段位置 encode 时：value 中不含该 key → **整字段跳过**；显式带 `key: undefined` → 保留 `undefined`，后续 `JSON.stringify` 才丢字段 —— 整体效果与 Go `omitempty` 等价。
+- `※` Go slice/map 底层 pointer-like，JSON `null` → nil。schema 中 `array(T)` / `record(V)` 默认拒绝 `null`，要表达此语义请显式 `.nullish()` 或 `.null()` —— 与 Go 的细微偏差。
+- `§` `schema.bigint()` 接受 `bigint` 与字符串（对齐 Go `json:",string"` tag 用法），**拒绝 `number`**（避免 IEEE 754 精度丢失，超过 `Number.MAX_SAFE_INTEGER` 直接 throw）；encode 输出字符串。
+
+**关键**：用值类型还是指针，**是用户的语义决策** —— 通过 `schema.x()` 与 `schema.x().nullish()` / `.optional()` 表达。schema 不替用户决定。
+
+#### 修饰行为对偶
 
 | Go 行为 | `@defjs/core/schema` |
 |---|---|
-| `json.Unmarshal([]byte("{}"), &u)` 缺字段填零值 | `parse(undefined) → 零值`（空字符串、0、空对象 …）|
 | `json:"field_name"` tag 重命名 | `.alias('field_name')` |
-| `*string` pointer-like（nil vs 空值） | `.null()` / `.nullable()` |
-| 完全缺失字段 / omitempty | `.optional()` 让 Output 上可省 |
+| `omitempty` Output 字段可省 | `.optional()` |
+| `json.Marshal` 反向序列化 | `schema.encode(value)` |
 | `Decoder.DisallowUnknownFields()` | `.strict()` 拒绝未知字段 |
-| 必填字段校验 | `.strict({ missingKeys: true })` 拒绝缺失 |
-| `time.Time` | `schema.date()` |
-| `int64` 大整数 | `schema.bigint()` |
-| `json.Marshal` 反向 | `schema.encode(value)` |
-| 嵌套 struct / slice / map | `schema.object()` / `schema.array()` / `schema.record()` |
+| 必填字段校验（显式严格） | `.strict({ missingKeys: true })` 拒绝缺失 |
 
-零值兜底是**设计意图**而非 bug：缺字段时拿到 Go 风格的零值；要求严格则显式 `.strict({ missingKeys: true })`。
+零值兜底是**设计意图**而非 bug：缺字段时拿到 Go 风格零值；要严格就显式 `.strict({ missingKeys: true })`。
+
+#### 字符串域：query / header / form
+
+URL query、HTTP headers、multipart form 是字符串域，缺字段行为**完全由 schema 决定** —— 不引入额外规则：
+
+- `schema.string()` —— 缺字段 `""`（等价 Go `string`）
+- `schema.number()` —— 缺字段 `0`（等价 Go `int`）
+- `schema.string().optional()` —— 缺字段 `undefined`（等价 Go `*string`）
+- `schema.string().nullish()` —— 缺字段或显式 `null` → `undefined`
+
+要表达"可能没传"用 `.optional()` / `.nullish()`；要表达"必填，缺就是零值"用值类型 schema。**这不是新规则，是 Go 指针语义的自然外延** —— 同一套心智模型贯穿 JSON body 与字符串域。
 
 ### Schema API 表
 
@@ -120,8 +156,27 @@ schema.tuple([a, b, c])
 schema.or(a, b, ...)
 schema.intersection(a, b)
 schema.discriminatedUnion('type', [optionA, optionB, ...])
-schema.lazy(() => recursiveSchema)
 ```
+
+**递归 schema(getter 模式)**
+
+直接在 `schema.object` 入参用 getter 字段,TS 完全自动推断:
+
+```ts
+const tree = schema.object({
+  id: schema.string(),
+  get children() { return schema.array(tree) },
+})
+
+type Tree = TypeOf<typeof tree>   // { id: string; children: Tree[] }
+
+const [err, val] = tree.parse({ id: 'root', children: [{ id: 'a', children: [] }] })
+```
+
+- **完全自动推断**:无类型注解、无 cast、无显式 lazy 工厂
+- **运行时延迟**:`schema.object` 内部用 `Object.getOwnPropertyDescriptor` 检测 getter,parse 时才调用 getter 取值(避开 JS TDZ)
+- **同 zod v4 对齐**:借助 phantom property 类型设计 + 宽 shape 约束
+- **类型层局限**:**简单 1~2 层递归**(`tree.children`)自动推断 work;**多层嵌套 + 复杂 mapped type**(如 `tree.meta.nested.snapshots: T[][][]`)TS 会 bail out,需要 `as unknown as ...` cast。这是 TS 自身在 generic instantiation 深度上的硬限制,业界(zod v4 同款)。
 
 **共用 method-chain（所有 schema）**
 
@@ -132,7 +187,7 @@ schema.lazy(() => recursiveSchema)
 .null()                // 接受 null
 .nullish()             // optional + nullable
 .refine(check, msg?)   // 自定义验证（sync 或 async）
-.transform(fn)         // 输出变换
+.transform(decode, encode)  // 双向变换，encode 必填，保证 round-trip
 .pipe(target)          // 链接到下个 schema
 .brand<B>()            // nominal type（纯类型层）
 .catch(fallback)       // 失败降级
@@ -143,11 +198,22 @@ schema.lazy(() => recursiveSchema)
 **Parse 入口**
 
 ```ts
-.parse(value)             // 抛 SchemaError
-.safeParse(value)         // { ok: true, value } | { ok: false, error }
-.parseAsync(value)        // 异步 await（支持 async refine）
-.safeParseAsync(value)    // 异步 safe
+.parse(value)        // [error: SchemaError | null, value: O]
+.parseAsync(value)   // Promise<[error, value]>，支持 async refine
 ```
+
+Go 风元组,**永远不抛错**。`value` 永远是 `O` 类型 —— 成功时是解析后的值,失败时是 schema 零值(同 `parse(undefined)`)。用法:
+
+```ts
+const [err, user] = userSchema.parse(input)
+if (err) {
+  console.error(err.prettify())
+  return
+}
+console.log(user.name)   // 成功路径,user 类型已 narrow
+```
+
+与 `http` / `sse` / `web_socket` 三个传输的 `[error, data, response]` 元组完全同构。这是包内唯一的解析入口 —— 没有 throws 版,没有 safeParse 版,**一种最佳实践**。
 
 **String 内建约束**
 
@@ -237,7 +303,7 @@ const getUserInfo = defineRequest({
 })
 ```
 
-请求侧只有 `build(request, input)` 这一条主路径。常用 helper：
+请求侧只有 `build(request, input)` 这一条主路径。HTTP 的 `request` builder（HTTP / SSE / WebSocket 各有**独立的 interface**，不共用、不互为子集）暴露：
 
 1. `request.pathParams(...)`
 2. `request.queryParams(...)`
@@ -384,6 +450,14 @@ const watchUserInfo = defineEventStream({
 })
 ```
 
+SSE 的 `request` builder（与 HTTP / WebSocket **各自独立**的 interface）只暴露：
+
+1. `request.pathParams(...)`
+2. `request.queryParams(...)`
+3. `request.headers(...)`
+
+SSE 走 GET，没有请求体，所以不存在 `body / json / text / html / xml / formData / formUrlEncoded`。这不是从 HTTP builder Pick 出来的子集 —— 是从零定义的独立 interface，IDE 自动补全就是这三个。
+
 ### 调用
 
 无配置：
@@ -469,6 +543,13 @@ const chatSocket = defineWebSocket({
 })
 ```
 
+WebSocket 的 `request` builder（与 HTTP / SSE **各自独立**的 interface）只暴露：
+
+1. `request.pathParams(...)`
+2. `request.queryParams(...)`
+
+WebSocket Web API 不支持自定义握手 headers（见下文"WebSocket 规则"），也没有请求体。这同样不是从其它 builder Pick 出来的子集 —— 是从零定义的独立 interface，IDE 自动补全就是这两个。
+
 ### 调用
 
 无配置：
@@ -476,7 +557,6 @@ const chatSocket = defineWebSocket({
 ```ts
 const [error, socket, connection] = await chatSocket.use({
   roomId: 'room-1',
-})
 ```
 
 有配置：

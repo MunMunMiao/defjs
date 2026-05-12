@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest'
-import type { HttpRequest } from '../../http'
-import { makeFakeHandler } from '../../http/transport/test_handler'
-import { type BasicCredential, basicAuthHttpInterceptor, basicAuthSSEInterceptor } from '../../interceptor/authorization/basic_auth_interceptor'
-import { makeInterceptorChain, makeSSEInterceptorChain } from '../../interceptor/interceptor'
-import type { EventStreamHandle } from '../../sse/transport/event_stream'
+import type { HttpRequest } from '../http'
+import { makeFakeHandler } from '../http/transport/test_handler'
+import type { EventStreamHandle } from '../sse/transport/event_stream'
+import { type BasicCredential, basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './basic_auth'
+import { makeInterceptorChain, makeSSEInterceptorChain } from './interceptor'
 
 describe('Basic Auth Interceptor', () => {
   const credential: BasicCredential = {

@@ -86,6 +86,36 @@ describe('Context', () => {
     expect(context.length).toBe(0)
   })
 
+  test('ctx.get does not mutate the underlying map(no miss-then-cache)', () => {
+    const token = makeHttpContextToken(() => 'default-value')
+    const ctx = makeHttpContext()
+
+    expect(ctx.has(token)).toBe(false)
+    expect(ctx.get(token)).toBe('default-value')
+    // 关键:get 之后 has 仍是 false
+    expect(ctx.has(token)).toBe(false)
+    expect(ctx.length).toBe(0)
+  })
+
+  test('token factory is invoked each time get is called for unset token', () => {
+    let calls = 0
+    const token = makeHttpContextToken(() => ++calls)
+    const ctx = makeHttpContext()
+
+    expect(ctx.get(token)).toBe(1)
+    expect(ctx.get(token)).toBe(2)
+    expect(ctx.length).toBe(0)
+  })
+
+  test('explicit set null is distinguishable from unset', () => {
+    const token = makeHttpContextToken<string | null>(() => 'default')
+    const ctx = makeHttpContext()
+
+    ctx.set(token, null)
+    expect(ctx.has(token)).toBe(true)
+    expect(ctx.get(token)).toBe(null)
+  })
+
   test('should merge http contexts with secondary context taking precedence', () => {
     const tokenA = makeHttpContextToken(() => 'a-default')
     const tokenB = makeHttpContextToken(() => 'b-default')

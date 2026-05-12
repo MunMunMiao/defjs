@@ -70,13 +70,6 @@ export const DEFAULT_HTTP_OPTIONS: Required<ClientHttpOptions> = {
 }
 
 export const DEFAULT_SSE_OPTIONS: Required<ClientSseOptions> = {
-  fetch: ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init)) as typeof fetch,
+  fetch: globalThis.fetch.bind(globalThis) as typeof fetch,
 }
 
-export const DEFAULT_WEB_SOCKET_OPTIONS: ClientWebSocketOptions = {
-  beforeConnect: undefined,
-  heartbeat: undefined,
-  protocols: undefined,
-  queue: undefined,
-  reconnect: undefined,
-}

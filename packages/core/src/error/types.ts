@@ -19,6 +19,7 @@ export interface SettledResponseLike<TBody = unknown> {
 }
 
 export interface HttpStatusError<TErrorData = unknown> {
+  code: 'HTTP_STATUS'
   data: TErrorData
   kind: 'http'
   message: string

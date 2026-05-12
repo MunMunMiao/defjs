@@ -11,20 +11,28 @@ describe('object schema utility methods', () => {
   test('pick keeps only selected fields', () => {
     const lite = base.pick({ id: true, name: true })
 
-    expect(lite.parse({ id: 'u_1', name: 'x', score: 99 })).toEqual({ id: 'u_1', name: 'x' })
+    const [err, val] = lite.parse({ id: 'u_1', name: 'x', score: 99 })
+    expect(err).toBeNull()
+    expect(val).toEqual({ id: 'u_1', name: 'x' })
   })
 
   test('omit removes selected fields', () => {
     const noScore = base.omit({ score: true })
 
-    expect(noScore.parse({ id: 'u_1', name: 'x' })).toEqual({ id: 'u_1', name: 'x' })
+    const [err, val] = noScore.parse({ id: 'u_1', name: 'x' })
+    expect(err).toBeNull()
+    expect(val).toEqual({ id: 'u_1', name: 'x' })
   })
 
   test('partial makes every field optional in Output', () => {
     const optional = base.partial()
 
-    expect(optional.parse({})).toEqual({})
-    expect(optional.parse({ id: 'u_1' })).toEqual({ id: 'u_1' })
+    const [e1, v1] = optional.parse({})
+    expect(e1).toBeNull()
+    expect(v1).toEqual({})
+    const [e2, v2] = optional.parse({ id: 'u_1' })
+    expect(e2).toBeNull()
+    expect(v2).toEqual({ id: 'u_1' })
   })
 
   test('required flips back optional fields to required, defaulting to zero values when missing', () => {
@@ -34,8 +42,12 @@ describe('object schema utility methods', () => {
     })
 
     const strict = withMaybe.required()
-    expect(strict.parse({ id: 'u_1' })).toEqual({ id: 'u_1', tag: '' })
-    expect(strict.parse({ id: 'u_1', tag: 'release' })).toEqual({ id: 'u_1', tag: 'release' })
+    const [e1, v1] = strict.parse({ id: 'u_1' })
+    expect(e1).toBeNull()
+    expect(v1).toEqual({ id: 'u_1', tag: '' })
+    const [e2, v2] = strict.parse({ id: 'u_1', tag: 'release' })
+    expect(e2).toBeNull()
+    expect(v2).toEqual({ id: 'u_1', tag: 'release' })
   })
 
   test('extend appends or overrides fields with a plain shape', () => {
@@ -44,13 +56,16 @@ describe('object schema utility methods', () => {
       active: schema.boolean(),
     })
 
-    expect(widened.parse({ id: 'u_1', name: 'x', score: 10, active: true })).toEqual({
+    const [okErr, okVal] = widened.parse({ id: 'u_1', name: 'x', score: 10, active: true })
+    expect(okErr).toBeNull()
+    expect(okVal).toEqual({
       id: 'u_1',
       name: 'x',
       score: 10,
       active: true,
     })
-    expect(() => widened.parse({ id: 'u_1', name: 'x', score: 3.14, active: true })).toThrowError(SchemaError)
+    const [badErr] = widened.parse({ id: 'u_1', name: 'x', score: 3.14, active: true })
+    expect(badErr).toBeInstanceOf(SchemaError)
   })
 
   test('merge combines two object schemas, letting the later definition win on conflict', () => {
@@ -60,7 +75,9 @@ describe('object schema utility methods', () => {
     })
 
     const merged = base.merge(extra)
-    expect(merged.parse({ id: 'u_1', name: 'x', score: 7, created: '2026-05-12' })).toEqual({
+    const [err, val] = merged.parse({ id: 'u_1', name: 'x', score: 7, created: '2026-05-12' })
+    expect(err).toBeNull()
+    expect(val).toEqual({
       id: 'u_1',
       name: 'x',
       score: 7,
@@ -75,10 +92,17 @@ describe('object schema utility methods', () => {
   test('keyof returns an enum schema with declared keys', () => {
     const keys = base.keyof()
 
-    expect(keys.parse('id')).toBe('id')
-    expect(keys.parse('name')).toBe('name')
-    expect(keys.parse('score')).toBe('score')
-    expect(() => keys.parse('unknown')).toThrowError(SchemaError)
+    const [e1, v1] = keys.parse('id')
+    expect(e1).toBeNull()
+    expect(v1).toBe('id')
+    const [e2, v2] = keys.parse('name')
+    expect(e2).toBeNull()
+    expect(v2).toBe('name')
+    const [e3, v3] = keys.parse('score')
+    expect(e3).toBeNull()
+    expect(v3).toBe('score')
+    const [badErr] = keys.parse('unknown')
+    expect(badErr).toBeInstanceOf(SchemaError)
   })
 
   test('keyof on empty shape throws at chain time', () => {
@@ -88,10 +112,13 @@ describe('object schema utility methods', () => {
 
   test('utility methods preserve strict / passthrough / strip unknownKeys state', () => {
     const strictPick = base.strict().pick({ id: true })
-    expect(() => strictPick.parse({ id: 'u_1', extra: 'no' })).toThrowError(SchemaError)
+    const [spErr] = strictPick.parse({ id: 'u_1', extra: 'no' })
+    expect(spErr).toBeInstanceOf(SchemaError)
 
     const passthroughExtend = base.passthrough().extend({ extra: schema.string() })
-    expect(passthroughExtend.parse({ id: 'u_1', name: 'x', score: 1, extra: 'kept', stray: 'also' })).toEqual({
+    const [peErr, peVal] = passthroughExtend.parse({ id: 'u_1', name: 'x', score: 1, extra: 'kept', stray: 'also' })
+    expect(peErr).toBeNull()
+    expect(peVal).toEqual({
       id: 'u_1',
       name: 'x',
       score: 1,

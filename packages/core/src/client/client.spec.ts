@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, test } from 'vitest'
 import { ERR_NOT_FOUND_GLOBAL_CLIENT } from '../error'
 import { fetchHandler } from '../http/transport'
 import { cloneClient, createClient } from './client'
-import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS, DEFAULT_WEB_SOCKET_OPTIONS } from './config'
-import { getGlobalClient, restGlobalClient, setGlobalClient } from './global'
+import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
+import { getGlobalClient, resetGlobalClient, restGlobalClient, setGlobalClient } from './global'
 import type { Client } from './resolve'
 import { getClientConfig, isClient } from './resolve'
 
@@ -11,7 +11,7 @@ describe('Client', () => {
   let baseClient: Client
 
   beforeEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
     baseClient = createClient({
       endpoint: 'https://example.com/v1',
     })
@@ -23,7 +23,7 @@ describe('Client', () => {
     expect(config.endpoint).toBe('https://example.com/v1')
     expect(config.http).toEqual(DEFAULT_HTTP_OPTIONS)
     expect(config.sse).toEqual(DEFAULT_SSE_OPTIONS)
-    expect(config.webSocket).toEqual(DEFAULT_WEB_SOCKET_OPTIONS)
+    expect(config.webSocket).toEqual({ protocols: undefined })
     expect(config.queryParamsSerializer).toBe(DEFAULT_QUERY_PARAMS_SERIALIZER)
   })
 
@@ -56,13 +56,27 @@ describe('Client', () => {
     const client = getGlobalClient()
     expect(isClient(client)).toBe(true)
 
-    restGlobalClient()
+    resetGlobalClient()
     expect(() => getGlobalClient()).toThrowError(ERR_NOT_FOUND_GLOBAL_CLIENT)
   })
 
   test('should setGlobalClient set global client', () => {
     setGlobalClient(baseClient)
     expect(getGlobalClient()).toBe(baseClient)
+  })
+
+  test('restGlobalClient is alias of resetGlobalClient(historic typo, deprecated)', () => {
+    expect(restGlobalClient).toBe(resetGlobalClient)
+    setGlobalClient(baseClient)
+    expect(getGlobalClient()).toBe(baseClient)
+    restGlobalClient()
+    expect(() => getGlobalClient()).toThrowError(ERR_NOT_FOUND_GLOBAL_CLIENT)
+  })
+
+  test('DEFAULT_SSE_OPTIONS.fetch is bound to globalThis(detachable without losing this)', async () => {
+    // 解构出来调用不应抛 Illegal invocation
+    const { fetch: detached } = DEFAULT_SSE_OPTIONS
+    await expect(detached('about:blank').catch(() => 'caught')).resolves.toBeDefined()
   })
 
   test('should cloneClient override endpoint and protocol defaults', () => {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, restGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { makeResponse } from '../internal/http_response'
 import { schema } from '../schema'
 import type { HttpRequest } from './index'
@@ -15,7 +15,7 @@ describe('request http runtime', () => {
   })
 
   afterEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
   })
 
   test('should resolve success tuple for object-style request endpoints', async () => {

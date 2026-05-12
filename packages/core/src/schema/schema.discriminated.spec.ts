@@ -19,41 +19,43 @@ describe('schema discriminatedUnion', () => {
   ])
 
   test('routes payload by discriminator field in O(1)', () => {
-    expect(event.parse({ type: 'click', x: 10, y: 20 })).toEqual({ type: 'click', x: 10, y: 20 })
-    expect(event.parse({ type: 'scroll', delta: 5 })).toEqual({ type: 'scroll', delta: 5 })
-    expect(event.parse({ type: 'keypress', key: 'Enter' })).toEqual({ type: 'keypress', key: 'Enter' })
+    const [e1, v1] = event.parse({ type: 'click', x: 10, y: 20 })
+    expect(e1).toBeNull()
+    expect(v1).toEqual({ type: 'click', x: 10, y: 20 })
+
+    const [e2, v2] = event.parse({ type: 'scroll', delta: 5 })
+    expect(e2).toBeNull()
+    expect(v2).toEqual({ type: 'scroll', delta: 5 })
+
+    const [e3, v3] = event.parse({ type: 'keypress', key: 'Enter' })
+    expect(e3).toBeNull()
+    expect(v3).toEqual({ type: 'keypress', key: 'Enter' })
   })
 
   test('reports invalid_union with declared values on unknown discriminator', () => {
-    try {
-      event.parse({ type: 'unknown', payload: 'no' })
-      throw new Error('should have thrown')
-    } catch (error) {
-      expect(error).toBeInstanceOf(SchemaError)
-      const issue = (error as SchemaError).issues[0]
-      expect(issue?.code).toBe('invalid_union')
-      expect(issue?.path).toEqual(['type'])
-      expect(issue?.expected).toBe('"click" | "scroll" | "keypress"')
-      expect(issue?.message).toContain('"unknown"')
-    }
+    const [err] = event.parse({ type: 'unknown', payload: 'no' })
+    expect(err).toBeInstanceOf(SchemaError)
+    const issue = err!.issues[0]
+    expect(issue?.code).toBe('invalid_union')
+    expect(issue?.path).toEqual(['type'])
+    expect(issue?.expected).toBe('"click" | "scroll" | "keypress"')
+    expect(issue?.message).toContain('"unknown"')
   })
 
   test('forwards selected branch issues with full path', () => {
-    expect(() => event.parse({ type: 'click', x: 'no', y: 20 })).toThrowError(SchemaError)
-
-    try {
-      event.parse({ type: 'click', x: 'no', y: 20 })
-      throw new Error('should have thrown')
-    } catch (error) {
-      const issue = (error as SchemaError).issues[0]
-      expect(issue?.path).toEqual(['x'])
-      expect(issue?.code).toBe('invalid_type')
-    }
+    const [err] = event.parse({ type: 'click', x: 'no', y: 20 })
+    expect(err).toBeInstanceOf(SchemaError)
+    const issue = err!.issues[0]
+    expect(issue?.path).toEqual(['x'])
+    expect(issue?.code).toBe('invalid_type')
   })
 
   test('rejects non-object payloads', () => {
-    expect(() => event.parse('click')).toThrowError(SchemaError)
-    expect(() => event.parse([])).toThrowError(SchemaError)
+    const [e1] = event.parse('click')
+    expect(e1).toBeInstanceOf(SchemaError)
+
+    const [e2] = event.parse([])
+    expect(e2).toBeInstanceOf(SchemaError)
   })
 
   test('rejects option list with duplicate discriminator value at chain time', () => {
@@ -78,6 +80,8 @@ describe('schema discriminatedUnion', () => {
   })
 
   test('async parse routes via discriminator as well', async () => {
-    await expect(event.parseAsync({ type: 'scroll', delta: 3 })).resolves.toEqual({ type: 'scroll', delta: 3 })
+    const [err, val] = await event.parseAsync({ type: 'scroll', delta: 3 })
+    expect(err).toBeNull()
+    expect(val).toEqual({ type: 'scroll', delta: 3 })
   })
 })

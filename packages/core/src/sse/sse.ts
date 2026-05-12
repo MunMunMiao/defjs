@@ -171,6 +171,14 @@ async function executeEventStreamEndpoint<TInput extends AnyCompatibleSchema | u
 ): Promise<StreamAwaitResult<EventStreamData<TEvents>>> {
   state.status = 'connecting'
 
+  // Fast path: caller already aborted before we did any schema work.
+  if (config.abort?.aborted) {
+    const transportError = createRequestRuntimeError(config.abort.reason ?? ERR_ABORTED)
+    state.error = transportError
+    state.status = 'aborted'
+    return [transportError, undefined, undefined]
+  }
+
   let parsedInput: ParsedInput<TInput>
   try {
     parsedInput = (await parseEndpointInput(endpoint.input, input)) as ParsedInput<TInput>

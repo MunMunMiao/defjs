@@ -77,6 +77,7 @@ export function createRequestRuntimeError(cause: unknown, response?: SettledResp
 
   if (response && !response.ok) {
     return {
+      code: 'HTTP_STATUS',
       data: undefined,
       kind: 'http',
       message: response.error instanceof Error ? response.error.message : String(response.error ?? `HTTP ${response.status}`),

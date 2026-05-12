@@ -15,6 +15,9 @@ export function setGlobalClient(client: Client): void {
   globalClient = client
 }
 
-export function restGlobalClient(): void {
+export function resetGlobalClient(): void {
   globalClient = undefined
 }
+
+/** @deprecated use resetGlobalClient — historic typo kept as alias for backward compat. */
+export const restGlobalClient = resetGlobalClient

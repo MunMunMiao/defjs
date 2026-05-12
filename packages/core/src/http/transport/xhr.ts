@@ -1,8 +1,15 @@
-import { ERR_ABORTED, ERR_INVALID_CLIENT_ENDPOINT, ERR_NETWORK, ERR_TIMEOUT, ERR_UNKNOWN } from '../../error'
+import { ERR_ABORTED, ERR_NETWORK, ERR_TIMEOUT, ERR_UNKNOWN } from '../../error'
 import type { HttpRequest } from '../../internal/http_request'
 import { type HttpResponse, type HttpResponseBody, makeResponse } from '../../internal/http_response'
+import { resolveRequestUrl } from '../../internal/url'
 import { detectHttpContentType, serializeHttpBody } from './body'
+import type { HttpHandler } from './handler'
 import { getContentType, parseBody } from './utils'
+
+export const xhrHandler: HttpHandler = Object.assign(
+  (req: HttpRequest) => xhrHandlerImpl(req),
+  { supportsNativeTimeout: true as const },
+)
 
 export function extractHeaders(value: string): Headers {
   const headers = new Headers()
@@ -17,7 +24,7 @@ export function extractHeaders(value: string): Headers {
   return headers
 }
 
-export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unknown>> {
+function xhrHandlerImpl(httpRequest: HttpRequest): Promise<HttpResponse<unknown>> {
   return new Promise(resolve => {
     if (typeof globalThis.XMLHttpRequest !== 'function') {
       resolve(makeResponse({ error: new Error('XMLHttpRequest is not supported') }))
@@ -28,12 +35,7 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
     const uploadProgress = httpRequest.uploadProgress
     const downloadProgress = httpRequest.downloadProgress
 
-    const url = createRequestUrl(httpRequest)
-    if (typeof httpRequest.queryString === 'string') {
-      url.search = httpRequest.queryString
-    } else if (httpRequest.queryParams) {
-      url.search = httpRequest.queryParams.toString()
-    }
+    const url = resolveRequestUrl(httpRequest)
 
     xhr.open(httpRequest.method, url, true)
 
@@ -171,25 +173,3 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
   })
 }
 
-function createRequestUrl(request: HttpRequest): URL {
-  if (!request.baseEndpoint) {
-    throw ERR_INVALID_CLIENT_ENDPOINT
-  }
-
-  let base: URL
-  try {
-    base = new URL(request.baseEndpoint)
-  } catch {
-    throw ERR_INVALID_CLIENT_ENDPOINT
-  }
-
-  if (!base.pathname.endsWith('/')) {
-    base.pathname = `${base.pathname}/`
-  }
-
-  try {
-    return new URL(request.endpoint.replace(/^\/+/, ''), base)
-  } catch {
-    throw ERR_INVALID_CLIENT_ENDPOINT
-  }
-}

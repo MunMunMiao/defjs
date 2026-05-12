@@ -1,6 +1,6 @@
 import { resolveClientConfig } from '../client/client'
 import type { Client } from '../client/resolve'
-import { createDefinitionError, createTransportError, type HttpStatusError, type RequestError } from '../error'
+import { createDefinitionError, createTransportError, ERR_ABORTED, type HttpStatusError, type RequestError } from '../error'
 import { makeInterceptorChain, resolveHttpInterceptors } from '../interceptor/interceptor'
 import { mergeAbortSignals } from '../internal/abort'
 import type { HttpContext } from '../internal/context'
@@ -13,7 +13,6 @@ import { type AnyCompatibleSchema, type CompatibleInputOf, type CompatibleOutput
 import { createHttpRequest, normalizeOutputShape, type RequestOutputShape, resolveDefaultResponseType } from './request'
 import type { HttpHandler } from './transport/handler'
 
-import { xhrHandler } from './transport/xhr'
 
 export interface UseRequestConfig {
   abort?: AbortSignal
@@ -161,6 +160,14 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
 ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>> {
   state.status = 'pending'
 
+  // Fast path: caller already aborted before we did any schema work — skip parseEndpointInput / resolveClientConfig.
+  if (config.abort?.aborted) {
+    const transportError = createTransportError(config.abort.reason ?? ERR_ABORTED)
+    state.error = transportError as RequestError<RequestErrorData<TOutput>>
+    state.status = 'aborted'
+    return [transportError as RequestError<RequestErrorData<TOutput>>, undefined, undefined]
+  }
+
   let parsedInput: ParsedInput<TInput>
   try {
     parsedInput = (await parseEndpointInput(endpoint.input, input)) as ParsedInput<TInput>
@@ -185,7 +192,7 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
   try {
     const resolvedHandler = config.handler ?? clientConfig.http.handler
     request = createHttpRequest(endpoint.method, endpoint.path, parsedInput, endpoint.build, {
-      abort: mergeAbortSignals(controller.signal, [config.abort], resolvedHandler === xhrHandler ? undefined : config.timeout),
+      abort: mergeAbortSignals(controller.signal, [config.abort], resolvedHandler.supportsNativeTimeout ? undefined : config.timeout),
       baseEndpoint: clientConfig.endpoint,
       context: config.context,
       downloadProgress: config.onDownloadProgress,
@@ -235,6 +242,7 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
     }
 
     const httpError: HttpStatusError<RequestErrorData<TOutput>> = {
+      code: 'HTTP_STATUS',
       data: undefined as RequestErrorData<TOutput>,
       kind: 'http',
       message: response.error instanceof Error ? response.error.message : String(response.error ?? `HTTP ${response.status}`),
@@ -275,6 +283,7 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
   }
 
   const httpError: HttpStatusError<RequestErrorData<TOutput>> = {
+    code: 'HTTP_STATUS',
     data: parsedBody as RequestErrorData<TOutput>,
     kind: 'http',
     message: response.error instanceof Error ? response.error.message : String(response.error ?? `HTTP ${response.status}`),

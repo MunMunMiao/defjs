@@ -7,19 +7,32 @@ describe('schema in real browser environment', () => {
     const file = new File(['data'], 'doc.txt', { type: 'text/plain' })
     const buffer = new ArrayBuffer(8)
 
-    expect(schema.blob().parse(blob)).toBe(blob)
-    expect(schema.file().parse(file)).toBe(file)
-    expect(schema.arrayBuffer().parse(buffer)).toBe(buffer)
+    const [be, bv] = schema.blob().parse(blob)
+    expect(be).toBeNull()
+    expect(bv).toBe(blob)
 
-    expect(() => schema.blob().parse('not a blob')).toThrowError(SchemaError)
-    expect(() => schema.file().parse(blob)).toThrowError(SchemaError)
-    expect(() => schema.arrayBuffer().parse(file)).toThrowError(SchemaError)
+    const [fe, fv] = schema.file().parse(file)
+    expect(fe).toBeNull()
+    expect(fv).toBe(file)
+
+    const [ae, av] = schema.arrayBuffer().parse(buffer)
+    expect(ae).toBeNull()
+    expect(av).toBe(buffer)
+
+    const [badBlob] = schema.blob().parse('not a blob')
+    expect(badBlob).toBeInstanceOf(SchemaError)
+
+    const [badFile] = schema.file().parse(blob)
+    expect(badFile).toBeInstanceOf(SchemaError)
+
+    const [badAb] = schema.arrayBuffer().parse(file)
+    expect(badAb).toBeInstanceOf(SchemaError)
   })
 
   test('blob and file zero values are constructible in browser', () => {
-    const zeroBlob = schema.blob().parse(undefined)
-    const zeroFile = schema.file().parse(undefined)
-    const zeroBuffer = schema.arrayBuffer().parse(undefined)
+    const [, zeroBlob] = schema.blob().parse(undefined)
+    const [, zeroFile] = schema.file().parse(undefined)
+    const [, zeroBuffer] = schema.arrayBuffer().parse(undefined)
 
     expect(zeroBlob).toBeInstanceOf(Blob)
     expect(zeroFile).toBeInstanceOf(File)
@@ -42,21 +55,26 @@ describe('schema in real browser environment', () => {
       caption: 'hello',
     }
 
-    const parsed = uploadSchema.parse(payload)
-    expect(parsed.attachment.name).toBe('avatar.png')
-    expect(parsed.cover.type).toBe('image/jpeg')
-    expect(parsed.bytes.byteLength).toBe(16)
+    const [err, parsed] = uploadSchema.parse(payload)
+    expect(err).toBeNull()
+    expect(parsed!.attachment.name).toBe('avatar.png')
+    expect(parsed!.cover.type).toBe('image/jpeg')
+    expect(parsed!.bytes.byteLength).toBe(16)
 
-    await expect(uploadSchema.parseAsync(payload)).resolves.toMatchObject({
-      caption: 'hello',
-    })
+    const [asyncErr, asyncVal] = await uploadSchema.parseAsync(payload)
+    expect(asyncErr).toBeNull()
+    expect(asyncVal).toMatchObject({ caption: 'hello' })
   })
 
   test('date and bigint work in browser runtime', () => {
     const d = new Date('2026-05-12T08:00:00Z')
-    expect(schema.date().parse(d)).toBe(d)
+    const [de, dv] = schema.date().parse(d)
+    expect(de).toBeNull()
+    expect(dv).toBe(d)
 
-    expect(schema.bigint().parse(2026n)).toBe(2026n)
+    const [be, bv] = schema.bigint().parse(2026n)
+    expect(be).toBeNull()
+    expect(bv).toBe(2026n)
   })
 
   test('Standard Schema bridge accepts payloads with Web API instances', () => {

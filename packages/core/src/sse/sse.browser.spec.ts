@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
-import { createClient, restGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { schema } from '../schema'
 import { defineEventStream } from './index'
 
@@ -14,7 +14,7 @@ describe('sse browser runtime', () => {
   })
 
   afterEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
   })
 
   test('should consume event streams in real browsers', async () => {

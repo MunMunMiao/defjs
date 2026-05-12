@@ -18,7 +18,9 @@ describe('schema recursive structures', () => {
       }),
     }) as Recursive
 
-    expect(tree.parse({ id: 'root' })).toEqual({
+    const [e1, v1] = tree.parse({ id: 'root' })
+    expect(e1).toBeNull()
+    expect(v1).toEqual({
       children: [],
       id: 'root',
       meta: {
@@ -26,15 +28,15 @@ describe('schema recursive structures', () => {
       },
     })
 
-    expect(
-      tree.parse({
-        children: [{ id: 'leaf' }],
-        id: 'root',
-        meta: {
-          snapshots: [[[{ id: 'child' }]]],
-        },
-      }),
-    ).toEqual({
+    const [e2, v2] = tree.parse({
+      children: [{ id: 'leaf' }],
+      id: 'root',
+      meta: {
+        snapshots: [[[{ id: 'child' }]]],
+      },
+    })
+    expect(e2).toBeNull()
+    expect(v2).toEqual({
       children: [
         {
           children: [],
@@ -81,15 +83,15 @@ describe('schema recursive structures', () => {
       },
     }) as Recursive
 
-    expect(
-      root.parse({
-        branch: {
-          children: [{ name: 'branch-child' }],
-          name: 'branch-root',
-        },
-        name: 'root',
-      }),
-    ).toEqual({
+    const [err, val] = root.parse({
+      branch: {
+        children: [{ name: 'branch-child' }],
+        name: 'branch-root',
+      },
+      name: 'root',
+    })
+    expect(err).toBeNull()
+    expect(val).toEqual({
       branch: {
         children: [
           {
@@ -116,8 +118,12 @@ describe('schema recursive structures', () => {
       ),
     )
 
-    expect(matrix.parse([[[{ name: 'A' }]]])).toEqual([[[{ name: 'A' }]]])
-    expect(() => matrix.parse('bad')).toThrowError(SchemaError)
-    expect(() => matrix.parse([[[{ name: 1 } as never]]])).toThrowError(SchemaError)
+    const [err, val] = matrix.parse([[[{ name: 'A' }]]])
+    expect(err).toBeNull()
+    expect(val).toEqual([[[{ name: 'A' }]]])
+    const [e1] = matrix.parse('bad')
+    expect(e1).toBeInstanceOf(SchemaError)
+    const [e2] = matrix.parse([[[{ name: 1 } as never]]])
+    expect(e2).toBeInstanceOf(SchemaError)
   })
 })

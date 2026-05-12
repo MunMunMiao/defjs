@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, restGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { schema } from '../schema'
 import { defineRequest } from './index'
 
@@ -13,7 +13,7 @@ describe('request http runtime errors', () => {
   })
 
   afterEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
   })
 
   test('should resolve non-2xx responses as http errors with typed data', async () => {

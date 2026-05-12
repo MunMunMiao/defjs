@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, restGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { schema } from '../schema'
 import { defineWebSocket } from './index'
 
@@ -13,7 +13,7 @@ describe('web socket runtime heartbeat', () => {
   })
 
   afterEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
   })
 
   test('should send heartbeat messages automatically when heartbeat.message is provided', async () => {

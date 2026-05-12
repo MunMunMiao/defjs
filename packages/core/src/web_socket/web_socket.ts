@@ -1,25 +1,23 @@
 import { resolveClientConfig } from '../client/client'
-import type {
-  ClientConfig,
-  WebSocketBeforeConnect,
-  WebSocketHeartbeatOptions,
-  WebSocketQueueOptions,
-  WebSocketReconnectOptions,
-} from '../client/config'
+import type { ClientConfig, WebSocketBeforeConnect, WebSocketHeartbeatOptions } from '../client/config'
 import type { Client } from '../client/resolve'
-import { createDefinitionError, createTransportError, ERR_ABORTED, ERR_TIMEOUT, type RequestError, type TransportError } from '../error'
+import { createDefinitionError, createTransportError, ERR_ABORTED, type RequestError } from '../error'
 import { mergeAbortSignals } from '../internal/abort'
+import { AsyncQueue } from '../internal/async_queue'
 import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
 import type { RequestBuild, RequestBuildHandler } from '../internal/request_builder'
-import {
-  type AnyCompatibleSchema,
-  type CompatibleInputOf,
-  type CompatibleOutputOf,
-  isStandardSchemaLike,
-  parseCompatibleSchema,
-  SchemaError,
-} from '../schema'
+import { type AnyCompatibleSchema, type CompatibleInputOf, type CompatibleOutputOf } from '../schema'
 import { createWebSocketBuild, createWebSocketUrl } from './build'
+import {
+  extractCloseInfo,
+  isManualSocketCloseReason,
+  resolveAbortTransportError,
+  serializeOutgoingWebSocketMessage,
+  transformWebSocketMessage,
+} from './codec'
+import { type HeartbeatRuntime, startHeartbeat, stopHeartbeat } from './heartbeat'
+import { createSendQueue, type SendQueue, type WebSocketQueueConfig } from './queue'
+import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait, type WebSocketReconnectConfig } from './reconnect'
 
 export type WebSocketState = 'aborted' | 'closed' | 'closing' | 'connecting' | 'error' | 'idle' | 'open' | 'reconnecting'
 
@@ -170,7 +168,7 @@ type SocketRefState<TIncoming, TOutgoing> = {
   status: WebSocketState
 }
 
-type ManualSocketCloseReason = {
+export type ManualSocketCloseReason = {
   code?: number
   kind: 'manual-web-socket-close'
   reason?: string
@@ -182,17 +180,11 @@ type Deferred<T> = {
   resolve: (value: T | PromiseLike<T>) => void
 }
 
-type PendingNext<T> = {
-  reject: (reason?: unknown) => void
-  resolve: (value: IteratorResult<T>) => void
-}
-
-export type WebSocketReconnectConfig = WebSocketReconnectOptions
+export type { WebSocketReconnectConfig, WebSocketQueueConfig }
 export type WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> = Omit<WebSocketHeartbeatOptions, 'isAck' | 'message'> & {
   isAck?: (message: TIncoming) => boolean
   message?: <T = TOutgoing>() => T | unknown
 }
-export type WebSocketQueueConfig = WebSocketQueueOptions
 
 export function defineWebSocket<
   TInput extends AnyCompatibleSchema | undefined,
@@ -327,7 +319,7 @@ async function executeWebSocketEndpoint<
   }
 
   return await new Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>(resolve => {
-    const incomingQueue = new AsyncMessageQueue<WebSocketIncomingData<TIncoming>>()
+    const incomingQueue = new AsyncQueue<WebSocketIncomingData<TIncoming>>()
     const closedDeferred = createDeferred<WebSocketCloseInfo>()
     const sessionController = {
       currentSocket: undefined as WebSocket | undefined,
@@ -368,13 +360,13 @@ async function executeWebSocketEndpoint<
         const nextState = attempt === 0 ? 'connecting' : 'reconnecting'
         setSocketState(state, nextState)
 
-        const prepared = await prepareAttempt(attempt)
+        const prepared = await prepareAttempt()
         if (!prepared.ok) {
           finishStartFailure(prepared.error)
           return
         }
 
-        const outcome = await connectOnce(prepared.url, prepared.protocols, attempt)
+        const outcome = await connectOnce(prepared.url, prepared.protocols)
         latestConnection = outcome.connection ?? latestConnection
         state.connection = latestConnection
 
@@ -412,9 +404,7 @@ async function executeWebSocketEndpoint<
       }
     }
 
-    async function prepareAttempt(
-      currentAttempt: number,
-    ): Promise<{ ok: true; protocols: readonly string[]; url: string } | { error: RequestError<unknown>; ok: false }> {
+    async function prepareAttempt(): Promise<{ ok: true; protocols: readonly string[]; url: string } | { error: RequestError<unknown>; ok: false }> {
       let url: string
       try {
         url = createWebSocketUrl(clientConfig.endpoint, endpoint.path, built.params, built.query, clientConfig.queryParamsSerializer)
@@ -443,7 +433,7 @@ async function executeWebSocketEndpoint<
       }
     }
 
-    async function connectOnce(url: string, protocols: readonly string[], currentAttempt: number): Promise<SocketLifecycleOutcome> {
+    async function connectOnce(url: string, protocols: readonly string[]): Promise<SocketLifecycleOutcome> {
       let socket: WebSocket
       try {
         socket = protocols.length > 0 ? new globalThis.WebSocket(url, [...protocols]) : new globalThis.WebSocket(url)
@@ -467,7 +457,7 @@ async function executeWebSocketEndpoint<
         const cleanup = () => {
           stopHeartbeat(sessionController)
           socket.removeEventListener('open', handleOpen)
-          socket.removeEventListener('message', handleMessage)
+          socket.removeEventListener('message', onMessage)
           socket.removeEventListener('close', handleClose)
           socket.removeEventListener('error', handleError)
           signal.removeEventListener('abort', handleAbort)
@@ -502,11 +492,18 @@ async function executeWebSocketEndpoint<
             resolve([null, session, latestConnection])
           }
           flushSendQueue(socket, sendQueue, state)
-          startHeartbeat(socket, sessionController, heartbeatConfig, endpoint.outgoing, sendQueue, state)
+          startHeartbeat(socket, sessionController, heartbeatConfig, endpoint.outgoing, sendQueue, error => emitRuntimeError(state, error))
         }
 
         const handleMessage = async (event: MessageEvent) => {
-          const transformed = await transformWebSocketMessage(endpoint.incoming, event.data)
+          let transformed: WebSocketIncomingData<typeof endpoint.incoming> | undefined
+          try {
+            transformed = await transformWebSocketMessage(endpoint.incoming, event.data)
+          } catch (error) {
+            // schema validation failure → surface via onRuntimeError instead of silent drop.
+            emitRuntimeError(state, error)
+            return
+          }
           if (typeof transformed === 'undefined') {
             return
           }
@@ -517,6 +514,11 @@ async function executeWebSocketEndpoint<
           }
 
           incomingQueue.push(transformed)
+        }
+
+        // Wrap async handler in a named sync fn so addEventListener / removeEventListener share the same ref.
+        const onMessage = (event: MessageEvent) => {
+          void handleMessage(event)
         }
 
         const handleError = () => {
@@ -537,9 +539,7 @@ async function executeWebSocketEndpoint<
 
         signal.addEventListener('abort', handleAbort, { once: true })
         socket.addEventListener('open', handleOpen)
-        socket.addEventListener('message', event => {
-          void handleMessage(event)
-        })
+        socket.addEventListener('message', onMessage)
         socket.addEventListener('close', handleClose)
         socket.addEventListener('error', handleError)
       })
@@ -591,7 +591,11 @@ async function executeWebSocketEndpoint<
           setSocketState(state, state.error?.kind === 'transport' && state.error.code === 'ABORTED' ? 'aborted' : 'error')
         }
       } else if (closeInfo.cause) {
-        setSocketState(state, 'closed')
+        // Close driven by a runtime cause(transport/protocol error) should surface as 'error'.
+        if (!state.error) {
+          state.error = createTransportError(closeInfo.cause)
+        }
+        setSocketState(state, 'error')
       } else {
         setSocketState(state, 'closed')
       }
@@ -603,57 +607,6 @@ async function executeWebSocketEndpoint<
   })
 }
 
-class AsyncMessageQueue<T> implements AsyncIterable<T> {
-  private readonly values: T[] = []
-  private readonly waiting: PendingNext<T>[] = []
-  private done = false
-
-  push(value: T): void {
-    if (this.done) {
-      return
-    }
-
-    const pending = this.waiting.shift()
-    if (pending) {
-      pending.resolve({ done: false, value })
-      return
-    }
-
-    this.values.push(value)
-  }
-
-  close(): void {
-    if (this.done) {
-      return
-    }
-
-    this.done = true
-    while (this.waiting.length > 0) {
-      this.waiting.shift()?.resolve({ done: true, value: undefined })
-    }
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: () => {
-        if (this.values.length > 0) {
-          return Promise.resolve({
-            done: false,
-            value: this.values.shift() as T,
-          })
-        }
-
-        if (this.done) {
-          return Promise.resolve({ done: true, value: undefined })
-        }
-
-        return new Promise<IteratorResult<T>>((resolve, reject) => {
-          this.waiting.push({ reject, resolve })
-        })
-      },
-    }
-  }
-}
 
 function createDeferred<T>(): Deferred<T> {
   let resolve!: Deferred<T>['resolve']
@@ -670,60 +623,17 @@ function createDeferred<T>(): Deferred<T> {
   }
 }
 
-type SocketLifecycleOutcome = {
+export type SocketLifecycleOutcome = {
   closeInfo: WebSocketCloseInfo
   connection?: WebSocketConnectionInfo
   cause?: unknown
   opened: boolean
 }
 
-type SendQueue = {
-  clear(): void
-  enqueue(serialized: string): void
-  shift(): string | undefined
-}
-
-type HeartbeatRuntime<TIncoming> = {
-  isAck?: (message: TIncoming) => boolean
-  markAck(): void
-  stop(): void
-}
-
-function createSendQueue(config?: WebSocketQueueConfig): SendQueue {
-  const queue: string[] = []
-  const maxSize = config?.maxSize ?? Number.POSITIVE_INFINITY
-  const overflow = config?.overflow ?? 'drop-oldest'
-
-  return {
-    clear() {
-      queue.length = 0
-    },
-    enqueue(serialized) {
-      if (queue.length < maxSize) {
-        queue.push(serialized)
-        return
-      }
-
-      switch (overflow) {
-        case 'drop-newest':
-          return
-        case 'drop-oldest':
-          queue.shift()
-          queue.push(serialized)
-          return
-        case 'error':
-          throw new Error('WebSocket send queue overflow')
-      }
-    },
-    shift() {
-      return queue.shift()
-    },
-  }
-}
 
 function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | undefined>(
   outgoing: TOutgoing,
-  queue: AsyncMessageQueue<TIncoming>,
+  queue: AsyncQueue<TIncoming>,
   closed: Promise<WebSocketCloseInfo>,
   state: SocketRefState<TIncoming, WebSocketOutgoingData<TOutgoing>>,
   sessionController: {
@@ -783,337 +693,8 @@ function flushSendQueue(socket: WebSocket, queue: SendQueue, state: SocketRefSta
   }
 }
 
-function startHeartbeat<TIncoming, TOutgoing extends SocketSchemas | undefined>(
-  socket: WebSocket,
-  sessionController: {
-    currentSocket: WebSocket | undefined
-    heartbeat: HeartbeatRuntime<TIncoming> | undefined
-    lastRuntimeError: unknown
-  },
-  config: WebSocketHeartbeatConfig<TIncoming, WebSocketOutgoingData<TOutgoing>> | undefined,
-  outgoing: TOutgoing,
-  sendQueue: SendQueue,
-  state: SocketRefState<TIncoming, WebSocketOutgoingData<TOutgoing>>,
-): void {
-  stopHeartbeat(sessionController)
-  if (!config) {
-    return
-  }
 
-  let ackTimer: ReturnType<typeof setTimeout> | undefined
-  const interval = setInterval(() => {
-    if (socket.readyState !== WebSocket.OPEN) {
-      return
-    }
 
-    const nextMessage = resolveHeartbeatMessage(config.message)
-    if (typeof nextMessage === 'undefined') {
-      return
-    }
-
-    try {
-      const serialized = serializeOutgoingWebSocketMessage(outgoing, nextMessage as WebSocketOutgoingData<TOutgoing>)
-      socket.send(serialized)
-    } catch (error) {
-      emitRuntimeError(state, error)
-      return
-    }
-
-    if (typeof config.timeoutMs === 'number' && config.timeoutMs > 0) {
-      clearTimeout(ackTimer)
-      ackTimer = setTimeout(() => {
-        emitRuntimeError(state, new Error('WebSocket heartbeat timeout'))
-        try {
-          socket.close(4000, 'heartbeat timeout')
-        } catch {
-          sendQueue.clear()
-        }
-      }, config.timeoutMs)
-    }
-  }, config.intervalMs)
-
-  sessionController.heartbeat = {
-    isAck: config.isAck,
-    markAck() {
-      clearTimeout(ackTimer)
-      ackTimer = undefined
-    },
-    stop() {
-      clearInterval(interval)
-      clearTimeout(ackTimer)
-      ackTimer = undefined
-    },
-  }
-}
-
-function stopHeartbeat(sessionController: { heartbeat: HeartbeatRuntime<any> | undefined }): void {
-  sessionController.heartbeat?.stop()
-  sessionController.heartbeat = undefined
-}
-
-function shouldReconnect(config: NormalizedReconnectConfig | undefined, outcome: SocketLifecycleOutcome, attempt: number): boolean {
-  if (!config) {
-    return false
-  }
-
-  if (outcome.opened === false && config.attempts <= 0) {
-    return false
-  }
-
-  return config.shouldReconnect(outcome, attempt)
-}
-
-type NormalizedReconnectConfig = {
-  attempts: number
-  delayMs: number
-  factor: number
-  jitter: number
-  maxDelayMs: number
-  shouldReconnect: (outcome: SocketLifecycleOutcome, attempt: number) => boolean
-}
-
-function normalizeReconnectConfig(config: WebSocketReconnectConfig | undefined): NormalizedReconnectConfig | undefined {
-  if (!config) {
-    return undefined
-  }
-
-  const attempts = config.attempts ?? 3
-  if (attempts <= 0) {
-    return undefined
-  }
-
-  return {
-    attempts,
-    delayMs: config.delayMs ?? 1_000,
-    factor: config.factor ?? 2,
-    jitter: config.jitter ?? 0,
-    maxDelayMs: config.maxDelayMs ?? 30_000,
-    shouldReconnect: (outcome, attempt) => {
-      if (typeof config.shouldReconnect === 'function') {
-        return Boolean(
-          config.shouldReconnect({
-            attempt,
-            cause: outcome.cause,
-            code: outcome.closeInfo.code,
-            reason: outcome.closeInfo.reason,
-            wasClean: outcome.closeInfo.wasClean,
-          }),
-        )
-      }
-
-      return true
-    },
-  }
-}
-
-function computeReconnectDelay(config: NormalizedReconnectConfig, attempt: number): number {
-  const exponential = Math.min(config.delayMs * config.factor ** Math.max(0, attempt - 1), config.maxDelayMs)
-  if (config.jitter <= 0) {
-    return exponential
-  }
-
-  const random = 1 + (Math.random() * 2 - 1) * config.jitter
-  return Math.max(0, Math.round(exponential * random))
-}
-
-function resolveHeartbeatMessage<T>(message?: <R = T>() => R | unknown): T | undefined {
-  if (!message) {
-    return undefined
-  }
-
-  return message() as T
-}
-
-async function wait(ms: number, signal: AbortSignal): Promise<void> {
-  if (ms <= 0) {
-    return
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-
-    const onAbort = () => {
-      clearTimeout(timeout)
-      signal.removeEventListener('abort', onAbort)
-      reject(signal.reason)
-    }
-
-    if (signal.aborted) {
-      onAbort()
-      return
-    }
-
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
-function serializeOutgoingWebSocketMessage<TOutgoing extends SocketSchemas | undefined>(
-  schemas: TOutgoing,
-  message: WebSocketOutgoingData<TOutgoing>,
-): string {
-  if (!schemas) {
-    throw new Error('No outgoing WebSocket messages are declared for this endpoint')
-  }
-
-  if (!isRecord(message) || typeof message.type !== 'string' || message.type.length === 0) {
-    throw new Error('Outgoing WebSocket messages must include a string type')
-  }
-
-  const schema = schemas[message.type]
-  if (!schema) {
-    throw new Error(`Undeclared outgoing message type: ${message.type}`)
-  }
-
-  const payload = 'data' in message ? message.data : omitSocketType(message)
-
-  return JSON.stringify(normalizeSocketPayload(message.type, serializeCompatiblePayload(schema, payload)))
-}
-
-function serializeCompatiblePayload(schema: AnyCompatibleSchema, payload: unknown): unknown {
-  // Outgoing validation should stay synchronous for send() ergonomics.
-  if ('parse' in schema && typeof schema.parse === 'function') {
-    return schema.parse(payload)
-  }
-
-  if (isStandardSchemaLike(schema)) {
-    const result = schema['~standard'].validate(payload)
-    if (result instanceof Promise) {
-      throw new Error('Async Standard Schema validation is not supported for outgoing WebSocket messages')
-    }
-
-    if ('issues' in result) {
-      throw new SchemaError(
-        result.issues.map(issue => ({
-          code: 'custom',
-          expected: 'valid value',
-          message: issue.message ?? 'Schema parse failed',
-          path: Array.isArray(issue.path) ? [...issue.path] : [],
-          received: undefined,
-        })),
-      )
-    }
-
-    return result.value
-  }
-
-  return payload
-}
-
-async function transformWebSocketMessage<TIncoming extends SocketSchemas>(
-  incoming: TIncoming,
-  raw: unknown,
-): Promise<WebSocketIncomingData<TIncoming> | undefined> {
-  const decoded = decodeWebSocketData(raw)
-  if (!isRecord(decoded) || typeof decoded['type'] !== 'string' || decoded['type'].length === 0) {
-    return undefined
-  }
-
-  const messageType = decoded['type']
-  const schema = incoming[messageType] ?? incoming['default']
-  if (!schema) {
-    return undefined
-  }
-
-  const payload = 'data' in decoded ? decoded['data'] : omitSocketType(decoded)
-
-  try {
-    return normalizeSocketPayload(messageType, await parseCompatibleSchema(schema, payload)) as WebSocketIncomingData<TIncoming>
-  } catch {
-    return undefined
-  }
-}
-
-function decodeWebSocketData(raw: unknown): unknown {
-  if (typeof raw === 'string') {
-    return decodeWebSocketText(raw)
-  }
-
-  if (raw instanceof ArrayBuffer) {
-    return decodeWebSocketText(new TextDecoder().decode(raw))
-  }
-
-  if (ArrayBuffer.isView(raw)) {
-    return decodeWebSocketText(new TextDecoder().decode(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)))
-  }
-
-  if (typeof Blob !== 'undefined' && raw instanceof Blob) {
-    return undefined
-  }
-
-  return undefined
-}
-
-function decodeWebSocketText(text: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
-}
-
-function normalizeSocketPayload(type: string, payload: unknown): Record<string, unknown> {
-  if (isRecord(payload)) {
-    return {
-      type,
-      ...payload,
-    }
-  }
-
-  return {
-    data: payload,
-    type,
-  }
-}
-
-function omitSocketType(value: Record<string, unknown>): Record<string, unknown> {
-  const { type: _type, ...payload } = value
-  return payload
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function extractCloseInfo(event?: CloseEvent, cause?: unknown): WebSocketCloseInfo & { cause?: unknown } {
-  return {
-    cause,
-    code: event?.code,
-    reason: event?.reason,
-    wasClean: event?.wasClean,
-  }
-}
-
-function isManualSocketCloseReason(value: unknown): value is ManualSocketCloseReason {
-  return typeof value === 'object' && value !== null && 'kind' in value && value.kind === 'manual-web-socket-close'
-}
-
-function resolveAbortTransportError(signal: AbortSignal): TransportError | undefined {
-  if (!signal.aborted) {
-    return undefined
-  }
-
-  const reason = signal.reason
-  if (isManualSocketCloseReason(reason)) {
-    return createTransportError(ERR_ABORTED)
-  }
-
-  if (isTimeoutReason(reason)) {
-    return createTransportError(ERR_TIMEOUT)
-  }
-
-  return createTransportError(reason ?? ERR_ABORTED)
-}
-
-function isTimeoutReason(value: unknown): boolean {
-  return (
-    value === ERR_TIMEOUT ||
-    (value instanceof Error && value.message === ERR_TIMEOUT.message) ||
-    (value instanceof DOMException && value.name === 'TimeoutError')
-  )
-}
 
 function setSocketState<TIncoming, TOutgoing>(state: SocketRefState<TIncoming, TOutgoing>, next: WebSocketState): void {
   if (state.status === next) {

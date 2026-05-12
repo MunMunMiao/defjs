@@ -1,6 +1,7 @@
-import { ERR_ABORTED, ERR_INVALID_CLIENT_ENDPOINT, ERR_TIMEOUT } from '../../error'
+import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
 import type { HttpRequest } from '../../internal/http_request'
 import { type HttpResponse, type HttpResponseBody, makeResponse } from '../../internal/http_response'
+import { resolveRequestUrl } from '../../internal/url'
 import { detectHttpContentType, serializeHttpBody } from './body'
 import { concatChunks, getContentLength, getContentType, parseBody } from './utils'
 
@@ -118,38 +119,8 @@ export function createFetchRequestInit(request: HttpRequest): RequestInitWithDup
 }
 
 export function createFetchRequest(request: HttpRequest): Request {
-  const url = createRequestUrl(request)
-
-  if (typeof request.queryString === 'string') {
-    url.search = request.queryString
-  } else if (request.queryParams) {
-    url.search = request.queryParams.toString()
-  }
-
+  const url = resolveRequestUrl(request)
   return new Request(url, createFetchRequestInit(request))
-}
-
-function createRequestUrl(request: HttpRequest): URL {
-  if (!request.baseEndpoint) {
-    throw ERR_INVALID_CLIENT_ENDPOINT
-  }
-
-  let base: URL
-  try {
-    base = new URL(request.baseEndpoint)
-  } catch {
-    throw ERR_INVALID_CLIENT_ENDPOINT
-  }
-
-  if (!base.pathname.endsWith('/')) {
-    base.pathname = `${base.pathname}/`
-  }
-
-  try {
-    return new URL(request.endpoint.replace(/^\/+/, ''), base)
-  } catch {
-    throw ERR_INVALID_CLIENT_ENDPOINT
-  }
 }
 
 export async function fetchHandler(httpRequest: HttpRequest): Promise<HttpResponse<unknown>> {

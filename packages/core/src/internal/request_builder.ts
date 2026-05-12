@@ -71,10 +71,10 @@ function createRequestBuilder(state: RequestBuilderState): RequestBuilder {
       setBody(state, body)
     },
     formUrlEncoded(record, options) {
-      setBody(state, new URLSearchParams(), options?.contentType ?? 'application/x-www-form-urlencoded;charset=UTF-8')
-      state.snapshot.body = new URLSearchParams()
+      const body = new URLSearchParams()
+      setBody(state, body, options?.contentType ?? 'application/x-www-form-urlencoded;charset=UTF-8')
       for (const [key, value] of Object.entries(record)) {
-        appendUrlEncodedBodyValue(state.snapshot.body as URLSearchParams, key, value)
+        appendUrlEncodedBodyValue(body, key, value)
       }
     },
     headers(record) {
@@ -159,16 +159,12 @@ function appendRequestFormDataValue(formData: FormData, key: string, value: Requ
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      appendRequestFormDataArrayItem(formData, key, item as RequestFormDataArrayItem)
+      appendRequestFormDataItem(formData, key, item as RequestFormDataArrayItem)
     }
     return
   }
 
   appendRequestFormDataItem(formData, key, value as RequestFormDataScalar | RequestFormDataFileLike)
-}
-
-function appendRequestFormDataArrayItem(formData: FormData, key: string, value: RequestFormDataScalar | RequestFormDataFileLike): void {
-  appendRequestFormDataItem(formData, key, value)
 }
 
 function appendRequestFormDataItem(formData: FormData, key: string, value: RequestFormDataScalar | RequestFormDataFileLike): void {

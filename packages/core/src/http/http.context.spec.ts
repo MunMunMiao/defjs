@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, restGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { createHttpInterceptor } from '../interceptor/interceptor'
 import { makeHttpContext, makeHttpContextToken } from '../internal/context'
 import { makeResponse } from '../internal/http_response'
@@ -15,7 +15,7 @@ describe('request http runtime context', () => {
   })
 
   afterEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
   })
 
   test('should use context and interceptors for request-scoped transaction data', async () => {

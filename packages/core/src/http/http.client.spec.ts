@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, restGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { ERR_NOT_FOUND_GLOBAL_CLIENT } from '../error'
 import { makeResponse } from '../internal/http_response'
 import { schema } from '../schema'
@@ -15,7 +15,7 @@ describe('request http runtime with client config', () => {
   })
 
   afterEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
   })
 
   test('should support queryParamsSerializer from client config', async () => {
@@ -60,7 +60,7 @@ describe('request http runtime with client config', () => {
   })
 
   test('should resolve client from config first and then from global client', async () => {
-    restGlobalClient()
+    resetGlobalClient()
 
     const localClient = createClient({
       endpoint: 'https://example.com/api',

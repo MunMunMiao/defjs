@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, restGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { makeResponse } from '../internal/http_response'
 import { type StandardSchemaLike, schema } from '../schema'
 import { defineRequest } from './index'
@@ -14,7 +14,7 @@ describe('request http runtime compatibility', () => {
   })
 
   afterEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
   })
 
   test('should support Standard Schema compatible input and output', async () => {

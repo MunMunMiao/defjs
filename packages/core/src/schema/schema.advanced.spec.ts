@@ -4,7 +4,9 @@ import { SchemaError, schema } from './index'
 describe('schema brand (nominal types)', () => {
   test('brand is a runtime no-op preserving the value', () => {
     const userId = schema.string().brand<'UserId'>()
-    expect(userId.parse('u_1')).toBe('u_1')
+    const [err, val] = userId.parse('u_1')
+    expect(err).toBeNull()
+    expect(val).toBe('u_1')
   })
 })
 
@@ -15,8 +17,13 @@ describe('schema catch (fallback on failure)', () => {
       .refine(value => value > 0 || 'must be positive')
       .catch(0)
 
-    expect(positive.parse(5)).toBe(5)
-    expect(positive.parse(-1)).toBe(0)
+    const [err1, val1] = positive.parse(5)
+    expect(err1).toBeNull()
+    expect(val1).toBe(5)
+
+    const [err2, val2] = positive.parse(-1)
+    expect(err2).toBeNull()
+    expect(val2).toBe(0)
   })
 
   test('catch propagates through object fields', () => {
@@ -24,42 +31,50 @@ describe('schema catch (fallback on failure)', () => {
       retries: schema.number().int().catch(3),
     })
 
-    expect(settings.parse({ retries: 5 })).toEqual({ retries: 5 })
-    expect(settings.parse({ retries: 'bad' })).toEqual({ retries: 3 })
+    const [err1, val1] = settings.parse({ retries: 5 })
+    expect(err1).toBeNull()
+    expect(val1).toEqual({ retries: 5 })
+
+    const [err2, val2] = settings.parse({ retries: 'bad' })
+    expect(err2).toBeNull()
+    expect(val2).toEqual({ retries: 3 })
   })
 
   test('catch clones fallback to avoid shared reference mutation', () => {
     const list = schema.array(schema.number()).catch([1, 2])
 
-    const a = list.parse('bad') as number[]
-    const b = list.parse('also-bad') as number[]
-    a.push(99)
+    const [, a] = list.parse('bad')
+    const [, b] = list.parse('also-bad')
+    ;(a as number[]).push(99)
     expect(b).toEqual([1, 2])
   })
 
-  test('safeParse with catch returns ok=true even on bad input', () => {
+  test('parse with catch returns fallback even on bad input', () => {
     const enriched = schema.string().min(3).catch('default')
-    const result = enriched.safeParse('a')
-    expect(result).toEqual({ ok: true, value: 'default' })
+    const [err, val] = enriched.parse('a')
+    expect(err).toBeNull()
+    expect(val).toBe('default')
   })
 })
 
-describe('schema lazy (explicit recursive)', () => {
-  test('lazy resolver is invoked on parse, supporting recursive schemas', () => {
-    const tree: any = schema.object({
+describe('schema object with getter (recursive shape)', () => {
+  test('object schema parses recursive structure via getter field', () => {
+    const tree = schema.object({
       id: schema.string(),
-      children: schema.array(schema.lazy(() => tree)),
+      get children() {
+        return schema.array(tree)
+      },
     })
 
-    expect(
-      tree.parse({
-        id: 'root',
-        children: [
-          { id: 'a', children: [] },
-          { id: 'b', children: [{ id: 'c', children: [] }] },
-        ],
-      }),
-    ).toEqual({
+    const [err, val] = tree.parse({
+      id: 'root',
+      children: [
+        { id: 'a', children: [] },
+        { id: 'b', children: [{ id: 'c', children: [] }] },
+      ],
+    })
+    expect(err).toBeNull()
+    expect(val).toEqual({
       id: 'root',
       children: [
         { id: 'a', children: [] },
@@ -68,41 +83,82 @@ describe('schema lazy (explicit recursive)', () => {
     })
   })
 
-  test('lazy resolver is memoized across calls', () => {
-    let calls = 0
-    const innerSchema = schema.string()
-    const wrapped = schema.lazy(() => {
-      calls += 1
-      return innerSchema
-    })
-
-    wrapped.parse('a')
-    wrapped.parse('b')
-    wrapped.parse('c')
-    expect(calls).toBe(1)
-  })
-
-  test('lazy rejects non-function resolvers at chain time', () => {
-    expect(() => schema.lazy(null as never)).toThrowError('lazy() requires a resolver function')
+  test('object schema asserts non-schema fields at runtime', () => {
+    const bad = schema.object({ x: 42 as never })
+    expect(() => bad.parse({ x: 1 })).toThrowError(/must be a schema/)
   })
 })
 
 describe('schema bigint and date primitives', () => {
-  test('bigint validates BigInt values and exposes a 0n zero value', () => {
-    expect(schema.bigint().parse(42n)).toBe(42n)
-    expect(schema.bigint().parse(undefined)).toBe(0n)
-    expect(() => schema.bigint().parse(42)).toThrowError('Expected bigint at <root>, received 42')
+  test('bigint accepts BigInt and string wire form, rejects number', () => {
+    const [e1, v1] = schema.bigint().parse(42n)
+    expect(e1).toBeNull()
+    expect(v1).toBe(42n)
+
+    const [e2, v2] = schema.bigint().parse('42')
+    expect(e2).toBeNull()
+    expect(v2).toBe(42n)
+
+    const [e3, v3] = schema.bigint().parse('9007199254740993')
+    expect(e3).toBeNull()
+    expect(v3).toBe(9007199254740993n)
+
+    const [e4, v4] = schema.bigint().parse(undefined)
+    expect(e4).toBeNull()
+    expect(v4).toBe(0n)
+
+    const [e5] = schema.bigint().parse(42)
+    expect(e5).toBeInstanceOf(SchemaError)
+    expect(e5?.message).toContain('Expected bigint')
+
+    const [e6] = schema.bigint().parse('abc')
+    expect(e6).toBeInstanceOf(SchemaError)
+    expect(e6?.message).toContain('Expected bigint')
   })
 
-  test('date validates Date instances, rejects invalid dates', () => {
-    const d = new Date('2026-05-12')
-    expect(schema.date().parse(d)).toBe(d)
-    expect(() => schema.date().parse(new Date('not-a-date'))).toThrowError('Expected Date')
-    expect(() => schema.date().parse('2026-05-12')).toThrowError('Expected Date')
+  test('bigint encodes back to string wire form', () => {
+    expect(schema.bigint().encode(42n)).toBe('42')
+    const [, parsed] = schema.bigint().parse('9007199254740993')
+    expect(schema.bigint().encode(parsed as bigint)).toBe('9007199254740993')
+  })
 
-    const zero = schema.date().parse(undefined)
+  test('date accepts Date instance, ISO string, and epoch number', () => {
+    const d = new Date('2026-05-12T10:00:00Z')
+    const [e1, v1] = schema.date().parse(d)
+    expect(e1).toBeNull()
+    expect(v1).toBe(d)
+
+    const [e2, v2] = schema.date().parse('2026-05-12T10:00:00Z')
+    expect(e2).toBeNull()
+    expect((v2 as Date).getTime()).toBe(d.getTime())
+
+    const [e3, v3] = schema.date().parse(d.getTime())
+    expect(e3).toBeNull()
+    expect((v3 as Date).getTime()).toBe(d.getTime())
+
+    const [e4, zero] = schema.date().parse(undefined)
+    expect(e4).toBeNull()
     expect(zero).toBeInstanceOf(Date)
     expect((zero as Date).getTime()).toBe(0)
+  })
+
+  test('date rejects invalid wire input with invalid_type code', () => {
+    const [e1] = schema.date().parse(new Date('not-a-date'))
+    expect(e1).toBeInstanceOf(SchemaError)
+    expect(e1?.message).toContain('Expected Date')
+    expect(e1?.issues[0]?.code).toBe('invalid_type')
+
+    const [e2] = schema.date().parse('not-a-date')
+    expect(e2).toBeInstanceOf(SchemaError)
+    expect(e2?.message).toContain('Expected Date')
+    expect(e2?.issues[0]?.code).toBe('invalid_type')
+  })
+
+  test('date encodes back to ISO string', () => {
+    const d = new Date('2026-05-12T10:00:00Z')
+    expect(schema.date().encode(d)).toBe('2026-05-12T10:00:00.000Z')
+    const [, parsed] = schema.date().parse('2026-05-12T10:00:00Z')
+    expect(schema.date().encode(parsed as Date)).toBe('2026-05-12T10:00:00.000Z')
   })
 })
 
@@ -112,8 +168,12 @@ describe('schema intersection', () => {
     const aged = schema.object({ age: schema.number() })
     const person = schema.intersection(named, aged)
 
-    expect(person.parse({ name: 'x', age: 30 })).toEqual({ name: 'x', age: 30 })
-    expect(() => person.parse({ name: 'x', age: 'bad' })).toThrowError(SchemaError)
+    const [okErr, okVal] = person.parse({ name: 'x', age: 30 })
+    expect(okErr).toBeNull()
+    expect(okVal).toEqual({ name: 'x', age: 30 })
+
+    const [badErr] = person.parse({ name: 'x', age: 'bad' })
+    expect(badErr).toBeInstanceOf(SchemaError)
   })
 
   test('intersection rejects when either side fails', () => {
@@ -121,31 +181,65 @@ describe('schema intersection', () => {
     const integer = schema.number().int()
     const combined = schema.intersection(positive, integer)
 
-    expect(combined.parse(7)).toBe(7)
-    expect(() => combined.parse(-1)).toThrowError('must be positive')
-    expect(() => combined.parse(3.14)).toThrowError('Number must be an integer')
+    const [okErr, okVal] = combined.parse(7)
+    expect(okErr).toBeNull()
+    expect(okVal).toBe(7)
+
+    const [negErr] = combined.parse(-1)
+    expect(negErr).toBeInstanceOf(SchemaError)
+    expect(negErr?.message).toContain('must be positive')
+
+    const [floatErr] = combined.parse(3.14)
+    expect(floatErr).toBeInstanceOf(SchemaError)
+    expect(floatErr?.message).toContain('Number must be an integer')
   })
 })
 
 describe('schema string regex extensions', () => {
   test('datetime accepts ISO 8601 with offset / Z', () => {
-    expect(schema.string().datetime().parse('2026-05-12T08:30:00Z')).toBe('2026-05-12T08:30:00Z')
-    expect(schema.string().datetime().parse('2026-05-12T08:30:00.123+08:00')).toBe('2026-05-12T08:30:00.123+08:00')
-    expect(() => schema.string().datetime().parse('2026-05-12')).toThrowError('Invalid ISO datetime')
+    const [e1, v1] = schema.string().datetime().parse('2026-05-12T08:30:00Z')
+    expect(e1).toBeNull()
+    expect(v1).toBe('2026-05-12T08:30:00Z')
+
+    const [e2, v2] = schema.string().datetime().parse('2026-05-12T08:30:00.123+08:00')
+    expect(e2).toBeNull()
+    expect(v2).toBe('2026-05-12T08:30:00.123+08:00')
+
+    const [e3] = schema.string().datetime().parse('2026-05-12')
+    expect(e3).toBeInstanceOf(SchemaError)
+    expect(e3?.message).toContain('Invalid ISO datetime')
   })
 
   test('ip accepts IPv4 and IPv6', () => {
-    expect(schema.string().ip().parse('192.168.0.1')).toBe('192.168.0.1')
-    expect(schema.string().ip().parse('2001:0db8:0000:0000:0000:ff00:0042:8329')).toBe('2001:0db8:0000:0000:0000:ff00:0042:8329')
-    expect(() => schema.string().ip().parse('999.999.999.999')).toThrowError('Invalid IP address')
+    const [e1, v1] = schema.string().ip().parse('192.168.0.1')
+    expect(e1).toBeNull()
+    expect(v1).toBe('192.168.0.1')
+
+    const [e2, v2] = schema.string().ip().parse('2001:0db8:0000:0000:0000:ff00:0042:8329')
+    expect(e2).toBeNull()
+    expect(v2).toBe('2001:0db8:0000:0000:0000:ff00:0042:8329')
+
+    const [e3] = schema.string().ip().parse('999.999.999.999')
+    expect(e3).toBeInstanceOf(SchemaError)
+    expect(e3?.message).toContain('Invalid IP address')
   })
 
   test('cuid and nanoid validate fixed-shape ids', () => {
-    expect(schema.string().cuid().parse('c123456789012345678901234')).toBe('c123456789012345678901234')
-    expect(() => schema.string().cuid().parse('not-cuid')).toThrowError('Invalid CUID')
+    const [e1, v1] = schema.string().cuid().parse('c123456789012345678901234')
+    expect(e1).toBeNull()
+    expect(v1).toBe('c123456789012345678901234')
 
-    expect(schema.string().nanoid().parse('V1StGXR8_Z5jdHi6B-myT')).toBe('V1StGXR8_Z5jdHi6B-myT')
-    expect(() => schema.string().nanoid().parse('short')).toThrowError('Invalid nanoid')
+    const [e2] = schema.string().cuid().parse('not-cuid')
+    expect(e2).toBeInstanceOf(SchemaError)
+    expect(e2?.message).toContain('Invalid CUID')
+
+    const [e3, v3] = schema.string().nanoid().parse('V1StGXR8_Z5jdHi6B-myT')
+    expect(e3).toBeNull()
+    expect(v3).toBe('V1StGXR8_Z5jdHi6B-myT')
+
+    const [e4] = schema.string().nanoid().parse('short')
+    expect(e4).toBeInstanceOf(SchemaError)
+    expect(e4?.message).toContain('Invalid nanoid')
   })
 })
 
@@ -159,21 +253,37 @@ describe('schema strict missingKeys (Go strict mode)', () => {
   test('strict({ missingKeys: true }) rejects missing required fields', () => {
     const strictUser = user.strict({ missingKeys: true })
 
-    expect(() => strictUser.parse({})).toThrowError('Missing key "id"')
+    const [missErr] = strictUser.parse({})
+    expect(missErr).toBeInstanceOf(SchemaError)
+    expect(missErr?.message).toContain('Missing key "id"')
 
-    expect(strictUser.parse({ id: 'u_1' })).toEqual({ id: 'u_1', locale: 'zh-CN' })
+    const [okErr, okVal] = strictUser.parse({ id: 'u_1' })
+    expect(okErr).toBeNull()
+    expect(okVal).toEqual({ id: 'u_1', locale: 'zh-CN' })
   })
 
   test('strict({ missingKeys: true, unknownKeys: false }) only checks missing, allows unknowns', () => {
     const partial = user.strict({ missingKeys: true, unknownKeys: false })
-    expect(partial.parse({ id: 'u_1', extra: 'ok' })).toEqual({ id: 'u_1', locale: 'zh-CN' })
-    expect(() => partial.parse({ extra: 'ok' })).toThrowError('Missing key "id"')
+
+    const [okErr, okVal] = partial.parse({ id: 'u_1', extra: 'ok' })
+    expect(okErr).toBeNull()
+    expect(okVal).toEqual({ id: 'u_1', locale: 'zh-CN' })
+
+    const [missErr] = partial.parse({ extra: 'ok' })
+    expect(missErr).toBeInstanceOf(SchemaError)
+    expect(missErr?.message).toContain('Missing key "id"')
   })
 
   test('default .strict() still enforces unknownKeys only', () => {
     const u = user.strict()
-    expect(u.parse({ id: 'u_1' })).toEqual({ id: 'u_1', locale: 'zh-CN' })
-    expect(() => u.parse({ id: 'u_1', extra: 'no' })).toThrowError('Unrecognized key')
+
+    const [okErr, okVal] = u.parse({ id: 'u_1' })
+    expect(okErr).toBeNull()
+    expect(okVal).toEqual({ id: 'u_1', locale: 'zh-CN' })
+
+    const [unkErr] = u.parse({ id: 'u_1', extra: 'no' })
+    expect(unkErr).toBeInstanceOf(SchemaError)
+    expect(unkErr?.message).toContain('Unrecognized key')
   })
 })
 
@@ -205,10 +315,12 @@ describe('schema encode (Go json.Marshal dual)', () => {
     expect(schema.boolean().encode(true)).toBe(true)
   })
 
-  test('encode follows lazy resolver', () => {
-    const tree: any = schema.object({
+  test('encode follows recursive shape via getter', () => {
+    const tree = schema.object({
       id: schema.string().alias('node_id'),
-      children: schema.array(schema.lazy(() => tree)),
+      get children() {
+        return schema.array(tree)
+      },
     })
 
     expect(tree.encode({ id: 'root', children: [{ id: 'a', children: [] }] })).toEqual({

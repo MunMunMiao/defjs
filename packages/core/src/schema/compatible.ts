@@ -57,7 +57,11 @@ export async function parseCompatibleSchema<TSchema extends AnyCompatibleSchema>
   value: unknown,
 ): Promise<CompatibleOutputOf<TSchema>> {
   if (isSchema(schema)) {
-    return schema.parse(value) as CompatibleOutputOf<TSchema>
+    const [err, val] = schema.parse(value)
+    if (err) {
+      throw err
+    }
+    return val as CompatibleOutputOf<TSchema>
   }
 
   const result = await schema['~standard'].validate(value)

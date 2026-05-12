@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, restGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { schema } from '../schema'
 import { defineWebSocket } from './index'
 
@@ -13,7 +14,19 @@ describe('web socket runtime lifecycle', () => {
   })
 
   afterEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
+  })
+
+  test('message listener add/remove use the same ref(no leak)', () => {
+    // Bun 的 native WebSocket(C++ 实现)让 prototype-level spy 无法拦截 addEventListener/removeEventListener,
+    // 因此这里改用 source-level meta-check:断言 web_socket.ts 中 cleanup 用的是 onMessage 而非 handleMessage。
+    // 这保护 bug 3(行 541 的 wrap 必须与 cleanup 的 ref 一致)永不回归。
+    const source = readFileSync(new URL('./web_socket.ts', import.meta.url), 'utf8')
+    expect(source).toMatch(/socket\.addEventListener\('message', onMessage\)/)
+    expect(source).toMatch(/socket\.removeEventListener\('message', onMessage\)/)
+    // 反向断言:旧的 anonymous arrow wrap 已彻底消失
+    expect(source).not.toMatch(/socket\.addEventListener\('message', event =>/)
+    expect(source).not.toMatch(/socket\.removeEventListener\('message', handleMessage\)/)
   })
 
   test('should allow closing websocket refs before startup', async () => {

@@ -1,6 +1,10 @@
-import { ERR_ABORTED, ERR_INVALID_CLIENT_ENDPOINT, ERR_TIMEOUT } from '../../error'
+import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
+import { isReadableStreamBody, supportsStreamingRequestBody } from '../../http/transport/fetch'
+import { serializeHttpBody } from '../../http/transport/body'
+import { AsyncQueue } from '../../internal/async_queue'
 import type { HttpRequest } from '../../internal/http_request'
 import { type HttpResponse, makeResponse } from '../../internal/http_response'
+import { resolveRequestUrl } from '../../internal/url'
 import { createLineParser, createMessageParser, type EventStreamMessage, readStreamBytes } from './parser'
 
 export const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream'
@@ -48,13 +52,6 @@ type Deferred<T> = {
   reject: (reason?: unknown) => void
 }
 
-type PendingNext<T> = {
-  resolve: (value: IteratorResult<T>) => void
-  reject: (reason?: unknown) => void
-}
-
-const NO_ERROR = Symbol('NO_ERROR')
-
 class EventStreamFatalError extends Error {
   cause?: unknown
 
@@ -65,80 +62,11 @@ class EventStreamFatalError extends Error {
   }
 }
 
-class AsyncEventQueue<T> implements AsyncIterable<T> {
-  private readonly values: T[] = []
-  private readonly waiting: PendingNext<T>[] = []
-  private done = false
-  private error: unknown = NO_ERROR
-
-  push(value: T): void {
-    if (this.done) {
-      return
-    }
-
-    const waiting = this.waiting.shift()
-    if (waiting) {
-      waiting.resolve({ done: false, value })
-      return
-    }
-
-    this.values.push(value)
-  }
-
-  close(): void {
-    if (this.done) {
-      return
-    }
-
-    this.done = true
-    while (this.waiting.length > 0) {
-      this.waiting.shift()?.resolve({ done: true, value: undefined })
-    }
-  }
-
-  fail(error: unknown): void {
-    if (this.done) {
-      return
-    }
-
-    this.done = true
-    this.error = error
-    while (this.waiting.length > 0) {
-      this.waiting.shift()?.reject(error)
-    }
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: () => {
-        if (this.values.length > 0) {
-          return Promise.resolve({
-            done: false,
-            value: this.values.shift() as T,
-          })
-        }
-
-        if (this.error !== NO_ERROR) {
-          return Promise.reject(this.error)
-        }
-
-        if (this.done) {
-          return Promise.resolve({ done: true, value: undefined })
-        }
-
-        return new Promise<IteratorResult<T>>((resolve, reject) => {
-          this.waiting.push({ resolve, reject })
-        })
-      },
-    }
-  }
-}
-
 export async function fetchEventStream<TEvent = EventStreamMessage>(
   request: HttpRequest,
   options: FetchEventStreamOptions<TEvent> = {},
 ): Promise<EventStreamHandle<TEvent>> {
-  const queue = new AsyncEventQueue<TEvent>()
+  const queue = new AsyncQueue<TEvent>()
   const closedDeferred = createDeferred<EventStreamCloseInfo>()
   const openDeferred = createDeferred<EventStreamHandle<TEvent>>()
   const closeController = new AbortController()
@@ -331,13 +259,7 @@ function cloneHeaders(headers?: Headers): Headers {
 }
 
 function createEventStreamRequest(request: HttpRequest, headers: Headers, abort?: AbortSignal): Request {
-  const url = createRequestUrl(request)
-  if (typeof request.queryString === 'string') {
-    url.search = request.queryString
-  } else if (request.queryParams) {
-    url.search = request.queryParams.toString()
-  }
-
+  const url = resolveRequestUrl(request)
   return new Request(url, createEventStreamRequestInit(request, headers, abort))
 }
 
@@ -366,7 +288,7 @@ function createEventStreamRequestInit(request: HttpRequest, headers: Headers, ab
   }
 
   const credentials = request.withCredentials ? 'include' : undefined
-  const body = serializeEventStreamBody(request.body)
+  const body = serializeHttpBody(request.body)
   const init: RequestInitWithDuplex = {
     body,
     credentials,
@@ -386,76 +308,7 @@ function createEventStreamRequestInit(request: HttpRequest, headers: Headers, ab
   return init
 }
 
-function createRequestUrl(request: HttpRequest): URL {
-  if (!request.baseEndpoint) {
-    throw ERR_INVALID_CLIENT_ENDPOINT
-  }
 
-  let base: URL
-  try {
-    base = new URL(request.baseEndpoint)
-  } catch {
-    throw ERR_INVALID_CLIENT_ENDPOINT
-  }
-
-  if (!base.pathname.endsWith('/')) {
-    base.pathname = `${base.pathname}/`
-  }
-
-  try {
-    return new URL(request.endpoint.replace(/^\/+/, ''), base)
-  } catch {
-    throw ERR_INVALID_CLIENT_ENDPOINT
-  }
-}
-
-function serializeEventStreamBody(
-  body: HttpRequest['body'],
-): ArrayBuffer | Blob | FormData | URLSearchParams | ReadableStream<Uint8Array> | string | null {
-  switch (true) {
-    case body instanceof FormData:
-    case body instanceof Blob:
-    case body instanceof ArrayBuffer:
-    case body instanceof URLSearchParams:
-    case typeof ReadableStream !== 'undefined' && body instanceof ReadableStream:
-    case typeof body === 'string':
-      return body
-    case typeof body === 'object':
-    case typeof body === 'boolean':
-    case typeof body === 'number':
-    case Array.isArray(body):
-      return JSON.stringify(body)
-    default:
-      return null
-  }
-}
-
-function isReadableStreamBody(body: HttpRequest['body'] | ReturnType<typeof serializeEventStreamBody>): body is ReadableStream<Uint8Array> {
-  return typeof ReadableStream !== 'undefined' && body instanceof ReadableStream
-}
-
-function supportsStreamingRequestBody(): boolean {
-  if (typeof Request !== 'function' || typeof ReadableStream === 'undefined') {
-    return false
-  }
-
-  try {
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.close()
-      },
-    })
-    const request = new Request('https://example.com', {
-      body: stream,
-      duplex: 'half',
-      method: 'POST',
-    } as RequestInitWithDuplex)
-
-    return request.body !== null
-  } catch {
-    return false
-  }
-}
 
 function validateOpenResponse(open: EventStreamOpenInfo, requireContentType: boolean): void {
   const { response } = open

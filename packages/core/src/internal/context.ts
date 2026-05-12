@@ -69,10 +69,7 @@ export function makeHttpContext(entries?: readonly (readonly [HttpContextToken<u
       if (!isHttpContextToken(token)) {
         throw ERR_INVALID_HTTP_CONTEXT_TOKEN
       }
-      if (!ctx.has(token)) {
-        ctx.set(token, token())
-      }
-      return ctx.get(token) as T
+      return ctx.has(token) ? (ctx.get(token) as T) : token()
     },
     del<T>(token: HttpContextToken<T>) {
       ctx.delete(token)
@@ -85,7 +82,7 @@ export function makeHttpContext(entries?: readonly (readonly [HttpContextToken<u
       return ctx.keys()
     },
     get length(): number {
-      return Array.from(ctx.keys()).length
+      return ctx.size
     },
 
     [HTTP_CONTEXT]: ctx,

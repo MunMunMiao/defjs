@@ -45,9 +45,17 @@ describe('schema basics', () => {
   })
 
   test('supports primitive defaults for boolean and exact null schema', () => {
-    expect(schema.boolean().parse(undefined)).toBe(false)
-    expect(schema.null().parse(undefined)).toBeNull()
-    expect(schema.null().parse(null)).toBeNull()
+    const [boolErr, boolVal] = schema.boolean().parse(undefined)
+    expect(boolErr).toBeNull()
+    expect(boolVal).toBe(false)
+
+    const [nullErr1, nullVal1] = schema.null().parse(undefined)
+    expect(nullErr1).toBeNull()
+    expect(nullVal1).toBeNull()
+
+    const [nullErr2, nullVal2] = schema.null().parse(null)
+    expect(nullErr2).toBeNull()
+    expect(nullVal2).toBeNull()
   })
 
   test('covers internal primitive definitions that are otherwise short-circuited', () => {
@@ -88,8 +96,17 @@ describe('schema basics', () => {
 
     expect(base).not.toBe(optionalValue)
     expect(base).not.toBe(defaultValue)
-    expect(base.parse(undefined)).toBe('')
-    expect(optionalValue.parse(undefined)).toBeUndefined()
-    expect(defaultValue.parse(undefined)).toBe('x')
+
+    const [baseErr, baseVal] = base.parse(undefined)
+    expect(baseErr).toBeNull()
+    expect(baseVal).toBe('')
+
+    const [optErr, optVal] = optionalValue.parse(undefined)
+    expect(optErr).toBeNull()
+    expect(optVal).toBeUndefined()
+
+    const [defErr, defVal] = defaultValue.parse(undefined)
+    expect(defErr).toBeNull()
+    expect(defVal).toBe('x')
   })
 })

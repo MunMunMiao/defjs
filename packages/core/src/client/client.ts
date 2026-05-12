@@ -1,5 +1,5 @@
 import type { ClientConfig, ClientOptions } from './config'
-import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS, DEFAULT_WEB_SOCKET_OPTIONS } from './config'
+import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import { getGlobalClient } from './global'
 import { CLIENT, type Client, getClientConfig } from './resolve'
 
@@ -17,9 +17,8 @@ export function createClient(options: ClientOptions): Client {
       ...options.sse,
     },
     webSocket: {
-      ...DEFAULT_WEB_SOCKET_OPTIONS,
       ...options.webSocket,
-      protocols: options.webSocket?.protocols ? [...options.webSocket.protocols] : DEFAULT_WEB_SOCKET_OPTIONS.protocols,
+      protocols: options.webSocket?.protocols ? [...options.webSocket.protocols] : undefined,
     },
     withCredentials: options.withCredentials,
   }

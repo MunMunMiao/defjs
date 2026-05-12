@@ -1,4 +1,5 @@
 import { ERR_INVALID_CLIENT_ENDPOINT } from '../error'
+import type { HttpRequest } from './http_request'
 import type { RequestBuildValue } from './request_values'
 
 export function fillUrl(path: string, params?: Record<string, RequestBuildValue>): string {
@@ -77,6 +78,21 @@ export function createResolvedRequestUrl(baseEndpoint: string, path: string, que
   const url = new URL(normalizedPath, base)
   url.search = queryString
   return url
+}
+
+// HttpRequest-flavored convenience: resolve endpoint + base + query string in one go.
+// Replaces the four near-identical `createRequestUrl` helpers previously duplicated in fetch/xhr/sse/test_handler.
+export function resolveRequestUrl(request: HttpRequest): URL {
+  if (!request.baseEndpoint) {
+    throw ERR_INVALID_CLIENT_ENDPOINT
+  }
+  const queryString =
+    typeof request.queryString === 'string'
+      ? request.queryString
+      : request.queryParams
+        ? request.queryParams.toString()
+        : ''
+  return createResolvedRequestUrl(request.baseEndpoint, request.endpoint, queryString)
 }
 
 function appendToSearchParams(searchParams: URLSearchParams, key: string, value: RequestBuildValue): void {

@@ -45,22 +45,20 @@ export type Interceptor = HttpInterceptor | SSEInterceptor
 // Chain builders
 // ---------------------------------------------------------------------------
 
-export function makeInterceptorChain(interceptors: InterceptorFn[]): InterceptorFn {
-  return interceptors.reduceRight(
-    (fn, interceptor) => {
-      return (initReq, finalHandlerFn) => interceptor(initReq, req => fn(req, finalHandlerFn))
-    },
-    (req: HttpRequest, fn: HttpHandler) => fn(req),
+// Generic onion-chain builder — both HTTP and SSE chains share this shape.
+function makeChain<TFn extends (req: HttpRequest, next: any) => any>(interceptors: TFn[]): TFn {
+  return interceptors.reduceRight<TFn>(
+    (fn, interceptor) => ((initReq: HttpRequest, finalHandlerFn: never) => interceptor(initReq, (req: HttpRequest) => fn(req, finalHandlerFn))) as TFn,
+    ((req: HttpRequest, fn: (req: HttpRequest) => unknown) => fn(req)) as TFn,
   )
 }
 
+export function makeInterceptorChain(interceptors: InterceptorFn[]): InterceptorFn {
+  return makeChain(interceptors)
+}
+
 export function makeSSEInterceptorChain(interceptors: SSEInterceptorFn[]): SSEInterceptorFn {
-  return interceptors.reduceRight(
-    (fn, interceptor) => {
-      return (initReq, finalHandlerFn) => interceptor(initReq, req => fn(req, finalHandlerFn))
-    },
-    (req: HttpRequest, fn: SSEHandler) => fn(req),
-  )
+  return makeChain(interceptors)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,3 @@
 export { fetchHandler } from './fetch'
-export { getGlobalHttpHandler, type HttpHandler, setGlobalHttpHandler } from './handler'
+export type { HttpHandler } from './handler'
 export { xhrHandler } from './xhr'

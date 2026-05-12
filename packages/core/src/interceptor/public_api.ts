@@ -1,4 +1,4 @@
-export { type BasicAuthInterceptorOptions, basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './authorization/basic_auth_interceptor'
+export { type BasicAuthInterceptorOptions, basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './basic_auth'
 export {
   createHttpInterceptor,
   createSSEInterceptor,

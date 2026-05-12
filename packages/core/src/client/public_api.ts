@@ -10,5 +10,5 @@ export type {
   WebSocketQueueOptions,
   WebSocketReconnectOptions,
 } from './config'
-export { getGlobalClient, restGlobalClient, setGlobalClient } from './global'
+export { getGlobalClient, resetGlobalClient, restGlobalClient, setGlobalClient } from './global'
 export type { Client } from './resolve'

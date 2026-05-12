@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { ERR_NOT_FOUND_GLOBAL_CLIENT } from '../error'
 import { createClient, resolveClientConfig } from './client'
-import { restGlobalClient, setGlobalClient } from './global'
+import { resetGlobalClient, setGlobalClient } from './global'
 
 describe('client resolve helpers', () => {
   afterEach(() => {
-    restGlobalClient()
+    resetGlobalClient()
   })
 
   test('should resolve explicit client config before global client', () => {
