@@ -42,8 +42,8 @@ describe('schema refine behavior', () => {
   test('supports refine returning string and Error', () => {
     const schemaValue = schema
       .number()
-      .refine(value => (Number(value) > 0 ? undefined : 'must be positive'))
-      .refine(value => (Number(value) < 10 ? undefined : new Error('must be less than 10')))
+      .refine(value => (Number(value) > 0 ? true : 'must be positive'))
+      .refine(value => (Number(value) < 10 ? true : new Error('must be less than 10')))
 
     expect(schemaValue.parse(5)).toBe(5)
 

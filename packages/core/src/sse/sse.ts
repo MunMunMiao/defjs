@@ -1,7 +1,7 @@
 import { resolveClientConfig } from '../client/client'
 import type { Client } from '../client/resolve'
 import { createDefinitionError, createRequestRuntimeError, ERR_ABORTED, type RequestError } from '../error'
-import { type SSEHandler, makeSSEInterceptorChain, resolveSSEInterceptors } from '../interceptor/interceptor'
+import { makeSSEInterceptorChain, resolveSSEInterceptors, type SSEHandler } from '../interceptor/interceptor'
 import { mergeAbortSignals } from '../internal/abort'
 import type { HttpContext } from '../internal/context'
 import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
@@ -86,7 +86,7 @@ export interface EventStreamRef<TEvent = unknown> extends PromiseLike<StreamAwai
 
 type IsInputOptional<TInput extends AnyCompatibleSchema | undefined> = [TInput] extends [undefined]
   ? true
-  : undefined extends CompatibleInputOf<NonNullable<TInput>>
+  : {} extends CompatibleInputOf<NonNullable<TInput>>
     ? true
     : false
 

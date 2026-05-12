@@ -55,10 +55,10 @@ type ExpectedEvent =
 type EventCases = Expect<Equal<EventStreamData<typeof events>, ExpectedEvent>>
 type RefCases = Expect<Equal<ReturnType<typeof useRequiredStream>, EventStreamRef<ExpectedEvent>>>
 type AwaitCases = Expect<Equal<Awaited<ReturnType<typeof useRequiredStream>>, StreamAwaitResult<ExpectedEvent>>>
-type InputCases = Expect<Equal<Parameters<typeof useRequiredStream>, [({ roomId?: string } | undefined)?]>>
+type InputCases = Expect<Equal<Parameters<typeof useRequiredStream>, [({ roomId?: string | undefined } | undefined)?]>>
 
 function assertRequiredStreamEvent(event: EventStreamData<typeof events>) {
-  if (event.event === 'message') {
+  if (event.event === 'message' && 'text' in event.data) {
     const data: {
       text: string
     } = event.data

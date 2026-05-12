@@ -41,6 +41,40 @@ describe('compatible schema helpers', () => {
     await expect(parseCompatibleSchema(standardSchema, { id: '7' })).resolves.toEqual({ id: 7 })
   })
 
+  test('zen schema exposes ~standard for third-party consumers', () => {
+    const userSchema = schema.object({
+      id: schema.string(),
+      score: schema.number(),
+    })
+
+    const standard = userSchema['~standard']
+
+    expect(standard.version).toBe(1)
+    expect(standard.vendor).toBe('defjs')
+
+    const ok = standard.validate({ id: 'u_1', score: 42 })
+    expect(ok).toEqual({ value: { id: 'u_1', score: 42 } })
+
+    const fail = standard.validate({ id: 42, score: 'wrong' })
+    expect(fail).toEqual({
+      issues: [
+        { message: 'Expected string at id, received 42', path: ['id'] },
+        { message: 'Expected number at score, received "wrong"', path: ['score'] },
+      ],
+    })
+  })
+
+  test('zen schema is consumable through parseCompatibleSchema as standard schema', async () => {
+    const fromZen = schema.number().refine(value => value > 0 || 'must be positive')
+
+    const adapter: StandardSchemaLike<unknown, number> = {
+      '~standard': fromZen['~standard'] as StandardSchemaLike<unknown, number>['~standard'],
+    }
+
+    await expect(parseCompatibleSchema(adapter, 7)).resolves.toBe(7)
+    await expect(parseCompatibleSchema(adapter, -1)).rejects.toBeInstanceOf(SchemaError)
+  })
+
   test('maps standard schema issues into SchemaError', async () => {
     const invalidSchema: StandardSchemaLike = {
       '~standard': {

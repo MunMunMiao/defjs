@@ -42,20 +42,21 @@ type ExpectedIncoming =
 
 type ExpectedOutgoing =
   | {
-      text: string
+      text?: string | undefined
       type: 'message'
     }
   | {
       data: {
-        text: string
+        text?: string | undefined
       }
       type: 'message'
     }
 
 type IncomingCases = Expect<Equal<WebSocketIncomingData<typeof incomingSchemas>, ExpectedIncoming>>
+
 type OutgoingCases = Expect<Equal<WebSocketOutgoingData<typeof outgoingSchemas>, ExpectedOutgoing>>
 type RefCases = Expect<Equal<ReturnType<typeof useSocket>, WebSocketRef<ExpectedIncoming, ExpectedOutgoing>>>
-type InputCases = Expect<Equal<Parameters<typeof useSocket>, [({ roomId?: string } | undefined)?]>>
+type InputCases = Expect<Equal<Parameters<typeof useSocket>, [({ roomId?: string | undefined } | undefined)?]>>
 
 function assertSocketSession(session: WebSocketSession<ExpectedIncoming, ExpectedOutgoing>) {
   session.send({

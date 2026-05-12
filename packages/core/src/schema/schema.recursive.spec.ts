@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'vitest'
 import { SchemaError, schema } from './index'
+import type { ObjectSchema, SchemaLike } from './schema'
+
+type Recursive = ObjectSchema<Record<string, SchemaLike<any, any, boolean>>>
 
 describe('schema recursive structures', () => {
   test('supports recursive trees and deep references to root self', () => {
-    const tree = schema.object({
+    const tree: Recursive = schema.object({
       id: schema.string(),
       get children() {
         return schema.array(tree)
@@ -13,7 +16,7 @@ describe('schema recursive structures', () => {
           return schema.array(schema.array(schema.array(tree)))
         },
       }),
-    })
+    }) as Recursive
 
     expect(tree.parse({ id: 'root' })).toEqual({
       children: [],
@@ -61,10 +64,10 @@ describe('schema recursive structures', () => {
   })
 
   test('supports nested self for branch recursion', () => {
-    const root = schema.object({
+    const root: Recursive = schema.object({
       name: schema.string(),
       get branch() {
-        const branch = schema.object({
+        const branch: Recursive = schema.object({
           name: schema.string(),
           get children() {
             return schema.array(branch)
@@ -72,11 +75,11 @@ describe('schema recursive structures', () => {
           get roots() {
             return schema.array(root)
           },
-        })
+        }) as Recursive
 
         return branch
       },
-    })
+    }) as Recursive
 
     expect(
       root.parse({

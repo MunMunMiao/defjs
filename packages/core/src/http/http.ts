@@ -94,7 +94,7 @@ export interface HttpRequestRef<TSuccess = unknown, TErrorData = unknown> extend
 
 type IsInputOptional<TInput extends AnyCompatibleSchema | undefined> = [TInput] extends [undefined]
   ? true
-  : undefined extends CompatibleInputOf<NonNullable<TInput>>
+  : {} extends CompatibleInputOf<NonNullable<TInput>>
     ? true
     : false
 

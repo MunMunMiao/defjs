@@ -54,7 +54,7 @@ describe('schema defaults and edge cases', () => {
     const first = payload.parse({})
     const second = payload.parse({})
 
-    ;(first.meta.tags as string[]).push('b')
+    ;(first.meta['tags'] as string[]).push('b')
     expect(second).toEqual({ meta: { tags: ['a'] } })
   })
 
@@ -74,7 +74,7 @@ describe('schema defaults and edge cases', () => {
     expect(first.nested).not.toBe(second.nested)
     expect(first.tags).not.toBe(second.tags)
 
-    first.nested.items = ['changed']
+    first.nested['items'] = ['changed']
     first.tags.push('y')
 
     expect(second).toEqual({

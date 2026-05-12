@@ -1,6 +1,9 @@
 import { type InputOf, schema, type TypeOf } from './index'
+import type { ArraySchema, ObjectSchema, Schema, SchemaLike } from './schema'
 
-type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+type IsAny<T> = 0 extends 1 & T ? true : false
+type StrictEqual<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? (IsAny<A> extends IsAny<B> ? true : false) : false
 type Expect<T extends true> = T
 
 const profileSchema = schema.object({
@@ -11,7 +14,7 @@ const profileSchema = schema.object({
 })
 
 type ProfileCases = Expect<
-  Equal<
+  StrictEqual<
     TypeOf<typeof profileSchema>,
     {
       id: string
@@ -23,13 +26,13 @@ type ProfileCases = Expect<
 >
 
 type ProfileInputCases = Expect<
-  Equal<
+  StrictEqual<
     InputOf<typeof profileSchema>,
     {
-      id: string
-      locale?: string
-      nickname?: string
-      score: number
+      id?: string | undefined
+      locale?: string | undefined
+      nickname?: string | undefined
+      score?: number | undefined
     }
   >
 >
@@ -40,7 +43,7 @@ const requestSchema = schema.object({
 })
 
 type RequestCases = Expect<
-  Equal<
+  StrictEqual<
     TypeOf<typeof requestSchema>,
     {
       theme: string | null
@@ -50,11 +53,11 @@ type RequestCases = Expect<
 >
 
 type RequestInputCases = Expect<
-  Equal<
+  StrictEqual<
     InputOf<typeof requestSchema>,
     {
-      theme: string | null
-      timezone?: string | null
+      theme?: string | null | undefined
+      timezone?: string | null | undefined
     }
   >
 >
@@ -69,19 +72,7 @@ const matrixSchema = schema.array(
   ),
 )
 
-type MatrixCases = Expect<Equal<TypeOf<typeof matrixSchema>, { name: string }[][][]>>
-
-const treeSchema = schema.object({
-  id: schema.string(),
-  get children() {
-    return schema.array(treeSchema)
-  },
-  meta: schema.object({
-    get backups() {
-      return schema.array(treeSchema)
-    },
-  }),
-})
+type MatrixCases = Expect<StrictEqual<TypeOf<typeof matrixSchema>, { name: string }[][][]>>
 
 type TreeExpected = {
   children: TreeExpected[]
@@ -91,18 +82,27 @@ type TreeExpected = {
   }
 }
 
-type TreeCases = Expect<Equal<TypeOf<typeof treeSchema>, TreeExpected>>
+type TreeShape = {
+  id: Schema<string | undefined, string, false>
+  children: ArraySchema<SchemaLike<TreeExpected, TreeExpected, false>>
+  meta: ObjectSchema<{
+    backups: ArraySchema<SchemaLike<TreeExpected, TreeExpected, false>>
+  }>
+}
 
-const deepTreeSchema = schema.object({
+const treeSchema = schema.object({
   id: schema.string(),
+  get children() {
+    return schema.array(treeSchema) as unknown as ArraySchema<SchemaLike<TreeExpected, TreeExpected, false>>
+  },
   meta: schema.object({
-    nested: schema.object({
-      get snapshots() {
-        return schema.array(schema.array(schema.array(deepTreeSchema)))
-      },
-    }),
+    get backups() {
+      return schema.array(treeSchema) as unknown as ArraySchema<SchemaLike<TreeExpected, TreeExpected, false>>
+    },
   }),
-})
+}) as unknown as ObjectSchema<TreeShape>
+
+type TreeCases = Expect<StrictEqual<TypeOf<typeof treeSchema>, TreeExpected>>
 
 type DeepTreeExpected = {
   id: string
@@ -113,7 +113,29 @@ type DeepTreeExpected = {
   }
 }
 
-type DeepTreeCases = Expect<Equal<TypeOf<typeof deepTreeSchema>, DeepTreeExpected>>
+type DeepTreeShape = {
+  id: Schema<string | undefined, string, false>
+  meta: ObjectSchema<{
+    nested: ObjectSchema<{
+      snapshots: ArraySchema<ArraySchema<ArraySchema<SchemaLike<DeepTreeExpected, DeepTreeExpected, false>>>>
+    }>
+  }>
+}
+
+const deepTreeSchema = schema.object({
+  id: schema.string(),
+  meta: schema.object({
+    nested: schema.object({
+      get snapshots() {
+        return schema.array(schema.array(schema.array(deepTreeSchema))) as unknown as ArraySchema<
+          ArraySchema<ArraySchema<SchemaLike<DeepTreeExpected, DeepTreeExpected, false>>>
+        >
+      },
+    }),
+  }),
+}) as unknown as ObjectSchema<DeepTreeShape>
+
+type DeepTreeCases = Expect<StrictEqual<TypeOf<typeof deepTreeSchema>, DeepTreeExpected>>
 
 const uploadSchema = schema.object({
   attachment: schema.file(),
@@ -124,7 +146,7 @@ const uploadSchema = schema.object({
 })
 
 type UploadCases = Expect<
-  Equal<
+  StrictEqual<
     TypeOf<typeof uploadSchema>,
     {
       attachment: File
@@ -137,25 +159,34 @@ type UploadCases = Expect<
 >
 
 const enumSchema = schema.enum({ Draft: 'draft', Published: 'published' } as const)
-type EnumCases = Expect<Equal<TypeOf<typeof enumSchema>, 'draft' | 'published'>>
+type EnumCases = Expect<StrictEqual<TypeOf<typeof enumSchema>, 'draft' | 'published'>>
 
 const optionalSchema = schema.object({
   name: schema.string().optional(),
 })
 
-type OptionalCases = Expect<Equal<TypeOf<typeof optionalSchema>, { name?: string }>>
+type OptionalCases = Expect<StrictEqual<TypeOf<typeof optionalSchema>, { name?: string }>>
 
 // @ts-expect-error optional key schema should not become a required undefined union
-type OptionalShouldNotBecomeUndefinedUnion = Expect<Equal<TypeOf<typeof optionalSchema>, { name: string | undefined }>>
+type OptionalShouldNotBecomeUndefinedUnion = Expect<StrictEqual<TypeOf<typeof optionalSchema>, { name: string | undefined }>>
+
+// @ts-expect-error any-poisoned inference should fail strict equality
+type AnyPollutionGuard = Expect<StrictEqual<TypeOf<ReturnType<typeof schema.string>>, any>>
+
+// @ts-expect-error parse on string schema must reject non-string Output
+type ParseReturnsString = Expect<StrictEqual<TypeOf<ReturnType<typeof schema.string>>, number>>
 
 // @ts-expect-error array item must be a schema
 schema.array(1)
 
 export type Cases =
+  | AnyPollutionGuard
   | DeepTreeCases
   | EnumCases
   | MatrixCases
   | OptionalCases
+  | OptionalShouldNotBecomeUndefinedUnion
+  | ParseReturnsString
   | ProfileCases
   | ProfileInputCases
   | RequestCases

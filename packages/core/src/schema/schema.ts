@@ -3,9 +3,45 @@ const TYPES = Symbol('schema.types')
 const OMIT = Symbol('schema.omit')
 type Path = Array<number | string>
 type ParseMode = 'field' | 'value'
-type RefineResult = boolean | Error | null | string | undefined
-type RefineCheck<T> = (value: Readonly<T>) => RefineResult
+type RefineResult = boolean | Error | string
+type RefineCheck<T> = (value: Readonly<T>) => RefineResult | Promise<RefineResult>
+
+export type SafeParseResult<O> = { ok: true; value: O } | { ok: false; error: SchemaError }
 type LiteralValue = boolean | null | number | string
+type UnknownKeyStrategy = 'passthrough' | 'strict' | 'strip'
+
+export interface StrictOptions {
+  unknownKeys?: boolean
+  missingKeys?: boolean
+}
+
+export interface StandardSchemaResultSuccess<TOutput> {
+  readonly value: TOutput
+}
+
+export interface StandardSchemaIssueLike {
+  readonly message?: string
+  readonly path?: readonly (number | string)[]
+}
+
+export interface StandardSchemaResultFailure {
+  readonly issues: readonly StandardSchemaIssueLike[]
+}
+
+export interface StandardSchemaProps<TInput, TOutput> {
+  readonly types?: {
+    readonly input: TInput
+    readonly output: TOutput
+  }
+  readonly validate: (
+    value: unknown,
+  ) =>
+    | StandardSchemaResultFailure
+    | StandardSchemaResultSuccess<TOutput>
+    | Promise<StandardSchemaResultFailure | StandardSchemaResultSuccess<TOutput>>
+  readonly vendor?: string
+  readonly version?: number
+}
 
 interface SchemaTypes<Input = unknown, Output = unknown, OptionalOut extends boolean = false> {
   input: Input
@@ -13,18 +49,36 @@ interface SchemaTypes<Input = unknown, Output = unknown, OptionalOut extends boo
   output: Output
 }
 
-export interface SchemaLike {
-  readonly [TYPES]: SchemaTypes<any, any, boolean>
+export interface SchemaLike<I = unknown, O = unknown, OO extends boolean = boolean> {
+  readonly [TYPES]: SchemaTypes<I, O, OO>
 }
 
-type IsOptionalOutput<T extends SchemaLike> = T extends OptionalOutputSchema ? true : false
+type OptionalOutputSchema = SchemaLike<any, any, true>
 
 export interface SchemaIssue {
-  code: 'custom' | 'invalid_enum' | 'invalid_literal' | 'invalid_type' | 'invalid_union'
+  code: 'custom' | 'invalid_enum' | 'invalid_literal' | 'invalid_type' | 'invalid_union' | 'missing_key' | 'unrecognized_keys'
   expected: string
   message: string
   path: Path
   received: unknown
+}
+
+export interface FormattedSchemaError {
+  _errors: string[]
+  [key: string]: FormattedSchemaError | string[]
+}
+
+export interface FlattenedSchemaError {
+  formErrors: string[]
+  fieldErrors: Record<string, string[]>
+}
+
+export type ErrorMap = (issue: SchemaIssue) => string | undefined
+
+let globalErrorMap: ErrorMap | undefined
+
+export function setErrorMap(map: ErrorMap | undefined): void {
+  globalErrorMap = map
 }
 
 export class SchemaError extends Error {
@@ -35,57 +89,185 @@ export class SchemaError extends Error {
     this.name = 'SchemaError'
     this.issues = issues
   }
+
+  format(): FormattedSchemaError {
+    const root: FormattedSchemaError = { _errors: [] }
+    for (const item of this.issues) {
+      let cursor: FormattedSchemaError = root
+      for (const segment of item.path) {
+        const key = String(segment)
+        const existing = cursor[key]
+        if (existing && !Array.isArray(existing)) {
+          cursor = existing
+        } else {
+          const next: FormattedSchemaError = { _errors: [] }
+          cursor[key] = next
+          cursor = next
+        }
+      }
+      cursor._errors.push(item.message)
+    }
+    return root
+  }
+
+  flatten(): FlattenedSchemaError {
+    const formErrors: string[] = []
+    const fieldErrors: Record<string, string[]> = {}
+    for (const item of this.issues) {
+      if (item.path.length === 0) {
+        formErrors.push(item.message)
+        continue
+      }
+      const key = String(item.path[0])
+      ;(fieldErrors[key] ??= []).push(item.message)
+    }
+    return { fieldErrors, formErrors }
+  }
+
+  prettify(): string {
+    if (this.issues.length === 0) {
+      return 'Schema parse failed'
+    }
+    return this.issues
+      .map(item => {
+        const where = item.path.length === 0 ? '<root>' : formatPath(item.path)
+        return `× ${where}: ${item.message}`
+      })
+      .join('\n')
+  }
 }
 
-interface SchemaMethods extends SchemaLike {
-  alias(alias: string): this
-  default(value: Exclude<TypeOf<this>, undefined>): Schema<InputOf<this> | undefined, Exclude<TypeOf<this>, undefined>, false>
-  null(): Schema<InputOf<this> | null, TypeOf<this> | null, IsOptionalOutput<this>>
-  nullish(): Schema<InputOf<this> | null | undefined, TypeOf<this> | null | undefined, true>
-  optional(): Schema<InputOf<this> | undefined, TypeOf<this> | undefined, true>
-  parse(value: unknown): TypeOf<this>
-  refine(check: RefineCheck<TypeOf<this>>, message?: string): this
+export interface SchemaMethods<I, O, OO extends boolean> {
+  alias(alias: string): Schema<I, O, OO>
+  default(value: Exclude<O, undefined>): Schema<I | undefined, Exclude<O, undefined>, false>
+  null(): Schema<I | null, O | null, OO>
+  nullish(): Schema<I | null | undefined, O | null | undefined, true>
+  optional(): Schema<I | undefined, O | undefined, true>
+  parse(value: unknown): O
+  parseAsync(value: unknown): Promise<O>
+  safeParse(value: unknown): SafeParseResult<O>
+  safeParseAsync(value: unknown): Promise<SafeParseResult<O>>
+  refine(check: RefineCheck<O>, message?: string): Schema<I, O, OO>
+  transform<U>(fn: (value: O) => U): Schema<I, Awaited<U>, OO>
+  pipe<S extends SchemaLike<any, any, boolean>>(target: S): Schema<I, TypeOf<S>, OO>
+  brand<B extends string | symbol>(): Schema<I, O & { readonly __brand: B }, OO>
+  catch<U>(fallback: U): Schema<I, O | U, OO>
+  encode(value: O): I
+  readonly '~standard': StandardSchemaProps<I, O>
 }
 
-export type Schema<Input = unknown, Output = Input, OptionalOut extends boolean = false> = SchemaMethods & {
-  readonly [TYPES]: SchemaTypes<Input, Output, OptionalOut>
-}
+export type Schema<Input = unknown, Output = Input, OptionalOut extends boolean = false> = SchemaMethods<Input, Output, OptionalOut> &
+  SchemaLike<Input, Output, OptionalOut>
 
 export type AnySchema = Schema<any, any, boolean>
-type OptionalOutputSchema = {
-  readonly [TYPES]: SchemaTypes<any, any, true>
-}
 
-export type TypeOf<T> = T extends SchemaLike ? T[typeof TYPES]['output'] : never
-export type InputOf<T> = T extends SchemaLike ? T[typeof TYPES]['input'] : never
+export type TypeOf<T> = T extends SchemaLike<any, any, boolean> ? T[typeof TYPES]['output'] : never
+export type InputOf<T> = T extends SchemaLike<any, any, boolean> ? T[typeof TYPES]['input'] : never
 
-export type FieldOutput<S> = S extends SchemaLike ? (S extends OptionalOutputSchema ? Exclude<TypeOf<S>, undefined> : TypeOf<S>) : never
+export type FieldOutput<S> =
+  S extends SchemaLike<any, any, boolean> ? (S extends OptionalOutputSchema ? Exclude<TypeOf<S>, undefined> : TypeOf<S>) : never
 
-export type ObjectShape = Readonly<Record<string, any>>
+type Simplify<T> = { [K in keyof T]: T[K] } & {}
 
-export type ObjectInput<T extends Record<string, any>> = Partial<{
-  [K in keyof T]: InputOf<T[K]>
+export type ObjectShape = Record<string, SchemaLike<any, any, boolean>>
+
+export type ObjectInput<T extends ObjectShape> = Simplify<{
+  -readonly [K in keyof T]?: InputOf<T[K]>
 }>
 
-export type ObjectOutput<T extends Record<string, any>> = {
-  -readonly [K in keyof T as T[K] extends OptionalOutputSchema ? never : K]: FieldOutput<T[K]>
-} & {
-  -readonly [K in keyof T as T[K] extends OptionalOutputSchema ? K : never]?: FieldOutput<T[K]>
-}
+export type ObjectOutput<T extends ObjectShape> = Simplify<
+  {
+    -readonly [K in keyof T as T[K] extends OptionalOutputSchema ? never : K]: FieldOutput<T[K]>
+  } & {
+    -readonly [K in keyof T as T[K] extends OptionalOutputSchema ? K : never]?: FieldOutput<T[K]>
+  }
+>
 
-type TupleOutput<T extends readonly SchemaLike[]> = {
+type TupleOutput<T extends readonly SchemaLike<any, any, boolean>[]> = {
   -readonly [K in keyof T]: TypeOf<T[K]>
 }
 
-type UnionOutput<T extends readonly SchemaLike[]> = {
-  [K in keyof T]: T[K] extends SchemaLike ? TypeOf<T[K]> : never
+type UnionOutput<T extends readonly SchemaLike<any, any, boolean>[]> = {
+  [K in keyof T]: T[K] extends SchemaLike<any, any, boolean> ? TypeOf<T[K]> : never
 }[number]
 
-export type ArraySchema<S extends SchemaLike> = Schema<InputOf<S>[], TypeOf<S>[]>
-export type ObjectSchema<T extends Record<string, any>> = Schema<ObjectInput<T>, ObjectOutput<T>>
-export type RecordSchema<S extends SchemaLike> = Schema<Record<string, InputOf<S>>, Record<string, FieldOutput<S>>>
-export type TupleSchema<T extends readonly SchemaLike[]> = Schema<TupleOutput<T>, TupleOutput<T>>
-export type UnionSchema<T extends readonly SchemaLike[]> = Schema<unknown, UnionOutput<T>>
+export interface StringSchemaMethods {
+  min(n: number, message?: string): StringSchema
+  max(n: number, message?: string): StringSchema
+  length(n: number, message?: string): StringSchema
+  regex(pattern: RegExp, message?: string): StringSchema
+  email(message?: string): StringSchema
+  url(message?: string): StringSchema
+  uuid(message?: string): StringSchema
+  startsWith(prefix: string, message?: string): StringSchema
+  endsWith(suffix: string, message?: string): StringSchema
+  datetime(message?: string): StringSchema
+  ip(message?: string): StringSchema
+  cuid(message?: string): StringSchema
+  nanoid(message?: string): StringSchema
+}
+
+export type StringSchema = Schema<string | undefined, string> & StringSchemaMethods
+
+export interface NumberSchemaMethods {
+  min(n: number, message?: string): NumberSchema
+  max(n: number, message?: string): NumberSchema
+  gt(n: number, message?: string): NumberSchema
+  gte(n: number, message?: string): NumberSchema
+  lt(n: number, message?: string): NumberSchema
+  lte(n: number, message?: string): NumberSchema
+  int(message?: string): NumberSchema
+  positive(message?: string): NumberSchema
+  negative(message?: string): NumberSchema
+  nonnegative(message?: string): NumberSchema
+  nonpositive(message?: string): NumberSchema
+  finite(message?: string): NumberSchema
+  multipleOf(divisor: number, message?: string): NumberSchema
+}
+
+export type NumberSchema = Schema<number | undefined, number> & NumberSchemaMethods
+
+export interface ArraySchemaMethods<S extends SchemaLike<any, any, boolean>> {
+  min(n: number, message?: string): ArraySchema<S>
+  max(n: number, message?: string): ArraySchema<S>
+  length(n: number, message?: string): ArraySchema<S>
+  nonempty(message?: string): ArraySchema<S>
+}
+
+export type ArraySchema<S extends SchemaLike<any, any, boolean>> = Schema<InputOf<S>[], TypeOf<S>[]> & ArraySchemaMethods<S>
+
+type PartialField<S> =
+  S extends Schema<infer I, infer O, boolean>
+    ? Schema<I | undefined, O | undefined, true>
+    : S extends SchemaLike<infer I, infer O, boolean>
+      ? Schema<I | undefined, O | undefined, true>
+      : S
+
+type RequiredField<S> =
+  S extends Schema<infer I, infer O, boolean>
+    ? Schema<Exclude<I, undefined>, Exclude<O, undefined>, false>
+    : S extends SchemaLike<infer I, infer O, boolean>
+      ? Schema<Exclude<I, undefined>, Exclude<O, undefined>, false>
+      : S
+
+export interface ObjectSchemaMethods<T extends ObjectShape> {
+  strict(options?: StrictOptions): ObjectSchema<T>
+  passthrough(): ObjectSchema<T>
+  strip(): ObjectSchema<T>
+  pick<K extends keyof T & string>(keys: { [P in K]: true }): ObjectSchema<{ [P in K]: T[P] }>
+  omit<K extends keyof T & string>(keys: { [P in K]: true }): ObjectSchema<{ [P in Exclude<keyof T, K> & string]: T[P] }>
+  partial(): ObjectSchema<{ [K in keyof T]: PartialField<T[K]> }>
+  required(): ObjectSchema<{ [K in keyof T]: RequiredField<T[K]> }>
+  extend<U extends ObjectShape>(other: U): ObjectSchema<Simplify<Omit<T, keyof U> & U>>
+  merge<U extends ObjectShape>(other: ObjectSchema<U>): ObjectSchema<Simplify<Omit<T, keyof U> & U>>
+  keyof(): Schema<(keyof T & string) | undefined, keyof T & string>
+}
+
+export type ObjectSchema<T extends ObjectShape> = Schema<ObjectInput<T>, ObjectOutput<T>> & ObjectSchemaMethods<T>
+
+export type RecordSchema<S extends SchemaLike<any, any, boolean>> = Schema<Record<string, InputOf<S>>, Record<string, FieldOutput<S>>>
+export type TupleSchema<T extends readonly SchemaLike<any, any, boolean>[]> = Schema<TupleOutput<T>, TupleOutput<T>>
+export type UnionSchema<T extends readonly SchemaLike<any, any, boolean>[]> = Schema<unknown, UnionOutput<T>>
 
 type SchemaFlags = {
   alias?: string
@@ -93,19 +275,34 @@ type SchemaFlags = {
   hasDefault: boolean
   nullable: boolean
   optional: boolean
+  hasCatch?: boolean
+  catchValue?: unknown
 }
 
-type Refinement<T> = {
+type RefineStep<T> = {
+  kind: 'refine'
   check: RefineCheck<T>
   message?: string
 }
+
+type TransformStep<I = any, O = any> = {
+  kind: 'transform'
+  fn: (value: I) => O
+}
+
+type PipeStep = {
+  kind: 'pipe'
+  target: SchemaLike<any, any, boolean>
+}
+
+type Refinement<T = any> = PipeStep | RefineStep<T> | TransformStep
 
 type BaseDefinition = {
   flags: SchemaFlags
   refinements: readonly Refinement<any>[]
 }
 
-type PrimitiveKind = 'arrayBuffer' | 'blob' | 'boolean' | 'file' | 'null' | 'number' | 'string'
+type PrimitiveKind = 'arrayBuffer' | 'bigint' | 'blob' | 'boolean' | 'date' | 'file' | 'null' | 'number' | 'string'
 
 type PrimitiveDefinition<K extends PrimitiveKind, T> = BaseDefinition & {
   expected: string
@@ -136,34 +333,58 @@ type EnumDefinition<T extends number | string> = BaseDefinition & {
 
 type ArrayDefinition = BaseDefinition & {
   kind: 'array'
-  item: SchemaLike
+  item: SchemaLike<any, any, boolean>
 }
 
 type ObjectDefinition = BaseDefinition & {
   cache: WeakMap<RuntimeSchema, ObjectShape>
+  disallowMissingKeys: boolean
   kind: 'object'
   shape: ObjectShape
+  unknownKeys: UnknownKeyStrategy
 }
 
 type RecordDefinition = BaseDefinition & {
   kind: 'record'
-  value: SchemaLike
+  value: SchemaLike<any, any, boolean>
 }
 
 type TupleDefinition = BaseDefinition & {
   kind: 'tuple'
-  items: readonly [SchemaLike, ...SchemaLike[]]
+  items: readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]
 }
 
 type UnionDefinition = BaseDefinition & {
   kind: 'or'
-  options: readonly [SchemaLike, ...SchemaLike[]]
+  options: readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]
+}
+
+type DiscriminatedUnionDefinition = BaseDefinition & {
+  kind: 'discriminatedUnion'
+  discriminator: string
+  expected: string
+  map: Map<unknown, SchemaLike<any, any, boolean>>
+  options: readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]
+}
+
+type LazyDefinition = BaseDefinition & {
+  kind: 'lazy'
+  resolve(): SchemaLike<any, any, boolean>
+}
+
+type IntersectionDefinition = BaseDefinition & {
+  kind: 'intersection'
+  left: SchemaLike<any, any, boolean>
+  right: SchemaLike<any, any, boolean>
 }
 
 type SchemaDefinition =
   | ArrayDefinition
   | AnyDefinition
+  | DiscriminatedUnionDefinition
   | EnumDefinition<any>
+  | IntersectionDefinition
+  | LazyDefinition
   | LiteralDefinition<any>
   | ObjectDefinition
   | PrimitiveDefinition<PrimitiveKind, any>
@@ -184,38 +405,84 @@ type ParseSuccess<T> = {
 
 type ParseResult<T> = ParseFailure | ParseSuccess<T>
 
+type RuntimeSafeResult = { ok: true; value: unknown } | { ok: false; error: SchemaError }
+
 type RuntimeSchema = {
   readonly [DEFINITION]: SchemaDefinition
   readonly [TYPES]: SchemaTypes<unknown, unknown, boolean>
+  readonly '~standard': StandardSchemaProps<unknown, unknown>
   alias(alias: string): RuntimeSchema
   default(value: unknown): RuntimeSchema
   null(): RuntimeSchema
   nullish(): RuntimeSchema
   optional(): RuntimeSchema
   parse(value: unknown): unknown
+  parseAsync(value: unknown): Promise<unknown>
+  safeParse(value: unknown): RuntimeSafeResult
+  safeParseAsync(value: unknown): Promise<RuntimeSafeResult>
   refine(check: RefineCheck<unknown>, message?: string): RuntimeSchema
+  transform(fn: (value: unknown) => unknown): RuntimeSchema
+  pipe(target: SchemaLike<any, any, boolean>): RuntimeSchema
+  brand(): RuntimeSchema
+  catch(value: unknown): RuntimeSchema
+  encode(value: unknown): unknown
+  strict?(options?: StrictOptions): RuntimeSchema
+  passthrough?(): RuntimeSchema
+  strip?(): RuntimeSchema
+  pick?(keys: Record<string, true>): RuntimeSchema
+  omit?(keys: Record<string, true>): RuntimeSchema
+  partial?(): RuntimeSchema
+  required?(): RuntimeSchema
+  extend?(other: ObjectShape): RuntimeSchema
+  merge?(other: RuntimeSchema): RuntimeSchema
+  keyof?(): RuntimeSchema
+  min?(n: number, message?: string): RuntimeSchema
+  max?(n: number, message?: string): RuntimeSchema
+  length?(n: number, message?: string): RuntimeSchema
+  regex?(pattern: RegExp, message?: string): RuntimeSchema
+  email?(message?: string): RuntimeSchema
+  url?(message?: string): RuntimeSchema
+  uuid?(message?: string): RuntimeSchema
+  startsWith?(prefix: string, message?: string): RuntimeSchema
+  endsWith?(suffix: string, message?: string): RuntimeSchema
+  datetime?(message?: string): RuntimeSchema
+  ip?(message?: string): RuntimeSchema
+  cuid?(message?: string): RuntimeSchema
+  nanoid?(message?: string): RuntimeSchema
+  gt?(n: number, message?: string): RuntimeSchema
+  gte?(n: number, message?: string): RuntimeSchema
+  lt?(n: number, message?: string): RuntimeSchema
+  lte?(n: number, message?: string): RuntimeSchema
+  int?(message?: string): RuntimeSchema
+  positive?(message?: string): RuntimeSchema
+  negative?(message?: string): RuntimeSchema
+  nonnegative?(message?: string): RuntimeSchema
+  nonpositive?(message?: string): RuntimeSchema
+  finite?(message?: string): RuntimeSchema
+  multipleOf?(divisor: number, message?: string): RuntimeSchema
+  nonempty?(message?: string): RuntimeSchema
 }
 
 export function isSchema(value: unknown): value is AnySchema {
   return typeof value === 'object' && value !== null && DEFINITION in value
 }
 
-export function createStringSchema(): Schema<string | undefined, string> {
+export function createStringSchema(): StringSchema {
   return createPrimitiveSchema({
     expected: 'string',
     is: (value): value is string => typeof value === 'string',
     kind: 'string',
     zero: () => '',
-  })
+  }) as unknown as StringSchema
 }
 
-export function createNumberSchema(): Schema<number | undefined, number> {
+export function createNumberSchema(): NumberSchema {
   return createPrimitiveSchema({
     expected: 'number',
     is: (value): value is number => typeof value === 'number' && !Number.isNaN(value),
     kind: 'number',
     zero: () => 0,
-  })
+  }) as unknown as NumberSchema
 }
 
 export function createBooleanSchema(): Schema<boolean | undefined, boolean> {
@@ -233,7 +500,7 @@ export function createNullSchema(): Schema<null, null> {
     is: (value): value is null => value === null,
     kind: 'null',
     zero: () => null,
-  }) as Schema<null, null>
+  }) as unknown as Schema<null, null>
 }
 
 export function createAnySchema(): Schema<unknown, any> {
@@ -241,7 +508,7 @@ export function createAnySchema(): Schema<unknown, any> {
     flags: DEFAULT_FLAGS,
     kind: 'any',
     refinements: [],
-  }) as Schema<unknown, any>
+  }) as unknown as Schema<unknown, any>
 }
 
 export function createUnknownSchema(): Schema<unknown, unknown> {
@@ -249,7 +516,7 @@ export function createUnknownSchema(): Schema<unknown, unknown> {
     flags: DEFAULT_FLAGS,
     kind: 'unknown',
     refinements: [],
-  }) as Schema<unknown, unknown>
+  }) as unknown as Schema<unknown, unknown>
 }
 
 export function createLiteralSchema<const T extends LiteralValue>(value: T): Schema<T | undefined, T> {
@@ -259,7 +526,7 @@ export function createLiteralSchema<const T extends LiteralValue>(value: T): Sch
     kind: 'literal',
     refinements: [],
     value,
-  }) as Schema<T | undefined, T>
+  }) as unknown as Schema<T | undefined, T>
 }
 
 export function createEnumSchema<const T extends readonly [string, ...string[]]>(values: T): Schema<T[number] | undefined, T[number]> {
@@ -269,7 +536,7 @@ export function createEnumSchema<const T extends readonly [string, ...string[]]>
     kind: 'enum',
     refinements: [],
     values,
-  }) as Schema<T[number] | undefined, T[number]>
+  }) as unknown as Schema<T[number] | undefined, T[number]>
 }
 
 export function createObjectEnumSchema<const T extends Record<string, number | string>>(
@@ -287,10 +554,10 @@ export function createObjectEnumSchema<const T extends Record<string, number | s
     kind: 'enum',
     refinements: [],
     values: values as [T[keyof T], ...T[keyof T][]],
-  }) as Schema<T[keyof T] | undefined, T[keyof T]>
+  }) as unknown as Schema<T[keyof T] | undefined, T[keyof T]>
 }
 
-export function createArraySchema<S extends SchemaLike>(item: S): ArraySchema<S> {
+export function createArraySchema<S extends SchemaLike<any, any, boolean>>(item: S): ArraySchema<S> {
   assertSchema(item, 'array item')
 
   return makeSchema({
@@ -298,24 +565,26 @@ export function createArraySchema<S extends SchemaLike>(item: S): ArraySchema<S>
     item,
     kind: 'array',
     refinements: [],
-  }) as ArraySchema<S>
+  }) as unknown as ArraySchema<S>
 }
 
-export function createObjectSchema<const T extends Record<string, any>>(shape: T): ObjectSchema<T> {
+export function createObjectSchema<const T extends ObjectShape>(shape: T): ObjectSchema<T> {
   if (!isPlainObject(shape)) {
     throw new TypeError('object schema requires a plain object')
   }
 
   return makeSchema({
     cache: new WeakMap(),
+    disallowMissingKeys: false,
     flags: DEFAULT_FLAGS,
     kind: 'object',
     refinements: [],
     shape,
-  }) as ObjectSchema<T>
+    unknownKeys: 'strip',
+  }) as unknown as ObjectSchema<T>
 }
 
-export function createRecordSchema<S extends SchemaLike>(value: S): RecordSchema<S> {
+export function createRecordSchema<S extends SchemaLike<any, any, boolean>>(value: S): RecordSchema<S> {
   assertSchema(value, 'record value')
 
   return makeSchema({
@@ -323,10 +592,12 @@ export function createRecordSchema<S extends SchemaLike>(value: S): RecordSchema
     kind: 'record',
     refinements: [],
     value,
-  }) as RecordSchema<S>
+  }) as unknown as RecordSchema<S>
 }
 
-export function createTupleSchema<const T extends readonly [SchemaLike, ...SchemaLike[]]>(items: T): TupleSchema<T> {
+export function createTupleSchema<const T extends readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]>(
+  items: T,
+): TupleSchema<T> {
   for (const item of items) {
     assertSchema(item, 'tuple item')
   }
@@ -336,10 +607,12 @@ export function createTupleSchema<const T extends readonly [SchemaLike, ...Schem
     items,
     kind: 'tuple',
     refinements: [],
-  }) as TupleSchema<T>
+  }) as unknown as TupleSchema<T>
 }
 
-export function createUnionSchema<const T extends readonly [SchemaLike, ...SchemaLike[]]>(options: T): UnionSchema<T> {
+export function createUnionSchema<const T extends readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]>(
+  options: T,
+): UnionSchema<T> {
   for (const option of options) {
     assertSchema(option, 'or option')
   }
@@ -349,7 +622,48 @@ export function createUnionSchema<const T extends readonly [SchemaLike, ...Schem
     kind: 'or',
     options,
     refinements: [],
-  }) as UnionSchema<T>
+  }) as unknown as UnionSchema<T>
+}
+
+export type DiscriminatedUnionSchema<TOptions extends readonly ObjectSchema<any>[]> = Schema<unknown, TypeOf<TOptions[number]>>
+
+export function createDiscriminatedUnionSchema<
+  const TDiscriminator extends string,
+  const TOptions extends readonly [ObjectSchema<any>, ...ObjectSchema<any>[]],
+>(discriminator: TDiscriminator, options: TOptions): DiscriminatedUnionSchema<TOptions> {
+  const map = new Map<unknown, SchemaLike<any, any, boolean>>()
+  const values: unknown[] = []
+
+  for (const option of options) {
+    assertSchema(option, 'discriminatedUnion option')
+    const optionDef = (option as unknown as RuntimeSchema)[DEFINITION]
+    if (optionDef.kind !== 'object') {
+      throw new TypeError('discriminatedUnion options must be object schemas')
+    }
+    const fieldSchema = optionDef.shape[discriminator] as RuntimeSchema | undefined
+    if (!fieldSchema) {
+      throw new TypeError(`discriminatedUnion option missing discriminator field "${discriminator}"`)
+    }
+    const fieldDef = fieldSchema[DEFINITION]
+    if (fieldDef.kind !== 'literal') {
+      throw new TypeError(`discriminatedUnion option discriminator "${discriminator}" must be a literal schema`)
+    }
+    if (map.has(fieldDef.value)) {
+      throw new TypeError(`discriminatedUnion duplicate discriminator value: ${JSON.stringify(fieldDef.value)}`)
+    }
+    map.set(fieldDef.value, option)
+    values.push(fieldDef.value)
+  }
+
+  return makeSchema({
+    discriminator,
+    expected: values.map(item => JSON.stringify(item)).join(' | '),
+    flags: DEFAULT_FLAGS,
+    kind: 'discriminatedUnion',
+    map,
+    options,
+    refinements: [],
+  }) as unknown as DiscriminatedUnionSchema<TOptions>
 }
 
 export function createBlobSchema(): Schema<Blob | undefined, Blob> {
@@ -359,6 +673,59 @@ export function createBlobSchema(): Schema<Blob | undefined, Blob> {
     kind: 'blob',
     zero: () => new Blob(),
   })
+}
+
+export function createBigIntSchema(): Schema<bigint | undefined, bigint> {
+  return createPrimitiveSchema({
+    expected: 'bigint',
+    is: (value): value is bigint => typeof value === 'bigint',
+    kind: 'bigint',
+    zero: () => 0n,
+  })
+}
+
+export function createDateSchema(): Schema<Date | undefined, Date> {
+  return createPrimitiveSchema({
+    expected: 'Date',
+    is: (value): value is Date => value instanceof Date && !Number.isNaN(value.getTime()),
+    kind: 'date',
+    zero: () => new Date(0),
+  })
+}
+
+export function createLazySchema<S extends SchemaLike<any, any, boolean>>(resolver: () => S): S {
+  if (typeof resolver !== 'function') {
+    throw new TypeError('lazy() requires a resolver function')
+  }
+  let cached: SchemaLike<any, any, boolean> | undefined
+  return makeSchema({
+    flags: DEFAULT_FLAGS,
+    kind: 'lazy',
+    refinements: [],
+    resolve(): SchemaLike<any, any, boolean> {
+      if (!cached) {
+        cached = resolver()
+        assertSchema(cached, 'lazy() resolver')
+      }
+      return cached
+    },
+  }) as unknown as S
+}
+
+export function createIntersectionSchema<A extends SchemaLike<any, any, boolean>, B extends SchemaLike<any, any, boolean>>(
+  left: A,
+  right: B,
+): Schema<unknown, TypeOf<A> & TypeOf<B>> {
+  assertSchema(left, 'intersection left')
+  assertSchema(right, 'intersection right')
+
+  return makeSchema({
+    flags: DEFAULT_FLAGS,
+    kind: 'intersection',
+    left,
+    refinements: [],
+    right,
+  }) as unknown as Schema<unknown, TypeOf<A> & TypeOf<B>>
 }
 
 export function createFileSchema(): Schema<File | undefined, File> {
@@ -386,7 +753,7 @@ function createPrimitiveSchema<T>(
     ...definition,
     flags: DEFAULT_FLAGS,
     refinements: [],
-  }) as Schema<T | undefined, T>
+  }) as unknown as Schema<T | undefined, T>
 }
 
 const DEFAULT_FLAGS: SchemaFlags = { hasDefault: false, nullable: false, optional: false }
@@ -395,6 +762,16 @@ function makeSchema(definition: SchemaDefinition): RuntimeSchema {
   const schema: RuntimeSchema = {
     [DEFINITION]: definition,
     [TYPES]: undefined as never,
+    get ['~standard'](): StandardSchemaProps<unknown, unknown> {
+      return {
+        validate(value: unknown) {
+          const result = parseValue(schema, value, [], 'value')
+          return result.ok ? { value: result.value } : { issues: result.issues.map(item => ({ message: item.message, path: item.path })) }
+        },
+        vendor: 'defjs',
+        version: 1,
+      }
+    },
     alias(alias: string) {
       return makeSchema({
         ...definition,
@@ -451,6 +828,37 @@ function makeSchema(definition: SchemaDefinition): RuntimeSchema {
 
       return result.value
     },
+    safeParse(value: unknown): RuntimeSafeResult {
+      try {
+        const result = parseValue(schema, value, [], 'value')
+        return result.ok ? { ok: true, value: result.value } : { ok: false, error: new SchemaError(result.issues) }
+      } catch (error) {
+        if (error instanceof SchemaError) {
+          return { ok: false, error }
+        }
+        throw error
+      }
+    },
+    async parseAsync(value: unknown) {
+      const result = await parseValueAsync(schema, value, [], 'value')
+
+      if (!result.ok) {
+        throw new SchemaError(result.issues)
+      }
+
+      return result.value
+    },
+    async safeParseAsync(value: unknown): Promise<RuntimeSafeResult> {
+      try {
+        const result = await parseValueAsync(schema, value, [], 'value')
+        return result.ok ? { ok: true, value: result.value } : { ok: false, error: new SchemaError(result.issues) }
+      } catch (error) {
+        if (error instanceof SchemaError) {
+          return { ok: false, error }
+        }
+        throw error
+      }
+    },
     refine(check: RefineCheck<unknown>, message?: string) {
       if (typeof check !== 'function') {
         throw new TypeError('refine() requires a validation function')
@@ -458,16 +866,257 @@ function makeSchema(definition: SchemaDefinition): RuntimeSchema {
 
       return makeSchema({
         ...definition,
-        refinements: [...definition.refinements, { check, message }],
+        refinements: [...definition.refinements, { check, kind: 'refine', message }],
       })
     },
+    transform(fn: (value: unknown) => unknown) {
+      if (typeof fn !== 'function') {
+        throw new TypeError('transform() requires a function')
+      }
+
+      return makeSchema({
+        ...definition,
+        refinements: [...definition.refinements, { fn, kind: 'transform' }],
+      })
+    },
+    pipe(target: SchemaLike<any, any, boolean>) {
+      if (!isSchema(target)) {
+        throw new TypeError('pipe() requires a schema target')
+      }
+
+      return makeSchema({
+        ...definition,
+        refinements: [...definition.refinements, { kind: 'pipe', target }],
+      })
+    },
+    brand() {
+      return schema
+    },
+    catch(value: unknown) {
+      return makeSchema({
+        ...definition,
+        flags: { ...definition.flags, catchValue: value, hasCatch: true },
+      })
+    },
+    encode(value: unknown) {
+      return encodeValue(schema, value)
+    },
   }
+
+  attachKindMethods(schema, definition)
 
   return schema
 }
 
+function attachKindMethods(schema: RuntimeSchema, definition: SchemaDefinition): void {
+  switch (definition.kind) {
+    case 'object':
+      attachObjectMethods(schema, definition)
+      break
+    case 'string':
+      attachStringMethods(schema, definition)
+      break
+    case 'number':
+      attachNumberMethods(schema, definition)
+      break
+    case 'array':
+      attachArrayMethods(schema, definition)
+      break
+  }
+}
+
+function attachObjectMethods(schema: RuntimeSchema, definition: ObjectDefinition): void {
+  schema.strict = options =>
+    makeSchema({
+      ...definition,
+      disallowMissingKeys: options?.missingKeys === true,
+      unknownKeys: options?.unknownKeys === false ? definition.unknownKeys : 'strict',
+    })
+  schema.passthrough = () => makeSchema({ ...definition, unknownKeys: 'passthrough' })
+  schema.strip = () => makeSchema({ ...definition, unknownKeys: 'strip' })
+
+  schema.pick = keys =>
+    makeSchema({
+      ...definition,
+      cache: new WeakMap(),
+      shape: filterShape(definition.shape, key => keys[key] === true),
+    })
+
+  schema.omit = keys =>
+    makeSchema({
+      ...definition,
+      cache: new WeakMap(),
+      shape: filterShape(definition.shape, key => keys[key] !== true),
+    })
+
+  schema.partial = () =>
+    makeSchema({
+      ...definition,
+      cache: new WeakMap(),
+      shape: mapShape(definition.shape, field => (field as RuntimeSchema).optional()),
+    })
+
+  schema.required = () =>
+    makeSchema({
+      ...definition,
+      cache: new WeakMap(),
+      shape: mapShape(definition.shape, field => withRequiredFlag(field as RuntimeSchema)),
+    })
+
+  schema.extend = other =>
+    makeSchema({
+      ...definition,
+      cache: new WeakMap(),
+      shape: { ...definition.shape, ...other },
+    })
+
+  schema.merge = other => {
+    const otherDef = other[DEFINITION]
+    if (otherDef.kind !== 'object') {
+      throw new TypeError('merge() requires another object schema')
+    }
+    return makeSchema({
+      ...definition,
+      cache: new WeakMap(),
+      shape: { ...definition.shape, ...otherDef.shape },
+    })
+  }
+
+  schema.keyof = () => {
+    const keys = Object.keys(definition.shape)
+    if (keys.length === 0) {
+      throw new TypeError('keyof() requires at least one declared key')
+    }
+    return createEnumSchema(keys as [string, ...string[]]) as unknown as RuntimeSchema
+  }
+}
+
+function filterShape(source: ObjectShape, accept: (key: string) => boolean): ObjectShape {
+  const output: Record<string, SchemaLike<any, any, boolean>> = {}
+  for (const key of Object.keys(source)) {
+    if (accept(key)) {
+      output[key] = source[key] as SchemaLike<any, any, boolean>
+    }
+  }
+  return output
+}
+
+function mapShape(source: ObjectShape, transform: (field: SchemaLike<any, any, boolean>) => RuntimeSchema): ObjectShape {
+  const output: Record<string, SchemaLike<any, any, boolean>> = {}
+  for (const key of Object.keys(source)) {
+    output[key] = transform(source[key] as SchemaLike<any, any, boolean>) as unknown as SchemaLike<any, any, boolean>
+  }
+  return output
+}
+
+function withRequiredFlag(field: RuntimeSchema): RuntimeSchema {
+  const fieldDef = field[DEFINITION]
+  return makeSchema({
+    ...fieldDef,
+    flags: { ...fieldDef.flags, optional: false },
+  })
+}
+
+function withRefinement(definition: SchemaDefinition, check: RefineCheck<unknown>, message: string): RuntimeSchema {
+  return makeSchema({
+    ...definition,
+    refinements: [...definition.refinements, { check, kind: 'refine', message }],
+  })
+}
+
+const EMAIL_REGEX = /^(?!\.)(?!.*\.\.)([A-Z0-9_+-\.]*)[A-Z0-9_+-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const ISO_DATETIME_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+
+const IPV4_REGEX = /^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)$/
+
+const IPV6_REGEX = /^(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}$|^::(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4}$|^(?:[0-9a-f]{1,4}:){1,7}:$/i
+
+const CUID_REGEX = /^c[a-z0-9]{24}$/
+
+const NANOID_REGEX = /^[A-Za-z0-9_-]{21}$/
+
+function isValidUrl(value: string): boolean {
+  try {
+    return Boolean(new URL(value))
+  } catch {
+    return false
+  }
+}
+
+function attachStringMethods(schema: RuntimeSchema, definition: SchemaDefinition): void {
+  schema.min = (n, message) =>
+    withRefinement(definition, value => (value as string).length >= n, message ?? `String must contain at least ${n} character(s)`)
+  schema.max = (n, message) =>
+    withRefinement(definition, value => (value as string).length <= n, message ?? `String must contain at most ${n} character(s)`)
+  schema.length = (n, message) =>
+    withRefinement(definition, value => (value as string).length === n, message ?? `String must contain exactly ${n} character(s)`)
+  schema.regex = (pattern, message) =>
+    withRefinement(definition, value => pattern.test(value as string), message ?? `String must match ${pattern}`)
+  schema.email = message => withRefinement(definition, value => EMAIL_REGEX.test(value as string), message ?? 'Invalid email')
+  schema.url = message => withRefinement(definition, value => isValidUrl(value as string), message ?? 'Invalid url')
+  schema.uuid = message => withRefinement(definition, value => UUID_REGEX.test(value as string), message ?? 'Invalid UUID')
+  schema.startsWith = (prefix, message) =>
+    withRefinement(definition, value => (value as string).startsWith(prefix), message ?? `String must start with "${prefix}"`)
+  schema.endsWith = (suffix, message) =>
+    withRefinement(definition, value => (value as string).endsWith(suffix), message ?? `String must end with "${suffix}"`)
+  schema.datetime = message =>
+    withRefinement(definition, value => ISO_DATETIME_REGEX.test(value as string), message ?? 'Invalid ISO datetime')
+  schema.ip = message =>
+    withRefinement(
+      definition,
+      value => IPV4_REGEX.test(value as string) || IPV6_REGEX.test(value as string),
+      message ?? 'Invalid IP address',
+    )
+  schema.cuid = message => withRefinement(definition, value => CUID_REGEX.test(value as string), message ?? 'Invalid CUID')
+  schema.nanoid = message => withRefinement(definition, value => NANOID_REGEX.test(value as string), message ?? 'Invalid nanoid')
+}
+
+function attachNumberMethods(schema: RuntimeSchema, definition: SchemaDefinition): void {
+  const minImpl = (n: number, message?: string) =>
+    withRefinement(definition, value => (value as number) >= n, message ?? `Number must be greater than or equal to ${n}`)
+  const maxImpl = (n: number, message?: string) =>
+    withRefinement(definition, value => (value as number) <= n, message ?? `Number must be less than or equal to ${n}`)
+
+  schema.min = minImpl
+  schema.gte = minImpl
+  schema.max = maxImpl
+  schema.lte = maxImpl
+  schema.gt = (n, message) => withRefinement(definition, value => (value as number) > n, message ?? `Number must be greater than ${n}`)
+  schema.lt = (n, message) => withRefinement(definition, value => (value as number) < n, message ?? `Number must be less than ${n}`)
+  schema.int = message => withRefinement(definition, value => Number.isInteger(value), message ?? 'Number must be an integer')
+  schema.positive = message => withRefinement(definition, value => (value as number) > 0, message ?? 'Number must be positive')
+  schema.negative = message => withRefinement(definition, value => (value as number) < 0, message ?? 'Number must be negative')
+  schema.nonnegative = message => withRefinement(definition, value => (value as number) >= 0, message ?? 'Number must be non-negative')
+  schema.nonpositive = message => withRefinement(definition, value => (value as number) <= 0, message ?? 'Number must be non-positive')
+  schema.finite = message => withRefinement(definition, value => Number.isFinite(value), message ?? 'Number must be finite')
+  schema.multipleOf = (divisor, message) =>
+    withRefinement(definition, value => (value as number) % divisor === 0, message ?? `Number must be a multiple of ${divisor}`)
+}
+
+function attachArrayMethods(schema: RuntimeSchema, definition: SchemaDefinition): void {
+  schema.min = (n, message) =>
+    withRefinement(definition, value => (value as unknown[]).length >= n, message ?? `Array must contain at least ${n} item(s)`)
+  schema.max = (n, message) =>
+    withRefinement(definition, value => (value as unknown[]).length <= n, message ?? `Array must contain at most ${n} item(s)`)
+  schema.length = (n, message) =>
+    withRefinement(definition, value => (value as unknown[]).length === n, message ?? `Array must contain exactly ${n} item(s)`)
+  schema.nonempty = message => withRefinement(definition, value => (value as unknown[]).length > 0, message ?? 'Array must not be empty')
+}
+
 function parseValue(schema: RuntimeSchema, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
+  const result = dispatchParseValue(schema, input, path, mode)
+  return applyCatch(schema, result)
+}
+
+function dispatchParseValue(schema: RuntimeSchema, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
   const definition = schema[DEFINITION]
+
+  if (definition.kind === 'lazy') {
+    return parseValue(definition.resolve() as RuntimeSchema, input, path, mode)
+  }
 
   if (input === undefined) {
     return parseMissingValue(schema, path, mode)
@@ -490,8 +1139,10 @@ function parseValue(schema: RuntimeSchema, input: unknown, path: Path, mode: Par
       return parseArrayValue(schema, definition, input, path)
 
     case 'arrayBuffer':
+    case 'bigint':
     case 'blob':
     case 'boolean':
+    case 'date':
     case 'file':
     case 'null':
     case 'number':
@@ -501,6 +1152,9 @@ function parseValue(schema: RuntimeSchema, input: unknown, path: Path, mode: Par
     case 'enum':
       return parseEnumValue(schema, definition, input, path)
 
+    case 'intersection':
+      return parseIntersectionValue(schema, definition, input, path)
+
     case 'literal':
       return parseLiteralValue(schema, definition, input, path)
 
@@ -509,6 +1163,9 @@ function parseValue(schema: RuntimeSchema, input: unknown, path: Path, mode: Par
 
     case 'or':
       return parseUnionValue(schema, definition, input, path)
+
+    case 'discriminatedUnion':
+      return parseDiscriminatedUnionValue(schema, definition, input, path)
 
     case 'record':
       return parseRecordValue(schema, definition, input, path)
@@ -607,10 +1264,18 @@ function parseObjectValue(
   const shape = resolveObjectShape(schema, definition)
   const output: Record<string, unknown> = {}
   const issues: SchemaIssue[] = []
+  const declared = new Set<string>()
 
   for (const [key, itemSchema] of Object.entries(shape)) {
     const itemDefinition = (itemSchema as RuntimeSchema)[DEFINITION]
     const inputKey = itemDefinition.flags.alias ?? key
+    declared.add(inputKey)
+
+    if (definition.disallowMissingKeys && !(inputKey in input) && isFieldRequired(itemDefinition)) {
+      issues.push(issue([...path, key], 'missing_key', 'declared field', undefined, `Missing key "${key}"`))
+      continue
+    }
+
     const result = parseValue(itemSchema as RuntimeSchema, input[inputKey], [...path, key], 'field')
 
     if (!result.ok) {
@@ -623,11 +1288,28 @@ function parseObjectValue(
     }
   }
 
+  if (definition.unknownKeys !== 'strip') {
+    for (const inputKey of Object.keys(input)) {
+      if (declared.has(inputKey)) {
+        continue
+      }
+      if (definition.unknownKeys === 'strict') {
+        issues.push(issue([...path, inputKey], 'unrecognized_keys', 'declared field', input[inputKey], `Unrecognized key "${inputKey}"`))
+      } else if (definition.unknownKeys === 'passthrough') {
+        output[inputKey] = input[inputKey]
+      }
+    }
+  }
+
   if (issues.length > 0) {
     return failure(...issues)
   }
 
   return applyRefinements(schema, output, path) as ParseResult<Record<string, unknown>>
+}
+
+function isFieldRequired(itemDefinition: SchemaDefinition): boolean {
+  return !itemDefinition.flags.hasDefault && !itemDefinition.flags.optional && !itemDefinition.flags.nullable
 }
 
 function parseRecordValue(
@@ -701,29 +1383,529 @@ function parseUnionValue(schema: RuntimeSchema, definition: UnionDefinition, inp
   return failure(issue(path, 'invalid_union', expectedType(definition), input))
 }
 
-function applyRefinements(schema: RuntimeSchema, value: unknown, path: Path): ParseResult<unknown> {
-  const issues: SchemaIssue[] = []
+function parseDiscriminatedUnionValue(
+  schema: RuntimeSchema,
+  definition: DiscriminatedUnionDefinition,
+  input: unknown,
+  path: Path,
+): ParseResult<unknown> {
+  if (!isPlainObject(input)) {
+    return failure(issue(path, 'invalid_type', 'object', input))
+  }
+
+  const value = input[definition.discriminator]
+  const target = definition.map.get(value)
+  if (!target) {
+    return failure(
+      issue(
+        [...path, definition.discriminator],
+        'invalid_union',
+        definition.expected,
+        value,
+        `Invalid discriminator value. Expected ${definition.expected}, received ${describeValue(value)}`,
+      ),
+    )
+  }
+
+  const result = parseValue(target as RuntimeSchema, input, path, 'value')
+  if (!result.ok) {
+    return result
+  }
+
+  return applyRefinements(schema, result.value, path)
+}
+
+function parseIntersectionValue(
+  schema: RuntimeSchema,
+  definition: IntersectionDefinition,
+  input: unknown,
+  path: Path,
+): ParseResult<unknown> {
+  const leftResult = parseValue(definition.left as RuntimeSchema, input, path, 'value')
+  if (!leftResult.ok) {
+    return leftResult
+  }
+
+  const rightResult = parseValue(definition.right as RuntimeSchema, input, path, 'value')
+  if (!rightResult.ok) {
+    return rightResult
+  }
+
+  const merged =
+    isPlainObject(leftResult.value) && isPlainObject(rightResult.value) ? { ...leftResult.value, ...rightResult.value } : rightResult.value
+
+  return applyRefinements(schema, merged, path)
+}
+
+function applyCatch(schema: RuntimeSchema, result: ParseResult<unknown>): ParseResult<unknown> {
+  if (!result.ok && schema[DEFINITION].flags.hasCatch) {
+    return success(cloneValue(schema[DEFINITION].flags.catchValue))
+  }
+  return result
+}
+
+async function parseValueAsync(schema: RuntimeSchema, input: unknown, path: Path, mode: ParseMode): Promise<ParseResult<unknown>> {
+  const result = await dispatchParseValueAsync(schema, input, path, mode)
+  return applyCatch(schema, result)
+}
+
+async function dispatchParseValueAsync(schema: RuntimeSchema, input: unknown, path: Path, mode: ParseMode): Promise<ParseResult<unknown>> {
   const definition = schema[DEFINITION]
 
-  for (const refinement of definition.refinements) {
-    const result = refinement.check(value as never)
+  if (definition.kind === 'lazy') {
+    return parseValueAsync(definition.resolve() as RuntimeSchema, input, path, mode)
+  }
 
-    if (result === false) {
-      issues.push(issue(path, 'custom', expectedType(definition), value, refinement.message))
+  if (input === undefined) {
+    return parseMissingValueAsync(schema, path, mode)
+  }
+
+  if (input === null) {
+    if (definition.kind === 'null' || definition.flags.nullable) {
+      return applyRefinementsAsync(schema, null, path)
+    }
+
+    return failure(issue(path, 'invalid_type', expectedType(definition), input))
+  }
+
+  switch (definition.kind) {
+    case 'any':
+    case 'unknown':
+      return applyRefinementsAsync(schema, input, path)
+
+    case 'array':
+      return parseArrayValueAsync(schema, definition, input, path)
+
+    case 'arrayBuffer':
+    case 'bigint':
+    case 'blob':
+    case 'boolean':
+    case 'date':
+    case 'file':
+    case 'null':
+    case 'number':
+    case 'string':
+      return parsePrimitiveValueAsync(schema, definition, input, path)
+
+    case 'enum':
+      return parseEnumValueAsync(schema, definition, input, path)
+
+    case 'intersection':
+      return parseIntersectionValueAsync(schema, definition, input, path)
+
+    case 'literal':
+      return parseLiteralValueAsync(schema, definition, input, path)
+
+    case 'object':
+      return parseObjectValueAsync(schema, definition, input, path)
+
+    case 'or':
+      return parseUnionValueAsync(schema, definition, input, path)
+
+    case 'discriminatedUnion':
+      return parseDiscriminatedUnionValueAsync(schema, definition, input, path)
+
+    case 'record':
+      return parseRecordValueAsync(schema, definition, input, path)
+
+    case 'tuple':
+      return parseTupleValueAsync(schema, definition, input, path)
+  }
+}
+
+async function parseMissingValueAsync(schema: RuntimeSchema, path: Path, mode: ParseMode): Promise<ParseResult<unknown>> {
+  const definition = schema[DEFINITION]
+
+  if (definition.flags.hasDefault) {
+    return applyRefinementsAsync(schema, cloneValue(definition.flags.defaultValue), path)
+  }
+
+  if (mode === 'field' && definition.flags.optional) {
+    return success(OMIT)
+  }
+
+  if (definition.flags.optional) {
+    return applyRefinementsAsync(schema, undefined, path)
+  }
+
+  if (definition.flags.nullable || definition.kind === 'null') {
+    return applyRefinementsAsync(schema, null, path)
+  }
+
+  return applyRefinementsAsync(schema, buildZeroValue(schema, path), path)
+}
+
+async function parsePrimitiveValueAsync(
+  schema: RuntimeSchema,
+  definition: PrimitiveDefinition<PrimitiveKind, any>,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<unknown>> {
+  if (!definition.is(input)) {
+    return failure(issue(path, 'invalid_type', definition.expected, input))
+  }
+
+  return applyRefinementsAsync(schema, input, path)
+}
+
+async function parseEnumValueAsync(
+  schema: RuntimeSchema,
+  definition: EnumDefinition<any>,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<unknown>> {
+  if (!definition.values.includes(input)) {
+    return failure(issue(path, 'invalid_enum', definition.expected, input))
+  }
+
+  return applyRefinementsAsync(schema, input, path)
+}
+
+async function parseLiteralValueAsync(
+  schema: RuntimeSchema,
+  definition: LiteralDefinition<any>,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<unknown>> {
+  if (!Object.is(input, definition.value)) {
+    return failure(issue(path, 'invalid_literal', definition.expected, input))
+  }
+
+  return applyRefinementsAsync(schema, input, path)
+}
+
+async function parseArrayValueAsync(
+  schema: RuntimeSchema,
+  definition: ArrayDefinition,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<unknown[]>> {
+  if (!Array.isArray(input)) {
+    return failure(issue(path, 'invalid_type', 'array', input))
+  }
+
+  const output: unknown[] = []
+  const issues: SchemaIssue[] = []
+
+  for (let index = 0; index < input.length; index += 1) {
+    const result = await parseValueAsync(definition.item as RuntimeSchema, input[index], [...path, index], 'value')
+    if (!result.ok) {
+      issues.push(...result.issues)
       continue
     }
 
-    if (typeof result === 'string') {
-      issues.push(issue(path, 'custom', expectedType(definition), value, result))
+    output[index] = result.value
+  }
+
+  if (issues.length > 0) {
+    return failure(...issues)
+  }
+
+  return applyRefinementsAsync(schema, output, path) as Promise<ParseResult<unknown[]>>
+}
+
+async function parseObjectValueAsync(
+  schema: RuntimeSchema,
+  definition: ObjectDefinition,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<Record<string, unknown>>> {
+  if (!isPlainObject(input)) {
+    return failure(issue(path, 'invalid_type', 'object', input))
+  }
+
+  const shape = resolveObjectShape(schema, definition)
+  const output: Record<string, unknown> = {}
+  const issues: SchemaIssue[] = []
+  const declared = new Set<string>()
+
+  for (const [key, itemSchema] of Object.entries(shape)) {
+    const itemDefinition = (itemSchema as RuntimeSchema)[DEFINITION]
+    const inputKey = itemDefinition.flags.alias ?? key
+    declared.add(inputKey)
+
+    if (definition.disallowMissingKeys && !(inputKey in input) && isFieldRequired(itemDefinition)) {
+      issues.push(issue([...path, key], 'missing_key', 'declared field', undefined, `Missing key "${key}"`))
       continue
     }
 
-    if (result instanceof Error) {
-      issues.push(issue(path, 'custom', expectedType(definition), value, result.message))
+    const result = await parseValueAsync(itemSchema as RuntimeSchema, input[inputKey], [...path, key], 'field')
+
+    if (!result.ok) {
+      issues.push(...result.issues)
+      continue
+    }
+
+    if (result.value !== OMIT) {
+      output[key] = result.value
     }
   }
 
-  return issues.length > 0 ? failure(...issues) : success(value)
+  if (definition.unknownKeys !== 'strip') {
+    for (const inputKey of Object.keys(input)) {
+      if (declared.has(inputKey)) {
+        continue
+      }
+      if (definition.unknownKeys === 'strict') {
+        issues.push(issue([...path, inputKey], 'unrecognized_keys', 'declared field', input[inputKey], `Unrecognized key "${inputKey}"`))
+      } else if (definition.unknownKeys === 'passthrough') {
+        output[inputKey] = input[inputKey]
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    return failure(...issues)
+  }
+
+  return applyRefinementsAsync(schema, output, path) as Promise<ParseResult<Record<string, unknown>>>
+}
+
+async function parseRecordValueAsync(
+  schema: RuntimeSchema,
+  definition: RecordDefinition,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<Record<string, unknown>>> {
+  if (!isPlainObject(input)) {
+    return failure(issue(path, 'invalid_type', 'object', input))
+  }
+
+  const output: Record<string, unknown> = {}
+  const issues: SchemaIssue[] = []
+
+  for (const [key, value] of Object.entries(input)) {
+    const result = await parseValueAsync(definition.value as RuntimeSchema, value, [...path, key], 'field')
+
+    if (!result.ok) {
+      issues.push(...result.issues)
+      continue
+    }
+
+    if (result.value !== OMIT) {
+      output[key] = result.value
+    }
+  }
+
+  if (issues.length > 0) {
+    return failure(...issues)
+  }
+
+  return applyRefinementsAsync(schema, output, path) as Promise<ParseResult<Record<string, unknown>>>
+}
+
+async function parseTupleValueAsync(
+  schema: RuntimeSchema,
+  definition: TupleDefinition,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<unknown[]>> {
+  if (!Array.isArray(input)) {
+    return failure(issue(path, 'invalid_type', 'tuple', input))
+  }
+
+  const output: unknown[] = []
+  const issues: SchemaIssue[] = []
+
+  for (let index = 0; index < definition.items.length; index += 1) {
+    const itemSchema = definition.items[index]
+    const result = await parseValueAsync(itemSchema as RuntimeSchema, input[index], [...path, index], 'value')
+
+    if (!result.ok) {
+      issues.push(...result.issues)
+      continue
+    }
+
+    output[index] = result.value
+  }
+
+  if (issues.length > 0) {
+    return failure(...issues)
+  }
+
+  return applyRefinementsAsync(schema, output, path) as Promise<ParseResult<unknown[]>>
+}
+
+async function parseUnionValueAsync(
+  schema: RuntimeSchema,
+  definition: UnionDefinition,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<unknown>> {
+  for (const option of definition.options) {
+    const result = await parseValueAsync(option as RuntimeSchema, input, path, 'value')
+    if (result.ok) {
+      return applyRefinementsAsync(schema, result.value, path)
+    }
+  }
+
+  return failure(issue(path, 'invalid_union', expectedType(definition), input))
+}
+
+async function parseDiscriminatedUnionValueAsync(
+  schema: RuntimeSchema,
+  definition: DiscriminatedUnionDefinition,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<unknown>> {
+  if (!isPlainObject(input)) {
+    return failure(issue(path, 'invalid_type', 'object', input))
+  }
+
+  const value = input[definition.discriminator]
+  const target = definition.map.get(value)
+  if (!target) {
+    return failure(
+      issue(
+        [...path, definition.discriminator],
+        'invalid_union',
+        definition.expected,
+        value,
+        `Invalid discriminator value. Expected ${definition.expected}, received ${describeValue(value)}`,
+      ),
+    )
+  }
+
+  const result = await parseValueAsync(target as RuntimeSchema, input, path, 'value')
+  if (!result.ok) {
+    return result
+  }
+
+  return applyRefinementsAsync(schema, result.value, path)
+}
+
+async function parseIntersectionValueAsync(
+  schema: RuntimeSchema,
+  definition: IntersectionDefinition,
+  input: unknown,
+  path: Path,
+): Promise<ParseResult<unknown>> {
+  const leftResult = await parseValueAsync(definition.left as RuntimeSchema, input, path, 'value')
+  if (!leftResult.ok) {
+    return leftResult
+  }
+
+  const rightResult = await parseValueAsync(definition.right as RuntimeSchema, input, path, 'value')
+  if (!rightResult.ok) {
+    return rightResult
+  }
+
+  const merged =
+    isPlainObject(leftResult.value) && isPlainObject(rightResult.value) ? { ...leftResult.value, ...rightResult.value } : rightResult.value
+
+  return applyRefinementsAsync(schema, merged, path)
+}
+
+function applyRefinements(schema: RuntimeSchema, value: unknown, path: Path): ParseResult<unknown> {
+  const definition = schema[DEFINITION]
+  const { refinements } = definition
+
+  if (refinements.length === 0) {
+    return success(value)
+  }
+
+  const issues: SchemaIssue[] = []
+  let current = value
+
+  for (const step of refinements) {
+    if (step.kind === 'refine') {
+      const result = step.check(current as never)
+
+      if (isPromiseLike(result)) {
+        throw new SchemaError([
+          issue(path, 'custom', expectedType(definition), current, 'Async refinement detected; use parseAsync() or safeParseAsync()'),
+        ])
+      }
+
+      collectRefineIssue(result, step.message, definition, current, path, issues)
+      continue
+    }
+
+    if (issues.length > 0) {
+      return failure(...issues)
+    }
+
+    if (step.kind === 'transform') {
+      current = step.fn(current)
+      continue
+    }
+
+    const result = parseValue(step.target as RuntimeSchema, current, path, 'value')
+    if (!result.ok) {
+      return failure(...result.issues)
+    }
+    current = result.value
+  }
+
+  return issues.length > 0 ? failure(...issues) : success(current)
+}
+
+async function applyRefinementsAsync(schema: RuntimeSchema, value: unknown, path: Path): Promise<ParseResult<unknown>> {
+  const definition = schema[DEFINITION]
+  const { refinements } = definition
+
+  if (refinements.length === 0) {
+    return success(value)
+  }
+
+  const issues: SchemaIssue[] = []
+  let current = value
+
+  for (const step of refinements) {
+    if (step.kind === 'refine') {
+      const result = await Promise.resolve(step.check(current as never))
+      collectRefineIssue(result, step.message, definition, current, path, issues)
+      continue
+    }
+
+    if (issues.length > 0) {
+      return failure(...issues)
+    }
+
+    if (step.kind === 'transform') {
+      current = await Promise.resolve(step.fn(current))
+      continue
+    }
+
+    const result = await parseValueAsync(step.target as RuntimeSchema, current, path, 'value')
+    if (!result.ok) {
+      return failure(...result.issues)
+    }
+    current = result.value
+  }
+
+  return issues.length > 0 ? failure(...issues) : success(current)
+}
+
+function collectRefineIssue(
+  result: RefineResult,
+  message: string | undefined,
+  definition: SchemaDefinition,
+  value: unknown,
+  path: Path,
+  issues: SchemaIssue[],
+): void {
+  if (result === true) {
+    return
+  }
+
+  if (result === false) {
+    issues.push(issue(path, 'custom', expectedType(definition), value, message))
+    return
+  }
+
+  if (typeof result === 'string') {
+    issues.push(issue(path, 'custom', expectedType(definition), value, result))
+    return
+  }
+
+  if (result instanceof Error) {
+    issues.push(issue(path, 'custom', expectedType(definition), value, result.message))
+  }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return value !== null && typeof value === 'object' && typeof (value as { then?: unknown }).then === 'function'
 }
 
 function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
@@ -738,8 +1920,10 @@ function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
       return []
 
     case 'arrayBuffer':
+    case 'bigint':
     case 'blob':
     case 'boolean':
+    case 'date':
     case 'file':
     case 'null':
     case 'number':
@@ -748,6 +1932,18 @@ function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
 
     case 'enum':
       return cloneValue(definition.values[0])
+
+    case 'intersection': {
+      const result = parseValue(definition.right as RuntimeSchema, undefined, path, 'value')
+      if (!result.ok) {
+        throw new SchemaError(result.issues)
+      }
+
+      return result.value
+    }
+
+    case 'lazy':
+      return buildZeroValue(definition.resolve() as RuntimeSchema, path)
 
     case 'literal':
       return cloneValue(definition.value)
@@ -779,6 +1975,15 @@ function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
       return result.value
     }
 
+    case 'discriminatedUnion': {
+      const result = parseValue(definition.options[0] as RuntimeSchema, undefined, path, 'value')
+      if (!result.ok) {
+        throw new SchemaError(result.issues)
+      }
+
+      return result.value
+    }
+
     case 'record':
       return {}
 
@@ -796,6 +2001,71 @@ function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
 
       return output
     }
+  }
+}
+
+function encodeValue(schema: RuntimeSchema, value: unknown): unknown {
+  const definition = schema[DEFINITION]
+
+  switch (definition.kind) {
+    case 'any':
+    case 'unknown':
+    case 'arrayBuffer':
+    case 'bigint':
+    case 'blob':
+    case 'boolean':
+    case 'date':
+    case 'file':
+    case 'null':
+    case 'number':
+    case 'string':
+    case 'enum':
+    case 'literal':
+      return value
+
+    case 'array':
+      return Array.isArray(value) ? value.map(item => encodeValue(definition.item as RuntimeSchema, item)) : value
+
+    case 'tuple':
+      return Array.isArray(value)
+        ? value.map((item, index) => (index < definition.items.length ? encodeValue(definition.items[index] as RuntimeSchema, item) : item))
+        : value
+
+    case 'record': {
+      if (!isPlainObject(value)) {
+        return value
+      }
+      const output: Record<string, unknown> = {}
+      for (const [key, entry] of Object.entries(value)) {
+        output[key] = encodeValue(definition.value as RuntimeSchema, entry)
+      }
+      return output
+    }
+
+    case 'object': {
+      if (!isPlainObject(value)) {
+        return value
+      }
+      const output: Record<string, unknown> = {}
+      const shape = resolveObjectShape(schema, definition)
+      for (const [key, fieldSchema] of Object.entries(shape)) {
+        if (!(key in value)) {
+          continue
+        }
+        const fieldDef = (fieldSchema as RuntimeSchema)[DEFINITION]
+        const outputKey = fieldDef.flags.alias ?? key
+        output[outputKey] = encodeValue(fieldSchema as RuntimeSchema, value[key])
+      }
+      return output
+    }
+
+    case 'or':
+    case 'discriminatedUnion':
+    case 'intersection':
+      return value
+
+    case 'lazy':
+      return encodeValue(definition.resolve() as RuntimeSchema, value)
   }
 }
 
@@ -828,20 +2098,27 @@ function readObjectShape(shape: ObjectShape): ObjectShape {
   return output as ObjectShape
 }
 
-function assertSchema(value: unknown, label: string): asserts value is SchemaLike {
+function assertSchema(value: unknown, label: string): asserts value is SchemaLike<any, any, boolean> {
   if (!isSchema(value)) {
     throw new TypeError(`${label} must be a schema`)
   }
 }
 
 function issue(path: Path, code: SchemaIssue['code'], expected: string, received: unknown, message?: string): SchemaIssue {
-  return {
+  const candidate: SchemaIssue = {
     code,
     expected,
     message: message ?? `Expected ${expected} at ${formatPath(path)}, received ${describeValue(received)}`,
     path,
     received,
   }
+  if (globalErrorMap) {
+    const override = globalErrorMap(candidate)
+    if (override) {
+      candidate.message = override
+    }
+  }
+  return candidate
 }
 
 function success<T>(value: T): ParseSuccess<T> {
@@ -872,7 +2149,9 @@ function expectedType(definition: SchemaDefinition): string {
     case 'blob':
       return 'Blob'
 
+    case 'bigint':
     case 'boolean':
+    case 'date':
     case 'file':
     case 'null':
     case 'number':
@@ -883,11 +2162,20 @@ function expectedType(definition: SchemaDefinition): string {
     case 'literal':
       return definition.expected
 
+    case 'intersection':
+      return `${expectedType((definition.left as RuntimeSchema)[DEFINITION])} & ${expectedType((definition.right as RuntimeSchema)[DEFINITION])}`
+
+    case 'lazy':
+      return expectedType((definition.resolve() as RuntimeSchema)[DEFINITION])
+
     case 'object':
       return 'object'
 
     case 'or':
       return definition.options.map(option => expectedType((option as RuntimeSchema)[DEFINITION])).join(' | ')
+
+    case 'discriminatedUnion':
+      return definition.expected
 
     case 'record':
       return 'object'

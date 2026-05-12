@@ -128,4 +128,81 @@ describe('schema object and composite values', () => {
       'x-request-id': 'trace-2',
     })
   })
+
+  test('strip drops unknown keys by default (Go json default)', () => {
+    const base = schema.object({
+      id: schema.string(),
+    })
+
+    expect(base.parse({ id: 'u_1', extra: 'ignored' })).toEqual({ id: 'u_1' })
+  })
+
+  test('strict rejects unknown keys like json.Decoder.DisallowUnknownFields', () => {
+    const strictUser = schema
+      .object({
+        id: schema.string(),
+      })
+      .strict()
+
+    expect(strictUser.parse({ id: 'u_1' })).toEqual({ id: 'u_1' })
+
+    expect(() => strictUser.parse({ id: 'u_1', extra: 'no' })).toThrowError(SchemaError)
+
+    try {
+      strictUser.parse({ id: 'u_1', extra: 'no', also: 1 })
+    } catch (error) {
+      const issues = (error as SchemaError).issues
+      expect(issues).toEqual([
+        {
+          code: 'unrecognized_keys',
+          expected: 'declared field',
+          message: 'Unrecognized key "extra"',
+          path: ['extra'],
+          received: 'no',
+        },
+        {
+          code: 'unrecognized_keys',
+          expected: 'declared field',
+          message: 'Unrecognized key "also"',
+          path: ['also'],
+          received: 1,
+        },
+      ])
+    }
+  })
+
+  test('passthrough keeps unknown keys verbatim', () => {
+    const loose = schema
+      .object({
+        id: schema.string(),
+      })
+      .passthrough()
+
+    expect(loose.parse({ id: 'u_1', extra: 'kept', count: 7 })).toEqual({
+      id: 'u_1',
+      extra: 'kept',
+      count: 7,
+    })
+  })
+
+  test('strip explicitly returns to default behavior after strict', () => {
+    const base = schema.object({
+      id: schema.string(),
+    })
+
+    const round = base.strict().strip()
+    expect(round.parse({ id: 'u_1', extra: 'dropped' })).toEqual({ id: 'u_1' })
+  })
+
+  test('respects alias under strict mode', () => {
+    const renamed = schema
+      .object({
+        pageSize: schema.number().alias('page_size'),
+      })
+      .strict()
+
+    expect(renamed.parse({ page_size: 20 })).toEqual({ pageSize: 20 })
+
+    expect(() => renamed.parse({ page_size: 20, pageSize: 99 })).toThrowError(SchemaError)
+  })
 })

@@ -61,7 +61,7 @@ type RequiredInputCases = Expect<
     [
       (
         | {
-            id?: string
+            id?: string | undefined
             verbose?: boolean | undefined
           }
         | undefined

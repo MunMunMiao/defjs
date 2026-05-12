@@ -58,7 +58,7 @@ https://api.example.com/v1/user/info
 endpoint 定义层当前接受两类 schema：
 
 1. `@defjs/core` 自带 `schema`
-2. Standard Schema 兼容对象
+2. Standard Schema 兼容对象（任何带 `~standard` 属性的库，如 zod / valibot / arktype）
 
 有两条硬规则：
 
@@ -69,6 +69,142 @@ endpoint 定义层当前接受两类 schema：
 
 1. `input` 省略时，传入值原样交给 `build(request, input)`
 2. `output` 省略时，即使服务端 body 有值，也不会解析，HTTP 的 `result` 会是 `undefined`
+
+### 设计哲学：对齐 Go `encoding/json`
+
+`@defjs/core/schema` 模仿 Go struct ↔ JSON 序列化/反序列化语义，让 TS 开发者获得 Go 后端开发者熟悉的 DX：
+
+| Go 行为 | `@defjs/core/schema` |
+|---|---|
+| `json.Unmarshal([]byte("{}"), &u)` 缺字段填零值 | `parse(undefined) → 零值`（空字符串、0、空对象 …）|
+| `json:"field_name"` tag 重命名 | `.alias('field_name')` |
+| `*string` pointer-like（nil vs 空值） | `.null()` / `.nullable()` |
+| 完全缺失字段 / omitempty | `.optional()` 让 Output 上可省 |
+| `Decoder.DisallowUnknownFields()` | `.strict()` 拒绝未知字段 |
+| 必填字段校验 | `.strict({ missingKeys: true })` 拒绝缺失 |
+| `time.Time` | `schema.date()` |
+| `int64` 大整数 | `schema.bigint()` |
+| `json.Marshal` 反向 | `schema.encode(value)` |
+| 嵌套 struct / slice / map | `schema.object()` / `schema.array()` / `schema.record()` |
+
+零值兜底是**设计意图**而非 bug：缺字段时拿到 Go 风格的零值；要求严格则显式 `.strict({ missingKeys: true })`。
+
+### Schema API 表
+
+**基础工厂**
+
+```ts
+schema.string()         // Schema<string|undefined, string>
+schema.number()         // Schema<number|undefined, number>
+schema.boolean()        // Schema<boolean|undefined, boolean>
+schema.null()           // Schema<null, null>
+schema.any()            // Schema<unknown, any>
+schema.unknown()        // Schema<unknown, unknown>
+schema.bigint()         // Schema<bigint|undefined, bigint>
+schema.date()           // Schema<Date|undefined, Date>
+schema.blob()           // Schema<Blob|undefined, Blob>
+schema.file()           // Schema<File|undefined, File>
+schema.arrayBuffer()    // Schema<ArrayBuffer|undefined, ArrayBuffer>
+schema.literal('x')     // Schema<'x'|undefined, 'x'>
+schema.enum(['a','b'])  // Schema<'a'|'b'|undefined, 'a'|'b'>
+schema.enum({A:'a'})    // 同上，从 const obj 推断
+```
+
+**复合工厂**
+
+```ts
+schema.array(item)
+schema.object({...})
+schema.record(valueSchema)
+schema.tuple([a, b, c])
+schema.or(a, b, ...)
+schema.intersection(a, b)
+schema.discriminatedUnion('type', [optionA, optionB, ...])
+schema.lazy(() => recursiveSchema)
+```
+
+**共用 method-chain（所有 schema）**
+
+```ts
+.alias('field_name')   // Go json:"" tag
+.default(value)        // 缺省值
+.optional()            // pointer-like，Output 可省
+.null()                // 接受 null
+.nullish()             // optional + nullable
+.refine(check, msg?)   // 自定义验证（sync 或 async）
+.transform(fn)         // 输出变换
+.pipe(target)          // 链接到下个 schema
+.brand<B>()            // nominal type（纯类型层）
+.catch(fallback)       // 失败降级
+.encode(value)         // Go json.Marshal 对偶
+['~standard']          // Standard Schema 双向兼容
+```
+
+**Parse 入口**
+
+```ts
+.parse(value)             // 抛 SchemaError
+.safeParse(value)         // { ok: true, value } | { ok: false, error }
+.parseAsync(value)        // 异步 await（支持 async refine）
+.safeParseAsync(value)    // 异步 safe
+```
+
+**String 内建约束**
+
+```ts
+.min(n) / .max(n) / .length(n)
+.regex(/pattern/) / .email() / .url() / .uuid()
+.startsWith(prefix) / .endsWith(suffix)
+.datetime() / .ip() / .cuid() / .nanoid()
+```
+
+**Number 内建约束**
+
+```ts
+.min(n) / .max(n) / .gt(n) / .gte(n) / .lt(n) / .lte(n)
+.int() / .positive() / .negative() / .nonnegative() / .nonpositive()
+.finite() / .multipleOf(divisor)
+```
+
+**Array 内建约束**
+
+```ts
+.min(n) / .max(n) / .length(n) / .nonempty()
+```
+
+**Object utility**
+
+```ts
+.strict(options?)         // { unknownKeys?, missingKeys? }
+.passthrough()            // 保留未知字段
+.strip()                  // 丢弃未知字段（默认）
+.pick({ a: true, b: true })
+.omit({ a: true })
+.partial()                // 所有字段变 optional
+.required()               // 所有字段变 required
+.extend({...})            // 追加/覆盖字段
+.merge(otherObjectSchema)
+.keyof()                  // 返回 enum schema with declared keys
+```
+
+**SchemaError 与全局错误**
+
+```ts
+error.format()      // { _errors: [], [key]: subtree }
+error.flatten()     // { formErrors: [], fieldErrors: {} }
+error.prettify()    // 多行可读字符串
+setErrorMap(map)    // 全局拦截 issue.message，i18n 友好
+```
+
+### Standard Schema 互操作
+
+任何 `@defjs/core` schema 都暴露 `~standard` 属性（`vendor: 'defjs', version: 1`），可直接传给 tRPC v11 / Hono / TanStack Form / Drizzle / RHF resolvers 等支持 Standard Schema 的库。
+
+```ts
+const userSchema = schema.object({...})
+const standard = userSchema['~standard']
+const result = await standard.validate({...})  // { value } | { issues }
+```
 
 ## HTTP
 

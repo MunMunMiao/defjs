@@ -27,9 +27,11 @@ export type SocketSchemas = Record<string, AnyCompatibleSchema>
 
 type KnownSocketKey<TMessages extends SocketSchemas> = Exclude<Extract<keyof TMessages, string>, 'default'>
 
+type SimplifySocket<T> = { [K in keyof T]: T[K] } & {}
+
 type NormalizeSocketMessage<TKey extends string, TPayload> =
   TPayload extends Record<string, unknown>
-    ? { type: TKey } & TPayload
+    ? SimplifySocket<{ type: TKey } & TPayload>
     : {
         data: TPayload
         type: TKey
@@ -38,7 +40,7 @@ type NormalizeSocketMessage<TKey extends string, TPayload> =
 type SocketSendMessage<TKey extends string, TPayload> =
   TPayload extends Record<string, unknown>
     ?
-        | ({ type: TKey } & TPayload)
+        | SimplifySocket<{ type: TKey } & TPayload>
         | {
             data: TPayload
             type: TKey
@@ -135,7 +137,7 @@ export interface WebSocketRef<TIncoming = unknown, TOutgoing = never> extends Pr
 
 type IsInputOptional<TInput extends AnyCompatibleSchema | undefined> = [TInput] extends [undefined]
   ? true
-  : undefined extends CompatibleInputOf<NonNullable<TInput>>
+  : {} extends CompatibleInputOf<NonNullable<TInput>>
     ? true
     : false
 
