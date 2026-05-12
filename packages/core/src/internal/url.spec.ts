@@ -1,0 +1,69 @@
+import { describe, expect, test } from 'vitest'
+import { appendRecordToHeaders, createResolvedRequestUrl, createSearchParams, fillUrl } from './url'
+
+describe('url helpers', () => {
+  test('should resolve endpoint urls with normalized client endpoint path', () => {
+    expect(createResolvedRequestUrl('https://api.example.com/v1', '/user/info').toString()).toBe('https://api.example.com/v1/user/info')
+    expect(createResolvedRequestUrl('https://api.example.com/v1/', 'user/info', 'page=1').toString()).toBe(
+      'https://api.example.com/v1/user/info?page=1',
+    )
+  })
+
+  test('should reject invalid endpoint paths', () => {
+    expect(() => createResolvedRequestUrl('/api', '/user/info')).toThrowError('ERR_INVALID_CLIENT_ENDPOINT')
+    expect(() => createResolvedRequestUrl('https://api.example.com/v1', 'https://other.example.com/user')).toThrowError(
+      'Endpoint path must not be an absolute URL',
+    )
+    expect(() => createResolvedRequestUrl('https://api.example.com/v1', '/user/info?page=1')).toThrowError(
+      'Endpoint path must not include query or hash',
+    )
+    expect(() => createResolvedRequestUrl('https://api.example.com/v1', '/user/info#fragment')).toThrowError(
+      'Endpoint path must not include query or hash',
+    )
+  })
+
+  test('should fill urls and create search params from request values', () => {
+    expect(
+      fillUrl('/user/:id/:name', {
+        id: [1, 2],
+        name: undefined,
+      }),
+    ).toBe('/user/1/undefined')
+
+    const params = createSearchParams({
+      filters: { active: true },
+      include: true,
+      page: 1,
+      skip: undefined,
+      tags: ['a', 'b'],
+    })
+
+    expect(params.toString()).toBe('filters=%7B%22active%22%3Atrue%7D&include=true&page=1&tags=a&tags=b')
+  })
+
+  test('should append record-like values into headers', () => {
+    const fromHeaders = new Headers()
+    fromHeaders.set('x-trace-id', 'trace-1')
+
+    const copied = new Headers()
+    appendRecordToHeaders(copied, fromHeaders)
+    expect(copied.get('x-trace-id')).toBe('trace-1')
+
+    const fromTuples = new Headers()
+    appendRecordToHeaders(fromTuples, [
+      ['set-cookie', 'a=1'],
+      ['set-cookie', 'b=2'],
+    ])
+    expect(fromTuples.get('set-cookie')).toBe('a=1, b=2')
+
+    const fromRecord = new Headers()
+    appendRecordToHeaders(fromRecord, {
+      'x-number': 1,
+      'x-roles': ['admin', 'user'],
+      'x-skip': undefined,
+    })
+    expect(fromRecord.get('x-number')).toBe('1')
+    expect(fromRecord.get('x-roles')).toBe('admin, user')
+    expect(fromRecord.has('x-skip')).toBe(false)
+  })
+})

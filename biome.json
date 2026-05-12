@@ -1,6 +1,10 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.8/schema.json",
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**/*", "!**/coverage", "!**/coverage/**", "!**/coverage-*", "!**/coverage-*/**", "!**/dist", "!**/dist/**"]
+  },
   "javascript": {
     "globals": ["Bun"],
     "formatter": {

@@ -2,7 +2,9 @@
   "name": "defjs",
   "version": "0.0.0",
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "devDependencies": {
     "@biomejs/biome": "2.4.8",
     "@hono/node-server": "^1.19.11",
@@ -21,20 +23,9 @@
     "webdriverio": "^9.20.0"
   },
   "scripts": {
-    "build": "bun --filter '@defjs/core' build",
-    "lint": "bun --filter '@defjs/core' lint",
-    "lint:fix": "bun --filter '@defjs/core' lint:fix",
-    "test": "vitest run --project core-node",
-    "test:all": "vitest run --project core-node --project core-bun-compat --project core-deno-compat --project core-browser-chrome --project core-browser-firefox",
-    "test:browser:chrome": "vitest run --project core-browser-chrome",
-    "test:browser:firefox": "vitest run --project core-browser-firefox",
-    "test:browser:safari": "vitest run --project core-browser-safari",
-    "test:browsers": "vitest run --project core-browser-chrome --project core-browser-firefox",
-    "test:bun": "vitest run --project core-bun-compat",
-    "test:deno": "vitest run --project core-deno-compat",
-    "test:node": "vitest run --project core-node",
-    "test:runtime": "vitest run --project core-node --project core-bun-compat --project core-deno-compat",
-    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit",
-    "test:all:macos": "vitest run --project core-browser-safari"
+    "build": "cd packages/core && bun scripts/build.ts",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "typecheck": "bun x tsc -p packages/core/tsconfig.json --noEmit"
   }
 }

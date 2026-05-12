@@ -1,3 +1,4 @@
+import type { Socket } from 'node:net'
 import { createAdaptorServer, type ServerType } from '@hono/node-server'
 import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import { Hono } from 'hono'
@@ -14,6 +15,13 @@ declare module 'vitest' {
 let testServer: ServerType | undefined
 let nodeWebSocket: NodeWebSocket | undefined
 let testServerAddr: string
+const testServerSockets = new Set<Socket>()
+const isDenoRuntime = 'Deno' in globalThis
+
+type ServerConnectionCleanup = {
+  closeAllConnections?: () => void
+  closeIdleConnections?: () => void
+}
 
 export async function setup({ provide }: TestProject) {
   const app = new Hono()
@@ -277,6 +285,13 @@ export async function setup({ provide }: TestProject) {
   })
   testServer = server
 
+  server.on('connection', socket => {
+    testServerSockets.add(socket)
+    socket.on('close', () => {
+      testServerSockets.delete(socket)
+    })
+  })
+
   injectWebSocket(server)
 
   await new Promise<void>((resolve, reject) => {
@@ -290,6 +305,7 @@ export async function setup({ provide }: TestProject) {
   }
 
   testServerAddr = `http://127.0.0.1:${address.port}`
+  server.unref()
   provide('testServerHost', testServerAddr)
   console.log(`Test server is running on ${testServerAddr}`)
 }
@@ -319,9 +335,21 @@ export async function teardown() {
   }
 
   if (!testServer.listening) {
+    testServerSockets.clear()
     testServer = undefined
     return
   }
+
+  if (!isDenoRuntime) {
+    const serverWithCleanup = testServer as ServerType & ServerConnectionCleanup
+    serverWithCleanup.closeIdleConnections?.()
+    serverWithCleanup.closeAllConnections?.()
+  }
+
+  testServerSockets.forEach(socket => {
+    socket.destroy()
+  })
+  testServerSockets.clear()
 
   await new Promise<void>((resolve, reject) => {
     testServer?.close(error => {

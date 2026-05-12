@@ -1,4 +1,6 @@
-import type { InterceptorFn } from '../interceptor'
+import type { HttpRequest } from '../../internal/http_request'
+import { createHttpInterceptor, type HttpInterceptor } from '../interceptor'
+import { createSSEInterceptor, type SSEInterceptor } from '../interceptor'
 
 export type BasicCredential = {
   username: string
@@ -9,7 +11,7 @@ export type BasicAuthInterceptorOptions = {
   encode?: (credential: BasicCredential) => string
 }
 
-export function basicAuthInterceptor(fn: () => BasicCredential, options?: BasicAuthInterceptorOptions): InterceptorFn {
+function createBasicAuthModifier(fn: () => BasicCredential, options?: BasicAuthInterceptorOptions): (req: HttpRequest) => HttpRequest {
   let encode = options?.encode
 
   if (!encode) {
@@ -20,10 +22,19 @@ export function basicAuthInterceptor(fn: () => BasicCredential, options?: BasicA
     encode = (data: BasicCredential) => btoa(`${data.username}:${data.password}`)
   }
 
-  return (req, next) => {
+  return (req: HttpRequest): HttpRequest => {
     const headers = req.headers || new Headers()
     headers.set('Authorization', `Basic ${encode(fn())}`)
-    req.headers = headers
-    return next(req)
+    return { ...req, headers }
   }
+}
+
+export function basicAuthHttpInterceptor(fn: () => BasicCredential, options?: BasicAuthInterceptorOptions): HttpInterceptor {
+  const modify = createBasicAuthModifier(fn, options)
+  return createHttpInterceptor((req, next) => next(modify(req)))
+}
+
+export function basicAuthSSEInterceptor(fn: () => BasicCredential, options?: BasicAuthInterceptorOptions): SSEInterceptor {
+  const modify = createBasicAuthModifier(fn, options)
+  return createSSEInterceptor((req, next) => next(modify(req)))
 }

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { HttpRequest } from '../http'
-import { type InterceptorFn, makeInterceptorChain } from '../interceptor/interceptor'
-import { makeFakeHandler } from '../transport/http/test_handler'
+import { makeFakeHandler } from '../http/transport/test_handler'
+import { createHttpInterceptor, type InterceptorFn, makeInterceptorChain } from '../interceptor/interceptor'
 
 describe('interceptor', () => {
-  it('should work', async () => {
+  it('should work with InterceptorFn chain', async () => {
     const result: number[] = []
     const fun1: InterceptorFn = (req, next) => {
       result.push(1)
@@ -48,5 +48,11 @@ describe('interceptor', () => {
     await chain(req, handler)
 
     expect(result).toEqual([1, 2, 3, 3.1, 2.1, 1.1])
+  })
+
+  it('should create HttpInterceptor with createHttpInterceptor', () => {
+    const interceptor = createHttpInterceptor((req, next) => next(req))
+    expect(interceptor.kind).toBe('http')
+    expect(typeof interceptor.fn).toBe('function')
   })
 })

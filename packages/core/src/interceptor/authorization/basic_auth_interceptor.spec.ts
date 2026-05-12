@@ -1,26 +1,24 @@
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../../http'
-import { type BasicCredential, basicAuthInterceptor } from '../../interceptor/authorization/basic_auth_interceptor'
-import { makeInterceptorChain } from '../../interceptor/interceptor'
-import { makeFakeHandler } from '../../transport/http/test_handler'
+import { makeFakeHandler } from '../../http/transport/test_handler'
+import { type BasicCredential, basicAuthHttpInterceptor, basicAuthSSEInterceptor } from '../../interceptor/authorization/basic_auth_interceptor'
+import { makeInterceptorChain, makeSSEInterceptorChain } from '../../interceptor/interceptor'
+import type { EventStreamHandle } from '../../sse/transport/event_stream'
 
 describe('Basic Auth Interceptor', () => {
-  test('should use basic auth', async () => {
+  const credential: BasicCredential = {
+    username: 'user',
+    password: '123',
+  }
+
+  test('basicAuthHttpInterceptor should set Authorization header', async () => {
     const hq: HttpRequest = {
       baseEndpoint: 'https://example.com',
       endpoint: '/v1/user',
       method: 'GET',
     }
-    const credential: BasicCredential = {
-      username: 'user',
-      password: '123',
-    }
-    const chain = makeInterceptorChain([
-      basicAuthInterceptor(() => credential),
-      basicAuthInterceptor(() => credential, {
-        encode: data => btoa(`${data.username}:${data.password}`),
-      }),
-    ])
+    const interceptor = basicAuthHttpInterceptor(() => credential)
+    const chain = makeInterceptorChain([interceptor.fn])
     const handler = makeFakeHandler({
       response: {
         status: 200,
@@ -36,18 +34,69 @@ describe('Basic Auth Interceptor', () => {
     await chain(hq, handler)
   })
 
+  test('basicAuthHttpInterceptor should accept custom encode', async () => {
+    const hq: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'GET',
+    }
+    const interceptor = basicAuthHttpInterceptor(() => credential, {
+      encode: data => btoa(`${data.username}:${data.password}`),
+    })
+    const chain = makeInterceptorChain([interceptor.fn])
+    const handler = makeFakeHandler({
+      response: {
+        status: 200,
+        statusText: 'OK',
+      },
+      onRequestBefore: req => {
+        const authorization = req.headers?.get('Authorization')
+        expect(authorization).toEqual(`Basic ${btoa(`${credential.username}:${credential.password}`)}`)
+      },
+    })
+
+    await chain(hq, handler)
+  })
+
+  test('basicAuthSSEInterceptor should set Authorization header', async () => {
+    const hq: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/events',
+      method: 'GET',
+    }
+    const interceptor = basicAuthSSEInterceptor(() => credential)
+    const chain = makeSSEInterceptorChain([interceptor.fn])
+
+    let capturedRequest: HttpRequest | undefined
+    const fakeSseHandler = async (req: HttpRequest) => {
+      capturedRequest = req
+      return {} as EventStreamHandle<unknown>
+    }
+
+    await chain(hq, fakeSseHandler)
+
+    expect(capturedRequest).toBeDefined()
+    expect(capturedRequest!.headers?.get('Authorization')).toEqual(`Basic ${btoa(`${credential.username}:${credential.password}`)}`)
+  })
+
   test('should throw error if btoa is not supported', () => {
     const _btoa = globalThis.btoa
     // @ts-ignore
     globalThis.btoa = undefined
 
-    const credential: BasicCredential = {
-      username: 'user',
-      password: '123',
-    }
-
-    expect(() => basicAuthInterceptor(() => credential)).toThrowError()
+    expect(() => basicAuthHttpInterceptor(() => credential)).toThrowError()
+    expect(() => basicAuthSSEInterceptor(() => credential)).toThrowError()
 
     globalThis.btoa = _btoa
+  })
+
+  test('basicAuthHttpInterceptor should return kind http', () => {
+    const interceptor = basicAuthHttpInterceptor(() => credential)
+    expect(interceptor.kind).toBe('http')
+  })
+
+  test('basicAuthSSEInterceptor should return kind sse', () => {
+    const interceptor = basicAuthSSEInterceptor(() => credential)
+    expect(interceptor.kind).toBe('sse')
   })
 })

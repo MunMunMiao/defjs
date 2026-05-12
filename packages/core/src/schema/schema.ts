@@ -238,7 +238,7 @@ export function createNullSchema(): Schema<null, null> {
 
 export function createAnySchema(): Schema<unknown, any> {
   return makeSchema({
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     kind: 'any',
     refinements: [],
   }) as Schema<unknown, any>
@@ -246,7 +246,7 @@ export function createAnySchema(): Schema<unknown, any> {
 
 export function createUnknownSchema(): Schema<unknown, unknown> {
   return makeSchema({
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     kind: 'unknown',
     refinements: [],
   }) as Schema<unknown, unknown>
@@ -255,7 +255,7 @@ export function createUnknownSchema(): Schema<unknown, unknown> {
 export function createLiteralSchema<const T extends LiteralValue>(value: T): Schema<T | undefined, T> {
   return makeSchema({
     expected: describeValue(value),
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     kind: 'literal',
     refinements: [],
     value,
@@ -265,7 +265,7 @@ export function createLiteralSchema<const T extends LiteralValue>(value: T): Sch
 export function createEnumSchema<const T extends readonly [string, ...string[]]>(values: T): Schema<T[number] | undefined, T[number]> {
   return makeSchema({
     expected: values.map(item => JSON.stringify(item)).join(' | '),
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     kind: 'enum',
     refinements: [],
     values,
@@ -283,7 +283,7 @@ export function createObjectEnumSchema<const T extends Record<string, number | s
 
   return makeSchema({
     expected: values.map(item => JSON.stringify(item)).join(' | '),
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     kind: 'enum',
     refinements: [],
     values: values as [T[keyof T], ...T[keyof T][]],
@@ -294,7 +294,7 @@ export function createArraySchema<S extends SchemaLike>(item: S): ArraySchema<S>
   assertSchema(item, 'array item')
 
   return makeSchema({
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     item,
     kind: 'array',
     refinements: [],
@@ -308,7 +308,7 @@ export function createObjectSchema<const T extends Record<string, any>>(shape: T
 
   return makeSchema({
     cache: new WeakMap(),
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     kind: 'object',
     refinements: [],
     shape,
@@ -319,7 +319,7 @@ export function createRecordSchema<S extends SchemaLike>(value: S): RecordSchema
   assertSchema(value, 'record value')
 
   return makeSchema({
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     kind: 'record',
     refinements: [],
     value,
@@ -332,7 +332,7 @@ export function createTupleSchema<const T extends readonly [SchemaLike, ...Schem
   }
 
   return makeSchema({
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     items,
     kind: 'tuple',
     refinements: [],
@@ -345,7 +345,7 @@ export function createUnionSchema<const T extends readonly [SchemaLike, ...Schem
   }
 
   return makeSchema({
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     kind: 'or',
     options,
     refinements: [],
@@ -384,18 +384,12 @@ function createPrimitiveSchema<T>(
 ): Schema<T | undefined, T> {
   return makeSchema({
     ...definition,
-    flags: createFlags(),
+    flags: DEFAULT_FLAGS,
     refinements: [],
   }) as Schema<T | undefined, T>
 }
 
-function createFlags(): SchemaFlags {
-  return {
-    hasDefault: false,
-    nullable: false,
-    optional: false,
-  }
-}
+const DEFAULT_FLAGS: SchemaFlags = { hasDefault: false, nullable: false, optional: false }
 
 function makeSchema(definition: SchemaDefinition): RuntimeSchema {
   const schema: RuntimeSchema = {
