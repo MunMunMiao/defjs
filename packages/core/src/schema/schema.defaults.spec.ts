@@ -131,4 +131,37 @@ describe('schema defaults and edge cases', () => {
       }).parse({}),
     ).toThrowError('object field "bad" must be a schema')
   })
+
+  test('falls back to manual clone for Date without structuredClone', () => {
+    globalThis.structuredClone = undefined as unknown as typeof structuredClone
+
+    const payload = schema.object({
+      when: schema.date().default(new Date('2026-05-12T10:00:00Z')),
+    })
+
+    const [, first] = payload.parse({})
+    const [, second] = payload.parse({})
+
+    expect(first!.when.getTime()).toBe(second!.when.getTime())
+    expect(first!.when).not.toBe(second!.when)
+  })
+
+  test('intersection zero value fails when right side fails', () => {
+    const s = schema.intersection(
+      schema.object({ a: schema.string() }),
+      schema.object({ b: schema.string().refine(() => false, 'fail') }),
+    )
+    const [err] = s.parse(undefined)
+    expect(err).toBeInstanceOf(SchemaError)
+    expect(err?.message).toContain('fail')
+  })
+
+  test('discriminatedUnion zero value fails when first option fails', () => {
+    const s = schema.discriminatedUnion('type', [
+      schema.object({ type: schema.literal('a'), payload: schema.string().refine(() => false, 'fail') }),
+    ])
+    const [err] = s.parse(undefined)
+    expect(err).toBeInstanceOf(SchemaError)
+    expect(err?.message).toContain('fail')
+  })
 })

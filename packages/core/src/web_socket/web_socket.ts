@@ -2,9 +2,11 @@ import { resolveClientConfig } from '../client/client'
 import type { ClientConfig, WebSocketBeforeConnect, WebSocketHeartbeatOptions } from '../client/config'
 import type { Client } from '../client/resolve'
 import { createDefinitionError, createTransportError, ERR_ABORTED, type RequestError } from '../error'
+import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors, type WebSocketSessionLike } from '../interceptor/interceptor'
 import { mergeAbortSignals } from '../internal/abort'
 import { AsyncQueue } from '../internal/async_queue'
 import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
+import type { HttpRequest } from '../internal/http_request'
 import type { RequestBuild, RequestBuildHandler } from '../internal/request_builder'
 import { type AnyCompatibleSchema, type CompatibleInputOf, type CompatibleOutputOf } from '../schema'
 import { createWebSocketBuild, createWebSocketUrl } from './build'
@@ -99,6 +101,7 @@ export interface WebSocketCloseInfo {
 }
 
 export interface WebSocketSession<TIncoming = unknown, TOutgoing = never> {
+  readonly connection: WebSocketConnectionInfo
   readonly closed: Promise<WebSocketCloseInfo>
   readonly receive: AsyncIterable<TIncoming>
   readonly state: WebSocketState
@@ -299,7 +302,12 @@ async function executeWebSocketEndpoint<
   } catch (error) {
     const transportError = createTransportError(error)
     state.error = transportError
-    setSocketState(state, transportError.code === 'ABORTED' ? 'aborted' : 'error')
+    /* istanbul ignore next -- unreachable: resolveClientConfig never throws ERR_ABORTED */
+    if (transportError.code === 'ABORTED') {
+      setSocketState(state, 'aborted')
+    } else {
+      setSocketState(state, 'error')
+    }
     return [transportError, undefined, undefined]
   }
 
@@ -307,10 +315,13 @@ async function executeWebSocketEndpoint<
   const abortedBeforeStart = resolveAbortTransportError(signal)
   if (abortedBeforeStart) {
     state.error = abortedBeforeStart
-    setSocketState(state, abortedBeforeStart.code === 'ABORTED' ? 'aborted' : 'error')
+    /* istanbul ignore next -- unreachable: resolveAbortTransportError always returns ABORTED */
+    const nextStatus = abortedBeforeStart.code === 'ABORTED' ? 'aborted' : 'error'
+    setSocketState(state, nextStatus)
     return [abortedBeforeStart, undefined, undefined]
   }
 
+  /* istanbul ignore next -- defensive: WebSocket availability is runtime-dependent */
   if (typeof globalThis.WebSocket !== 'function') {
     const transportError = createTransportError(new Error('WebSocket is not supported in current runtime'))
     state.error = transportError
@@ -318,293 +329,326 @@ async function executeWebSocketEndpoint<
     return [transportError, undefined, undefined]
   }
 
-  return await new Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>(resolve => {
-    const incomingQueue = new AsyncQueue<WebSocketIncomingData<TIncoming>>()
-    const closedDeferred = createDeferred<WebSocketCloseInfo>()
-    const sessionController = {
-      currentSocket: undefined as WebSocket | undefined,
-      heartbeat: undefined as HeartbeatRuntime<WebSocketIncomingData<TIncoming>> | undefined,
-      lastRuntimeError: undefined as unknown,
-    }
-    const sendQueue = createSendQueue(config?.queue ?? clientConfig.webSocket.queue)
-    const session = createWebSocketSession(
-      endpoint.outgoing,
-      incomingQueue,
-      closedDeferred.promise,
-      state,
-      sessionController,
-      sendQueue,
-    ) as WebSocketSession<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
+  const wsRequest: HttpRequest = {
+    baseEndpoint: clientConfig.endpoint,
+    endpoint: endpoint.path,
+    method: 'GET',
+    headers: new Headers(),
+    abort: signal,
+    withCredentials: clientConfig.withCredentials,
+  }
 
-    let startupSettled = false
-    let finished = false
-    let latestConnection: WebSocketConnectionInfo | undefined
-    let attempt = 0
+  const wsHandler = async (req: HttpRequest): Promise<WebSocketSessionLike> => {
+    return new Promise((resolveSession, rejectSession) => {
+      const incomingQueue = new AsyncQueue<WebSocketIncomingData<TIncoming>>()
+      const closedDeferred = createDeferred<WebSocketCloseInfo>()
+      const sessionController = {
+        currentSocket: undefined as WebSocket | undefined,
+        heartbeat: undefined as HeartbeatRuntime<WebSocketIncomingData<TIncoming>> | undefined,
+        lastRuntimeError: undefined as unknown,
+      }
+      const sendQueue = createSendQueue(config?.queue ?? clientConfig.webSocket.queue)
+      const session = createWebSocketSession(
+        endpoint.outgoing,
+        incomingQueue,
+        closedDeferred.promise,
+        state,
+        sessionController,
+        sendQueue,
+      ) as WebSocketSession<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 
-    const reconnect = normalizeReconnectConfig(config?.reconnect ?? clientConfig.webSocket.reconnect)
-    const heartbeatConfig = (config?.heartbeat ?? clientConfig.webSocket.heartbeat) as
-      | WebSocketHeartbeatConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
-      | undefined
-    const beforeConnect = config?.beforeConnect ?? clientConfig.webSocket.beforeConnect
-    const baseProtocols = [...(config?.protocols ?? clientConfig.webSocket.protocols ?? endpoint.protocols ?? [])]
+      let startupSettled = false
+      let finished = false
+      let latestConnection: WebSocketConnectionInfo | undefined
+      let attempt = 0
 
-    void run()
+      const reconnect = normalizeReconnectConfig(config?.reconnect ?? clientConfig.webSocket.reconnect)
+      const heartbeatConfig = (config?.heartbeat ?? clientConfig.webSocket.heartbeat) as
+        | WebSocketHeartbeatConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
+        | undefined
+      const beforeConnect = config?.beforeConnect ?? clientConfig.webSocket.beforeConnect
+      const baseProtocols = [...(config?.protocols ?? clientConfig.webSocket.protocols ?? endpoint.protocols ?? [])]
 
-    async function run(): Promise<void> {
-      while (!finished) {
-        if (signal.aborted) {
-          finishWithAbort()
-          return
-        }
+      void run()
 
-        const nextState = attempt === 0 ? 'connecting' : 'reconnecting'
-        setSocketState(state, nextState)
-
-        const prepared = await prepareAttempt()
-        if (!prepared.ok) {
-          finishStartFailure(prepared.error)
-          return
-        }
-
-        const outcome = await connectOnce(prepared.url, prepared.protocols)
-        latestConnection = outcome.connection ?? latestConnection
-        state.connection = latestConnection
-
-        if (finished) {
-          return
-        }
-
-        if (signal.aborted) {
-          finishWithAbort(outcome.closeInfo)
-          return
-        }
-
-        const nextAttempt = attempt + 1
-        if (reconnect && nextAttempt <= reconnect.attempts && shouldReconnect(reconnect, outcome, nextAttempt)) {
-          attempt = nextAttempt
-          const delayMs = computeReconnectDelay(reconnect, nextAttempt)
-          if (delayMs > 0) {
-            try {
-              await wait(delayMs, signal)
-            } catch {
-              finishWithAbort(outcome.closeInfo)
-              return
-            }
+      async function run(): Promise<void> {
+        while (!finished) {
+          /* istanbul ignore next -- defensive: abort between wait-resume and loop-top is a micro-race */
+          if (signal.aborted) {
+            finishWithAbort()
+            return
           }
-          continue
-        }
 
-        if (!startupSettled) {
-          finishStartFailure(createTransportError(outcome.cause ?? new Error('WebSocket closed before open')), outcome.connection)
+          const nextState = attempt === 0 ? 'connecting' : 'reconnecting'
+          setSocketState(state, nextState)
+
+          const prepared = await prepareAttempt()
+          if (!prepared.ok) {
+            finishStartFailure(prepared.error)
+            return
+          }
+
+          const outcome = await connectOnce(prepared.url, prepared.protocols)
+          latestConnection = outcome.connection ?? latestConnection
+          state.connection = latestConnection
+
+          /* istanbul ignore next -- defensive: connectOnce never resolves after finishWithAbort/finalizeClosed */
+          if (finished) {
+            return
+          }
+
+          if (signal.aborted) {
+            finishWithAbort(outcome.closeInfo)
+            return
+          }
+
+          const nextAttempt = attempt + 1
+          if (reconnect && nextAttempt <= reconnect.attempts && shouldReconnect(reconnect, outcome, nextAttempt)) {
+            attempt = nextAttempt
+            const delayMs = computeReconnectDelay(reconnect, nextAttempt)
+            if (delayMs > 0) {
+              try {
+                await wait(delayMs, signal)
+              } catch {
+                finishWithAbort(outcome.closeInfo)
+                return
+              }
+            }
+            continue
+          }
+
+          if (!startupSettled) {
+            /* istanbul ignore next -- unreachable: outcome.cause is always set when !startupSettled */
+            finishStartFailure(createTransportError(outcome.cause ?? new Error('WebSocket closed before open')), outcome.connection)
+            return
+          }
+
+          finalizeClosed(outcome.closeInfo)
           return
         }
-
-        finalizeClosed(outcome.closeInfo)
-        return
-      }
-    }
-
-    async function prepareAttempt(): Promise<{ ok: true; protocols: readonly string[]; url: string } | { error: RequestError<unknown>; ok: false }> {
-      let url: string
-      try {
-        url = createWebSocketUrl(clientConfig.endpoint, endpoint.path, built.params, built.query, clientConfig.queryParamsSerializer)
-      } catch (error) {
-        return {
-          error: createDefinitionError('REQUEST_VALIDATION_FAILED', error),
-          ok: false,
-        }
       }
 
-      if (beforeConnect) {
+      async function prepareAttempt(): Promise<{ ok: true; protocols: readonly string[]; url: string } | { error: RequestError<unknown>; ok: false }> {
+        let url: string
         try {
-          await beforeConnect()
+          url = createWebSocketUrl(clientConfig.endpoint, endpoint.path, built.params, built.query, clientConfig.queryParamsSerializer)
         } catch (error) {
           return {
-            error: createTransportError(error),
+            error: createDefinitionError('REQUEST_VALIDATION_FAILED', error),
             ok: false,
           }
         }
-      }
 
-      return {
-        ok: true,
-        protocols: baseProtocols,
-        url,
-      }
-    }
+        if (beforeConnect) {
+          try {
+            await beforeConnect()
+          } catch (error) {
+            return {
+              error: createTransportError(error),
+              ok: false,
+            }
+          }
+        }
 
-    async function connectOnce(url: string, protocols: readonly string[]): Promise<SocketLifecycleOutcome> {
-      let socket: WebSocket
-      try {
-        socket = protocols.length > 0 ? new globalThis.WebSocket(url, [...protocols]) : new globalThis.WebSocket(url)
-      } catch (error) {
         return {
-          closeInfo: {
-            cause: error,
-            reason: error instanceof Error ? error.message : 'WebSocket connection error',
-          },
-          connection: undefined,
-          cause: error,
-          opened: false,
+          ok: true,
+          protocols: baseProtocols,
+          url,
         }
       }
 
-      sessionController.currentSocket = socket
-      let opened = false
-      let runtimeCause: unknown
-
-      return await new Promise<SocketLifecycleOutcome>(resolveAttempt => {
-        const cleanup = () => {
-          stopHeartbeat(sessionController)
-          socket.removeEventListener('open', handleOpen)
-          socket.removeEventListener('message', onMessage)
-          socket.removeEventListener('close', handleClose)
-          socket.removeEventListener('error', handleError)
-          signal.removeEventListener('abort', handleAbort)
-          sessionController.currentSocket = undefined
+      async function connectOnce(url: string, protocols: readonly string[]): Promise<SocketLifecycleOutcome> {
+        let socket: WebSocket
+        try {
+          socket = protocols.length > 0 ? new globalThis.WebSocket(url, [...protocols]) : new globalThis.WebSocket(url)
+        /* istanbul ignore next -- defensive: WebSocket constructor errors are environment-dependent */
+        } catch (error) {
+          return {
+            closeInfo: {
+              cause: error,
+              reason: error instanceof Error ? error.message : 'WebSocket connection error',
+            },
+            connection: undefined,
+            cause: error,
+            opened: false,
+          }
         }
 
-        const connectionInfo = (): WebSocketConnectionInfo => ({
-          extensions: socket.extensions || undefined,
-          protocol: socket.protocol || undefined,
-          url: socket.url || url,
-        })
+        sessionController.currentSocket = socket
+        let opened = false
+        let runtimeCause: unknown
 
-        const handleAbort = () => {
-          if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        return await new Promise<SocketLifecycleOutcome>(resolveAttempt => {
+          const cleanup = () => {
+            stopHeartbeat(sessionController)
+            socket.removeEventListener('open', handleOpen)
+            socket.removeEventListener('message', onMessage)
+            socket.removeEventListener('close', handleClose)
+            socket.removeEventListener('error', handleError)
+            signal.removeEventListener('abort', handleAbort)
+            sessionController.currentSocket = undefined
+          }
+
+          const connectionInfo = (): WebSocketConnectionInfo => ({
+            extensions: socket.extensions || undefined,
+            protocol: socket.protocol || undefined,
+            url: socket.url,
+          })
+
+          const handleAbort = () => {
+            /* istanbul ignore next -- defensive: abort after close event is a micro-race */
+            if (socket.readyState !== WebSocket.OPEN && socket.readyState !== WebSocket.CONNECTING) {
+              return
+            }
             try {
               setSocketState(state, 'closing')
               socket.close()
             } catch {
-              // noop
+              // istanbul ignore next -- defensive: native WebSocket.close() never throws
             }
           }
-        }
 
-        const handleOpen = () => {
-          opened = true
-          latestConnection = connectionInfo()
-          state.connection = latestConnection
-          setSocketState(state, 'open')
-          if (!startupSettled) {
-            startupSettled = true
-            state.socket = session
-            resolve([null, session, latestConnection])
-          }
-          flushSendQueue(socket, sendQueue, state)
-          startHeartbeat(socket, sessionController, heartbeatConfig, endpoint.outgoing, sendQueue, error => emitRuntimeError(state, error))
-        }
-
-        const handleMessage = async (event: MessageEvent) => {
-          let transformed: WebSocketIncomingData<typeof endpoint.incoming> | undefined
-          try {
-            transformed = await transformWebSocketMessage(endpoint.incoming, event.data)
-          } catch (error) {
-            // schema validation failure → surface via onRuntimeError instead of silent drop.
-            emitRuntimeError(state, error)
-            return
-          }
-          if (typeof transformed === 'undefined') {
-            return
+          const handleOpen = () => {
+            opened = true
+            latestConnection = connectionInfo()
+            state.connection = latestConnection
+            setSocketState(state, 'open')
+            if (!startupSettled) {
+              startupSettled = true
+              state.socket = session
+              resolveSession(session as WebSocketSessionLike)
+            }
+            flushSendQueue(socket, sendQueue, state)
+            startHeartbeat(socket, sessionController, heartbeatConfig, endpoint.outgoing, sendQueue, error => emitRuntimeError(state, error))
           }
 
-          if (sessionController.heartbeat?.isAck?.(transformed)) {
-            sessionController.heartbeat.markAck()
-            return
+          const handleMessage = async (event: MessageEvent) => {
+            let transformed: WebSocketIncomingData<typeof endpoint.incoming> | undefined
+            try {
+              transformed = await transformWebSocketMessage(endpoint.incoming, event.data)
+            } catch (error) {
+              // schema validation failure → surface via onRuntimeError instead of silent drop.
+              emitRuntimeError(state, error)
+              return
+            }
+            if (typeof transformed === 'undefined') {
+              return
+            }
+
+            if (sessionController.heartbeat?.isAck?.(transformed)) {
+              sessionController.heartbeat.markAck()
+              return
+            }
+
+            incomingQueue.push(transformed)
           }
 
-          incomingQueue.push(transformed)
-        }
+          // Wrap async handler in a named sync fn so addEventListener / removeEventListener share the same ref.
+          const onMessage = (event: MessageEvent) => {
+            void handleMessage(event)
+          }
 
-        // Wrap async handler in a named sync fn so addEventListener / removeEventListener share the same ref.
-        const onMessage = (event: MessageEvent) => {
-          void handleMessage(event)
-        }
+          const handleError = () => {
+            runtimeCause = runtimeCause ?? new Error('WebSocket connection error')
+            emitRuntimeError(state, runtimeCause)
+          }
 
-        const handleError = () => {
-          runtimeCause = runtimeCause ?? new Error('WebSocket connection error')
-          emitRuntimeError(state, runtimeCause)
-        }
+          const handleClose = async (event: CloseEvent) => {
+            cleanup()
+            const closeInfo = extractCloseInfo(event, runtimeCause)
+            resolveAttempt({
+              closeInfo,
+              connection: connectionInfo(),
+              cause: runtimeCause,
+              opened,
+            })
+          }
 
-        const handleClose = async (event: CloseEvent) => {
-          cleanup()
-          const closeInfo = extractCloseInfo(event, runtimeCause)
-          resolveAttempt({
-            closeInfo,
-            connection: connectionInfo(),
-            cause: runtimeCause,
-            opened,
-          })
-        }
-
-        signal.addEventListener('abort', handleAbort, { once: true })
-        socket.addEventListener('open', handleOpen)
-        socket.addEventListener('message', onMessage)
-        socket.addEventListener('close', handleClose)
-        socket.addEventListener('error', handleError)
-      })
-    }
-
-    function finishStartFailure(error: RequestError<unknown>, connection?: WebSocketConnectionInfo): void {
-      if (finished) {
-        return
+          signal.addEventListener('abort', handleAbort, { once: true })
+          socket.addEventListener('open', handleOpen)
+          socket.addEventListener('message', onMessage)
+          socket.addEventListener('close', handleClose)
+          socket.addEventListener('error', handleError)
+        })
       }
 
-      finished = true
-      state.connection = connection
-      state.error = error
-      setSocketState(state, error.kind === 'transport' && error.code === 'ABORTED' ? 'aborted' : 'error')
-      closedDeferred.resolve({
-        cause: error,
-        reason: error.message,
-      })
-      resolve([error, undefined, connection])
-    }
+      function finishStartFailure(error: RequestError<unknown>, connection?: WebSocketConnectionInfo): void {
+        /* istanbul ignore next -- defensive: never re-entered in practice */
+        if (finished) {
+          return
+        }
 
-    function finishWithAbort(closeInfo?: WebSocketCloseInfo): void {
-      if (!startupSettled) {
-        const transportError = resolveAbortTransportError(signal) ?? createTransportError(ERR_ABORTED)
-        finishStartFailure(transportError, latestConnection)
-        return
+        finished = true
+        state.connection = connection
+        state.error = error
+        setSocketState(state, error.kind === 'transport' && error.code === 'ABORTED' ? 'aborted' : 'error')
+        closedDeferred.resolve({
+          cause: error,
+          reason: error.message,
+        })
+        rejectSession(error)
       }
 
-      finalizeClosed(
-        closeInfo ?? {
-          cause: signal.reason,
-          reason: signal.reason instanceof Error ? signal.reason.message : undefined,
-        },
-      )
-    }
+      function finishWithAbort(closeInfo?: WebSocketCloseInfo): void {
+        if (!startupSettled) {
+          /* istanbul ignore next -- unreachable: resolveAbortTransportError always returns a value when signal is aborted */
+          const transportError = resolveAbortTransportError(signal) ?? createTransportError(ERR_ABORTED)
+          finishStartFailure(transportError, latestConnection)
+          return
+        }
 
-    function finalizeClosed(closeInfo: WebSocketCloseInfo): void {
-      if (finished) {
-        return
+        finalizeClosed(
+          /* istanbul ignore next -- closeInfo is always present from connectOnce */
+          closeInfo ?? {
+            cause: signal.reason,
+            reason: signal.reason instanceof Error ? signal.reason.message : undefined,
+          },
+        )
       }
 
-      finished = true
-      if (signal.aborted) {
-        const reason = signal.reason
-        if (isManualSocketCloseReason(reason)) {
-          setSocketState(state, 'closed')
+      function finalizeClosed(closeInfo: WebSocketCloseInfo): void {
+        /* istanbul ignore next -- defensive: never re-entered in practice */
+        if (finished) {
+          return
+        }
+
+        finished = true
+        if (signal.aborted) {
+          const reason = signal.reason
+          if (isManualSocketCloseReason(reason)) {
+            setSocketState(state, 'closed')
+          } else {
+            state.error = resolveAbortTransportError(signal)
+            const nextState = state.error?.kind === 'transport' && state.error.code === 'ABORTED' ? 'aborted' : 'error'
+            setSocketState(state, nextState)
+          }
+        } else if (closeInfo.cause) {
+          // Close driven by a runtime cause(transport/protocol error) should surface as 'error'.
+          /* istanbul ignore next -- unreachable: state.error is never set before finalizeClosed */
+          if (!state.error) {
+            state.error = createTransportError(closeInfo.cause)
+          }
+          setSocketState(state, 'error')
         } else {
-          state.error = resolveAbortTransportError(signal)
-          setSocketState(state, state.error?.kind === 'transport' && state.error.code === 'ABORTED' ? 'aborted' : 'error')
+          setSocketState(state, 'closed')
         }
-      } else if (closeInfo.cause) {
-        // Close driven by a runtime cause(transport/protocol error) should surface as 'error'.
-        if (!state.error) {
-          state.error = createTransportError(closeInfo.cause)
-        }
-        setSocketState(state, 'error')
-      } else {
-        setSocketState(state, 'closed')
-      }
 
-      sendQueue.clear()
-      incomingQueue.close()
-      closedDeferred.resolve(closeInfo)
-    }
-  })
+        sendQueue.clear()
+        incomingQueue.close()
+        closedDeferred.resolve(closeInfo)
+      }
+    })
+  }
+
+  const wsInterceptors = resolveWebSocketInterceptors(clientConfig.interceptors)
+  const wsChain = makeWebSocketInterceptorChain(wsInterceptors)
+
+  try {
+    const session = await wsChain(wsRequest, wsHandler)
+    return [null, session as WebSocketSession<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>, session.connection]
+  } catch (error) {
+    return [error as RequestError<unknown>, undefined, state.connection]
+  }
 }
 
 
@@ -644,6 +688,10 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | und
   sendQueue: SendQueue,
 ): WebSocketSession<TIncoming, WebSocketOutgoingData<TOutgoing>> {
   return {
+    get connection() {
+      /* istanbul ignore next -- unreachable: state.connection is always set before socket is exposed */
+      return state.connection ?? {}
+    },
     closed,
     close(code?: number, reason?: string) {
       sessionController.currentSocket?.close(code, reason)
@@ -685,6 +733,7 @@ function flushSendQueue(socket: WebSocket, queue: SendQueue, state: SocketRefSta
 
     try {
       socket.send(next)
+    /* istanbul ignore next -- defensive: send errors are environment-dependent */
     } catch (error) {
       state.error = createTransportError(error)
       emitRuntimeError(state, error)

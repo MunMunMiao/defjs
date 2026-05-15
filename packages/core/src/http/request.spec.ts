@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { makeHttpContext, makeHttpContextToken } from '../internal/context'
 import { schema } from '../schema'
-import { createHttpRequest, resolveDefaultResponseType } from './request'
+import { createHttpRequest, normalizeOutputShape, resolveDefaultResponseType } from './request'
 
 describe('http request helpers', () => {
   test('should create http request with builder helpers params query headers and custom serializer', () => {
@@ -264,5 +264,12 @@ describe('http request helpers', () => {
       }),
     ).toBe('json')
     expect(resolveDefaultResponseType(undefined, 'blob')).toBe('blob')
+  })
+
+  test('should normalize output shape with single status value', () => {
+    const map = normalizeOutputShape([
+      { body: schema.string(), status: 200 },
+    ])
+    expect(map.get(200)).toBeDefined()
   })
 })

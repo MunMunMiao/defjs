@@ -80,6 +80,33 @@ describe('schema refine behavior', () => {
     expect(err?.issues[0]?.message).toBe('Expected string at <root>, received 1')
   })
 
+  test('async refine fails on invalid value', async () => {
+    const s = schema.string().refine(() => false)
+    const [err] = await s.parseAsync('hello')
+    expect(err).toBeInstanceOf(SchemaError)
+  })
+
+  test('prettify formats root path as <root>', () => {
+    const [err] = schema.string().refine(() => false).parse('x')
+    expect(err).toBeInstanceOf(SchemaError)
+    expect(err!.prettify()).toContain('<root>')
+  })
+
+  test('format reuses existing nested path nodes', () => {
+    const payload = schema.object({
+      a: schema.object({
+        x: schema.string(),
+        y: schema.number(),
+      }),
+    })
+    const [err] = payload.parse({ a: { x: 1, y: 'bad' } })
+    expect(err).toBeInstanceOf(SchemaError)
+    const formatted = err!.format()
+    expect(formatted.a?._errors).toEqual([])
+    expect(formatted.a?.x?._errors).toEqual(['Expected string at a.x, received 1'])
+    expect(formatted.a?.y?._errors).toEqual(['Expected number at a.y, received "bad"'])
+  })
+
   test('covers remaining expected type and describe value branches', () => {
     const [anyErr, anyVal] = schema.any().parse(undefined)
     expect(anyErr).toBeNull()
@@ -225,5 +252,67 @@ describe('schema refine behavior', () => {
       .parse(['x'])
     expect(tupRefErr).toBeInstanceOf(SchemaError)
     expect(tupRefErr?.message).toContain('Expected tuple at <root>, received array')
+
+    const [intErr] = schema
+      .intersection(
+        schema.object({ a: schema.string() }),
+        schema.object({ b: schema.number() }),
+      )
+      .refine(() => false)
+      .parse({ a: 'x', b: 1 })
+    expect(intErr).toBeInstanceOf(SchemaError)
+    expect(intErr?.message).toContain('Expected object & object at <root>')
+
+    const [duErr] = schema
+      .discriminatedUnion('type', [
+        schema.object({ type: schema.literal('a'), a: schema.string() }),
+        schema.object({ type: schema.literal('b'), b: schema.number() }),
+      ])
+      .refine(() => false)
+      .parse({ type: 'a', a: 'x' })
+    expect(duErr).toBeInstanceOf(SchemaError)
+    expect(duErr?.message).toContain('Expected "a" | "b" at <root>')
+
+    const [dateErr, dateVal] = schema.date().default(new Date('2024-01-01')).parse(undefined)
+    expect(dateErr).toBeNull()
+    expect(dateVal).toEqual(new Date('2024-01-01'))
+
+    const [abRefErr] = schema
+      .arrayBuffer()
+      .refine(() => false)
+      .parse(new ArrayBuffer(1))
+    expect(abRefErr).toBeInstanceOf(SchemaError)
+    expect(abRefErr?.message).toContain('Expected ArrayBuffer')
+
+    const [blobErr] = schema
+      .blob()
+      .refine(() => false)
+      .parse(new Blob())
+    expect(blobErr).toBeInstanceOf(SchemaError)
+    expect(blobErr?.message).toContain('Expected Blob')
+
+    const [bigintErr] = schema
+      .bigint()
+      .refine(() => false)
+      .parse(1n)
+    expect(bigintErr).toBeInstanceOf(SchemaError)
+    expect(bigintErr?.message).toContain('Expected bigint')
+
+    // intersection where left branch is not an object falls back to right value
+    const [intNonObjErr, intNonObjVal] = schema
+      .intersection(schema.string(), schema.string())
+      .parse('x')
+    expect(intNonObjErr).toBeNull()
+    expect(intNonObjVal).toBe('x')
+
+    const [dateBoolErr] = schema.date().parse(true)
+    expect(dateBoolErr).toBeNull()
+
+    const [objOptErr, objOptVal] = schema.object({
+      name: schema.string(),
+      age: schema.number().optional(),
+    }).parse({ name: 'x' })
+    expect(objOptErr).toBeNull()
+    expect(objOptVal).toEqual({ name: 'x' })
   })
 })

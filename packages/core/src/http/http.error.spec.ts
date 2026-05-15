@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { ERR_ABORTED } from '../error'
+import { createHttpInterceptor } from '../interceptor'
+import { makeResponse } from '../internal/http_response'
 import { schema } from '../schema'
 import { defineRequest } from './index'
 
@@ -115,6 +118,452 @@ describe('request http runtime errors', () => {
     }
 
     expect(error.code).toBe('UNDECLARED_STATUS')
+  })
+
+  test('should return definition error when build throws', async () => {
+    const useBadBuild = defineRequest({
+      build: () => {
+        throw new Error('build failed')
+      },
+      method: 'GET',
+      path: '/test',
+    })
+
+    const [error, result, response] = await useBadBuild()
+
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+    expect(error?.kind).toBe('definition')
+
+    if (!error || error.kind !== 'definition') {
+      throw new Error('Expected definition error')
+    }
+
+    expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
+  })
+
+  test('should return transport error when interceptor chain throws', async () => {
+    const throwingInterceptor = createHttpInterceptor(async () => {
+      throw new Error('interceptor boom')
+    })
+
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: async () =>
+          makeResponse({
+            body: null,
+            status: 200,
+          }),
+      },
+      interceptors: [throwingInterceptor],
+    })
+
+    const useIntercepted = defineRequest({
+      method: 'GET',
+      output: {
+        200: schema.null(),
+      },
+      path: '/intercepted',
+    })
+
+    const [error, result, response] = await useIntercepted().with({ client })
+
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+    expect(error?.kind).toBe('transport')
+
+    if (!error || error.kind !== 'transport') {
+      throw new Error('Expected transport error')
+    }
+
+    expect(error.code).toBe('NETWORK_ERROR')
+  })
+
+  test('should return aborted error when signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort(ERR_ABORTED)
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        200: schema.null(),
+      },
+      path: '/null',
+    })
+
+    const ref = useRequest().with({ abort: controller.signal })
+    const [error, result, response] = await ref
+
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+    expect(error?.kind).toBe('transport')
+    expect(error?.code).toBe('ABORTED')
+    expect(ref.status).toBe('aborted')
+  })
+
+  test('should return transport error when client is invalid', async () => {
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        200: schema.null(),
+      },
+      path: '/null',
+    })
+
+    const [error, result, response] = await useRequest().with({ client: {} as never })
+
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+    expect(error?.kind).toBe('transport')
+    expect(error?.code).toBe('NETWORK_ERROR')
+  })
+
+  test('should return ABORTED when signal is aborted with explicit undefined reason', async () => {
+    const signal = { aborted: true, reason: undefined } as AbortSignal
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        200: schema.null(),
+      },
+      path: '/null',
+    })
+
+    const ref = useRequest().with({ abort: signal })
+    const [error, result, response] = await ref
+
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+    expect(error?.kind).toBe('transport')
+    expect(error?.code).toBe('ABORTED')
+    expect(ref.status).toBe('aborted')
+  })
+
+  test('should use HTTP status message when response.error is undefined without output', async () => {
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: async () =>
+          makeResponse({
+            body: null,
+            error: undefined,
+            status: 500,
+            statusText: 'Server Error',
+            url: 'https://example.com/test',
+          }),
+      },
+    })
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      path: '/test',
+    })
+
+    const [error, result, response] = await useRequest().with({ client })
+
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(500)
+    expect(error?.kind).toBe('http')
+    expect(error?.message).toContain('500')
+  })
+
+  test('should use HTTP status message when response.error is undefined with output schema', async () => {
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: async () =>
+          makeResponse({
+            body: { code: 'ERR' },
+            error: undefined,
+            headers: new Headers([['content-type', 'application/json']]),
+            status: 500,
+            statusText: 'Server Error',
+            url: 'https://example.com/test',
+          }),
+      },
+    })
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        500: schema.object({ code: schema.string() }),
+      },
+      path: '/test',
+    })
+
+    const [error, result, response] = await useRequest().with({ client })
+
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(500)
+    expect(error?.kind).toBe('http')
+    expect(error?.message).toContain('500')
+    if (error?.kind === 'http') {
+      expect(error.data).toEqual({ code: 'ERR' })
+    }
+  })
+
+  test('should expose error on ref after failed request', async () => {
+    const useBadRequest = defineRequest({
+      input: schema.object({
+        id: schema.number(),
+      }),
+      method: 'GET',
+      output: {
+        200: schema.null(),
+      },
+      path: '/null',
+    })
+
+    const ref = useBadRequest({ id: 'invalid' } as never)
+    const [error] = await ref
+
+    expect(error?.kind).toBe('definition')
+    expect(ref.error?.kind).toBe('definition')
+    expect(ref.status).toBe('error')
+  })
+
+  test('should cancel a pending request', async () => {
+    const useDelay = defineRequest({
+      build: (request, input) => {
+        request.queryParams({
+          ms: input.ms,
+        })
+      },
+      input: schema.object({
+        ms: schema.number(),
+      }),
+      method: 'GET',
+      output: {
+        200: schema.null(),
+      },
+      path: '/delay',
+    })
+
+    const ref = useDelay({ ms: 5000 })
+    ref.cancel()
+
+    const [error] = await ref
+    expect(error?.kind).toBe('transport')
+    expect(error?.code).toBe('ABORTED')
+    expect(ref.status).toBe('aborted')
+  })
+
+  test('should return transport error with ABORTED code when interceptor aborts', async () => {
+    const abortingInterceptor = createHttpInterceptor(async (req, next) => {
+      const result = await next(req)
+      if (result.status === 200) {
+        throw ERR_ABORTED
+      }
+      return result
+    })
+
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: async () =>
+          makeResponse({
+            body: null,
+            status: 200,
+          }),
+      },
+      interceptors: [abortingInterceptor],
+    })
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        200: schema.null(),
+      },
+      path: '/test',
+    })
+
+    const [error, result, response] = await useRequest().with({ client })
+
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+    expect(error?.kind).toBe('transport')
+    expect(error?.code).toBe('ABORTED')
+  })
+
+  test('should use handler without native timeout support', async () => {
+    let capturedTimeout: number | undefined
+
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: Object.assign(
+          async (req: { timeout?: number }) => {
+            capturedTimeout = req.timeout
+            return makeResponse({ body: null, status: 200 })
+          },
+          { supportsNativeTimeout: true },
+        ),
+      },
+    })
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        200: schema.null(),
+      },
+      path: '/test',
+    })
+
+    const [error] = await useRequest().with({ client, timeout: 5000 })
+
+    expect(error).toBeNull()
+    expect(capturedTimeout).toBe(5000)
+  })
+
+  test('should use string error for non-ok response without output', async () => {
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: async () => ({
+          body: null,
+          error: 'custom string error',
+          headers: new Headers(),
+          status: 500,
+          statusText: 'Server Error',
+          url: 'https://example.com/test',
+        }),
+      },
+    })
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      path: '/test',
+    })
+
+    const [error, result, response] = await useRequest().with({ client })
+
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(500)
+    expect(error?.kind).toBe('http')
+    expect(error?.message).toBe('custom string error')
+  })
+
+  test('should use string error for non-ok response with output schema', async () => {
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: async () => ({
+          body: { code: 'ERR' },
+          error: 'custom string error',
+          headers: new Headers([['content-type', 'application/json']]),
+          status: 500,
+          statusText: 'Server Error',
+          url: 'https://example.com/test',
+        }),
+      },
+    })
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        500: schema.object({ code: schema.string() }),
+      },
+      path: '/test',
+    })
+
+    const [error, result, response] = await useRequest().with({ client })
+
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(500)
+    expect(error?.kind).toBe('http')
+    expect(error?.message).toBe('custom string error')
+    if (error?.kind === 'http') {
+      expect(error.data).toEqual({ code: 'ERR' })
+    }
+  })
+
+  test('should return success for ok response without output', async () => {
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: async () =>
+          makeResponse({
+            body: null,
+            status: 204,
+            url: 'https://example.com/test',
+          }),
+      },
+    })
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      path: '/test',
+    })
+
+    const [error, result, response] = await useRequest().with({ client })
+
+    expect(error).toBeNull()
+    expect(result).toBeUndefined()
+    expect(response?.ok).toBe(true)
+  })
+
+  test('should use Error message for non-ok response without output', async () => {
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: async () =>
+          makeResponse({
+            body: null,
+            status: 500,
+            statusText: 'Internal Server Error',
+            url: 'https://example.com/test',
+          }),
+      },
+    })
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      path: '/test',
+    })
+
+    const [error, result, response] = await useRequest().with({ client })
+
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(500)
+    expect(error?.kind).toBe('http')
+    expect(error?.message).toContain('500')
+    expect(error?.message).toContain('Internal Server Error')
+  })
+
+  test('should use Error message for non-ok response with output schema', async () => {
+    const client = createClient({
+      endpoint: 'https://example.com',
+      http: {
+        handler: async () =>
+          makeResponse({
+            body: { code: 'ERR' },
+            headers: new Headers([['content-type', 'application/json']]),
+            status: 500,
+            statusText: 'Server Error',
+            url: 'https://example.com/test',
+          }),
+      },
+    })
+
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        500: schema.object({ code: schema.string() }),
+      },
+      path: '/test',
+    })
+
+    const [error, result, response] = await useRequest().with({ client })
+
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(500)
+    expect(error?.kind).toBe('http')
+    expect(error?.message).toContain('500')
+    expect(error?.message).toContain('Server Error')
+    if (error?.kind === 'http') {
+      expect(error.data).toEqual({ code: 'ERR' })
+    }
   })
 
   test('should support timeout in second-stage config', async () => {

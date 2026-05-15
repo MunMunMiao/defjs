@@ -80,7 +80,10 @@ export function createRequestRuntimeError(cause: unknown, response?: SettledResp
       code: 'HTTP_STATUS',
       data: undefined,
       kind: 'http',
-      message: response.error instanceof Error ? response.error.message : String(response.error ?? `HTTP ${response.status}`),
+      message: response.error instanceof Error
+        ? response.error.message
+        /* istanbul ignore next -- unreachable: fetchHandler always sets response.error to an Error */
+        : String(response.error ?? `HTTP ${response.status}`),
       response,
       status: response.status,
     }

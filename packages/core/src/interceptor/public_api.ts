@@ -2,10 +2,15 @@ export { type BasicAuthInterceptorOptions, basicAuthHttpInterceptor, basicAuthSS
 export {
   createHttpInterceptor,
   createSSEInterceptor,
+  createWebSocketInterceptor,
   type HttpInterceptor,
   type Interceptor,
   type InterceptorFn,
   type SSEHandler,
   type SSEInterceptor,
   type SSEInterceptorFn,
+  type WebSocketHandler,
+  type WebSocketInterceptor,
+  type WebSocketInterceptorFn,
+  type WebSocketSessionLike,
 } from './interceptor'

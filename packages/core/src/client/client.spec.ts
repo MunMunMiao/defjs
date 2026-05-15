@@ -106,4 +106,37 @@ describe('Client', () => {
       },
     })
   })
+
+  test('should cloneClient preserve previous endpoint when not overridden', () => {
+    const nextClient = cloneClient(baseClient, {})
+    expect(getClientConfig(nextClient).endpoint).toBe('https://example.com/v1')
+  })
+
+  test('should cloneClient preserve previous webSocket protocols when not overridden', () => {
+    const withProtocols = cloneClient(baseClient, {
+      webSocket: {
+        protocols: ['proto1'],
+      },
+    })
+    const nextClient = cloneClient(withProtocols, {
+      webSocket: {
+        heartbeat: { intervalMs: 500 },
+      },
+    })
+    expect(getClientConfig(nextClient).webSocket.protocols).toEqual(['proto1'])
+  })
+
+  test('should cloneClient override webSocket protocols with spread', () => {
+    const withProtocols = cloneClient(baseClient, {
+      webSocket: {
+        protocols: ['proto1'],
+      },
+    })
+    const nextClient = cloneClient(withProtocols, {
+      webSocket: {
+        protocols: ['proto2'],
+      },
+    })
+    expect(getClientConfig(nextClient).webSocket.protocols).toEqual(['proto2'])
+  })
 })

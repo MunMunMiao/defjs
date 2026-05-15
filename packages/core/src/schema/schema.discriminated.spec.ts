@@ -84,4 +84,19 @@ describe('schema discriminatedUnion', () => {
     expect(err).toBeNull()
     expect(val).toEqual({ type: 'scroll', delta: 3 })
   })
+
+  test('async parse fails on invalid branch', async () => {
+    const [err] = await event.parseAsync({ type: 'click', x: 'no', y: 20 })
+    expect(err).toBeInstanceOf(SchemaError)
+  })
+
+  test('async parse fails on non-object payload', async () => {
+    const [err] = await event.parseAsync('not-an-object')
+    expect(err).toBeInstanceOf(SchemaError)
+  })
+
+  test('async parse fails on unknown discriminator', async () => {
+    const [err] = await event.parseAsync({ type: 'unknown' })
+    expect(err).toBeInstanceOf(SchemaError)
+  })
 })

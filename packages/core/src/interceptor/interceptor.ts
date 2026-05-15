@@ -36,16 +36,46 @@ export function createSSEInterceptor(fn: SSEInterceptorFn): SSEInterceptor {
 }
 
 // ---------------------------------------------------------------------------
+// WebSocket Interceptor
+// ---------------------------------------------------------------------------
+
+// Minimal session interface — structurally compatible with WebSocketSession
+// to avoid circular dependency (interceptor.ts ←→ web_socket.ts).
+export interface WebSocketSessionLike {
+  readonly connection: { extensions?: string; protocol?: string; url?: string }
+  readonly closed: Promise<unknown>
+  readonly receive: AsyncIterable<unknown>
+  readonly state: string
+  close(code?: number, reason?: string): void
+  onRuntimeError(listener: (error: unknown) => void): () => void
+  onStateChange(listener: (state: string) => void): () => void
+  send(message: unknown): void
+}
+
+export type WebSocketHandler = (req: HttpRequest) => Promise<WebSocketSessionLike>
+
+export type WebSocketInterceptorFn = (req: HttpRequest, next: WebSocketHandler) => Promise<WebSocketSessionLike>
+
+export interface WebSocketInterceptor {
+  kind: 'web-socket'
+  fn: WebSocketInterceptorFn
+}
+
+export function createWebSocketInterceptor(fn: WebSocketInterceptorFn): WebSocketInterceptor {
+  return { kind: 'web-socket', fn }
+}
+
+// ---------------------------------------------------------------------------
 // Unified type
 // ---------------------------------------------------------------------------
 
-export type Interceptor = HttpInterceptor | SSEInterceptor
+export type Interceptor = HttpInterceptor | SSEInterceptor | WebSocketInterceptor
 
 // ---------------------------------------------------------------------------
 // Chain builders
 // ---------------------------------------------------------------------------
 
-// Generic onion-chain builder — both HTTP and SSE chains share this shape.
+// Generic onion-chain builder — HTTP, SSE, and WebSocket chains share this shape.
 function makeChain<TFn extends (req: HttpRequest, next: any) => any>(interceptors: TFn[]): TFn {
   return interceptors.reduceRight<TFn>(
     (fn, interceptor) => ((initReq: HttpRequest, finalHandlerFn: never) => interceptor(initReq, (req: HttpRequest) => fn(req, finalHandlerFn))) as TFn,
@@ -61,6 +91,10 @@ export function makeSSEInterceptorChain(interceptors: SSEInterceptorFn[]): SSEIn
   return makeChain(interceptors)
 }
 
+export function makeWebSocketInterceptorChain(interceptors: WebSocketInterceptorFn[]): WebSocketInterceptorFn {
+  return makeChain(interceptors)
+}
+
 // ---------------------------------------------------------------------------
 // Resolvers – extract typed interceptor fns from the mixed array
 // ---------------------------------------------------------------------------
@@ -71,4 +105,8 @@ export function resolveHttpInterceptors(interceptors: Interceptor[]): Intercepto
 
 export function resolveSSEInterceptors(interceptors: Interceptor[]): SSEInterceptorFn[] {
   return interceptors.filter((i): i is SSEInterceptor => i.kind === 'sse').map(i => i.fn)
+}
+
+export function resolveWebSocketInterceptors(interceptors: Interceptor[]): WebSocketInterceptorFn[] {
+  return interceptors.filter((i): i is WebSocketInterceptor => i.kind === 'web-socket').map(i => i.fn)
 }

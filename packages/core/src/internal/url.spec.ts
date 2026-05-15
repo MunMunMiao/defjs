@@ -30,6 +30,12 @@ describe('url helpers', () => {
       }),
     ).toBe('/user/1/undefined')
 
+    expect(
+      fillUrl('/user/:id', {
+        id: [],
+      }),
+    ).toBe('/user/undefined')
+
     const params = createSearchParams({
       filters: { active: true },
       include: true,
@@ -39,6 +45,16 @@ describe('url helpers', () => {
     })
 
     expect(params.toString()).toBe('filters=%7B%22active%22%3Atrue%7D&include=true&page=1&tags=a&tags=b')
+
+    const paramsWithNull = createSearchParams({
+      empty: null,
+    })
+    expect(paramsWithNull.toString()).toBe('empty=null')
+
+    const paramsWithUndefinedArray = createSearchParams({
+      tags: [undefined as never],
+    })
+    expect(paramsWithUndefinedArray.toString()).toBe('tags=undefined')
   })
 
   test('should append record-like values into headers', () => {

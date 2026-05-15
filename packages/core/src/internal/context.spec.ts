@@ -127,4 +127,23 @@ describe('Context', () => {
     expect(merged.get(tokenA)).toBe('from-primary')
     expect(merged.get(tokenB)).toBe('from-secondary')
   })
+
+  test('should merge with no contexts', () => {
+    const merged = mergeHttpContexts(undefined, undefined)
+    expect(merged.length).toBe(0)
+  })
+
+  test('should merge with only primary context', () => {
+    const token = makeHttpContextToken(() => 'default')
+    const primary = makeHttpContext().set(token, 'primary')
+    const merged = mergeHttpContexts(primary, undefined)
+    expect(merged.get(token)).toBe('primary')
+  })
+
+  test('should merge with only secondary context', () => {
+    const token = makeHttpContextToken(() => 'default')
+    const secondary = makeHttpContext().set(token, 'secondary')
+    const merged = mergeHttpContexts(undefined, secondary)
+    expect(merged.get(token)).toBe('secondary')
+  })
 })

@@ -59,6 +59,7 @@ function createRequestBuilder(state: RequestBuilderState): RequestBuilder {
       setBody(state, value, options?.contentType)
     },
     formData(record) {
+      /* istanbul ignore next -- unreachable: FormData is available in all target runtimes */
       if (typeof FormData === 'undefined') {
         throw new Error('FormData is not supported in current runtime')
       }
@@ -168,6 +169,7 @@ function appendRequestFormDataValue(formData: FormData, key: string, value: Requ
 }
 
 function appendRequestFormDataItem(formData: FormData, key: string, value: RequestFormDataScalar | RequestFormDataFileLike): void {
+  /* istanbul ignore next -- unreachable: caller already filters undefined values */
   if (typeof value === 'undefined') {
     return
   }

@@ -79,6 +79,10 @@ export async function setup({ provide }: TestProject) {
   app.get('/text', c => c.text('Hello World!'))
   app.get('/json', c => c.json({ id: 1 }))
   app.get('/null', c => c.body(null, 200))
+  app.get('/no-content-type', c => {
+    c.header('content-type', '')
+    return c.body('hello', 200)
+  })
   app.get('/500', c => c.body(null, { status: 500, statusText: 'Internal Server Error' }))
   app.on('HEAD', '/head', c => c.body(null, { status: 204, statusText: 'No Content' }))
   app.post('/account', c => c.json({ id: 1, name: 'Jack' }))
@@ -89,7 +93,7 @@ export async function setup({ provide }: TestProject) {
     return c.body(null, 200)
   })
 
-  app.get('/sse/basic', c => {
+  const basicSseHandler = (c: any) => {
     c.header('x-request-id', 'trace-sse-basic')
     return streamSSE(c, async stream => {
       await stream.writeSSE({
@@ -104,7 +108,10 @@ export async function setup({ provide }: TestProject) {
         id: '2',
       })
     })
-  })
+  }
+
+  app.get('/sse/basic', basicSseHandler)
+  app.post('/sse/basic', basicSseHandler)
 
   app.get('/sse/retry', c => {
     const lastEventId = c.req.header('last-event-id')
@@ -126,8 +133,73 @@ export async function setup({ provide }: TestProject) {
         data: 'first',
         event: 'message',
         id: '1',
-        retry: 0,
+        retry: 100,
       })
+    })
+  })
+
+  app.get('/sse/slow', async c => {
+    await delay(500)
+    return c.body(null, 500)
+  })
+
+  const sseRetryAttempts = new Map<string, number>()
+
+  app.get('/sse/500-once', c => {
+    const key = c.req.query('key') ?? 'default'
+    const attempt = (sseRetryAttempts.get(key) ?? 0) + 1
+    sseRetryAttempts.set(key, attempt)
+
+    if (attempt === 1) {
+      return c.body(null, 500)
+    }
+
+    return streamSSE(c, async stream => {
+      await stream.writeSSE({ data: 'ok', event: 'message', id: '1' })
+    })
+  })
+
+  app.get('/sse/500-always', c => c.body(null, 500))
+
+  app.get('/sse/no-id', c => {
+    return streamSSE(c, async stream => {
+      await stream.writeSSE({
+        data: 'no-id-message',
+        event: 'message',
+      })
+    })
+  })
+
+  app.get('/sse/empty-id', c => {
+    c.header('content-type', 'text/event-stream')
+    return streamSSE(c, async stream => {
+      const encoder = new TextEncoder()
+      await stream.write(encoder.encode('data: hello\nid:\nevent: message\n\n'))
+    })
+  })
+
+  app.get('/sse/mixed', c => {
+    return streamSSE(c, async stream => {
+      await stream.writeSSE({ data: JSON.stringify({ uid: 1 }), event: 'userconnect', id: '1' })
+      await stream.writeSSE({ data: JSON.stringify({ note: 'fallback' }), event: 'something-else', id: '2' })
+    })
+  })
+
+  app.get('/sse/unknown-event', c => {
+    return streamSSE(c, async stream => {
+      await stream.writeSSE({ data: 'hello', event: 'unknown', id: '1' })
+    })
+  })
+
+  app.get('/sse/empty-data', c => {
+    return streamSSE(c, async stream => {
+      await stream.writeSSE({ data: '', event: 'message', id: '1' })
+    })
+  })
+
+  app.get('/sse/no-event-name', c => {
+    return streamSSE(c, async stream => {
+      await stream.writeSSE({ data: 'hello', id: '1' })
     })
   })
 
@@ -275,6 +347,51 @@ export async function setup({ provide }: TestProject) {
         } catch {
           // noop
         }
+      },
+    })),
+  )
+
+  app.get(
+    '/ws/heartbeat-silent',
+    upgradeWebSocket(() => ({
+      // Intentionally silent — used to test heartbeat timeout on the client side.
+      onMessage() {},
+    })),
+  )
+
+  app.get(
+    '/ws/close-immediately',
+    upgradeWebSocket(() => ({
+      onOpen(_event, ws) {
+        ws.close(1000, 'bye')
+      },
+    })),
+  )
+
+  app.get(
+    '/ws/error-before-close',
+    upgradeWebSocket(() => ({
+      onOpen(_event, ws) {
+        setTimeout(() => {
+          if (ws.readyState === 1) {
+            ws.send(createSocketMessage('message', { text: 123 }))
+            ws.close(1000, 'done')
+          }
+        }, 10)
+      },
+    })),
+  )
+
+  app.get(
+    '/ws/unknown-message',
+    upgradeWebSocket(() => ({
+      onOpen(_event, ws) {
+        setTimeout(() => {
+          if (ws.readyState === 1) {
+            ws.send(createSocketMessage('unknown', { note: 'skip-me' }))
+            ws.close(1000, 'done')
+          }
+        }, 10)
       },
     })),
   )

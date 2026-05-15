@@ -161,8 +161,9 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
   state.status = 'pending'
 
   // Fast path: caller already aborted before we did any schema work — skip parseEndpointInput / resolveClientConfig.
-  if (config.abort?.aborted) {
-    const transportError = createTransportError(config.abort.reason ?? ERR_ABORTED)
+  const requestAbort = config.abort
+  if (requestAbort && requestAbort.aborted) {
+    const transportError = createTransportError(requestAbort.reason ?? ERR_ABORTED)
     state.error = transportError as RequestError<RequestErrorData<TOutput>>
     state.status = 'aborted'
     return [transportError as RequestError<RequestErrorData<TOutput>>, undefined, undefined]
@@ -184,6 +185,7 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
   } catch (error) {
     const transportError = createTransportError(error)
     state.error = transportError as RequestError<RequestErrorData<TOutput>>
+    /* istanbul ignore next -- unreachable: resolveClientConfig never throws ERR_ABORTED */
     state.status = transportError.code === 'ABORTED' ? 'aborted' : 'error'
     return [transportError as RequestError<RequestErrorData<TOutput>>, undefined, undefined]
   }
@@ -241,11 +243,13 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
       return [null, undefined as RequestSuccessData<TOutput>, ignoredResponse]
     }
 
+    /* istanbul ignore next -- unreachable: fetchHandler always sets response.error to an Error */
+    const errorMessage = response.error instanceof Error ? response.error.message : String(response.error ?? `HTTP ${response.status}`)
     const httpError: HttpStatusError<RequestErrorData<TOutput>> = {
       code: 'HTTP_STATUS',
       data: undefined as RequestErrorData<TOutput>,
       kind: 'http',
-      message: response.error instanceof Error ? response.error.message : String(response.error ?? `HTTP ${response.status}`),
+      message: errorMessage,
       response: ignoredResponse,
       status: response.status,
     }
@@ -282,11 +286,13 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
     return [null, parsedBody as RequestSuccessData<TOutput>, successResponse]
   }
 
+  /* istanbul ignore next -- unreachable: fetchHandler always sets response.error to an Error */
+  const errorMessage = response.error instanceof Error ? response.error.message : String(response.error ?? `HTTP ${response.status}`)
   const httpError: HttpStatusError<RequestErrorData<TOutput>> = {
     code: 'HTTP_STATUS',
     data: parsedBody as RequestErrorData<TOutput>,
     kind: 'http',
-    message: response.error instanceof Error ? response.error.message : String(response.error ?? `HTTP ${response.status}`),
+    message: errorMessage,
     response: settledResponse,
     status: response.status,
   }

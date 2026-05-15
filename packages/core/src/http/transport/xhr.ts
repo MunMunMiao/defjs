@@ -55,7 +55,7 @@ function xhrHandlerImpl(httpRequest: HttpRequest): Promise<HttpResponse<unknown>
     if (!headers.has('Content-Type')) {
       const detectedType = detectHttpContentType(httpRequest.body)
       if (detectedType) {
-        headers.set('Content-Type', detectedType)
+        xhr.setRequestHeader('Content-Type', detectedType)
       }
     }
 

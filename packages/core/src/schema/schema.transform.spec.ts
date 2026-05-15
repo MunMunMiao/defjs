@@ -103,6 +103,22 @@ describe('schema transform and pipe', () => {
     expect(badErr).toBeInstanceOf(SchemaError)
   })
 
+  test('pipe forwards output to another schema via parseAsync', async () => {
+    const parsedNumber = schema
+      .string()
+      .transform(
+        value => Number.parseInt(value, 10),
+        value => String(value),
+      )
+      .pipe(schema.number().int().nonnegative())
+
+    const [okErr, okVal] = await parsedNumber.parseAsync('42')
+    expect(okErr).toBeNull()
+    expect(okVal).toBe(42)
+    const [badErr] = await parsedNumber.parseAsync('-3')
+    expect(badErr).toBeInstanceOf(SchemaError)
+  })
+
   test('pipe + transform encodes through both layers', () => {
     const parsedNumber = schema
       .string()
@@ -126,6 +142,65 @@ describe('schema transform and pipe', () => {
     expect(val).toBe('loaded:x')
   })
 
+  test('transform decode throws non-SchemaError', async () => {
+    const s = schema.string().transform(
+      () => { throw new Error('decode failed') },
+      value => value,
+    )
+
+    const [err] = await s.parseAsync('hello')
+    expect(err).toBeInstanceOf(SchemaError)
+    expect(err?.issues[0]?.message).toContain('decode failed')
+  })
+
+  test('async transform decode throws non-Error primitive', async () => {
+    const s = schema.string().transform(
+      () => { throw 'not an error object' },
+      value => value,
+    )
+
+    const [err] = await s.parseAsync('hello')
+    expect(err).toBeInstanceOf(SchemaError)
+  })
+
+  test('sync transform decode throws non-SchemaError', () => {
+    const s = schema.string().transform(
+      () => { throw new Error('sync decode failed') },
+      value => value,
+    )
+
+    const [err] = s.parse('hello')
+    expect(err).toBeInstanceOf(SchemaError)
+    expect(err?.issues[0]?.message).toContain('sync decode failed')
+  })
+
+  test('sync transform decode throws non-Error primitive', () => {
+    const s = schema.string().transform(
+      () => { throw 'not an error object' },
+      value => value,
+    )
+
+    const [err] = s.parse('hello')
+    expect(err).toBeInstanceOf(SchemaError)
+  })
+
+  test('transform decode throws SchemaError', async () => {
+    const inner = schema.string().min(5)
+    const s = schema.string().transform(
+      () => {
+        const [err] = inner.parse('x')
+        if (err) {
+          throw err
+        }
+        return 'never'
+      },
+      value => value,
+    )
+
+    const [err] = await s.parseAsync('hello')
+    expect(err).toBeInstanceOf(SchemaError)
+  })
+
   test('pipe rejects non-schema targets at chain time', () => {
     expect(() => schema.string().pipe(null as never)).toThrowError('pipe() requires a schema target')
   })
@@ -137,5 +212,22 @@ describe('schema transform and pipe', () => {
     expect(() => schema.string().transform((value: string) => value, null as never)).toThrowError(
       'transform() requires both decode and encode functions',
     )
+  })
+
+  test('encode array passes through non-array', () => {
+    const s = schema.array(schema.string().transform(
+      value => value.toUpperCase(),
+      value => value.toLowerCase(),
+    ))
+    expect((s as any).encode('not-array')).toBe('not-array')
+  })
+
+  test('encode tuple passes through non-array and extra items', () => {
+    const s = schema.tuple([schema.string().transform(
+      value => value.toUpperCase(),
+      value => value.toLowerCase(),
+    )])
+    expect((s as any).encode('not-array')).toBe('not-array')
+    expect((s as any).encode(['HELLO', 'EXTRA'])).toEqual(['hello', 'EXTRA'])
   })
 })

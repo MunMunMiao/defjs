@@ -37,6 +37,7 @@ describe('error factory helpers', () => {
     expect(httpError).toMatchObject({
       kind: 'http',
       status: 400,
+      message: 'HTTP 400',
     })
 
     const schemaError = new SchemaError([
@@ -66,6 +67,42 @@ describe('error factory helpers', () => {
       code: 'UNDECLARED_STATUS',
       kind: 'definition',
       message: 'missing status',
+    })
+
+    // Cover line 66: cause is not an Error
+    const nonErrorDefinition = createDefinitionError('REQUEST_VALIDATION_FAILED', 'plain string cause')
+    expect(nonErrorDefinition.message).toBe('plain string cause')
+
+    // Cover line 83: response.error is not an Error
+    const stringErrorResponse = toSettledResponse(
+      makeResponse({
+        body: null,
+        error: 'string error',
+        status: 500,
+      }),
+    )
+    const httpStringError = createRequestRuntimeError(new Error('ignored'), stringErrorResponse)
+    expect(httpStringError).toMatchObject({
+      kind: 'http',
+      message: 'string error',
+      status: 500,
+    })
+
+    // Cover line 83: response.error is falsy (?? fallback)
+    const nullErrorResponse = {
+      body: null,
+      error: null,
+      headers: new Headers(),
+      ok: false,
+      status: 500,
+      statusText: '',
+      url: '',
+    }
+    const httpNullError = createRequestRuntimeError(new Error('ignored'), nullErrorResponse)
+    expect(httpNullError).toMatchObject({
+      kind: 'http',
+      message: 'HTTP 500',
+      status: 500,
     })
   })
 })

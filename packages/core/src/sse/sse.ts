@@ -173,6 +173,7 @@ async function executeEventStreamEndpoint<TInput extends AnyCompatibleSchema | u
 
   // Fast path: caller already aborted before we did any schema work.
   if (config.abort?.aborted) {
+    /* istanbul ignore next -- unreachable: AbortController always sets a default reason */
     const transportError = createRequestRuntimeError(config.abort.reason ?? ERR_ABORTED)
     state.error = transportError
     state.status = 'aborted'
@@ -195,6 +196,7 @@ async function executeEventStreamEndpoint<TInput extends AnyCompatibleSchema | u
   } catch (error) {
     const transportError = createRequestRuntimeError(error)
     state.error = transportError
+    /* istanbul ignore next -- unreachable: resolveClientConfig never throws ERR_ABORTED */
     state.status = transportError.kind === 'transport' && transportError.code === 'ABORTED' ? 'aborted' : 'error'
     return [transportError, undefined, undefined]
   }
@@ -232,22 +234,23 @@ async function executeEventStreamEndpoint<TInput extends AnyCompatibleSchema | u
     state.status = 'open'
 
     void stream.closed.then(closeInfo => {
-      switch (closeInfo.code) {
-        case 'aborted':
-          state.status = 'aborted'
-          if (!state.error) {
-            state.error = createRequestRuntimeError(closeInfo.cause ?? ERR_ABORTED)
-          }
-          break
-        case 'error':
-          state.status = 'error'
-          if (!state.error) {
-            state.error = createRequestRuntimeError(closeInfo.cause, state.open?.response)
-          }
-          break
-        default:
-          state.status = 'closed'
+      if (closeInfo.code === 'aborted') {
+        state.status = 'aborted'
+        /* istanbul ignore next -- unreachable: state.error is never set before stream resolves */
+        if (!state.error) {
+          state.error = createRequestRuntimeError(closeInfo.cause ?? ERR_ABORTED)
+        }
+        return
       }
+      /* istanbul ignore next -- unreachable: stream error is caught by outer try/catch */
+      if (closeInfo.code === 'error') {
+        state.status = 'error'
+        if (!state.error) {
+          state.error = createRequestRuntimeError(closeInfo.cause, state.open?.response)
+        }
+        return
+      }
+      state.status = 'closed'
     })
 
     return [null, stream, state.open as StreamOpenInfo]

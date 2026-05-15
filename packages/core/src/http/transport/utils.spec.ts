@@ -119,4 +119,10 @@ describe('Handler util', () => {
     const result = getContentType(header)
     expect(result).toEqual('application/json')
   })
+
+  test('should return empty string when content type is missing', () => {
+    const header = new Headers()
+    const result = getContentType(header)
+    expect(result).toEqual('')
+  })
 })

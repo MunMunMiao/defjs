@@ -8,6 +8,9 @@ export default defineConfig({
     include: ['src/**/*.spec.ts'],
     exclude: runtimeSpecificSpecPatterns.filter(pattern => pattern !== 'src/**/*.node.spec.ts'),
     globalSetup: globalSetupPath,
-    coverage: coverageConfig,
+    coverage: {
+      ...coverageConfig,
+    },
+    pool: 'threads',
   },
 })

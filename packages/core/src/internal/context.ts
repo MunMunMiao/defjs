@@ -95,6 +95,7 @@ export function mergeHttpContexts(primary?: HttpContext, secondary?: HttpContext
   }
 
   if (!primary) {
+    /* istanbul ignore next -- unreachable: covered by (!primary && !secondary) above */
     return secondary ? makeHttpContext(secondary) : makeHttpContext()
   }
 

@@ -213,4 +213,33 @@ describe('request http runtime', () => {
     expect(response?.status).toBe(200)
     expect(response?.body).toBeNull()
   })
+
+  test('should return http error when output is omitted and response is not ok', async () => {
+    setGlobalClient(
+      createClient({
+        endpoint: 'https://example.com',
+        http: {
+          handler: async () =>
+            makeResponse({
+              body: { error: 'fail' },
+              status: 500,
+              statusText: 'Internal Server Error',
+            }),
+        },
+      }),
+    )
+
+    const useNoOutput = defineRequest({
+      method: 'GET',
+      path: '/fail',
+    })
+
+    const [error, result, response] = await useNoOutput()
+
+    expect(error?.kind).toBe('http')
+    expect(error?.code).toBe('HTTP_STATUS')
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(500)
+    expect(response?.body).toBeNull()
+  })
 })

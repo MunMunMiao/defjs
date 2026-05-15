@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, inject, test, vi } from 'vitest'
 
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { ERR_ABORTED } from '../error'
 import { schema } from '../schema'
 import { defineEventStream } from './index'
 
@@ -46,25 +47,88 @@ describe('request event stream runtime', () => {
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
   })
 
-  test('should support default event schema parsing with request-level fetch override', async () => {
-    const encoder = new TextEncoder()
-    const fakeFetch = (async () =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(
-              encoder.encode('event: userconnect\ndata: {"uid":1}\n\n' + 'event: something-else\ndata: {"note":"fallback"}\n\n'),
-            )
-            controller.close()
-          },
-        }),
-        {
-          headers: {
-            'content-type': 'text/event-stream; charset=utf-8',
-          },
-        },
-      )) as unknown as typeof fetch
+  test('should support withCredentials for SSE', async () => {
+    const useBasicStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/basic',
+    })
 
+    const [error, stream] = await useBasicStream().with({
+      client: createClient({
+        endpoint: inject('testServerHost'),
+        withCredentials: true,
+      }),
+    })
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const messages: Array<{ data: string; event: string; id?: string }> = []
+    for await (const event of stream) {
+      messages.push(event)
+    }
+
+    expect(messages.length).toBeGreaterThan(0)
+    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+  })
+
+  test('should handle SSE events without id', async () => {
+    const useNoIdStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/no-id',
+    })
+
+    const [error, stream] = await useNoIdStream()
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const messages: Array<{ data: string; event: string; id?: string }> = []
+    for await (const event of stream) {
+      messages.push(event)
+    }
+
+    expect(messages).toEqual([
+      { data: 'no-id-message', event: 'message', id: undefined, retry: undefined },
+    ])
+    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+  })
+
+  test('should handle SSE events with empty id', async () => {
+    const useEmptyIdStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/empty-id',
+    })
+
+    const [error, stream] = await useEmptyIdStream()
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const messages: Array<{ data: string; event: string; id?: string }> = []
+    for await (const event of stream) {
+      messages.push(event)
+    }
+
+    expect(messages).toEqual([
+      { data: 'hello', event: 'message', id: undefined, retry: undefined },
+    ])
+    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+  })
+
+  test('should support default event schema parsing', async () => {
     const useMixedStream = defineEventStream({
       events: {
         default: schema.object({
@@ -74,15 +138,10 @@ describe('request event stream runtime', () => {
           uid: schema.number(),
         }),
       },
-      path: '/events',
+      path: '/sse/mixed',
     })
 
-    const [error, stream] = await useMixedStream().with({
-      client: createClient({
-        endpoint: 'https://example.com',
-      }),
-      fetch: fakeFetch,
-    })
+    const [error, stream] = await useMixedStream()
 
     expect(error).toBeNull()
     if (!stream) {
@@ -180,4 +239,251 @@ describe('request event stream runtime', () => {
 
     expect(error.code).toBe('RESPONSE_VALIDATION_FAILED')
   })
+
+  test('should abort before startup when signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/basic',
+    })
+
+    const [error, stream, open] = await useStream().with({
+      abort: controller.signal,
+    })
+
+    expect(stream).toBeUndefined()
+    expect(open).toBeUndefined()
+    expect(error?.kind).toBe('transport')
+  })
+
+  test('should ignore non-aborted signal during startup', async () => {
+    const controller = new AbortController()
+
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/basic',
+    })
+
+    const [error, stream] = await useStream().with({
+      abort: controller.signal,
+    })
+
+    expect(error).toBeNull()
+    expect(stream).toBeDefined()
+  })
+
+  test('should handle stream error state', async () => {
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/500',
+    })
+
+    const [error, stream, open] = await useStream()
+
+    expect(stream).toBeUndefined()
+    expect(open?.response?.status).toBe(500)
+    expect(error?.kind).toBe('http')
+    expect(error?.code).toBe('HTTP_STATUS')
+  })
+
+  test('should skip unknown event types without default schema', async () => {
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/unknown-event',
+    })
+
+    const [error, stream] = await useStream()
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+    expect(events).toEqual([])
+  })
+
+  test('should parse empty event data', async () => {
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/empty-data',
+    })
+
+    const [error, stream] = await useStream()
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+    expect(events).toEqual([{ data: '', event: 'message', id: '1', retry: undefined }])
+  })
+
+  test('should parse message with empty event name', async () => {
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+        default: schema.string(),
+      },
+      path: '/sse/no-event-name',
+    })
+
+    const [error, stream] = await useStream()
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+    expect(events).toEqual([{ data: 'hello', event: 'message', id: '1', retry: undefined }])
+  })
+
+  test('should return transport error when signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort(ERR_ABORTED)
+
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/basic',
+    })
+
+    const [error, stream, open] = await useStream().with({
+      abort: controller.signal,
+    })
+
+    expect(stream).toBeUndefined()
+    expect(open).toBeUndefined()
+    expect(error?.kind).toBe('transport')
+    expect(error?.code).toBe('ABORTED')
+  })
+
+  test('should return definition error when build throws', async () => {
+    const useStream = defineEventStream({
+      build: () => {
+        throw new Error('build failed')
+      },
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/basic',
+    })
+
+    const [error, stream, open] = await useStream()
+
+    expect(stream).toBeUndefined()
+    expect(open).toBeUndefined()
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+  })
+
+  test('should expose ref error and open after failure', async () => {
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/basic',
+    })
+
+    const ref = useStream()
+    // Call then twice to cover getPromise with existing promise
+    const p1 = ref.then(() => {})
+    const p2 = ref.then(() => {})
+    await Promise.all([p1, p2])
+
+    const [error] = await ref
+
+    expect(error).toBeNull()
+    expect(ref.error).toBeUndefined()
+    expect(ref.open?.response?.ok).toBe(true)
+    expect(ref.status).toBe('open')
+
+    ref.close()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(ref.status).toBe('aborted')
+  })
+
+  test('should return transport error when no client is configured', async () => {
+    resetGlobalClient()
+
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/events',
+    })
+
+    const [error, stream, open] = await useStream()
+
+    expect(stream).toBeUndefined()
+    expect(open).toBeUndefined()
+    expect(error?.kind).toBe('transport')
+
+    // Restore global client for other tests
+    setGlobalClient(
+      createClient({
+        endpoint: inject('testServerHost'),
+      }),
+    )
+  })
+
+  test('should return http error on non-ok response', async () => {
+    const useStream = defineEventStream({
+      events: {
+        message: schema.string(),
+      },
+      path: '/500',
+    })
+
+    const [error, stream, open] = await useStream()
+
+    expect(stream).toBeUndefined()
+    expect(open?.response?.status).toBe(500)
+    expect(error?.kind).toBe('http')
+    expect(error?.code).toBe('HTTP_STATUS')
+  })
+
+  test('should handle request validation failure on invalid input', async () => {
+    const useStream = defineEventStream({
+      input: schema.object({
+        id: schema.number(),
+      }),
+      events: {
+        message: schema.string(),
+      },
+      path: '/sse/basic',
+    })
+
+    const [error, stream, open] = await useStream({ id: 'invalid' } as never)
+
+    expect(stream).toBeUndefined()
+    expect(open).toBeUndefined()
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+  })
+
 })
