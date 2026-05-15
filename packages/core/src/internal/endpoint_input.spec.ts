@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { parseEndpointInput } from './endpoint_input'
 
 describe('endpoint input helpers', () => {
@@ -11,8 +11,8 @@ describe('endpoint input helpers', () => {
     expect(await parseEndpointInput(undefined, input)).toBe(input)
     expect(
       await parseEndpointInput(
-        schema.object({
-          id: schema.number(),
+        struct.object({
+          id: struct.number(),
         }),
         {
           id: 1,

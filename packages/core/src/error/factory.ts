@@ -69,7 +69,7 @@ export function createDefinitionError(
 }
 
 function isSchemaErrorLike(value: unknown): value is Error & { issues: readonly unknown[] } {
-  return value instanceof Error && value.name === 'SchemaError' && Array.isArray((value as { issues?: unknown[] }).issues)
+  return value instanceof Error && value.name === 'StructError' && Array.isArray((value as { issues?: unknown[] }).issues)
 }
 
 export function createRequestRuntimeError(cause: unknown, response?: SettledResponseLike<unknown>): RequestError<unknown> {
@@ -80,10 +80,11 @@ export function createRequestRuntimeError(cause: unknown, response?: SettledResp
       code: 'HTTP_STATUS',
       data: undefined,
       kind: 'http',
-      message: response.error instanceof Error
-        ? response.error.message
-        /* istanbul ignore next -- unreachable: fetchHandler always sets response.error to an Error */
-        : String(response.error ?? `HTTP ${response.status}`),
+      message:
+        response.error instanceof Error
+          ? response.error.message
+          : /* istanbul ignore next -- unreachable: fetchHandler always sets response.error to an Error */
+            String(response.error ?? `HTTP ${response.status}`),
       response,
       status: response.status,
     }

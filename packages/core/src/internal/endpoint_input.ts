@@ -1,11 +1,11 @@
-import { type AnyCompatibleSchema, type CompatibleInputOf, type CompatibleOutputOf, parseCompatibleSchema } from '../schema'
+import { type AnyCompatibleSchema, type CompatibleInput, type CompatibleOutput, parseCompatibleSchema } from '../struct/compatible'
 
 export type EndpointInput<TInput extends AnyCompatibleSchema | undefined> = TInput extends AnyCompatibleSchema
-  ? CompatibleInputOf<TInput>
+  ? CompatibleInput<TInput>
   : unknown
 
 export type ParsedInput<TInput extends AnyCompatibleSchema | undefined> = TInput extends AnyCompatibleSchema
-  ? CompatibleOutputOf<TInput>
+  ? CompatibleOutput<TInput>
   : unknown
 
 export async function parseEndpointInput<TInput extends AnyCompatibleSchema | undefined>(

@@ -1,29 +1,29 @@
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineWebSocket, type WebSocketIncomingData, type WebSocketOutgoingData, type WebSocketRef, type WebSocketSession } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
 
 const incomingSchemas = {
-  default: schema.object({
-    raw: schema.string(),
+  default: struct.object({
+    raw: struct.string(),
   }),
-  joined: schema.object({
-    roomId: schema.string(),
-    userId: schema.number(),
+  joined: struct.object({
+    roomId: struct.string(),
+    userId: struct.number(),
   }),
 }
 
 const outgoingSchemas = {
-  message: schema.object({
-    text: schema.string(),
+  message: struct.object({
+    text: struct.string(),
   }),
 }
 
 const useSocket = defineWebSocket({
   incoming: incomingSchemas,
-  input: schema.object({
-    roomId: schema.string(),
+  input: struct.object({
+    roomId: struct.string(),
   }),
   outgoing: outgoingSchemas,
   path: '/ws/chat',

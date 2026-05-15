@@ -3,7 +3,7 @@ import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { ERR_ABORTED } from '../error'
 import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineRequest } from './index'
 
 describe('request http runtime errors', () => {
@@ -23,9 +23,9 @@ describe('request http runtime errors', () => {
     const useMissingAccount = defineRequest({
       method: 'GET',
       output: {
-        404: schema.object({
-          code: schema.string(),
-          message: schema.string(),
+        404: struct.object({
+          code: struct.string(),
+          message: struct.string(),
         }),
       },
       path: '/account/not-found',
@@ -51,12 +51,12 @@ describe('request http runtime errors', () => {
 
   test('should return request validation failures as definition errors', async () => {
     const useValidatedRequest = defineRequest({
-      input: schema.object({
-        id: schema.number(),
+      input: struct.object({
+        id: struct.number(),
       }),
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/null',
     })
@@ -78,11 +78,11 @@ describe('request http runtime errors', () => {
     const useBadResponse = defineRequest({
       method: 'GET',
       output: {
-        200: schema.object({
-          name: schema.string().refine(value => value['endsWith']('!'), 'name must end with !'),
+        200: struct.object({
+          id: struct.string(),
         }),
       },
-      path: '/text',
+      path: '/json',
     })
 
     const [error, result, response] = await useBadResponse()
@@ -102,7 +102,7 @@ describe('request http runtime errors', () => {
     const useUndeclaredStatus = defineRequest({
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/500',
     })
@@ -162,7 +162,7 @@ describe('request http runtime errors', () => {
     const useIntercepted = defineRequest({
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/intercepted',
     })
@@ -187,7 +187,7 @@ describe('request http runtime errors', () => {
     const useRequest = defineRequest({
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/null',
     })
@@ -206,7 +206,7 @@ describe('request http runtime errors', () => {
     const useRequest = defineRequest({
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/null',
     })
@@ -225,7 +225,7 @@ describe('request http runtime errors', () => {
     const useRequest = defineRequest({
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/null',
     })
@@ -287,7 +287,7 @@ describe('request http runtime errors', () => {
     const useRequest = defineRequest({
       method: 'GET',
       output: {
-        500: schema.object({ code: schema.string() }),
+        500: struct.object({ code: struct.string() }),
       },
       path: '/test',
     })
@@ -305,12 +305,12 @@ describe('request http runtime errors', () => {
 
   test('should expose error on ref after failed request', async () => {
     const useBadRequest = defineRequest({
-      input: schema.object({
-        id: schema.number(),
+      input: struct.object({
+        id: struct.number(),
       }),
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/null',
     })
@@ -330,12 +330,12 @@ describe('request http runtime errors', () => {
           ms: input.ms,
         })
       },
-      input: schema.object({
-        ms: schema.number(),
+      input: struct.object({
+        ms: struct.number(),
       }),
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/delay',
     })
@@ -373,7 +373,7 @@ describe('request http runtime errors', () => {
     const useRequest = defineRequest({
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/test',
     })
@@ -405,7 +405,7 @@ describe('request http runtime errors', () => {
     const useRequest = defineRequest({
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/test',
     })
@@ -462,7 +462,7 @@ describe('request http runtime errors', () => {
     const useRequest = defineRequest({
       method: 'GET',
       output: {
-        500: schema.object({ code: schema.string() }),
+        500: struct.object({ code: struct.string() }),
       },
       path: '/test',
     })
@@ -549,7 +549,7 @@ describe('request http runtime errors', () => {
     const useRequest = defineRequest({
       method: 'GET',
       output: {
-        500: schema.object({ code: schema.string() }),
+        500: struct.object({ code: struct.string() }),
       },
       path: '/test',
     })
@@ -573,12 +573,12 @@ describe('request http runtime errors', () => {
           ms: input.ms,
         })
       },
-      input: schema.object({
-        ms: schema.number(),
+      input: struct.object({
+        ms: struct.number(),
       }),
       method: 'GET',
       output: {
-        200: schema.null(),
+        200: struct.null(),
       },
       path: '/delay',
     })

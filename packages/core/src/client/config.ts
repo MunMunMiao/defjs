@@ -2,7 +2,7 @@ import { fetchHandler } from '../http/transport/fetch'
 import type { HttpHandler } from '../http/transport/handler'
 import type { Interceptor } from '../interceptor/interceptor'
 
-export type QueryParamsSerializer = (params: URLSearchParams) => string
+export type QueryParamsSerializer = (params: URLSearchParams, rawParams?: Record<string, unknown>) => string
 
 export const DEFAULT_QUERY_PARAMS_SERIALIZER: QueryParamsSerializer = params => params.toString()
 
@@ -72,4 +72,3 @@ export const DEFAULT_HTTP_OPTIONS: Required<ClientHttpOptions> = {
 export const DEFAULT_SSE_OPTIONS: Required<ClientSseOptions> = {
   fetch: globalThis.fetch.bind(globalThis) as typeof fetch,
 }
-

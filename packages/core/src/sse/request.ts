@@ -1,8 +1,9 @@
-import type { QueryParamsSerializer } from '../client/config'
+import { DEFAULT_QUERY_PARAMS_SERIALIZER, type QueryParamsSerializer } from '../client/config'
 import type { HttpContext } from '../internal/context'
 import type { HttpRequest } from '../internal/http_request'
 import { buildRequest, type RequestBuildHandler } from '../internal/request_builder'
 import { appendRecordToHeaders, createSearchParams, fillUrl } from '../internal/url'
+import type { AnyCompatibleSchema } from '../struct'
 
 export function createEventStreamRequest<TInput>(
   method: string,
@@ -13,13 +14,15 @@ export function createEventStreamRequest<TInput>(
     abort: AbortSignal
     baseEndpoint: string
     context?: HttpContext
+    input?: AnyCompatibleSchema
     queryParamsSerializer: QueryParamsSerializer
     timeout?: number
     withCredentials?: boolean
   },
 ): HttpRequest {
-  const built = buildRequest(input, build)
-  const queryParams = createSearchParams(built.query)
+  const built = buildRequest(input, build, { input: options.input })
+  const allowComplexQuery = options.queryParamsSerializer !== DEFAULT_QUERY_PARAMS_SERIALIZER
+  const queryParams = createSearchParams(built.query, { allowComplex: allowComplexQuery })
   const headers = new Headers()
 
   appendRecordToHeaders(headers, built.headers)
@@ -37,7 +40,7 @@ export function createEventStreamRequest<TInput>(
     headers,
     method,
     queryParams,
-    queryString: options.queryParamsSerializer(queryParams),
+    queryString: options.queryParamsSerializer(queryParams, built.query),
     timeout: options.timeout,
     withCredentials: built.withCredentials ?? options.withCredentials ?? false,
   }

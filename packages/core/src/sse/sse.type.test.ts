@@ -1,26 +1,26 @@
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineEventStream, type EventStreamData, type EventStreamRef, type StreamAwaitResult } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
 
 const events = {
-  default: schema.object({
-    raw: schema.boolean(),
+  default: struct.object({
+    raw: struct.boolean(),
   }),
-  joined: schema.object({
-    roomId: schema.string(),
-    userId: schema.number(),
+  joined: struct.object({
+    roomId: struct.string(),
+    userId: struct.number(),
   }),
-  message: schema.object({
-    text: schema.string(),
+  message: struct.object({
+    text: struct.string(),
   }),
 }
 
 const useRequiredStream = defineEventStream({
   events,
-  input: schema.object({
-    roomId: schema.string(),
+  input: struct.object({
+    roomId: struct.string(),
   }),
   path: '/events',
 })

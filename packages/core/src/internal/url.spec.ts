@@ -36,15 +36,24 @@ describe('url helpers', () => {
       }),
     ).toBe('/user/undefined')
 
-    const params = createSearchParams({
-      filters: { active: true },
-      include: true,
-      page: 1,
-      skip: undefined,
-      tags: ['a', 'b'],
-    })
+    expect(() =>
+      createSearchParams({
+        filters: { active: true },
+      }),
+    ).toThrow('query value for "filters" requires queryParamsSerializer or a scalar value')
 
-    expect(params.toString()).toBe('filters=%7B%22active%22%3Atrue%7D&include=true&page=1&tags=a&tags=b')
+    const params = createSearchParams(
+      {
+        filters: { active: true },
+        include: true,
+        page: 1,
+        skip: undefined,
+        tags: ['a', 'b'],
+      },
+      { allowComplex: true },
+    )
+
+    expect(params.toString()).toBe('include=true&page=1&tags=a&tags=b')
 
     const paramsWithNull = createSearchParams({
       empty: null,
@@ -54,7 +63,7 @@ describe('url helpers', () => {
     const paramsWithUndefinedArray = createSearchParams({
       tags: [undefined as never],
     })
-    expect(paramsWithUndefinedArray.toString()).toBe('tags=undefined')
+    expect(paramsWithUndefinedArray.toString()).toBe('')
   })
 
   test('should append record-like values into headers', () => {

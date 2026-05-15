@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest'
-import { schema } from '../schema'
-import { startHeartbeat, stopHeartbeat } from './heartbeat'
+import { struct } from '../struct'
 import type { HeartbeatSession } from './heartbeat'
+import { startHeartbeat, stopHeartbeat } from './heartbeat'
 import { createSendQueue } from './queue'
 
 describe('heartbeat', () => {
@@ -36,14 +36,7 @@ describe('heartbeat', () => {
     }
     session.heartbeat = existingHeartbeat
 
-    startHeartbeat(
-      createMockSocket(),
-      session,
-      { intervalMs: 1000 },
-      undefined,
-      createSendQueue(),
-      vi.fn(),
-    )
+    startHeartbeat(createMockSocket(), session, { intervalMs: 1000 }, undefined, createSendQueue(), vi.fn())
 
     expect(existingHeartbeat.stop).toHaveBeenCalled()
   })
@@ -54,14 +47,7 @@ describe('heartbeat', () => {
     const session = createMockSession()
     const messageFn = vi.fn().mockReturnValue({ type: 'ping' })
 
-    startHeartbeat(
-      socket,
-      session,
-      { intervalMs: 100, message: messageFn },
-      { ping: schema.object({}) },
-      createSendQueue(),
-      vi.fn(),
-    )
+    startHeartbeat(socket, session, { intervalMs: 100, message: messageFn }, { ping: struct.object({}) }, createSendQueue(), vi.fn())
 
     expect(messageFn).not.toHaveBeenCalled()
 
@@ -85,7 +71,7 @@ describe('heartbeat', () => {
       socket,
       session,
       { intervalMs: 100, message: () => ({ type: 'ping' }) },
-      { ping: schema.object({}) },
+      { ping: struct.object({}) },
       createSendQueue(),
       vi.fn(),
     )
@@ -101,14 +87,7 @@ describe('heartbeat', () => {
     const socket = createMockSocket()
     const session = createMockSession()
 
-    startHeartbeat(
-      socket,
-      session,
-      { intervalMs: 100 },
-      undefined,
-      createSendQueue(),
-      vi.fn(),
-    )
+    startHeartbeat(socket, session, { intervalMs: 100 }, undefined, createSendQueue(), vi.fn())
 
     vi.advanceTimersByTime(100)
     expect(socket.send).not.toHaveBeenCalled()
@@ -126,7 +105,7 @@ describe('heartbeat', () => {
       socket,
       session,
       { intervalMs: 100, message: () => ({ type: 'unknown' }) },
-      { ping: schema.object({}) },
+      { ping: struct.object({}) },
       createSendQueue(),
       onError,
     )
@@ -148,7 +127,7 @@ describe('heartbeat', () => {
       socket,
       session,
       { intervalMs: 100, timeoutMs: 50, message: () => ({ type: 'ping' }) },
-      { ping: schema.object({}) },
+      { ping: struct.object({}) },
       createSendQueue(),
       onError,
     )
@@ -173,7 +152,7 @@ describe('heartbeat', () => {
       socket,
       session,
       { intervalMs: 100, timeoutMs: 200, message: () => ({ type: 'ping' }) },
-      { ping: schema.object({}) },
+      { ping: struct.object({}) },
       createSendQueue(),
       onError,
     )
@@ -194,14 +173,7 @@ describe('heartbeat', () => {
     const session = createMockSession()
     const isAck = vi.fn().mockReturnValue(true)
 
-    startHeartbeat(
-      createMockSocket(),
-      session,
-      { intervalMs: 1000, isAck },
-      undefined,
-      createSendQueue(),
-      vi.fn(),
-    )
+    startHeartbeat(createMockSocket(), session, { intervalMs: 1000, isAck }, undefined, createSendQueue(), vi.fn())
 
     expect(session.heartbeat?.isAck?.('test')).toBe(true)
     expect(isAck).toHaveBeenCalledWith('test')
@@ -216,7 +188,7 @@ describe('heartbeat', () => {
       socket,
       session,
       { intervalMs: 100, message: () => ({ type: 'ping' }) },
-      { ping: schema.object({}) },
+      { ping: struct.object({}) },
       createSendQueue(),
       vi.fn(),
     )
@@ -245,7 +217,7 @@ describe('heartbeat', () => {
       socket,
       session,
       { intervalMs: 100, timeoutMs: 50, message: () => ({ type: 'ping' }) },
-      { ping: schema.object({}) },
+      { ping: struct.object({}) },
       sendQueue,
       onError,
     )

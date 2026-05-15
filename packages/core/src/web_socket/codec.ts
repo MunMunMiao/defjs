@@ -1,5 +1,5 @@
 import { createTransportError, ERR_ABORTED, ERR_TIMEOUT, type TransportError } from '../error'
-import { type AnyCompatibleSchema, isSchema, isStandardSchemaLike, parseCompatibleSchema, SchemaError } from '../schema'
+import { type AnyCompatibleSchema, isStandardSchemaLike, isStruct, parseCompatibleSchema, StructError } from '../struct'
 import type { ManualSocketCloseReason, SocketSchemas, WebSocketCloseInfo, WebSocketIncomingData, WebSocketOutgoingData } from './web_socket'
 
 // ---- outgoing serialization ----
@@ -28,7 +28,7 @@ export function serializeOutgoingWebSocketMessage<TOutgoing extends SocketSchema
 
 function serializeCompatiblePayload(schema: AnyCompatibleSchema, payload: unknown): unknown {
   // Outgoing validation should stay synchronous for send() ergonomics.
-  if (isSchema(schema)) {
+  if (isStruct(schema)) {
     const [err, val] = schema.parse(payload)
     if (err) {
       throw err
@@ -43,7 +43,7 @@ function serializeCompatiblePayload(schema: AnyCompatibleSchema, payload: unknow
     }
 
     if ('issues' in result) {
-      throw new SchemaError(
+      throw new StructError(
         result.issues.map(issue => ({
           code: 'custom',
           expected: 'valid value',

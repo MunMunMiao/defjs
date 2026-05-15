@@ -1,3 +1,6 @@
+import type { AnyCompatibleSchema, StructLike } from '../struct'
+import { isObjectStruct } from '../struct'
+import { encodeHeaders, encodeJson, encodeMultipart, encodePathParams, encodeQueryParams, encodeUrlencoded } from '../struct/codec'
 import type { HttpRequest } from './http_request'
 import type {
   RequestBodyOptions,
@@ -8,6 +11,20 @@ import type {
 } from './request_values'
 
 type RequestFormDataArrayItem = RequestFormDataScalar | RequestFormDataFileLike
+
+export type RequestBodyCodec = 'json' | 'multipart' | 'urlencoded'
+
+export type RequestBodyDefinition =
+  | RequestBodyCodec
+  | {
+      codec: RequestBodyCodec
+      contentType?: string | null
+    }
+
+export interface RequestAutoBuildOptions {
+  body?: RequestBodyDefinition
+  input?: AnyCompatibleSchema
+}
 
 export interface RequestBuilder {
   body(value: HttpRequest['body'], options?: RequestBodyOptions): void
@@ -39,9 +56,13 @@ type RequestBuilderState = {
   snapshot: RequestBuild
 }
 
-export function buildRequest<TInput>(input: TInput, build: RequestBuildHandler<TInput> | undefined): RequestBuild {
+export function buildRequest<TInput>(
+  input: TInput,
+  build: RequestBuildHandler<TInput> | undefined,
+  options: RequestAutoBuildOptions = {},
+): RequestBuild {
   if (!build) {
-    return {}
+    return buildTaggedRequest(input, options)
   }
 
   const state: RequestBuilderState = {
@@ -51,6 +72,53 @@ export function buildRequest<TInput>(input: TInput, build: RequestBuildHandler<T
 
   build(createRequestBuilder(state), input)
   return state.snapshot
+}
+
+function buildTaggedRequest<TInput>(input: TInput, options: RequestAutoBuildOptions): RequestBuild {
+  if (!options.input || !isObjectStruct(options.input)) {
+    return {}
+  }
+
+  const state: RequestBuilderState = {
+    bodySet: false,
+    snapshot: {},
+  }
+  const builder = createRequestBuilder(state)
+
+  builder.pathParams(encodePathParams(options.input, input))
+  builder.queryParams(encodeQueryParams(options.input, input, { allowComplex: true }))
+  builder.headers(encodeHeaders(options.input, input))
+
+  if (options.body) {
+    setTaggedBody(builder, options.input, input, normalizeRequestBodyDefinition(options.body))
+  }
+
+  return state.snapshot
+}
+
+function setTaggedBody<TInput>(
+  builder: RequestBuilder,
+  inputSchema: StructLike,
+  input: TInput,
+  body: Extract<RequestBodyDefinition, { codec: RequestBodyCodec }>,
+): void {
+  switch (body.codec) {
+    case 'json':
+      builder.json(encodeJson(inputSchema, input, { requireTag: true }), { contentType: body.contentType })
+      return
+    case 'multipart':
+      builder.body(encodeMultipart(inputSchema, input), { contentType: body.contentType })
+      return
+    case 'urlencoded':
+      builder.body(encodeUrlencoded(inputSchema, input), {
+        contentType: body.contentType ?? 'application/x-www-form-urlencoded;charset=UTF-8',
+      })
+      return
+  }
+}
+
+function normalizeRequestBodyDefinition(body: RequestBodyDefinition): Extract<RequestBodyDefinition, { codec: RequestBodyCodec }> {
+  return typeof body === 'string' ? { codec: body } : body
 }
 
 function createRequestBuilder(state: RequestBuilderState): RequestBuilder {

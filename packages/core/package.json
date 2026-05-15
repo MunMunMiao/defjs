@@ -24,6 +24,7 @@
     "test:deno": "deno run --lock=../../deno.lock --frozen -A npm:vitest run --config vitest.config.deno.ts",
     "test:firefox": "bun x vitest run --config vitest.config.browser.firefox.ts",
     "test:node": "npm exec -- vitest run --config vitest.config.node.ts",
+    "test:struct:coverage": "bun x vitest run --config vitest.config.node.ts src/struct --coverage --coverage.include='src/struct/**/*.ts' && bun scripts/check-struct-coverage.ts",
     "test:safari": "bun x vitest run --config vitest.config.browser.safari.ts",
     "test:types": "bun x vitest run --typecheck --config vitest.config.typecheck.ts"
   }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { struct, tag } from '../struct'
 import { buildRequest } from './request_builder'
 
 describe('request_builder formUrlEncoded', () => {
@@ -242,5 +243,62 @@ describe('request_builder general', () => {
     })
     const body = built.body as URLSearchParams
     expect(body.get('data')).toBe('null')
+  })
+})
+
+describe('request_builder tagged struct input', () => {
+  test('builds request locations and json body from struct tags', () => {
+    const input = struct.object({
+      id: struct.number().tag(tag.uri('id'), tag.json('id')),
+      ignored: struct.string(),
+      include: struct.boolean().tag(tag.query('include')),
+      nickname: struct.string().tag(tag.json('nickname')),
+      token: struct.string().tag(tag.header('x-token')),
+    })
+
+    const built = buildRequest(
+      {
+        id: 7,
+        ignored: 'hidden',
+        include: true,
+        nickname: 'Miao',
+        token: 'secret',
+      },
+      undefined,
+      { body: 'json', input },
+    )
+
+    expect(built.params).toEqual({ id: 7 })
+    expect(built.query).toEqual({ include: true })
+    expect(built.headers?.get('x-token')).toBe('secret')
+    expect(built.bodyContentType).toBe('application/json')
+    expect(built.body).toBe('{"id":7,"nickname":"Miao"}')
+  })
+
+  test('distinguishes urlencoded and multipart tagged bodies', () => {
+    const profileForm = struct.object({
+      avatar: struct.blob().tag(tag.multipart('avatar')),
+      name: struct.string().tag(tag.urlencoded('name'), tag.multipart('name')),
+    })
+    const avatar = new Blob(['avatar'], { type: 'image/png' })
+
+    const urlencoded = buildRequest({ avatar, name: 'Miao' }, undefined, {
+      body: 'urlencoded',
+      input: profileForm,
+    })
+    const multipart = buildRequest({ avatar, name: 'Miao' }, undefined, {
+      body: 'multipart',
+      input: profileForm,
+    })
+
+    expect(urlencoded.body).toBeInstanceOf(URLSearchParams)
+    expect((urlencoded.body as URLSearchParams).toString()).toBe('name=Miao')
+    expect(urlencoded.bodyContentType).toBe('application/x-www-form-urlencoded;charset=UTF-8')
+
+    expect(multipart.body).toBeInstanceOf(FormData)
+    expect(multipart.bodyContentType).toBeUndefined()
+    expect((multipart.body as FormData).get('avatar')).toBeInstanceOf(Blob)
+    expect(((multipart.body as FormData).get('avatar') as Blob).size).toBe(avatar.size)
+    expect((multipart.body as FormData).get('name')).toBe('Miao')
   })
 })

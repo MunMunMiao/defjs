@@ -9,11 +9,11 @@ import type { SettledResponse } from '../internal/http_response'
 import type { RequestBuildHandler } from '../internal/request_builder'
 import {
   type AnyCompatibleSchema,
-  type CompatibleInputOf,
-  type CompatibleOutputOf,
+  type CompatibleInput,
+  type CompatibleOutput,
   isCompatibleSchema,
   parseCompatibleSchema,
-} from '../schema'
+} from '../struct/compatible'
 import { createEventStreamRequest } from './request'
 import type { EventStreamHandle, EventStreamOpenInfo } from './transport/event_stream'
 import { fetchEventStream, getErrorOpenInfo } from './transport/event_stream'
@@ -33,7 +33,7 @@ type KnownEventKey<TEvents extends EventSchemas> = Exclude<Extract<keyof TEvents
 
 type KnownEventUnion<TEvents extends EventSchemas> = {
   [K in KnownEventKey<TEvents>]: {
-    data: CompatibleOutputOf<TEvents[K]>
+    data: CompatibleOutput<TEvents[K]>
     event: K
     id?: string
     retry?: number
@@ -42,7 +42,7 @@ type KnownEventUnion<TEvents extends EventSchemas> = {
 
 type DefaultEventUnion<TEvents extends EventSchemas> = 'default' extends keyof TEvents
   ? {
-      data: CompatibleOutputOf<TEvents['default']>
+      data: CompatibleOutput<TEvents['default']>
       event: string
       id?: string
       retry?: number
@@ -86,7 +86,7 @@ export interface EventStreamRef<TEvent = unknown> extends PromiseLike<StreamAwai
 
 type IsInputOptional<TInput extends AnyCompatibleSchema | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends CompatibleInputOf<NonNullable<TInput>>
+  : {} extends CompatibleInput<NonNullable<TInput>>
     ? true
     : false
 
@@ -207,6 +207,7 @@ async function executeEventStreamEndpoint<TInput extends AnyCompatibleSchema | u
       abort: mergeAbortSignals(controller.signal, [config.abort], config.timeout),
       baseEndpoint: clientConfig.endpoint,
       context: config.context,
+      input: endpoint.input,
       queryParamsSerializer: clientConfig.queryParamsSerializer,
       withCredentials: clientConfig.withCredentials,
     })

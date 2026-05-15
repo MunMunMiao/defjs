@@ -8,11 +8,10 @@ import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../int
 import type { HttpProgressFn, HttpResponseType } from '../internal/http_request'
 import type { HttpResponse, SettledResponse } from '../internal/http_response'
 import { toSettledResponse } from '../internal/http_response'
-import type { RequestBuildHandler } from '../internal/request_builder'
-import { type AnyCompatibleSchema, type CompatibleInputOf, type CompatibleOutputOf, parseCompatibleSchema } from '../schema'
+import type { RequestBodyDefinition, RequestBuildHandler } from '../internal/request_builder'
+import { type AnyCompatibleSchema, type CompatibleInput, type CompatibleOutput, parseCompatibleSchema } from '../struct/compatible'
 import { createHttpRequest, normalizeOutputShape, type RequestOutputShape, resolveDefaultResponseType } from './request'
 import type { HttpHandler } from './transport/handler'
-
 
 export interface UseRequestConfig {
   abort?: AbortSignal
@@ -60,18 +59,19 @@ export type RequestSuccessData<TOutput extends RequestOutputShape | undefined> =
   ? undefined
   : [SuccessSchemaOf<NonNullable<TOutput>>] extends [never]
     ? unknown
-    : CompatibleOutputOf<SuccessSchemaOf<NonNullable<TOutput>>>
+    : CompatibleOutput<SuccessSchemaOf<NonNullable<TOutput>>>
 
 export type RequestErrorData<TOutput extends RequestOutputShape | undefined> = [TOutput] extends [undefined]
   ? undefined
   : [ErrorSchemaOf<NonNullable<TOutput>>] extends [never]
     ? unknown
-    : CompatibleOutputOf<ErrorSchemaOf<NonNullable<TOutput>>>
+    : CompatibleOutput<ErrorSchemaOf<NonNullable<TOutput>>>
 
 export interface RequestDefinition<
   TInput extends AnyCompatibleSchema | undefined = undefined,
   TOutput extends RequestOutputShape | undefined = undefined,
 > {
+  body?: RequestBodyDefinition
   build?: RequestBuildHandler<ParsedInput<TInput>>
   input?: TInput
   method: string
@@ -93,7 +93,7 @@ export interface HttpRequestRef<TSuccess = unknown, TErrorData = unknown> extend
 
 type IsInputOptional<TInput extends AnyCompatibleSchema | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends CompatibleInputOf<NonNullable<TInput>>
+  : {} extends CompatibleInput<NonNullable<TInput>>
     ? true
     : false
 
@@ -162,7 +162,7 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
 
   // Fast path: caller already aborted before we did any schema work — skip parseEndpointInput / resolveClientConfig.
   const requestAbort = config.abort
-  if (requestAbort && requestAbort.aborted) {
+  if (requestAbort?.aborted) {
     const transportError = createTransportError(requestAbort.reason ?? ERR_ABORTED)
     state.error = transportError as RequestError<RequestErrorData<TOutput>>
     state.status = 'aborted'
@@ -196,8 +196,10 @@ async function executeHttpEndpoint<TInput extends AnyCompatibleSchema | undefine
     request = createHttpRequest(endpoint.method, endpoint.path, parsedInput, endpoint.build, {
       abort: mergeAbortSignals(controller.signal, [config.abort], resolvedHandler.supportsNativeTimeout ? undefined : config.timeout),
       baseEndpoint: clientConfig.endpoint,
+      body: endpoint.body,
       context: config.context,
       downloadProgress: config.onDownloadProgress,
+      input: endpoint.input,
       queryParamsSerializer: clientConfig.queryParamsSerializer,
       responseType: resolveDefaultResponseType(endpoint.output, endpoint.responseType),
       timeout: config.timeout,

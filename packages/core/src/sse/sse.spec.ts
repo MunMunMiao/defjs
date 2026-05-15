@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, inject, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { ERR_ABORTED } from '../error'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineEventStream } from './index'
 
 describe('request event stream runtime', () => {
@@ -21,7 +21,7 @@ describe('request event stream runtime', () => {
   test('should resolve event streams through thenable refs', async () => {
     const useBasicStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/basic',
     })
@@ -50,7 +50,7 @@ describe('request event stream runtime', () => {
   test('should support withCredentials for SSE', async () => {
     const useBasicStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/basic',
     })
@@ -79,7 +79,7 @@ describe('request event stream runtime', () => {
   test('should handle SSE events without id', async () => {
     const useNoIdStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/no-id',
     })
@@ -96,16 +96,14 @@ describe('request event stream runtime', () => {
       messages.push(event)
     }
 
-    expect(messages).toEqual([
-      { data: 'no-id-message', event: 'message', id: undefined, retry: undefined },
-    ])
+    expect(messages).toEqual([{ data: 'no-id-message', event: 'message', id: undefined, retry: undefined }])
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
   })
 
   test('should handle SSE events with empty id', async () => {
     const useEmptyIdStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/empty-id',
     })
@@ -122,20 +120,18 @@ describe('request event stream runtime', () => {
       messages.push(event)
     }
 
-    expect(messages).toEqual([
-      { data: 'hello', event: 'message', id: undefined, retry: undefined },
-    ])
+    expect(messages).toEqual([{ data: 'hello', event: 'message', id: undefined, retry: undefined }])
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
   })
 
   test('should support default event schema parsing', async () => {
     const useMixedStream = defineEventStream({
       events: {
-        default: schema.object({
-          note: schema.string(),
+        default: struct.object({
+          note: struct.string(),
         }),
-        userconnect: schema.object({
-          uid: schema.number(),
+        userconnect: struct.object({
+          uid: struct.number(),
         }),
       },
       path: '/sse/mixed',
@@ -171,7 +167,7 @@ describe('request event stream runtime', () => {
   test('should allow closing stream refs before startup', async () => {
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/infinite',
     })
@@ -195,7 +191,7 @@ describe('request event stream runtime', () => {
   test('should skip unexpected stream messages after startup', async () => {
     const useStream = defineEventStream({
       events: {
-        message: schema.number(),
+        message: struct.number(),
       },
       path: '/sse/basic',
     })
@@ -222,7 +218,7 @@ describe('request event stream runtime', () => {
   test('should return startup error tuple when stream open response is invalid', async () => {
     const useInvalidStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/json',
     })
@@ -246,7 +242,7 @@ describe('request event stream runtime', () => {
 
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/basic',
     })
@@ -265,7 +261,7 @@ describe('request event stream runtime', () => {
 
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/basic',
     })
@@ -281,7 +277,7 @@ describe('request event stream runtime', () => {
   test('should handle stream error state', async () => {
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/500',
     })
@@ -297,7 +293,7 @@ describe('request event stream runtime', () => {
   test('should skip unknown event types without default schema', async () => {
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/unknown-event',
     })
@@ -319,7 +315,7 @@ describe('request event stream runtime', () => {
   test('should parse empty event data', async () => {
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/empty-data',
     })
@@ -341,8 +337,8 @@ describe('request event stream runtime', () => {
   test('should parse message with empty event name', async () => {
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
-        default: schema.string(),
+        message: struct.string(),
+        default: struct.string(),
       },
       path: '/sse/no-event-name',
     })
@@ -367,7 +363,7 @@ describe('request event stream runtime', () => {
 
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/basic',
     })
@@ -388,7 +384,7 @@ describe('request event stream runtime', () => {
         throw new Error('build failed')
       },
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/basic',
     })
@@ -404,15 +400,15 @@ describe('request event stream runtime', () => {
   test('should expose ref error and open after failure', async () => {
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/basic',
     })
 
     const ref = useStream()
     // Call then twice to cover getPromise with existing promise
-    const p1 = ref.then(() => {})
-    const p2 = ref.then(() => {})
+    const p1 = ref.then(() => undefined)
+    const p2 = ref.then(() => undefined)
     await Promise.all([p1, p2])
 
     const [error] = await ref
@@ -432,7 +428,7 @@ describe('request event stream runtime', () => {
 
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/events',
     })
@@ -454,7 +450,7 @@ describe('request event stream runtime', () => {
   test('should return http error on non-ok response', async () => {
     const useStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/500',
     })
@@ -469,11 +465,11 @@ describe('request event stream runtime', () => {
 
   test('should handle request validation failure on invalid input', async () => {
     const useStream = defineEventStream({
-      input: schema.object({
-        id: schema.number(),
+      input: struct.object({
+        id: struct.number(),
       }),
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/basic',
     })
@@ -485,5 +481,4 @@ describe('request event stream runtime', () => {
     expect(error?.kind).toBe('definition')
     expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
   })
-
 })

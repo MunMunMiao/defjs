@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime heartbeat', () => {
@@ -19,13 +19,13 @@ describe('web socket runtime heartbeat', () => {
   test('should send heartbeat messages automatically when heartbeat.message is provided', async () => {
     const useHeartbeatSocket = defineWebSocket({
       incoming: {
-        pong: schema.object({
-          ok: schema.boolean(),
+        pong: struct.object({
+          ok: struct.boolean(),
         }),
       },
       outgoing: {
-        ping: schema.object({
-          at: schema.number(),
+        ping: struct.object({
+          at: struct.number(),
         }),
       },
       path: '/ws/heartbeat',

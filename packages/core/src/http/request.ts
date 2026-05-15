@@ -1,9 +1,9 @@
-import type { QueryParamsSerializer } from '../client/config'
+import { DEFAULT_QUERY_PARAMS_SERIALIZER, type QueryParamsSerializer } from '../client/config'
 import type { HttpContext } from '../internal/context'
 import type { HttpProgressFn, HttpRequest, HttpResponseType } from '../internal/http_request'
-import { buildRequest, type RequestBuildHandler } from '../internal/request_builder'
+import { buildRequest, type RequestBodyDefinition, type RequestBuildHandler } from '../internal/request_builder'
 import { appendRecordToHeaders, createSearchParams, fillUrl } from '../internal/url'
-import type { AnyCompatibleSchema } from '../schema'
+import type { AnyCompatibleSchema } from '../struct'
 
 export type ResponseGroupItem<S extends number = number, B extends AnyCompatibleSchema = AnyCompatibleSchema> = {
   body: B
@@ -22,6 +22,8 @@ export function createHttpRequest<TInput>(
     baseEndpoint: string
     context?: HttpContext
     downloadProgress?: HttpProgressFn
+    body?: RequestBodyDefinition
+    input?: AnyCompatibleSchema
     queryParamsSerializer: QueryParamsSerializer
     responseType?: HttpResponseType
     timeout?: number
@@ -29,8 +31,12 @@ export function createHttpRequest<TInput>(
     withCredentials?: boolean
   },
 ): HttpRequest {
-  const built = buildRequest(input, build)
-  const queryParams = createSearchParams(built.query)
+  const built = buildRequest(input, build, {
+    body: options.body,
+    input: options.input,
+  })
+  const allowComplexQuery = options.queryParamsSerializer !== DEFAULT_QUERY_PARAMS_SERIALIZER
+  const queryParams = createSearchParams(built.query, { allowComplex: allowComplexQuery })
   const headers = new Headers()
 
   appendRecordToHeaders(headers, built.headers)
@@ -49,7 +55,7 @@ export function createHttpRequest<TInput>(
     headers,
     method,
     queryParams,
-    queryString: options.queryParamsSerializer(queryParams),
+    queryString: options.queryParamsSerializer(queryParams, built.query),
     responseType: options.responseType,
     timeout: options.timeout,
     uploadProgress: options.uploadProgress,
@@ -85,8 +91,8 @@ export function normalizeOutputShape(output: RequestOutputShape): Map<number, An
     return map
   }
 
-  for (const [status, schema] of Object.entries(output)) {
-    map.set(Number(status), schema)
+  for (const [status, struct] of Object.entries(output)) {
+    map.set(Number(status), struct)
   }
 
   return map

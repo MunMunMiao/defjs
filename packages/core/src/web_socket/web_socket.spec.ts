@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { ERR_ABORTED } from '../error'
 import { createWebSocketInterceptor } from '../interceptor'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime', () => {
@@ -41,21 +41,21 @@ describe('web socket runtime', () => {
         })
       },
       incoming: {
-        joined: schema.object({
-          roomId: schema.string(),
-          userId: schema.number(),
+        joined: struct.object({
+          roomId: struct.string(),
+          userId: struct.number(),
         }),
-        message: schema.object({
-          text: schema.string(),
-          userId: schema.number(),
+        message: struct.object({
+          text: struct.string(),
+          userId: struct.number(),
         }),
       },
-      input: schema.object({
-        roomId: schema.string(),
+      input: struct.object({
+        roomId: struct.string(),
       }),
       outgoing: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
       },
       path: '/ws/basic',
@@ -87,16 +87,16 @@ describe('web socket runtime', () => {
   test('should validate outgoing messages and echo typed responses', async () => {
     const useEchoSocket = defineWebSocket({
       incoming: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
-        ready: schema.object({
-          ok: schema.boolean(),
+        ready: struct.object({
+          ok: struct.boolean(),
         }),
       },
       outgoing: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
       },
       path: '/ws/echo',
@@ -136,12 +136,12 @@ describe('web socket runtime', () => {
   test('should support heartbeat with timeout', async () => {
     const useHeartbeatSocket = defineWebSocket({
       incoming: {
-        pong: schema.object({
-          ok: schema.boolean(),
+        pong: struct.object({
+          ok: struct.boolean(),
         }),
       },
       outgoing: {
-        ping: schema.object({}),
+        ping: struct.object({}),
       },
       path: '/ws/heartbeat-silent',
     })
@@ -173,12 +173,12 @@ describe('web socket runtime', () => {
   test('should mark heartbeat ack when server responds with pong', async () => {
     const useHeartbeatSocket = defineWebSocket({
       incoming: {
-        pong: schema.object({
-          ok: schema.boolean(),
+        pong: struct.object({
+          ok: struct.boolean(),
         }),
       },
       outgoing: {
-        ping: schema.object({}),
+        ping: struct.object({}),
       },
       path: '/ws/heartbeat',
     })
@@ -209,8 +209,8 @@ describe('web socket runtime', () => {
   test('should skip invalid incoming websocket payloads without runtime error', async () => {
     const useSocket = defineWebSocket({
       incoming: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
       },
       path: '/ws/invalid',
@@ -235,8 +235,8 @@ describe('web socket runtime', () => {
   test('should emit runtime error when incoming message schema validation fails', async () => {
     const useSocket = defineWebSocket({
       incoming: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
       },
       path: '/ws/error-before-close',
@@ -261,8 +261,8 @@ describe('web socket runtime', () => {
   test('should skip undeclared incoming message types', async () => {
     const useSocket = defineWebSocket({
       incoming: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
       },
       path: '/ws/unknown-message',
@@ -287,9 +287,9 @@ describe('web socket runtime', () => {
   test('should expose ref state transitions and allow unsubscribing listeners', async () => {
     const useSocket = defineWebSocket({
       incoming: {
-        joined: schema.object({
-          roomId: schema.string(),
-          userId: schema.number(),
+        joined: struct.object({
+          roomId: struct.string(),
+          userId: struct.number(),
         }),
       },
       path: '/ws/close-immediately',
@@ -347,8 +347,8 @@ describe('web socket runtime', () => {
   test('should support ref.close after startup and ignore socket.close after cleanup', async () => {
     const useSocket = defineWebSocket({
       incoming: {
-        ready: schema.object({
-          ok: schema.boolean(),
+        ready: struct.object({
+          ok: struct.boolean(),
         }),
       },
       path: '/ws/echo',
@@ -390,8 +390,8 @@ describe('web socket runtime', () => {
   test('should return definition error when input validation fails', async () => {
     const useSocket = defineWebSocket({
       incoming: {},
-      input: schema.object({
-        id: schema.number(),
+      input: struct.object({
+        id: struct.number(),
       }),
       path: '/ws/basic',
     })
@@ -460,16 +460,16 @@ describe('web socket runtime', () => {
         request.queryParams({ key: 'queued-reconnect' })
       },
       incoming: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
-        reconnected: schema.object({
-          attempt: schema.number(),
+        reconnected: struct.object({
+          attempt: struct.number(),
         }),
       },
       outgoing: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
       },
       path: '/ws/reconnect',
@@ -510,8 +510,8 @@ describe('web socket runtime', () => {
         request.queryParams({ key: 'abort-during-delay' })
       },
       incoming: {
-        reconnected: schema.object({
-          attempt: schema.number(),
+        reconnected: struct.object({
+          attempt: struct.number(),
         }),
       },
       path: '/ws/reconnect',
@@ -541,8 +541,8 @@ describe('web socket runtime', () => {
         request.queryParams({ key: 'zero-delay-reconnect' })
       },
       incoming: {
-        reconnected: schema.object({
-          attempt: schema.number(),
+        reconnected: struct.object({
+          attempt: struct.number(),
         }),
       },
       path: '/ws/reconnect',

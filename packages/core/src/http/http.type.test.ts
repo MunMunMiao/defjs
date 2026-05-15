@@ -1,4 +1,4 @@
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineRequest } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
@@ -9,17 +9,17 @@ const noInputEndpoint = defineRequest<undefined, undefined>({
   path: '/health',
 })
 
-const requiredInputSchema = schema.object({
-  id: schema.string(),
-  verbose: schema.boolean().optional(),
+const requiredInputSchema = struct.object({
+  id: struct.string(),
+  verbose: struct.boolean().optional(),
 })
 
-const requiredSuccessSchema = schema.object({
-  id: schema.string(),
+const requiredSuccessSchema = struct.object({
+  id: struct.string(),
 })
 
-const requiredErrorSchema = schema.object({
-  message: schema.string(),
+const requiredErrorSchema = struct.object({
+  message: struct.string(),
 })
 
 const requiredEndpoint = defineRequest<

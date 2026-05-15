@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { makeHttpContext, makeHttpContextToken } from '../internal/context'
-import { schema } from '../schema'
+import { struct, tag } from '../struct'
 import { createHttpRequest, normalizeOutputShape, resolveDefaultResponseType } from './request'
 
 describe('http request helpers', () => {
@@ -54,6 +54,25 @@ describe('http request helpers', () => {
     expect(request.withCredentials).toBe(false)
     expect(request.context?.get(traceToken)).toBe('trace-from-config')
     expect(request.body).toBe('{"nickname":"Miao"}')
+  })
+
+  test('should pass complex tagged query values to custom queryParamsSerializer', () => {
+    const input = struct.object({
+      filter: struct.object({ page: struct.number() }).tag(tag.query('filter')),
+      include: struct.boolean().tag(tag.query('include')),
+    })
+
+    const request = createHttpRequest('GET', '/search', { filter: { page: 1 }, include: true }, undefined, {
+      abort: new AbortController().signal,
+      baseEndpoint: 'https://api.example.com',
+      input,
+      queryParamsSerializer: (params, rawParams) => {
+        expect(params.get('include')).toBe('true')
+        return `include=${params.get('include')}&filter=${encodeURIComponent(JSON.stringify(rawParams?.filter))}`
+      },
+    })
+
+    expect(request.queryString).toBe(`include=true&filter=${encodeURIComponent(JSON.stringify({ page: 1 }))}`)
   })
 
   test('should support text xml form-url-encoded and raw body helpers', () => {
@@ -258,8 +277,8 @@ describe('http request helpers', () => {
     expect(resolveDefaultResponseType(undefined)).toBeUndefined()
     expect(
       resolveDefaultResponseType({
-        200: schema.object({
-          ok: schema.boolean(),
+        200: struct.object({
+          ok: struct.boolean(),
         }),
       }),
     ).toBe('json')
@@ -267,9 +286,7 @@ describe('http request helpers', () => {
   })
 
   test('should normalize output shape with single status value', () => {
-    const map = normalizeOutputShape([
-      { body: schema.string(), status: 200 },
-    ])
+    const map = normalizeOutputShape([{ body: struct.string(), status: 200 }])
     expect(map.get(200)).toBeDefined()
   })
 })

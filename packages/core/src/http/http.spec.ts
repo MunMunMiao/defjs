@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { makeResponse } from '../internal/http_response'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import type { HttpRequest } from './index'
 import { defineRequest } from './index'
 
@@ -22,9 +22,9 @@ describe('request http runtime', () => {
     const useCreateAccount = defineRequest({
       method: 'POST',
       output: {
-        200: schema.object({
-          id: schema.number(),
-          name: schema.string(),
+        200: struct.object({
+          id: struct.number(),
+          name: struct.string(),
         }),
       },
       path: '/account',
@@ -43,9 +43,9 @@ describe('request http runtime', () => {
       method: 'GET',
       output: [
         {
-          body: schema.object({
-            code: schema.string(),
-            message: schema.string(),
+          body: struct.object({
+            code: struct.string(),
+            message: struct.string(),
           }),
           status: [401, 403, 404] as const,
         },
@@ -105,17 +105,17 @@ describe('request http runtime', () => {
           tags: input.tags,
         })
       },
-      input: schema.object({
-        id: schema.number(),
-        include: schema.boolean(),
-        nickname: schema.string(),
-        tags: schema.array(schema.string()),
-        token: schema.string(),
+      input: struct.object({
+        id: struct.number(),
+        include: struct.boolean(),
+        nickname: struct.string(),
+        tags: struct.array(struct.string()),
+        token: struct.string(),
       }),
       method: 'POST',
       output: {
-        200: schema.object({
-          ok: schema.boolean(),
+        200: struct.object({
+          ok: struct.boolean(),
         }),
       },
       path: '/inspect/:id',

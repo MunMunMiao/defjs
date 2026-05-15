@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { createClient } from '../client'
 import { ERR_ABORTED } from '../error'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 let lastMockInstance: MockWebSocketInstance | undefined
@@ -20,12 +20,9 @@ interface MockWebSocketInstance {
   triggerError: () => void
 }
 
-function createMockWebSocketClass(options: {
-  autoOpen?: boolean
-  autoCloseDelay?: number
-  sendError?: Error
-  throwOnConstruct?: Error
-} = {}) {
+function createMockWebSocketClass(
+  options: { autoOpen?: boolean; autoCloseDelay?: number; sendError?: Error; throwOnConstruct?: Error } = {},
+) {
   const { autoOpen = true, autoCloseDelay = -1, sendError, throwOnConstruct } = options
 
   return class MockWebSocket {
@@ -55,7 +52,7 @@ function createMockWebSocketClass(options: {
 
       this.readyState = MockWebSocket.CONNECTING
       this.url = url
-      this.protocol = Array.isArray(protocols) ? protocols[0] ?? '' : protocols ?? ''
+      this.protocol = Array.isArray(protocols) ? (protocols[0] ?? '') : (protocols ?? '')
       this.extensions = ''
       this.listeners = {}
       this.close = vi.fn((code?: number, reason?: string) => {
@@ -110,10 +107,7 @@ describe('web socket runtime environment edge cases', () => {
   })
 
   test('should return transport error when WebSocket constructor throws', async () => {
-    vi.stubGlobal(
-      'WebSocket',
-      createMockWebSocketClass({ throwOnConstruct: new Error('connection refused') }),
-    )
+    vi.stubGlobal('WebSocket', createMockWebSocketClass({ throwOnConstruct: new Error('connection refused') }))
 
     const useSocket = defineWebSocket({
       incoming: {},
@@ -130,10 +124,7 @@ describe('web socket runtime environment edge cases', () => {
   })
 
   test('should return transport error when WebSocket constructor throws non-Error', async () => {
-    vi.stubGlobal(
-      'WebSocket',
-      createMockWebSocketClass({ throwOnConstruct: 'connection refused' as unknown as Error }),
-    )
+    vi.stubGlobal('WebSocket', createMockWebSocketClass({ throwOnConstruct: 'connection refused' as unknown as Error }))
 
     const useSocket = defineWebSocket({
       incoming: {},
@@ -232,7 +223,7 @@ describe('web socket runtime environment edge cases', () => {
     const useSocket = defineWebSocket({
       incoming: {},
       outgoing: {
-        msg: schema.object({ text: schema.string() }),
+        msg: struct.object({ text: struct.string() }),
       },
       path: '/ws/test',
     })

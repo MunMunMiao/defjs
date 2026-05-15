@@ -11,10 +11,18 @@ export function fillUrl(path: string, params?: Record<string, RequestBuildValue>
       }
 
       if (Array.isArray(value)) {
-        if (value.length > 0) {
-          paramMap.set(key, serializeValue(value[0]))
+        const first = value[0]
+        if (typeof first !== 'undefined') {
+          if (!isScalarSearchParamValue(first)) {
+            throw new TypeError(`path value for "${key}" requires a scalar value`)
+          }
+          paramMap.set(key, serializeValue(first))
         }
         continue
+      }
+
+      if (!isScalarSearchParamValue(value)) {
+        throw new TypeError(`path value for "${key}" requires a scalar value`)
       }
 
       paramMap.set(key, serializeValue(value))
@@ -24,14 +32,18 @@ export function fillUrl(path: string, params?: Record<string, RequestBuildValue>
   return path.replace(/:([^/]+)/g, (_, part) => paramMap.get(part) ?? 'undefined')
 }
 
-export function createSearchParams(query?: Record<string, RequestBuildValue>): URLSearchParams {
+export interface SearchParamsOptions {
+  allowComplex?: boolean
+}
+
+export function createSearchParams(query?: Record<string, RequestBuildValue>, options: SearchParamsOptions = {}): URLSearchParams {
   const searchParams = new URLSearchParams()
   if (!query) {
     return searchParams
   }
 
   for (const [key, value] of Object.entries(query)) {
-    appendToSearchParams(searchParams, key, value)
+    appendToSearchParams(searchParams, key, value, options)
   }
 
   return searchParams
@@ -63,9 +75,16 @@ export function appendRecordToHeaders(headers: Headers, value?: HeadersInit | Re
 
     if (Array.isArray(headerValue)) {
       for (const item of headerValue) {
+        if (!isScalarSearchParamValue(item)) {
+          throw new TypeError(`header value for "${key}" requires a scalar value`)
+        }
         headers.append(key, serializeValue(item))
       }
       continue
+    }
+
+    if (!isScalarSearchParamValue(headerValue)) {
+      throw new TypeError(`header value for "${key}" requires a scalar value`)
     }
 
     headers.set(key, serializeValue(headerValue))
@@ -87,22 +106,36 @@ export function resolveRequestUrl(request: HttpRequest): URL {
     throw ERR_INVALID_CLIENT_ENDPOINT
   }
   const queryString =
-    typeof request.queryString === 'string'
-      ? request.queryString
-      : request.queryParams
-        ? request.queryParams.toString()
-        : ''
+    typeof request.queryString === 'string' ? request.queryString : request.queryParams ? request.queryParams.toString() : ''
   return createResolvedRequestUrl(request.baseEndpoint, request.endpoint, queryString)
 }
 
-function appendToSearchParams(searchParams: URLSearchParams, key: string, value: RequestBuildValue): void {
+function appendToSearchParams(searchParams: URLSearchParams, key: string, value: RequestBuildValue, options: SearchParamsOptions): void {
   if (typeof value === 'undefined') {
     return
   }
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      searchParams.append(key, serializeValue(item))
+      if (typeof item === 'undefined') {
+        continue
+      }
+
+      if (isScalarSearchParamValue(item)) {
+        searchParams.append(key, serializeValue(item))
+        continue
+      }
+
+      if (!options.allowComplex) {
+        throw new TypeError(`query value for "${key}" requires queryParamsSerializer or a scalar value`)
+      }
+    }
+    return
+  }
+
+  if (!isScalarSearchParamValue(value)) {
+    if (!options.allowComplex) {
+      throw new TypeError(`query value for "${key}" requires queryParamsSerializer or a scalar value`)
     }
     return
   }
@@ -110,20 +143,12 @@ function appendToSearchParams(searchParams: URLSearchParams, key: string, value:
   searchParams.set(key, serializeValue(value))
 }
 
-function serializeValue(value: unknown): string {
-  switch (true) {
-    case typeof value === 'string':
-      return value
-    case typeof value === 'number':
-    case typeof value === 'boolean':
-      return String(value)
-    case value === null:
-      return 'null'
-    case typeof value === 'object':
-      return JSON.stringify(value)
-    default:
-      return String(value)
-  }
+function isScalarSearchParamValue(value: unknown): value is boolean | null | number | string {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null
+}
+
+function serializeValue(value: boolean | null | number | string): string {
+  return value === null ? 'null' : String(value)
 }
 
 function createEndpointDirectoryBase(baseEndpoint: string): URL {

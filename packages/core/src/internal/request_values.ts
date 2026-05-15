@@ -9,5 +9,5 @@ export type RequestFormDataValue =
   | readonly RequestFormDataFileLike[]
 
 export interface RequestBodyOptions {
-  readonly contentType?: string
+  readonly contentType?: string | null
 }

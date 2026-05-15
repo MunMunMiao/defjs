@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { ERR_NOT_FOUND_GLOBAL_CLIENT } from '../error'
 import { makeResponse } from '../internal/http_response'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineRequest } from './index'
 
 describe('request http runtime with client config', () => {
@@ -78,8 +78,8 @@ describe('request http runtime with client config', () => {
     const useGetInfo = defineRequest({
       method: 'GET',
       output: {
-        200: schema.object({
-          endpoint: schema.string(),
+        200: struct.object({
+          endpoint: struct.string(),
         }),
       },
       path: '/info',

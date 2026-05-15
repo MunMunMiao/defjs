@@ -8,7 +8,7 @@ import { AsyncQueue } from '../internal/async_queue'
 import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpRequest } from '../internal/http_request'
 import type { RequestBuild, RequestBuildHandler } from '../internal/request_builder'
-import { type AnyCompatibleSchema, type CompatibleInputOf, type CompatibleOutputOf } from '../schema'
+import type { AnyCompatibleSchema, CompatibleInput, CompatibleOutput } from '../struct/compatible'
 import { createWebSocketBuild, createWebSocketUrl } from './build'
 import {
   extractCloseInfo,
@@ -19,7 +19,7 @@ import {
 } from './codec'
 import { type HeartbeatRuntime, startHeartbeat, stopHeartbeat } from './heartbeat'
 import { createSendQueue, type SendQueue, type WebSocketQueueConfig } from './queue'
-import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait, type WebSocketReconnectConfig } from './reconnect'
+import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, type WebSocketReconnectConfig, wait } from './reconnect'
 
 export type WebSocketState = 'aborted' | 'closed' | 'closing' | 'connecting' | 'error' | 'idle' | 'open' | 'reconnecting'
 
@@ -51,11 +51,11 @@ type SocketSendMessage<TKey extends string, TPayload> =
       }
 
 type KnownIncomingSocketUnion<TIncoming extends SocketSchemas> = {
-  [K in KnownSocketKey<TIncoming>]: NormalizeSocketMessage<K, CompatibleOutputOf<TIncoming[K]>>
+  [K in KnownSocketKey<TIncoming>]: NormalizeSocketMessage<K, CompatibleOutput<TIncoming[K]>>
 }[KnownSocketKey<TIncoming>]
 
 type DefaultIncomingSocketUnion<TIncoming extends SocketSchemas> = 'default' extends keyof TIncoming
-  ? NormalizeSocketMessage<string, CompatibleOutputOf<TIncoming['default']>>
+  ? NormalizeSocketMessage<string, CompatibleOutput<TIncoming['default']>>
   : never
 
 export type WebSocketIncomingData<TIncoming extends SocketSchemas> = [
@@ -65,7 +65,7 @@ export type WebSocketIncomingData<TIncoming extends SocketSchemas> = [
   : KnownIncomingSocketUnion<TIncoming> | DefaultIncomingSocketUnion<TIncoming>
 
 type KnownOutgoingSocketUnion<TOutgoing extends SocketSchemas> = {
-  [K in KnownSocketKey<TOutgoing>]: SocketSendMessage<K, CompatibleInputOf<TOutgoing[K]>>
+  [K in KnownSocketKey<TOutgoing>]: SocketSendMessage<K, CompatibleInput<TOutgoing[K]>>
 }[KnownSocketKey<TOutgoing>]
 
 export type WebSocketOutgoingData<TOutgoing extends SocketSchemas | undefined> = TOutgoing extends SocketSchemas
@@ -138,7 +138,7 @@ export interface WebSocketRef<TIncoming = unknown, TOutgoing = never> extends Pr
 
 type IsInputOptional<TInput extends AnyCompatibleSchema | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends CompatibleInputOf<NonNullable<TInput>>
+  : {} extends CompatibleInput<NonNullable<TInput>>
     ? true
     : false
 
@@ -183,7 +183,7 @@ type Deferred<T> = {
   resolve: (value: T | PromiseLike<T>) => void
 }
 
-export type { WebSocketReconnectConfig, WebSocketQueueConfig }
+export type { WebSocketQueueConfig, WebSocketReconnectConfig }
 export type WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> = Omit<WebSocketHeartbeatOptions, 'isAck' | 'message'> & {
   isAck?: (message: TIncoming) => boolean
   message?: <T = TOutgoing>() => T | unknown
@@ -428,7 +428,9 @@ async function executeWebSocketEndpoint<
         }
       }
 
-      async function prepareAttempt(): Promise<{ ok: true; protocols: readonly string[]; url: string } | { error: RequestError<unknown>; ok: false }> {
+      async function prepareAttempt(): Promise<
+        { ok: true; protocols: readonly string[]; url: string } | { error: RequestError<unknown>; ok: false }
+      > {
         let url: string
         try {
           url = createWebSocketUrl(clientConfig.endpoint, endpoint.path, built.params, built.query, clientConfig.queryParamsSerializer)
@@ -461,7 +463,7 @@ async function executeWebSocketEndpoint<
         let socket: WebSocket
         try {
           socket = protocols.length > 0 ? new globalThis.WebSocket(url, [...protocols]) : new globalThis.WebSocket(url)
-        /* istanbul ignore next -- defensive: WebSocket constructor errors are environment-dependent */
+          /* istanbul ignore next -- defensive: WebSocket constructor errors are environment-dependent */
         } catch (error) {
           return {
             closeInfo: {
@@ -519,7 +521,9 @@ async function executeWebSocketEndpoint<
               resolveSession(session as WebSocketSessionLike)
             }
             flushSendQueue(socket, sendQueue, state)
-            startHeartbeat(socket, sessionController, heartbeatConfig, endpoint.outgoing, sendQueue, error => emitRuntimeError(state, error))
+            startHeartbeat(socket, sessionController, heartbeatConfig, endpoint.outgoing, sendQueue, error =>
+              emitRuntimeError(state, error),
+            )
           }
 
           const handleMessage = async (event: MessageEvent) => {
@@ -651,7 +655,6 @@ async function executeWebSocketEndpoint<
   }
 }
 
-
 function createDeferred<T>(): Deferred<T> {
   let resolve!: Deferred<T>['resolve']
   let reject!: Deferred<T>['reject']
@@ -673,7 +676,6 @@ export type SocketLifecycleOutcome = {
   cause?: unknown
   opened: boolean
 }
-
 
 function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | undefined>(
   outgoing: TOutgoing,
@@ -733,7 +735,7 @@ function flushSendQueue(socket: WebSocket, queue: SendQueue, state: SocketRefSta
 
     try {
       socket.send(next)
-    /* istanbul ignore next -- defensive: send errors are environment-dependent */
+      /* istanbul ignore next -- defensive: send errors are environment-dependent */
     } catch (error) {
       state.error = createTransportError(error)
       emitRuntimeError(state, error)
@@ -741,9 +743,6 @@ function flushSendQueue(socket: WebSocket, queue: SendQueue, state: SocketRefSta
     }
   }
 }
-
-
-
 
 function setSocketState<TIncoming, TOutgoing>(state: SocketRefState<TIncoming, TOutgoing>, next: WebSocketState): void {
   if (state.status === next) {

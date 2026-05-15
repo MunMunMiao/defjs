@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime reconnect', () => {
@@ -24,19 +24,19 @@ describe('web socket runtime reconnect', () => {
         })
       },
       incoming: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
-        reconnected: schema.object({
-          attempt: schema.number(),
+        reconnected: struct.object({
+          attempt: struct.number(),
         }),
       },
-      input: schema.object({
-        key: schema.string(),
+      input: struct.object({
+        key: struct.string(),
       }),
       outgoing: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
       },
       path: '/ws/reconnect',

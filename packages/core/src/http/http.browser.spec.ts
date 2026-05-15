@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineRequest } from './index'
 import { xhrHandler } from './transport'
 
@@ -22,8 +22,8 @@ describe('http browser runtime', () => {
     const useGetAccount = defineRequest({
       method: 'GET',
       output: {
-        200: schema.object({
-          id: schema.number(),
+        200: struct.object({
+          id: struct.number(),
         }),
       },
       path: '/json',

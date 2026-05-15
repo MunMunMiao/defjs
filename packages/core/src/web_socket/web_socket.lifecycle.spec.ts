@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime lifecycle', () => {
@@ -32,8 +32,8 @@ describe('web socket runtime lifecycle', () => {
   test('should allow closing websocket refs before startup', async () => {
     const useEchoSocket = defineWebSocket({
       incoming: {
-        ready: schema.object({
-          ok: schema.boolean(),
+        ready: struct.object({
+          ok: struct.boolean(),
         }),
       },
       path: '/ws/echo',
@@ -59,8 +59,8 @@ describe('web socket runtime lifecycle', () => {
   test('should skip unexpected websocket messages after startup', async () => {
     const useInvalidSocket = defineWebSocket({
       incoming: {
-        message: schema.object({
-          count: schema.number(),
+        message: struct.object({
+          count: struct.number(),
         }),
       },
       path: '/ws/invalid',
@@ -102,8 +102,8 @@ describe('web socket runtime lifecycle', () => {
         })
       },
       incoming: {
-        connected: schema.object({
-          token: schema.string(),
+        connected: struct.object({
+          token: struct.string(),
         }),
       },
       path: '/ws/before-connect',

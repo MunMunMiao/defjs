@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineEventStream } from './index'
 
 describe('sse browser runtime', () => {
@@ -20,7 +20,7 @@ describe('sse browser runtime', () => {
   test('should consume event streams in real browsers', async () => {
     const useBasicStream = defineEventStream({
       events: {
-        message: schema.string(),
+        message: struct.string(),
       },
       path: '/sse/basic',
     })
@@ -45,7 +45,7 @@ describe('sse browser runtime', () => {
   test('should skip unexpected events in real browsers', async () => {
     const useStream = defineEventStream({
       events: {
-        message: schema.number(),
+        message: struct.number(),
       },
       path: '/sse/basic',
     })

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
 import { makeResponse } from '../internal/http_response'
-import { type StandardSchemaLike, schema } from '../schema'
+import { type StandardSchemaLike, struct } from '../struct'
 import { defineRequest } from './index'
 
 describe('request http runtime compatibility', () => {
@@ -129,8 +129,8 @@ describe('request http runtime compatibility', () => {
     const useJsonResponse = defineRequest({
       method: 'GET',
       output: {
-        200: schema.object({
-          id: schema.number(),
+        200: struct.object({
+          id: struct.number(),
         }),
       },
       responseType: 'json',
@@ -140,7 +140,7 @@ describe('request http runtime compatibility', () => {
     const useTextResponse = defineRequest({
       method: 'GET',
       output: {
-        200: schema.string(),
+        200: struct.string(),
       },
       responseType: 'text',
       path: '/plain-text',

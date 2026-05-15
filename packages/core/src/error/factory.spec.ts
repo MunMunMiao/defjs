@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { makeResponse, toSettledResponse } from '../internal/http_response'
-import { SchemaError } from '../schema'
+import { StructError } from '../struct'
 import { createDefinitionError, createRequestRuntimeError, createTransportError, ERR_ABORTED, ERR_TIMEOUT, unwrapErrorCause } from './index'
 
 describe('error factory helpers', () => {
@@ -40,7 +40,7 @@ describe('error factory helpers', () => {
       message: 'HTTP 400',
     })
 
-    const schemaError = new SchemaError([
+    const schemaError = new StructError([
       {
         code: 'custom',
         expected: 'string',

@@ -1,0 +1,89 @@
+import type { FlattenedSchemaError, FormattedSchemaError, Path, SchemaIssue } from './types'
+import { describeValue, formatPath } from './utils'
+
+export type ErrorMap = (issue: SchemaIssue) => string | undefined
+
+let globalErrorMap: ErrorMap | undefined
+
+export function setErrorMap(map: ErrorMap | undefined): void {
+  globalErrorMap = map
+}
+
+export class StructError extends Error {
+  readonly issues: SchemaIssue[]
+
+  constructor(issues: SchemaIssue[]) {
+    const first = issues[0]?.message
+    super(issues.length <= 1 ? (first ?? 'Schema parse failed') : `${issues.length} schema issues: ${first}`)
+    this.name = 'StructError'
+    this.issues = issues
+  }
+
+  format(): FormattedSchemaError {
+    const root: FormattedSchemaError = { _errors: [] }
+    for (const item of this.issues) {
+      let cursor: FormattedSchemaError = root
+      for (const segment of item.path) {
+        const key = formatErrorTreeKey(segment)
+        const existing = cursor[key]
+        if (existing && !Array.isArray(existing)) {
+          cursor = existing
+        } else {
+          const next: FormattedSchemaError = { _errors: [] }
+          cursor[key] = next
+          cursor = next
+        }
+      }
+      cursor._errors.push(item.message)
+    }
+    return root
+  }
+
+  flatten(): FlattenedSchemaError {
+    const formErrors: string[] = []
+    const fieldErrors: Record<string, string[]> = {}
+    for (const item of this.issues) {
+      if (item.path.length === 0) {
+        formErrors.push(item.message)
+        continue
+      }
+      const key = String(item.path[0])
+      ;(fieldErrors[key] ??= []).push(item.message)
+    }
+    return { fieldErrors, formErrors }
+  }
+
+  prettify(): string {
+    if (this.issues.length === 0) {
+      return 'Schema parse failed'
+    }
+    return this.issues
+      .map(item => {
+        const where = item.path.length === 0 ? '<root>' : formatPath(item.path)
+        return `× ${where}: ${item.message}`
+      })
+      .join('\n')
+  }
+}
+
+function formatErrorTreeKey(segment: number | string): string {
+  const key = String(segment)
+  return key === '_errors' ? '\\_errors' : key
+}
+
+export function issue(path: Path, code: SchemaIssue['code'], expected: string, received: unknown, message?: string): SchemaIssue {
+  const candidate: SchemaIssue = {
+    code,
+    expected,
+    message: message ?? `Expected ${expected} at ${formatPath(path)}, received ${describeValue(received)}`,
+    path,
+    received,
+  }
+  if (globalErrorMap) {
+    const override = globalErrorMap(candidate)
+    if (override) {
+      candidate.message = override
+    }
+  }
+  return candidate
+}

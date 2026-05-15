@@ -1,5 +1,7 @@
 # `@defjs/core` 使用手册
 
+> 当前状态：历史草案。当前结构解析合同以 `src/struct/README.md` 和 `src/struct/public_api.ts` 为准。本文中仍出现的 `schema`、`.refine()`、`.transform()`、`.pipe()`、`.default()`、`.catch()`、`.strict()`、`.passthrough()`、`.strip()` 等旧 DSL 叙述，不再代表当前 public API。
+
 这份文档只保留当前最常用的 API 和使用方式。
 
 ## 快速开始

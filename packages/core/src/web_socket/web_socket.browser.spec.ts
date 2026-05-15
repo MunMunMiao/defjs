@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
 import { createClient, resetGlobalClient, setGlobalClient } from '../client'
-import { schema } from '../schema'
+import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket browser runtime', () => {
@@ -20,16 +20,16 @@ describe('web socket browser runtime', () => {
   test('should connect and exchange typed messages in real browsers', async () => {
     const useEchoSocket = defineWebSocket({
       incoming: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
-        ready: schema.object({
-          ok: schema.boolean(),
+        ready: struct.object({
+          ok: struct.boolean(),
         }),
       },
       outgoing: {
-        message: schema.object({
-          text: schema.string(),
+        message: struct.object({
+          text: struct.string(),
         }),
       },
       path: '/ws/echo',
@@ -73,12 +73,12 @@ describe('web socket browser runtime', () => {
         })
       },
       incoming: {
-        reconnected: schema.object({
-          attempt: schema.number(),
+        reconnected: struct.object({
+          attempt: struct.number(),
         }),
       },
-      input: schema.object({
-        key: schema.string(),
+      input: struct.object({
+        key: struct.string(),
       }),
       path: '/ws/reconnect',
     })({ key: 'browser-reconnect' }).with({
