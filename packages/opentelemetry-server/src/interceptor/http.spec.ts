@@ -212,7 +212,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     expect(requestHook).toHaveBeenCalledWith(spans[0], expect.any(Object))
   })
 
-  test('should call responseHook after response', async () => {
+  test('should call responseHook before span ends', async () => {
     const { tracer, spans } = createMockTracer()
     const propagator = createMockPropagator()
     const responseHook = vi.fn()
@@ -227,6 +227,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
 
     expect(responseHook).toHaveBeenCalledTimes(1)
     expect(responseHook).toHaveBeenCalledWith(spans[0], res)
+    expect(spans[0]?.ended).toBe(true) // span ends after hook
   })
 
   test('should record metrics on success', async () => {

@@ -59,8 +59,8 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
       const response = await next({ ...req, headers })
       const durationS = (performance.now() - startTime) / 1000
 
-      setSpanHttpResponse(span, response.status)
       responseHook?.(span, response)
+      setSpanHttpResponse(span, response.status)
 
       metrics?.requestCounter.add(1, { 'http.request.method': req.method })
       metrics?.durationHistogram.record(durationS, { 'http.request.method': req.method })
@@ -71,6 +71,7 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
 
       setSpanError(span, error)
 
+      metrics?.requestCounter.add(1, { 'http.request.method': req.method })
       metrics?.errorCounter.add(1, { 'http.request.method': req.method })
       metrics?.durationHistogram.record(durationS, { 'http.request.method': req.method })
 

@@ -93,6 +93,20 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
     vi.clearAllMocks()
   })
 
+  test('should extract trace context from headers via propagator', async () => {
+    const tracer = createMockTracer()
+    const propagator = createMockPropagator()
+    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator })
+
+    const req = makeRequest()
+    req.headers = new Headers({ traceparent: 'upstream-trace-id' })
+    const next = vi.fn(async () => makeMockSession())
+
+    await interceptor.fn(req, next)
+
+    expect(propagator.extract).toHaveBeenCalled()
+  })
+
   test('should inject traceparent into query params', async () => {
     const tracer = createMockTracer()
     const propagator = createMockPropagator()

@@ -1,7 +1,7 @@
 import { createWebSocketInterceptor } from '@defjs/core'
 import { context, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
 import type { RequestMetrics } from '../option'
-import { queryStringSetter } from '../propagation/carrier'
+import { headersGetter, queryStringSetter } from '../propagation/carrier'
 import { createWebSocketSpan, endSpan, setSpanError } from '../telemetry/trace'
 
 export interface WebSocketInterceptorOptions {
@@ -31,7 +31,7 @@ export function createOpenTelemetryWebSocketInterceptor(
       }
     }
 
-    const parentCtx = context.active()
+    const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
     const span = createWebSocketSpan(tracer, url, parentCtx)
     const spanCtx = trace.setSpan(parentCtx, span)
 
