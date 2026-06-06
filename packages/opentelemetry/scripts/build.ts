@@ -1,26 +1,22 @@
-import dts from 'bun-plugin-dts'
-
 async function build() {
-  await Bun.build({
-    entrypoints: ['./src/index.ts'],
-    outdir: './dist',
-    naming: '[dir]/[name].[ext]',
-    format: 'esm',
-    target: 'browser',
-    minify: false,
-    external: ['@defjs/core', '@opentelemetry/api'],
-    plugins: [
-      dts({
-        output: {
-          noBanner: true,
-        },
-        compilationOptions: {
-          preferredConfigPath: './tsconfig.build.json',
-          followSymlinks: false,
-        },
-      }),
-    ],
+  // Use tsc to compile TypeScript to JS and generate declarations
+  const proc = Bun.spawn({
+    cmd: ['npx', 'tsc', '--project', 'tsconfig.build.json'],
+    cwd: process.cwd(),
+    stdout: 'pipe',
+    stderr: 'pipe',
   })
+
+  const exitCode = await proc.exited
+  const stderr = await new Response(proc.stderr).text()
+  const stdout = await new Response(proc.stdout).text()
+
+  if (exitCode !== 0) {
+    console.error('tsc failed:')
+    if (stdout) console.error(stdout)
+    if (stderr) console.error(stderr)
+    throw new Error(`tsc exited with code ${exitCode}`)
+  }
 }
 
 async function afterBuild() {
