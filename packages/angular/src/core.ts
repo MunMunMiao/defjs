@@ -1,6 +1,6 @@
 import { DOCUMENT } from '@angular/common'
 import { APP_INITIALIZER, type EnvironmentProviders, InjectionToken, inject, makeEnvironmentProviders } from '@angular/core'
-import { type Client, createClient, type Interceptor, setGlobalClient } from '@defjs/core'
+import { type Client, createClient, type Interceptor, setGlobalClient, withEndpoint, withInterceptors } from '@defjs/core'
 
 const HTTP_CLIENT = new InjectionToken<Client>('HTTP_CLIENT')
 const HTTP_INTERCEPTOR_FNS = new InjectionToken<Interceptor[]>('HTTP_INTERCEPTOR_FNS')
@@ -41,10 +41,10 @@ export function provideClient(...feature: EnvironmentProviders[]): EnvironmentPr
 
         const interceptors = inject(HTTP_INTERCEPTOR_FNS, { optional: true }) ?? []
 
-        return createClient({
-          host,
-          interceptors,
-        })
+        return createClient(
+          withEndpoint(host),
+          withInterceptors(...interceptors),
+        )
       },
     },
   ])
