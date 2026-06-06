@@ -1,5 +1,3 @@
-import { logs, type Logger } from '@opentelemetry/api'
-
 export interface LogOptions {
   serviceName: string
 }
@@ -10,45 +8,17 @@ export interface RequestLogger {
   logError: (method: string, url: string, error: unknown) => void
 }
 
-export function createRequestLogger(options: LogOptions): RequestLogger {
-  const logger = logs.getLogger(options.serviceName)
-
+export function createRequestLogger(_options: LogOptions): RequestLogger {
   return {
-    logRequest(method, url) {
-      logger.emit({
-        severityNumber: 9,
-        severityText: 'INFO',
-        body: `HTTP ${method} ${url}`,
-        attributes: {
-          'http.request.method': method,
-          'url.full': url,
-        },
-      })
+    logRequest(_method, _url) {
+      // Logs API is not available in @opentelemetry/api v1.x
+      // It requires @opentelemetry/api-logs (experimental) or v2.x
     },
-    logResponse(method, url, status, durationMs) {
-      logger.emit({
-        severityNumber: 9,
-        severityText: 'INFO',
-        body: `HTTP ${method} ${url} -> ${status} (${durationMs.toFixed(2)}ms)`,
-        attributes: {
-          'http.request.method': method,
-          'url.full': url,
-          'http.response.status_code': status,
-        },
-      })
+    logResponse(_method, _url, _status, _durationMs) {
+      // Logs API is not available in @opentelemetry/api v1.x
     },
-    logError(method, url, error) {
-      const message = error instanceof Error ? error.message : String(error)
-      logger.emit({
-        severityNumber: 17,
-        severityText: 'ERROR',
-        body: `HTTP ${method} ${url} failed: ${message}`,
-        attributes: {
-          'http.request.method': method,
-          'url.full': url,
-          'error.message': message,
-        },
-      })
+    logError(_method, _url, _error) {
+      // Logs API is not available in @opentelemetry/api v1.x
     },
   }
 }
