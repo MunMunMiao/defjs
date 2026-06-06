@@ -1,51 +1,73 @@
-import type { Interceptor } from '@defjs/core'
-import { type ClientOption, withInterceptors } from '@defjs/core'
-import { type TextMapPropagator, trace } from '@opentelemetry/api'
+import type { ClientOption, Interceptor } from '@defjs/core'
+import { withInterceptors } from '@defjs/core'
+import type { Meter, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
 import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
 import { createOpenTelemetryHttpInterceptor } from './interceptor/http'
 import { createOpenTelemetrySseInterceptor } from './interceptor/sse'
 import { createOpenTelemetryWebSocketInterceptor } from './interceptor/web_socket'
-import { createRequestLogger } from './telemetry/logs'
-import { createRequestMetrics } from './telemetry/metrics'
 
-export interface OpenTelemetryOptions {
-  /** Service name for telemetry resources */
-  serviceName?: string
-  /** Additional attributes for all telemetry */
-  attributes?: Record<string, unknown>
+export interface RequestMetrics {
+  requestCounter: ReturnType<Meter['createCounter']>
+  errorCounter: ReturnType<Meter['createCounter']>
+  durationHistogram: ReturnType<Meter['createHistogram']>
+}
+
+export interface OpenTelemetryServerOptions {
+  /** External OTel tracer (required) */
+  tracer: Tracer
+  /** Optional external OTel meter for metrics collection */
+  meter?: Meter
+  /** Propagator, default W3C TraceContext + Baggage Composite */
+  propagator?: TextMapPropagator
+  /** Only create outgoing span when an active parent span exists */
+  requireParentSpan?: boolean
+  /** Hook to customize span before request */
+  requestHook?: (span: Span, req: any) => void
+  /** Hook to customize span after response */
+  responseHook?: (span: Span, res: any) => void
   /** Enable HTTP tracing, default true */
   http?: boolean
   /** Enable SSE tracing, default true */
   sse?: boolean
   /** Enable WebSocket tracing, default true */
   webSocket?: boolean
-  /** Record request/response bodies, default false */
-  recordBodies?: boolean
-  /** Record full headers, default false */
-  recordHeaders?: boolean
   /** WebSocket query string propagation, default true */
   webSocketQueryPropagation?: boolean
-  /** Custom propagator, default W3C TraceContext + Baggage */
-  propagator?: TextMapPropagator
 }
 
-export function withOpenTelemetry(options: OpenTelemetryOptions = {}): ClientOption {
+export function withOpenTelemetryServer(options: OpenTelemetryServerOptions): ClientOption {
   const {
-    serviceName = 'unknown-service',
+    tracer,
+    meter,
     http = true,
     sse = true,
     webSocket = true,
-    recordBodies = false,
-    recordHeaders = false,
     webSocketQueryPropagation = true,
     propagator = new CompositePropagator({
       propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
     }),
+    requireParentSpan = false,
+    requestHook,
+    responseHook,
   } = options
 
-  const tracer = trace.getTracer(serviceName)
-  const requestMetrics = createRequestMetrics({ serviceName })
-  const requestLogger = createRequestLogger({ serviceName })
+  const metrics = meter
+    ? {
+        requestCounter: meter.createCounter('http.client.request', {
+          description: 'Number of HTTP client requests',
+        }),
+        errorCounter: meter.createCounter('http.client.request.error', {
+          description: 'Number of HTTP client request errors',
+        }),
+        durationHistogram: meter.createHistogram('http.client.request.duration', {
+          description: 'HTTP client request duration',
+          unit: 's',
+          advice: {
+            explicitBucketBoundaries: [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10],
+          },
+        }),
+      }
+    : undefined
 
   const interceptors: Interceptor[] = []
 
@@ -54,10 +76,10 @@ export function withOpenTelemetry(options: OpenTelemetryOptions = {}): ClientOpt
       createOpenTelemetryHttpInterceptor({
         tracer,
         propagator,
-        metrics: requestMetrics,
-        logger: requestLogger,
-        recordBodies,
-        recordHeaders,
+        metrics,
+        requireParentSpan,
+        requestHook,
+        responseHook,
       }),
     )
   }
@@ -67,8 +89,8 @@ export function withOpenTelemetry(options: OpenTelemetryOptions = {}): ClientOpt
       createOpenTelemetrySseInterceptor({
         tracer,
         propagator,
-        metrics: requestMetrics,
-        logger: requestLogger,
+        metrics,
+        requireParentSpan,
       }),
     )
   }
@@ -78,8 +100,8 @@ export function withOpenTelemetry(options: OpenTelemetryOptions = {}): ClientOpt
       createOpenTelemetryWebSocketInterceptor({
         tracer,
         propagator,
-        metrics: requestMetrics,
-        logger: requestLogger,
+        metrics,
+        requireParentSpan,
         queryPropagation: webSocketQueryPropagation,
       }),
     )

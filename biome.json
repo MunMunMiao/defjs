@@ -3,7 +3,17 @@
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**/*", "!**/coverage", "!**/coverage/**", "!**/coverage-*", "!**/coverage-*/**", "!**/dist", "!**/dist/**"]
+    "includes": [
+      "**/*",
+      "!**/coverage",
+      "!**/coverage/**",
+      "!**/coverage-*",
+      "!**/coverage-*/**",
+      "!**/dist",
+      "!**/dist/**",
+      "!**/research",
+      "!**/research/**"
+    ]
   },
   "javascript": {
     "globals": ["Bun"],

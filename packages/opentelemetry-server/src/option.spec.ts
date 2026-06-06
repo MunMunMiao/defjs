@@ -1,6 +1,7 @@
 import type { ClientConfig } from '@defjs/core'
-import { describe, expect, test } from 'vitest'
-import { withOpenTelemetry } from './option'
+import type { Meter, TextMapPropagator, Tracer } from '@opentelemetry/api'
+import { describe, expect, test, vi } from 'vitest'
+import { withOpenTelemetryServer } from './option'
 
 function makeConfig(): ClientConfig {
   return {
@@ -12,10 +13,39 @@ function makeConfig(): ClientConfig {
   }
 }
 
-describe('withOpenTelemetry', () => {
+function createMockTracer(): Tracer {
+  const spans: any[] = []
+  const startSpan = vi.fn((name: string, options?: any, ctx?: any) => {
+    const span = {
+      name,
+      kind: options?.kind ?? 0,
+      attributes: { ...(options?.attributes ?? {}) },
+      ended: false,
+      addEvent: vi.fn(),
+      setAttribute: vi.fn((k: string, v: unknown) => {
+        span.attributes[k] = v
+      }),
+      setStatus: vi.fn((s: any) => {
+        span.status = s
+      }),
+      recordException: vi.fn(),
+      end: vi.fn(() => {
+        span.ended = true
+      }),
+    }
+    spans.push(span)
+    return span
+  })
+  return {
+    startSpan,
+    startActiveSpan: vi.fn(),
+  } as unknown as Tracer
+}
+
+describe('withOpenTelemetryServer', () => {
   test('should create interceptors for all transports by default', () => {
     const config = makeConfig()
-    const option = withOpenTelemetry({ serviceName: 'test-app' })
+    const option = withOpenTelemetryServer({ tracer: createMockTracer() })
     option(config)
 
     expect(config.interceptors).toHaveLength(3)
@@ -23,7 +53,7 @@ describe('withOpenTelemetry', () => {
 
   test('should disable HTTP interceptor when http is false', () => {
     const config = makeConfig()
-    const option = withOpenTelemetry({ serviceName: 'test-app', http: false })
+    const option = withOpenTelemetryServer({ tracer: createMockTracer(), http: false })
     option(config)
 
     expect(config.interceptors).toHaveLength(2)
@@ -31,7 +61,7 @@ describe('withOpenTelemetry', () => {
 
   test('should disable SSE interceptor when sse is false', () => {
     const config = makeConfig()
-    const option = withOpenTelemetry({ serviceName: 'test-app', sse: false })
+    const option = withOpenTelemetryServer({ tracer: createMockTracer(), sse: false })
     option(config)
 
     expect(config.interceptors).toHaveLength(2)
@@ -39,22 +69,38 @@ describe('withOpenTelemetry', () => {
 
   test('should disable WebSocket interceptor when webSocket is false', () => {
     const config = makeConfig()
-    const option = withOpenTelemetry({ serviceName: 'test-app', webSocket: false })
+    const option = withOpenTelemetryServer({ tracer: createMockTracer(), webSocket: false })
     option(config)
 
     expect(config.interceptors).toHaveLength(2)
   })
 
-  test('should use default service name when not provided', () => {
-    const config = makeConfig()
-    const option = withOpenTelemetry()
-    option(config)
+  test('should accept external meter', () => {
+    const meter = {
+      createCounter: vi.fn(() => ({ add: vi.fn() })),
+      createHistogram: vi.fn(() => ({ record: vi.fn() })),
+    } as unknown as Meter
 
-    expect(config.interceptors).toHaveLength(3)
+    const option = withOpenTelemetryServer({ tracer: createMockTracer(), meter })
+    expect(typeof option).toBe('function')
   })
 
-  test('should return ClientOption function', () => {
-    const option = withOpenTelemetry({ serviceName: 'test' })
+  test('should accept custom propagator', () => {
+    const propagator = {
+      inject: vi.fn(),
+      extract: vi.fn((ctx: any) => ctx),
+      fields: vi.fn(() => ['traceparent']),
+    } as unknown as TextMapPropagator
+
+    const option = withOpenTelemetryServer({ tracer: createMockTracer(), propagator })
+    expect(typeof option).toBe('function')
+  })
+
+  test('should accept requestHook and responseHook', () => {
+    const tracer = createMockTracer()
+    const requestHook = vi.fn()
+    const responseHook = vi.fn()
+    const option = withOpenTelemetryServer({ tracer, requestHook, responseHook })
     expect(typeof option).toBe('function')
   })
 })

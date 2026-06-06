@@ -1,53 +1,47 @@
 import { createSSEInterceptor } from '@defjs/core'
 import { context, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
+import type { RequestMetrics } from '../option'
 import { headersGetter, headersSetter } from '../propagation/carrier'
-import type { RequestLogger } from '../telemetry/logs'
-import type { RequestMetrics } from '../telemetry/metrics'
 import { createSseSpan, endSpan, setSpanError } from '../telemetry/trace'
 
 export interface SseInterceptorOptions {
   tracer: Tracer
   propagator: TextMapPropagator
   metrics?: RequestMetrics
-  logger?: RequestLogger
+  requireParentSpan?: boolean
 }
 
 export function createOpenTelemetrySseInterceptor(options: SseInterceptorOptions): ReturnType<typeof createSSEInterceptor> {
   return createSSEInterceptor(async (req, next) => {
-    const { tracer, propagator, metrics, logger } = options
+    const { tracer, propagator, metrics, requireParentSpan } = options
+
+    if (requireParentSpan && !trace.getActiveSpan()) {
+      return next(req)
+    }
 
     const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
-
     let url = req.endpoint
     if (req.baseEndpoint) {
       try {
         url = new URL(req.endpoint, req.baseEndpoint).toString()
       } catch {
-        // keep endpoint as-is
+        // keep as-is
       }
     }
 
-    const span = createSseSpan(tracer, url)
+    const span = createSseSpan(tracer, url, parentCtx)
     const spanCtx = trace.setSpan(parentCtx, span)
-
     const headers = new Headers(req.headers)
     propagator.inject(spanCtx, headers, headersSetter)
 
     const startTime = performance.now()
 
     try {
-      const stream = await next({
-        ...req,
-        headers,
-      })
+      const stream = await next({ ...req, headers })
+      const durationS = (performance.now() - startTime) / 1000
 
-      const durationMs = performance.now() - startTime
+      span.addEvent('sse.connected')
 
-      span.addEvent('sse.connected', {
-        duration_ms: durationMs,
-      })
-
-      // End span when stream closes
       stream.closed.then(
         (closeInfo: { code: string; cause?: unknown }) => {
           if (closeInfo.code === 'error') {
@@ -56,23 +50,18 @@ export function createOpenTelemetrySseInterceptor(options: SseInterceptorOptions
             endSpan(span)
           }
         },
-        (error: unknown) => {
-          setSpanError(span, error)
-        },
+        (error: unknown) => setSpanError(span, error),
       )
 
       metrics?.requestCounter.add(1, { 'http.request.method': req.method })
-      metrics?.durationHistogram.record(durationMs, { 'http.request.method': req.method })
+      metrics?.durationHistogram.record(durationS, { 'http.request.method': req.method })
 
       return stream
     } catch (error) {
-      const durationMs = performance.now() - startTime
-
+      const durationS = (performance.now() - startTime) / 1000
       setSpanError(span, error)
-
       metrics?.errorCounter.add(1, { 'http.request.method': req.method })
-      metrics?.durationHistogram.record(durationMs, { 'http.request.method': req.method })
-
+      metrics?.durationHistogram.record(durationS, { 'http.request.method': req.method })
       throw error
     }
   })

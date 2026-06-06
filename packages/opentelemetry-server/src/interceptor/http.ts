@@ -1,84 +1,78 @@
 import { createHttpInterceptor } from '@defjs/core'
-import { context, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
+import { context, type Span, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
+import type { RequestMetrics } from '../option'
 import { headersGetter, headersSetter } from '../propagation/carrier'
-import type { RequestLogger } from '../telemetry/logs'
-import type { RequestMetrics } from '../telemetry/metrics'
-import { setSpanError, setSpanHttpResponse } from '../telemetry/trace'
+import { createHttpSpan, setSpanError, setSpanHttpResponse } from '../telemetry/trace'
 
 export interface HttpInterceptorOptions {
   tracer: Tracer
   propagator: TextMapPropagator
   metrics?: RequestMetrics
-  logger?: RequestLogger
-  recordBodies?: boolean
-  recordHeaders?: boolean
+  requireParentSpan?: boolean
+  requestHook?: (span: Span, req: any) => void
+  responseHook?: (span: Span, res: any) => void
 }
 
 export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptions): ReturnType<typeof createHttpInterceptor> {
   return createHttpInterceptor(async (req, next) => {
-    const { tracer, propagator, metrics, logger, recordBodies, recordHeaders } = options
+    const { tracer, propagator, metrics, requireParentSpan, requestHook, responseHook } = options
 
-    // Extract context from incoming headers
+    if (requireParentSpan && !trace.getActiveSpan()) {
+      return next(req)
+    }
+
     const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
 
-    // Build URL for attributes
     let url = req.endpoint
+    let serverAddress: string | undefined
+    let serverPort: number | undefined
+
     if (req.baseEndpoint) {
       try {
-        url = new URL(req.endpoint, req.baseEndpoint).toString()
+        const parsed = new URL(req.endpoint, req.baseEndpoint)
+        url = parsed.toString()
+        serverAddress = parsed.hostname
+        serverPort = Number.parseInt(parsed.port) || undefined
       } catch {
-        // keep endpoint as-is
+        url = req.endpoint
       }
     }
 
-    // Create span with parent context
-    const span = tracer.startSpan(
-      `HTTP ${req.method}`,
-      {
-        kind: 2, // SpanKind.CLIENT
-        attributes: {
-          'http.request.method': req.method,
-          'url.full': url,
-        },
-      },
-      parentCtx,
-    )
+    const span = createHttpSpan(tracer, req.method, url, parentCtx)
+
+    if (serverAddress) {
+      span.setAttribute('server.address', serverAddress)
+    }
+    if (serverPort) {
+      span.setAttribute('server.port', serverPort)
+    }
+
+    requestHook?.(span, req)
 
     const spanCtx = trace.setSpan(parentCtx, span)
-
-    // Inject context into outgoing headers
     const headers = new Headers(req.headers)
     propagator.inject(spanCtx, headers, headersSetter)
 
     const startTime = performance.now()
 
-    logger?.logRequest(req.method, url)
-
     try {
-      const response = await next({
-        ...req,
-        headers,
-      })
-
-      const durationMs = performance.now() - startTime
+      const response = await next({ ...req, headers })
+      const durationS = (performance.now() - startTime) / 1000
 
       setSpanHttpResponse(span, response.status)
+      responseHook?.(span, response)
 
       metrics?.requestCounter.add(1, { 'http.request.method': req.method })
-      metrics?.durationHistogram.record(durationMs, { 'http.request.method': req.method })
-
-      logger?.logResponse(req.method, url, response.status, durationMs)
+      metrics?.durationHistogram.record(durationS, { 'http.request.method': req.method })
 
       return response
     } catch (error) {
-      const durationMs = performance.now() - startTime
+      const durationS = (performance.now() - startTime) / 1000
 
       setSpanError(span, error)
 
       metrics?.errorCounter.add(1, { 'http.request.method': req.method })
-      metrics?.durationHistogram.record(durationMs, { 'http.request.method': req.method })
-
-      logger?.logError(req.method, url, error)
+      metrics?.durationHistogram.record(durationS, { 'http.request.method': req.method })
 
       throw error
     }

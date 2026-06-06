@@ -1,2 +1,2 @@
-export type { OpenTelemetryOptions } from './option'
-export { withOpenTelemetry } from './option'
+export type { OpenTelemetryServerOptions } from './option'
+export { withOpenTelemetryServer } from './option'

@@ -1,15 +1,14 @@
 import { createWebSocketInterceptor } from '@defjs/core'
 import { context, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
+import type { RequestMetrics } from '../option'
 import { queryStringSetter } from '../propagation/carrier'
-import type { RequestLogger } from '../telemetry/logs'
-import type { RequestMetrics } from '../telemetry/metrics'
 import { createWebSocketSpan, endSpan, setSpanError } from '../telemetry/trace'
 
 export interface WebSocketInterceptorOptions {
   tracer: Tracer
   propagator: TextMapPropagator
   metrics?: RequestMetrics
-  logger?: RequestLogger
+  requireParentSpan?: boolean
   queryPropagation?: boolean
 }
 
@@ -17,21 +16,25 @@ export function createOpenTelemetryWebSocketInterceptor(
   options: WebSocketInterceptorOptions,
 ): ReturnType<typeof createWebSocketInterceptor> {
   return createWebSocketInterceptor(async (req, next) => {
-    const { tracer, propagator, metrics, logger, queryPropagation = true } = options
+    const { tracer, propagator, metrics, requireParentSpan, queryPropagation = true } = options
+
+    if (requireParentSpan && !trace.getActiveSpan()) {
+      return next(req)
+    }
 
     let url = req.endpoint
     if (req.baseEndpoint) {
       try {
         url = new URL(req.endpoint, req.baseEndpoint).toString()
       } catch {
-        // keep endpoint as-is
+        // keep as-is
       }
     }
 
-    const span = createWebSocketSpan(tracer, url)
-    const spanCtx = trace.setSpan(context.active(), span)
+    const parentCtx = context.active()
+    const span = createWebSocketSpan(tracer, url, parentCtx)
+    const spanCtx = trace.setSpan(parentCtx, span)
 
-    // Inject context into query string
     let queryParams = req.queryParams
     let queryString = req.queryString
 
@@ -45,19 +48,11 @@ export function createOpenTelemetryWebSocketInterceptor(
     const startTime = performance.now()
 
     try {
-      const session = await next({
-        ...req,
-        queryParams,
-        queryString,
-      })
+      const session = await next({ ...req, queryParams, queryString })
+      const durationS = (performance.now() - startTime) / 1000
 
-      const durationMs = performance.now() - startTime
+      span.addEvent('websocket.connected')
 
-      span.addEvent('websocket.connected', {
-        duration_ms: durationMs,
-      })
-
-      // Track session lifecycle
       session.closed.then(
         () => {
           span.addEvent('websocket.closed')
@@ -70,17 +65,14 @@ export function createOpenTelemetryWebSocketInterceptor(
       )
 
       metrics?.requestCounter.add(1, {})
-      metrics?.durationHistogram.record(durationMs, {})
+      metrics?.durationHistogram.record(durationS, {})
 
       return session
     } catch (error) {
-      const durationMs = performance.now() - startTime
-
+      const durationS = (performance.now() - startTime) / 1000
       setSpanError(span, error)
-
       metrics?.errorCounter.add(1, {})
-      metrics?.durationHistogram.record(durationMs, {})
-
+      metrics?.durationHistogram.record(durationS, {})
       throw error
     }
   })

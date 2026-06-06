@@ -1,46 +1,45 @@
+import type { Context } from '@opentelemetry/api'
 import { type Span, SpanKind, SpanStatusCode, type Tracer } from '@opentelemetry/api'
 
-export interface SpanContext {
-  span: Span
+export function createHttpSpan(tracer: Tracer, method: string, url: string, parentCtx: Context): Span {
+  return tracer.startSpan(
+    `HTTP ${method}`,
+    {
+      kind: SpanKind.CLIENT,
+      attributes: {
+        'http.request.method': method,
+        'url.full': url,
+      },
+    },
+    parentCtx,
+  )
 }
 
-export function createHttpSpan(tracer: Tracer, method: string, url: string): Span {
-  return tracer.startSpan(`HTTP ${method}`, {
-    kind: SpanKind.CLIENT,
-    attributes: {
-      'http.request.method': method,
-      'url.full': url,
+export function createSseSpan(tracer: Tracer, url: string, parentCtx: Context): Span {
+  return tracer.startSpan(
+    'SSE connect',
+    {
+      kind: SpanKind.CLIENT,
+      attributes: { 'url.full': url },
     },
-  })
+    parentCtx,
+  )
 }
 
-export function createSseSpan(tracer: Tracer, url: string): Span {
-  return tracer.startSpan('SSE connect', {
-    kind: SpanKind.CLIENT,
-    attributes: {
-      'url.full': url,
+export function createWebSocketSpan(tracer: Tracer, url: string, parentCtx: Context): Span {
+  return tracer.startSpan(
+    'WebSocket connect',
+    {
+      kind: SpanKind.CLIENT,
+      attributes: { 'url.full': url },
     },
-  })
-}
-
-export function createWebSocketSpan(tracer: Tracer, url: string): Span {
-  return tracer.startSpan('WebSocket connect', {
-    kind: SpanKind.CLIENT,
-    attributes: {
-      'url.full': url,
-    },
-  })
+    parentCtx,
+  )
 }
 
 export function setSpanHttpResponse(span: Span, status: number): void {
   span.setAttribute('http.response.status_code', status)
-
-  if (status >= 200 && status < 300) {
-    span.setStatus({ code: SpanStatusCode.OK })
-  } else {
-    span.setStatus({ code: SpanStatusCode.ERROR })
-  }
-
+  span.setStatus({ code: status >= 200 && status < 300 ? SpanStatusCode.OK : SpanStatusCode.ERROR })
   span.end()
 }
 

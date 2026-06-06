@@ -30,7 +30,7 @@ function createMockPropagator() {
 function createMockTracer() {
   activeSpans = []
 
-  const startSpan = vi.fn((name: string, options?: { kind?: number; attributes?: Record<string, unknown> }) => {
+  const startSpan = vi.fn((name: string, options?: { kind?: number; attributes?: Record<string, unknown> }, ctx?: Context) => {
     const span: MockSpan = {
       name,
       kind: options?.kind ?? 0,
@@ -64,6 +64,14 @@ function createMockTracer() {
   } as unknown as Tracer
 
   return { tracer, spans: activeSpans }
+}
+
+function createMockMetrics() {
+  return {
+    requestCounter: { add: vi.fn() },
+    errorCounter: { add: vi.fn() },
+    durationHistogram: { record: vi.fn() },
+  }
 }
 
 describe('createOpenTelemetryHttpInterceptor', () => {
@@ -170,5 +178,100 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     expect(calls[0]?.[0].method).toBe('GET')
     expect(calls[0]?.[0].endpoint).toBe('/test')
     expect(calls[0]?.[0].headers).toBeInstanceOf(Headers)
+  })
+
+  test('should skip span creation when requireParentSpan and no active span', async () => {
+    const { tracer, spans } = createMockTracer()
+    const propagator = createMockPropagator()
+    const interceptor = createOpenTelemetryHttpInterceptor({
+      tracer,
+      propagator,
+      requireParentSpan: true,
+    })
+
+    const next = vi.fn(async () => makeResponse())
+    await interceptor.fn(makeRequest(), next)
+
+    expect(spans).toHaveLength(0)
+    expect(next).toHaveBeenCalledTimes(1)
+  })
+
+  test('should call requestHook before request', async () => {
+    const { tracer, spans } = createMockTracer()
+    const propagator = createMockPropagator()
+    const requestHook = vi.fn()
+    const interceptor = createOpenTelemetryHttpInterceptor({
+      tracer,
+      propagator,
+      requestHook,
+    })
+
+    await interceptor.fn(makeRequest(), async () => makeResponse())
+
+    expect(requestHook).toHaveBeenCalledTimes(1)
+    expect(requestHook).toHaveBeenCalledWith(spans[0], expect.any(Object))
+  })
+
+  test('should call responseHook after response', async () => {
+    const { tracer, spans } = createMockTracer()
+    const propagator = createMockPropagator()
+    const responseHook = vi.fn()
+    const interceptor = createOpenTelemetryHttpInterceptor({
+      tracer,
+      propagator,
+      responseHook,
+    })
+
+    const res = makeResponse()
+    await interceptor.fn(makeRequest(), async () => res)
+
+    expect(responseHook).toHaveBeenCalledTimes(1)
+    expect(responseHook).toHaveBeenCalledWith(spans[0], res)
+  })
+
+  test('should record metrics on success', async () => {
+    const { tracer } = createMockTracer()
+    const propagator = createMockPropagator()
+    const metrics = createMockMetrics()
+    const interceptor = createOpenTelemetryHttpInterceptor({
+      tracer,
+      propagator,
+      metrics,
+    })
+
+    await interceptor.fn(makeRequest(), async () => makeResponse())
+
+    expect(metrics.requestCounter.add).toHaveBeenCalledWith(1, { 'http.request.method': 'GET' })
+    expect(metrics.durationHistogram.record).toHaveBeenCalled()
+  })
+
+  test('should record error metrics on exception', async () => {
+    const { tracer } = createMockTracer()
+    const propagator = createMockPropagator()
+    const metrics = createMockMetrics()
+    const interceptor = createOpenTelemetryHttpInterceptor({
+      tracer,
+      propagator,
+      metrics,
+    })
+
+    await expect(
+      interceptor.fn(makeRequest(), async () => {
+        throw new Error('fail')
+      }),
+    ).rejects.toThrow('fail')
+
+    expect(metrics.errorCounter.add).toHaveBeenCalledWith(1, { 'http.request.method': 'GET' })
+    expect(metrics.durationHistogram.record).toHaveBeenCalled()
+  })
+
+  test('should set server.address and server.port from URL', async () => {
+    const { tracer, spans } = createMockTracer()
+    const propagator = createMockPropagator()
+    const interceptor = createOpenTelemetryHttpInterceptor({ tracer, propagator })
+
+    await interceptor.fn(makeRequest(), async () => makeResponse())
+
+    expect(spans[0]?.attributes['server.address']).toBe('api.example.com')
   })
 })
