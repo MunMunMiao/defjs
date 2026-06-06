@@ -1,59 +1,45 @@
-import type { ClientConfig, ClientOptions } from './config'
-import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
+import type { ClientConfig } from './config'
+import { DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import { getGlobalClient } from './global'
 import { CLIENT, type Client, getClientConfig } from './resolve'
+import type { ClientOption } from './option'
 
-export function createClient(options: ClientOptions): Client {
+export function createClient(...options: ClientOption[]): Client {
   const conf: ClientConfig = {
-    endpoint: options.endpoint,
-    http: {
-      ...DEFAULT_HTTP_OPTIONS,
-      ...options.http,
-    },
-    interceptors: options.interceptors ?? [],
-    queryParamsSerializer: options.queryParamsSerializer ?? DEFAULT_QUERY_PARAMS_SERIALIZER,
-    sse: {
-      ...DEFAULT_SSE_OPTIONS,
-      ...options.sse,
-    },
-    webSocket: {
-      ...options.webSocket,
-      protocols: options.webSocket?.protocols ? [...options.webSocket.protocols] : undefined,
-    },
-    withCredentials: options.withCredentials,
+    endpoint: '',
+    interceptors: [],
+    queryParamsSerializer: DEFAULT_QUERY_PARAMS_SERIALIZER,
+    sse: { ...DEFAULT_SSE_OPTIONS },
+    webSocket: {},
+  }
+
+  for (const option of options) {
+    option(conf)
   }
 
   return { [CLIENT]: conf }
 }
 
-export function cloneClient(client: Client, options: Partial<ClientOptions>): Client {
+export function cloneClient(client: Client, ...options: ClientOption[]): Client {
   const prev = getClientConfig(client)
 
-  return createClient({
-    endpoint: options.endpoint ?? prev.endpoint,
-    http: options.http
-      ? {
-          ...prev.http,
-          ...options.http,
-        }
-      : prev.http,
-    interceptors: options.interceptors ?? prev.interceptors,
-    queryParamsSerializer: options.queryParamsSerializer ?? prev.queryParamsSerializer,
-    sse: options.sse
-      ? {
-          ...prev.sse,
-          ...options.sse,
-        }
-      : prev.sse,
-    webSocket: options.webSocket
-      ? {
-          ...prev.webSocket,
-          ...options.webSocket,
-          protocols: options.webSocket.protocols ? [...options.webSocket.protocols] : prev.webSocket.protocols,
-        }
-      : prev.webSocket,
-    withCredentials: options.withCredentials ?? prev.withCredentials,
-  })
+  const conf: ClientConfig = {
+    endpoint: prev.endpoint,
+    interceptors: [...prev.interceptors],
+    queryParamsSerializer: prev.queryParamsSerializer,
+    sse: { ...prev.sse },
+    webSocket: {
+      ...prev.webSocket,
+      protocols: prev.webSocket.protocols ? [...prev.webSocket.protocols] : undefined,
+    },
+    withCredentials: prev.withCredentials,
+  }
+
+  for (const option of options) {
+    option(conf)
+  }
+
+  return { [CLIENT]: conf }
 }
 
 export function resolveClientConfig(client?: Client): ClientConfig {
