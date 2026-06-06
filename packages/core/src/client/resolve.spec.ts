@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { ERR_NOT_FOUND_GLOBAL_CLIENT } from '../error'
 import { createClient, resolveClientConfig } from './client'
+import { withEndpoint } from './index'
 import { resetGlobalClient, setGlobalClient } from './global'
 
 describe('client resolve helpers', () => {
@@ -9,12 +10,8 @@ describe('client resolve helpers', () => {
   })
 
   test('should resolve explicit client config before global client', () => {
-    const explicitClient = createClient({
-      endpoint: 'https://explicit.example.com/v1',
-    })
-    const globalClient = createClient({
-      endpoint: 'https://global.example.com/v1',
-    })
+    const explicitClient = createClient(withEndpoint('https://explicit.example.com/v1'))
+    const globalClient = createClient(withEndpoint('https://global.example.com/v1'))
 
     setGlobalClient(globalClient)
 

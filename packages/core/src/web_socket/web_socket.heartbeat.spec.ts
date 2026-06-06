@@ -1,14 +1,12 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime heartbeat', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 

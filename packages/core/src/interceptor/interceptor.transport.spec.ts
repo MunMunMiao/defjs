@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'vitest'
-import { createHttpInterceptor, createSSEInterceptor, createWebSocketInterceptor, resolveHttpInterceptors, resolveSSEInterceptors, resolveWebSocketInterceptors, type Interceptor } from './interceptor'
+import {
+  createHttpInterceptor,
+  createSSEInterceptor,
+  createWebSocketInterceptor,
+  type Interceptor,
+  resolveHttpInterceptors,
+  resolveSSEInterceptors,
+  resolveWebSocketInterceptors,
+} from './interceptor'
 
 describe('interceptor transport resolution', () => {
   const httpInterceptor = createHttpInterceptor((req, next) => next(req))

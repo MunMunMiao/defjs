@@ -4,6 +4,7 @@ export {
   createSSEInterceptor,
   createWebSocketInterceptor,
   type HttpInterceptor,
+  type HttpInterceptorNext,
   type Interceptor,
   type InterceptorFn,
   type SSEHandler,

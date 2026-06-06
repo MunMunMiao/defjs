@@ -17,20 +17,19 @@
 
 `def` is an abbreviation for `define`, so it can be read as `define js`.
 
-Defjs is a library that helps you define and initiate requests, aiming to make it easier for you to define requests without worrying about the details.
+Defjs is a TypeScript library for defining typed request APIs and executing them across multiple transports and JavaScript runtimes.
 
--	Supports multiple request methods such as [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API), [XMLHttpRequest](https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest), custom, etc.
--	Functional API.
--	🚧 Supports streaming. (WIP)
--	Supports JS/TS with complete type.
--	Supports any JS runtime.
--	Supports Interceptors.
--	Supports ESM
--	🚧 Supports Mini Programs. (WIP)
+- Typed request definitions for [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API), custom transports, and more.
+- Functional API.
+- Streaming support.
+- Full TypeScript inference.
+- Works in any JavaScript runtime.
+- Interceptor support.
+- ESM.
 
 ## Quick Start
 
-> Use for package manager
+> Install with a package manager
 ```shell
 npm install @defjs/core
 // or
@@ -41,9 +40,9 @@ pnpm install @defjs/core
 bun install @defjs/core
 ```
 
-> Use for CDN
+> Use via CDN
 
-**Only can use ES modules**
+**ES modules only**
 
 ```javascript
 import {
@@ -55,7 +54,7 @@ import {
 /**
  * @title Step 1
  * @file src/main.ts
- * @description Setting up a global client
+ * @description Set up a global client
  */
 createGlobalClient({
   host: 'https://example.com',
@@ -64,7 +63,7 @@ createGlobalClient({
 /**
  * @title Step 2
  * @file src/lib/api/user.ts
- * @description Define the request api request in the lib/api directory of the project
+ * @description Define the request in the lib/api directory
  */
 const useGetUser = defineRequest('/v1/user/:id')
   .withField({
@@ -74,7 +73,7 @@ const useGetUser = defineRequest('/v1/user/:id')
 /**
  * @title Step 3
  * @file src/pages/home.ts
- * @description Use defined requests in business code
+ * @description Use the defined request in business code
  */
 const { doRequest } = useGetUser();
 const { error, body } = await doRequest({id: 1});
@@ -87,7 +86,7 @@ console.log(body);
 
 ## Documentation
 
-Check out the [🚧 defjs.org](https://defjs.org) to get started.
+Visit [defjs.org](https://defjs.org) to get started.
 
 ## Packages
 
@@ -99,13 +98,11 @@ Check out the [🚧 defjs.org](https://defjs.org) to get started.
 ## Roadmap
 
 - Documentation official website
-- Wechat mini programs handler
 - CLI Tool
   - Generate API from OpenAPI
   - Generate Full SDK Package (Like the [S3 SDK](https://www.npmjs.com/package/@aws-sdk/client-s3))
 - Vue wrapper package
 - React wrapper package
-- Think about simplifying useXXX and doRequest
 
 ## License
 

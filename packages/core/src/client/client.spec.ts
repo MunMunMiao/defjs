@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { ERR_NOT_FOUND_GLOBAL_CLIENT } from '../error'
-import { fetchHandler } from '../http/transport'
 import { cloneClient, createClient } from './client'
-import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
+import { withEndpoint, withSseOptions, withWebSocketOptions } from './index'
+import { DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import { getGlobalClient, resetGlobalClient, restGlobalClient, setGlobalClient } from './global'
 import type { Client } from './resolve'
 import { getClientConfig, isClient } from './resolve'
@@ -12,16 +12,13 @@ describe('Client', () => {
 
   beforeEach(() => {
     resetGlobalClient()
-    baseClient = createClient({
-      endpoint: 'https://example.com/v1',
-    })
+    baseClient = createClient(withEndpoint('https://example.com/v1'))
   })
 
   test('should create client with normalized endpoint and default protocol options', () => {
     const config = getClientConfig(baseClient)
 
     expect(config.endpoint).toBe('https://example.com/v1')
-    expect(config.http).toEqual(DEFAULT_HTTP_OPTIONS)
     expect(config.sse).toEqual(DEFAULT_SSE_OPTIONS)
     expect(config.webSocket).toEqual({ protocols: undefined })
     expect(config.queryParamsSerializer).toBe(DEFAULT_QUERY_PARAMS_SERIALIZER)
@@ -39,7 +36,7 @@ describe('Client', () => {
     const config = getClientConfig(baseClient)
 
     expect(config.endpoint).toBe('https://example.com/v1')
-    expect(config.http.handler).toBe(fetchHandler)
+    expect(config.interceptors).toEqual([])
   })
 
   test('should getClientConfig throw for non-client', () => {
@@ -48,9 +45,7 @@ describe('Client', () => {
 
   test('should setGlobalClient set global client', () => {
     setGlobalClient(
-      createClient({
-        endpoint: 'https://example.com/v1',
-      }),
+      createClient(withEndpoint('https://example.com/v1')),
     )
 
     const client = getGlobalClient()
@@ -80,21 +75,19 @@ describe('Client', () => {
   })
 
   test('should cloneClient override endpoint and protocol defaults', () => {
-    const nextClient = cloneClient(baseClient, {
-      endpoint: 'https://api.example.com/root',
-      http: {
-        handler: async request => fetchHandler(request),
-      },
-      sse: {
+    const nextClient = cloneClient(
+      baseClient,
+      withEndpoint('https://api.example.com/root'),
+      withSseOptions({
         fetch: DEFAULT_SSE_OPTIONS.fetch,
-      },
-      webSocket: {
+      }),
+      withWebSocketOptions({
         heartbeat: {
           intervalMs: 1_000,
         },
         protocols: ['json'],
-      },
-    })
+      }),
+    )
 
     expect(getClientConfig(nextClient)).toMatchObject({
       endpoint: 'https://api.example.com/root',
@@ -108,35 +101,39 @@ describe('Client', () => {
   })
 
   test('should cloneClient preserve previous endpoint when not overridden', () => {
-    const nextClient = cloneClient(baseClient, {})
+    const nextClient = cloneClient(baseClient)
     expect(getClientConfig(nextClient).endpoint).toBe('https://example.com/v1')
   })
 
   test('should cloneClient preserve previous webSocket protocols when not overridden', () => {
-    const withProtocols = cloneClient(baseClient, {
-      webSocket: {
+    const withProtocols = cloneClient(
+      baseClient,
+      withWebSocketOptions({
         protocols: ['proto1'],
-      },
-    })
-    const nextClient = cloneClient(withProtocols, {
-      webSocket: {
+      }),
+    )
+    const nextClient = cloneClient(
+      withProtocols,
+      withWebSocketOptions({
         heartbeat: { intervalMs: 500 },
-      },
-    })
+      }),
+    )
     expect(getClientConfig(nextClient).webSocket.protocols).toEqual(['proto1'])
   })
 
   test('should cloneClient override webSocket protocols with spread', () => {
-    const withProtocols = cloneClient(baseClient, {
-      webSocket: {
+    const withProtocols = cloneClient(
+      baseClient,
+      withWebSocketOptions({
         protocols: ['proto1'],
-      },
-    })
-    const nextClient = cloneClient(withProtocols, {
-      webSocket: {
+      }),
+    )
+    const nextClient = cloneClient(
+      withProtocols,
+      withWebSocketOptions({
         protocols: ['proto2'],
-      },
-    })
+      }),
+    )
     expect(getClientConfig(nextClient).webSocket.protocols).toEqual(['proto2'])
   })
 })

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { isStruct, struct } from './index'
+import { parseStructTuple as parse } from './introspection'
 import {
   createAnySchema,
   createArrayBufferSchema,
@@ -45,19 +46,19 @@ describe('facade.ts', () => {
   })
 
   test('supports primitive defaults for boolean and exact null schema', () => {
-    const [boolErr, boolVal] = struct.boolean().parse(undefined)
+    const [boolErr, boolVal] = parse(struct.boolean(), undefined)
     if (boolErr) {
       throw boolErr
     }
     expect(boolVal).toBe(false)
 
-    const [nullErr1, nullVal1] = struct.null().parse(undefined)
+    const [nullErr1, nullVal1] = parse(struct.null(), undefined)
     if (nullErr1) {
       throw nullErr1
     }
     expect(nullVal1).toBeNull()
 
-    const [nullErr2, nullVal2] = struct.null().parse(null)
+    const [nullErr2, nullVal2] = parse(struct.null(), null)
     if (nullErr2) {
       throw nullErr2
     }
@@ -101,13 +102,13 @@ describe('facade.ts', () => {
 
     expect(base).not.toBe(optionalValue)
 
-    const [baseErr, baseVal] = base.parse(undefined)
+    const [baseErr, baseVal] = parse(base, undefined)
     if (baseErr) {
       throw baseErr
     }
     expect(baseVal).toBe('')
 
-    const [optErr, optVal] = optionalValue.parse(undefined)
+    const [optErr, optVal] = parse(optionalValue, undefined)
     if (optErr) {
       throw optErr
     }
@@ -119,7 +120,7 @@ describe('facade.ts', () => {
     const user = struct.object(shape)
     ;(shape as Record<string, unknown>)['secret'] = struct.string()
 
-    const [err, val] = user.parse({ name: 'Miao', secret: 'hidden' })
+    const [err, val] = parse(user, { name: 'Miao', secret: 'hidden' })
 
     if (err) {
       throw err

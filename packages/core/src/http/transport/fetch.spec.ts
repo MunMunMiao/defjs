@@ -1,7 +1,13 @@
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { ERR_INVALID_CLIENT_ENDPOINT } from '../../error'
 import type { HttpRequest } from '../../http'
-import { createFetchRequest, createFetchRequestInit, ERR_STREAMING_REQUEST_UNSUPPORTED, fetchHandler, supportsStreamingRequestBody } from './fetch'
+import {
+  createFetchRequest,
+  createFetchRequestInit,
+  ERR_STREAMING_REQUEST_UNSUPPORTED,
+  fetchHandler,
+  supportsStreamingRequestBody,
+} from './fetch'
 
 describe('Fetch handler request creation', () => {
   test('should create a request', async () => {
@@ -54,6 +60,64 @@ describe('Fetch handler request creation', () => {
 
     const request = createFetchRequest(requestConfig)
     expect(request.headers.get('Content-Type')).toEqual('application/json')
+  })
+
+  test('should apply final body content type after configured headers', () => {
+    const jsonBody = { id: 1 }
+    const jsonRequest: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      headers: new Headers([['Content-Type', 'text/plain']]),
+      method: 'POST',
+      body: jsonBody,
+    }
+
+    const serializedJson = '{"id":1}'
+    const builderRequest: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      headers: new Headers([['Content-Type', 'text/plain']]),
+      method: 'POST',
+      body: serializedJson,
+      bodyContentType: 'application/json',
+      bodyContentTypeSource: serializedJson,
+    }
+
+    const binaryRequest: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/upload',
+      headers: new Headers([['Content-Type', 'text/plain']]),
+      method: 'POST',
+      body: new ArrayBuffer(0),
+    }
+
+    expect((createFetchRequestInit(jsonRequest).headers as Headers).get('content-type')).toBe('application/json')
+    expect((createFetchRequestInit(builderRequest).headers as Headers).get('content-type')).toBe('application/json')
+    expect((createFetchRequestInit(binaryRequest).headers as Headers).get('content-type')).toBe('application/octet-stream')
+  })
+
+  test('should remove or suppress Content-Type from final body rules', () => {
+    const formDataRequest: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/upload',
+      headers: new Headers([['Content-Type', 'multipart/form-data']]),
+      method: 'POST',
+      body: new FormData(),
+    }
+
+    const textBody = 'hello'
+    const suppressedRequest: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/text',
+      headers: new Headers([['Content-Type', 'text/plain']]),
+      method: 'POST',
+      body: textBody,
+      bodyContentType: null,
+      bodyContentTypeSource: textBody,
+    }
+
+    expect((createFetchRequestInit(formDataRequest).headers as Headers).has('content-type')).toBe(false)
+    expect((createFetchRequestInit(suppressedRequest).headers as Headers).has('content-type')).toBe(false)
   })
 
   test('should reject requests without baseEndpoint', () => {

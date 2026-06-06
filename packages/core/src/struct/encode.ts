@@ -69,6 +69,29 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
       return output
     }
 
+    case 'request': {
+      if (!isPlainObject(value)) {
+        return value
+      }
+      const output: Record<string, unknown> = Object.create(null)
+      if (definition.path && hasOwnKey(value, 'path')) {
+        output['path'] = encodeValue(definition.path as unknown as RuntimeSchema, value['path'], options)
+      }
+      if (definition.query && hasOwnKey(value, 'query')) {
+        output['query'] = encodeValue(definition.query as unknown as RuntimeSchema, value['query'], options)
+      }
+      if (definition.headers && hasOwnKey(value, 'headers')) {
+        output['headers'] = encodeValue(definition.headers as unknown as RuntimeSchema, value['headers'], options)
+      }
+      if (definition.body && hasOwnKey(value, 'body')) {
+        output['body'] = encodeValue(definition.body as unknown as RuntimeSchema, value['body'], options)
+      }
+      return output
+    }
+
+    case 'requestBody':
+      return encodeValue(definition.schema as RuntimeSchema, value, options)
+
     case 'or': {
       for (const opt of definition.options) {
         const optDef = (opt as RuntimeSchema)[DEFINITION]
@@ -154,6 +177,12 @@ export function matchesDefinition(definition: SchemaDefinition, value: unknown, 
         return true
       }
       return matchesObjectValue(schema, value)
+
+    case 'request':
+      return isPlainObject(value)
+
+    case 'requestBody':
+      return matchesFieldValue(definition.schema as RuntimeSchema, value)
 
     case 'record': {
       if (!isPlainObject(value)) {

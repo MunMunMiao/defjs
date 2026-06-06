@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { type ErrorMap, StructError, setErrorMap, struct } from './index'
+import { parseStructTuple as parse } from './introspection'
 
 afterEach(() => {
   setErrorMap(undefined)
@@ -15,7 +16,7 @@ describe('StructError format / flatten / prettify', () => {
   })
 
   test('format builds a nested tree of issues', () => {
-    const [err] = userSchema.parse({ id: 42, profile: { email: false }, tags: [10] })
+    const [err] = parse(userSchema, { id: 42, profile: { email: false }, tags: [10] })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
       throw new Error('expected parse error')
@@ -35,7 +36,7 @@ describe('StructError format / flatten / prettify', () => {
   })
 
   test('flatten groups by first path segment', () => {
-    const [err] = userSchema.parse({ id: 42, profile: { email: false }, tags: [10] })
+    const [err] = parse(userSchema, { id: 42, profile: { email: false }, tags: [10] })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
       throw new Error('expected parse error')
@@ -65,7 +66,7 @@ describe('StructError format / flatten / prettify', () => {
   })
 
   test('prettify renders multi-line human readable output', () => {
-    const [err] = userSchema.parse({ id: 42, profile: { email: false }, tags: [10] })
+    const [err] = parse(userSchema, { id: 42, profile: { email: false }, tags: [10] })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
       throw new Error('expected parse error')
@@ -78,7 +79,7 @@ describe('StructError format / flatten / prettify', () => {
   })
 
   test('format keeps a declared _errors field separate from node errors', () => {
-    const [err] = struct.object({ _errors: struct.string() }).parse({ _errors: 42 })
+    const [err] = parse(struct.object({ _errors: struct.string() }), { _errors: 42 })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
       throw new Error('expected parse error')
@@ -91,7 +92,7 @@ describe('StructError format / flatten / prettify', () => {
 
   test('prettify renders deep array paths without stray dots', () => {
     const matrix = struct.array(struct.array(struct.array(struct.string())))
-    const [err] = matrix.parse([[[1]]])
+    const [err] = parse(matrix, [[[1]]])
     expect(err).toBeInstanceOf(StructError)
 
     expect(err?.prettify()).toContain('× [0][0][0]: Expected string at [0][0][0], received 1')
@@ -113,7 +114,7 @@ describe('errors.ts errorMap', () => {
     }
     setErrorMap(map)
 
-    const [err] = struct.string().parse(42)
+    const [err] = parse(struct.string(), 42)
     expect(err).toBeInstanceOf(StructError)
     expect(err?.issues[0]?.message).toBe('字段  类型不符（期望 string）')
   })
@@ -121,7 +122,7 @@ describe('errors.ts errorMap', () => {
   test('errorMap returning undefined preserves the default message', () => {
     setErrorMap(() => undefined)
 
-    const [err] = struct.string().parse(42)
+    const [err] = parse(struct.string(), 42)
     expect(err).toBeInstanceOf(StructError)
     expect(err?.issues[0]?.message).toBe('Expected string at <root>, received 42')
   })
@@ -129,13 +130,13 @@ describe('errors.ts errorMap', () => {
   test('clearing errorMap restores defaults', () => {
     setErrorMap(() => 'custom')
 
-    const [before] = struct.string().parse(42)
+    const [before] = parse(struct.string(), 42)
     expect(before).toBeInstanceOf(StructError)
     expect(before?.issues[0]?.message).toBe('custom')
 
     setErrorMap(undefined)
 
-    const [after] = struct.string().parse(42)
+    const [after] = parse(struct.string(), 42)
     expect(after).toBeInstanceOf(StructError)
     expect(after?.issues[0]?.message).toBe('Expected string at <root>, received 42')
   })

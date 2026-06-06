@@ -15,10 +15,6 @@ export function encodeUrlencoded(struct: SchemaLike<any, any, boolean>, value: u
   const params = new URLSearchParams()
   for (const field of getStructFields(struct)) {
     const fieldTag = field.tags.get(UrlencodedTag.kind)
-    if (!fieldTag) {
-      continue
-    }
-
     appendSearchParam(params, getWireKey(field.key, fieldTag), encodeStructValue(field.struct, value[field.key]))
   }
 

@@ -1,71 +1,78 @@
 import { describe, expect, test } from 'vitest'
+import { encodeValue } from './encode'
 import { StructError, struct } from './index'
+import { parseStructTuple as parse } from './introspection'
+import type { RuntimeSchema } from './types'
+
+function encode(schema: unknown, value: unknown): unknown {
+  return encodeValue(schema as RuntimeSchema, value)
+}
 
 describe('constructors.ts bigint and date primitives', () => {
   test('bigint accepts BigInt and string wire form, rejects number', () => {
-    const [e1, v1] = struct.bigint().parse(42n)
+    const [e1, v1] = parse(struct.bigint(), 42n)
     if (e1) {
       throw e1
     }
     expect(v1).toBe(42n)
 
-    const [e2, v2] = struct.bigint().parse('42')
+    const [e2, v2] = parse(struct.bigint(), '42')
     if (e2) {
       throw e2
     }
     expect(v2).toBe(42n)
 
-    const [e3, v3] = struct.bigint().parse('9007199254740993')
+    const [e3, v3] = parse(struct.bigint(), '9007199254740993')
     if (e3) {
       throw e3
     }
     expect(v3).toBe(9007199254740993n)
 
-    const [e4, v4] = struct.bigint().parse(undefined)
+    const [e4, v4] = parse(struct.bigint(), undefined)
     if (e4) {
       throw e4
     }
     expect(v4).toBe(0n)
 
-    const [e5] = struct.bigint().parse(42)
+    const [e5] = parse(struct.bigint(), 42)
     expect(e5).toBeInstanceOf(StructError)
     expect(e5?.message).toContain('Expected bigint')
 
-    const [e6] = struct.bigint().parse('abc')
+    const [e6] = parse(struct.bigint(), 'abc')
     expect(e6).toBeInstanceOf(StructError)
     expect(e6?.message).toContain('Expected bigint')
   })
 
   test('bigint encodes back to string wire form', () => {
-    expect(struct.bigint().encode(42n)).toBe('42')
-    const [err, parsed] = struct.bigint().parse('9007199254740993')
+    expect(encode(struct.bigint(), 42n)).toBe('42')
+    const [err, parsed] = parse(struct.bigint(), '9007199254740993')
     if (err) {
       throw err
     }
-    expect(struct.bigint().encode(parsed as bigint)).toBe('9007199254740993')
+    expect(encode(struct.bigint(), parsed as bigint)).toBe('9007199254740993')
   })
 
   test('date accepts Date instance, ISO string, and epoch number', () => {
     const d = new Date('2026-05-12T10:00:00Z')
-    const [e1, v1] = struct.date().parse(d)
+    const [e1, v1] = parse(struct.date(), d)
     if (e1) {
       throw e1
     }
     expect(v1).toBe(d)
 
-    const [e2, v2] = struct.date().parse('2026-05-12T10:00:00Z')
+    const [e2, v2] = parse(struct.date(), '2026-05-12T10:00:00Z')
     if (e2) {
       throw e2
     }
     expect((v2 as Date).getTime()).toBe(d.getTime())
 
-    const [e3, v3] = struct.date().parse(d.getTime())
+    const [e3, v3] = parse(struct.date(), d.getTime())
     if (e3) {
       throw e3
     }
     expect((v3 as Date).getTime()).toBe(d.getTime())
 
-    const [e4, zero] = struct.date().parse(undefined)
+    const [e4, zero] = parse(struct.date(), undefined)
     if (e4) {
       throw e4
     }
@@ -74,29 +81,29 @@ describe('constructors.ts bigint and date primitives', () => {
   })
 
   test('date rejects invalid wire input with invalid_type code', () => {
-    const [e1] = struct.date().parse(new Date('not-a-date'))
+    const [e1] = parse(struct.date(), new Date('not-a-date'))
     expect(e1).toBeInstanceOf(StructError)
     expect(e1?.message).toContain('Expected Date')
     expect(e1?.issues[0]?.code).toBe('invalid_type')
 
-    const [e2] = struct.date().parse('not-a-date')
+    const [e2] = parse(struct.date(), 'not-a-date')
     expect(e2).toBeInstanceOf(StructError)
     expect(e2?.message).toContain('Expected Date')
     expect(e2?.issues[0]?.code).toBe('invalid_type')
 
-    const [e3] = struct.date().parse(true)
+    const [e3] = parse(struct.date(), true)
     expect(e3).toBeInstanceOf(StructError)
     expect(e3?.message).toContain('Expected Date')
   })
 
   test('date encodes back to ISO string', () => {
     const d = new Date('2026-05-12T10:00:00Z')
-    expect(struct.date().encode(d)).toBe('2026-05-12T10:00:00.000Z')
-    const [err, parsed] = struct.date().parse('2026-05-12T10:00:00Z')
+    expect(encode(struct.date(), d)).toBe('2026-05-12T10:00:00.000Z')
+    const [err, parsed] = parse(struct.date(), '2026-05-12T10:00:00Z')
     if (err) {
       throw err
     }
-    expect(struct.date().encode(parsed as Date)).toBe('2026-05-12T10:00:00.000Z')
+    expect(encode(struct.date(), parsed as Date)).toBe('2026-05-12T10:00:00.000Z')
   })
 })
 
@@ -106,30 +113,30 @@ describe('constructors.ts intersection', () => {
     const aged = struct.object({ age: struct.number() })
     const person = struct.intersection(named, aged)
 
-    const [okErr, okVal] = person.parse({ name: 'x', age: 30 })
+    const [okErr, okVal] = parse(person, { name: 'x', age: 30 })
     if (okErr) {
       throw okErr
     }
     expect(okVal).toEqual({ name: 'x', age: 30 })
 
-    const [badErr] = person.parse({ name: 'x', age: 'bad' })
+    const [badErr] = parse(person, { name: 'x', age: 'bad' })
     expect(badErr).toBeInstanceOf(StructError)
   })
 
   test('intersection rejects when either side fails', () => {
     const combined = struct.intersection(struct.object({ name: struct.string() }), struct.object({ age: struct.number() }))
 
-    const [okErr, okVal] = combined.parse({ age: 7, name: 'Miao' })
+    const [okErr, okVal] = parse(combined, { age: 7, name: 'Miao' })
     if (okErr) {
       throw okErr
     }
     expect(okVal).toEqual({ age: 7, name: 'Miao' })
 
-    const [leftErr] = combined.parse({ age: 7, name: false })
+    const [leftErr] = parse(combined, { age: 7, name: false })
     expect(leftErr).toBeInstanceOf(StructError)
     expect(leftErr?.message).toContain('Expected string')
 
-    const [rightErr] = combined.parse({ age: 'bad', name: 'Miao' })
+    const [rightErr] = parse(combined, { age: 'bad', name: 'Miao' })
     expect(rightErr).toBeInstanceOf(StructError)
     expect(rightErr?.message).toContain('Expected number')
   })

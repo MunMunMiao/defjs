@@ -1,15 +1,13 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
 import { struct } from '../struct'
 import { defineEventStream } from './index'
 
 describe('sse browser runtime', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 

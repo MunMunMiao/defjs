@@ -3,13 +3,18 @@ import type { ClientConfig, WebSocketBeforeConnect, WebSocketHeartbeatOptions } 
 import type { Client } from '../client/resolve'
 import { createDefinitionError, createTransportError, ERR_ABORTED, type RequestError } from '../error'
 import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors, type WebSocketSessionLike } from '../interceptor/interceptor'
-import { mergeAbortSignals } from '../internal/abort'
+import {
+  createAbortTimeoutConflictError,
+  hasAbortTimeoutConflict,
+  mergeAbortSignals,
+  type UseCancellationConfig,
+} from '../internal/abort'
 import { AsyncQueue } from '../internal/async_queue'
 import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpRequest } from '../internal/http_request'
-import type { RequestBuild, RequestBuildHandler } from '../internal/request_builder'
-import type { AnyCompatibleSchema, CompatibleInput, CompatibleOutput } from '../struct/compatible'
-import { createWebSocketBuild, createWebSocketUrl } from './build'
+import type { RequestBuild, RequestBuilder, RequestBuildHandler } from '../internal/request_builder'
+import type { AnyStruct, Infer } from '../struct'
+import { createWebSocketBuild, createWebSocketRequest, createWebSocketUrlFromRequest } from './build'
 import {
   extractCloseInfo,
   isManualSocketCloseReason,
@@ -23,7 +28,7 @@ import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, type 
 
 export type WebSocketState = 'aborted' | 'closed' | 'closing' | 'connecting' | 'error' | 'idle' | 'open' | 'reconnecting'
 
-export type SocketSchemas = Record<string, AnyCompatibleSchema>
+export type SocketSchemas = Record<string, AnyStruct>
 
 type KnownSocketKey<TMessages extends SocketSchemas> = Exclude<Extract<keyof TMessages, string>, 'default'>
 
@@ -51,11 +56,11 @@ type SocketSendMessage<TKey extends string, TPayload> =
       }
 
 type KnownIncomingSocketUnion<TIncoming extends SocketSchemas> = {
-  [K in KnownSocketKey<TIncoming>]: NormalizeSocketMessage<K, CompatibleOutput<TIncoming[K]>>
+  [K in KnownSocketKey<TIncoming>]: NormalizeSocketMessage<K, Infer<TIncoming[K]>>
 }[KnownSocketKey<TIncoming>]
 
 type DefaultIncomingSocketUnion<TIncoming extends SocketSchemas> = 'default' extends keyof TIncoming
-  ? NormalizeSocketMessage<string, CompatibleOutput<TIncoming['default']>>
+  ? NormalizeSocketMessage<string, Infer<TIncoming['default']>>
   : never
 
 export type WebSocketIncomingData<TIncoming extends SocketSchemas> = [
@@ -65,7 +70,7 @@ export type WebSocketIncomingData<TIncoming extends SocketSchemas> = [
   : KnownIncomingSocketUnion<TIncoming> | DefaultIncomingSocketUnion<TIncoming>
 
 type KnownOutgoingSocketUnion<TOutgoing extends SocketSchemas> = {
-  [K in KnownSocketKey<TOutgoing>]: SocketSendMessage<K, CompatibleInput<TOutgoing[K]>>
+  [K in KnownSocketKey<TOutgoing>]: SocketSendMessage<K, EndpointInput<TOutgoing[K]>>
 }[KnownSocketKey<TOutgoing>]
 
 export type WebSocketOutgoingData<TOutgoing extends SocketSchemas | undefined> = TOutgoing extends SocketSchemas
@@ -75,11 +80,11 @@ export type WebSocketOutgoingData<TOutgoing extends SocketSchemas | undefined> =
   : never
 
 export interface WebSocketDefinition<
-  TInput extends AnyCompatibleSchema | undefined = undefined,
+  TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
 > {
-  build?: RequestBuildHandler<ParsedInput<TInput>>
+  build?: RequestBuildHandler<TInput, 'webSocket'>
   incoming: TIncoming
   input?: TInput
   outgoing?: TOutgoing
@@ -115,16 +120,17 @@ export type SocketAwaitResult<TIncoming, TOutgoing = never> =
   | [error: null, socket: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
   | [error: RequestError<unknown>, socket: undefined, connection: WebSocketConnectionInfo | undefined]
 
-export interface UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> {
-  abort?: AbortSignal
+interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
   beforeConnect?: WebSocketBeforeConnect
   client?: Client
   heartbeat?: WebSocketHeartbeatConfig<TIncoming, TOutgoing>
   protocols?: readonly string[]
   queue?: WebSocketQueueConfig
   reconnect?: WebSocketReconnectConfig
-  timeout?: number
 }
+
+export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> =
+  UseWebSocketBaseConfig<TIncoming, TOutgoing> & UseCancellationConfig
 
 export interface WebSocketRef<TIncoming = unknown, TOutgoing = never> extends PromiseLike<SocketAwaitResult<TIncoming, TOutgoing>> {
   readonly connection?: WebSocketConnectionInfo
@@ -136,14 +142,14 @@ export interface WebSocketRef<TIncoming = unknown, TOutgoing = never> extends Pr
   with(config: UseWebSocketConfig<TIncoming, TOutgoing>): WebSocketRef<TIncoming, TOutgoing>
 }
 
-type IsInputOptional<TInput extends AnyCompatibleSchema | undefined> = [TInput] extends [undefined]
+type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends CompatibleInput<NonNullable<TInput>>
+  : {} extends EndpointInput<NonNullable<TInput>>
     ? true
     : false
 
 export type UseWebSocketEndpointFn<
-  TInput extends AnyCompatibleSchema | undefined,
+  TInput extends AnyStruct | undefined,
   TIncoming extends SocketSchemas,
   TOutgoing extends SocketSchemas | undefined,
 > =
@@ -152,7 +158,7 @@ export type UseWebSocketEndpointFn<
     : (input: EndpointInput<TInput>) => WebSocketRef<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 
 type WebSocketEndpoint<
-  TInput extends AnyCompatibleSchema | undefined = undefined,
+  TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
 > = WebSocketDefinition<TInput, TIncoming, TOutgoing> & {
@@ -190,8 +196,8 @@ export type WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> =
 }
 
 export function defineWebSocket<
-  TInput extends AnyCompatibleSchema | undefined,
-  TIncoming extends SocketSchemas,
+  TInput extends AnyStruct | undefined = undefined,
+  TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
 >(definition: WebSocketDefinition<TInput, TIncoming, TOutgoing>): UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing> {
   const endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing> = {
@@ -203,7 +209,7 @@ export function defineWebSocket<
 }
 
 function createWebSocketRef<
-  TInput extends AnyCompatibleSchema | undefined,
+  TInput extends AnyStruct | undefined,
   TIncoming extends SocketSchemas,
   TOutgoing extends SocketSchemas | undefined,
 >(
@@ -264,7 +270,7 @@ function createWebSocketRef<
 }
 
 async function executeWebSocketEndpoint<
-  TInput extends AnyCompatibleSchema | undefined,
+  TInput extends AnyStruct | undefined,
   TIncoming extends SocketSchemas,
   TOutgoing extends SocketSchemas | undefined,
 >(
@@ -275,6 +281,13 @@ async function executeWebSocketEndpoint<
   state: SocketRefState<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
 ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>> {
   setSocketState(state, 'connecting')
+
+  if (hasAbortTimeoutConflict(config)) {
+    const definitionError = createAbortTimeoutConflictError()
+    state.error = definitionError
+    setSocketState(state, 'error')
+    return [definitionError, undefined, undefined]
+  }
 
   let parsedInput: ParsedInput<TInput>
   try {
@@ -288,7 +301,11 @@ async function executeWebSocketEndpoint<
 
   let built: RequestBuild
   try {
-    built = createWebSocketBuild(parsedInput, endpoint.build)
+    built = createWebSocketBuild(
+      parsedInput,
+      endpoint.build as ((request: RequestBuilder, input: unknown) => void) | undefined,
+      endpoint.input,
+    )
   } catch (error) {
     const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
     state.error = definitionError
@@ -329,14 +346,14 @@ async function executeWebSocketEndpoint<
     return [transportError, undefined, undefined]
   }
 
-  const wsRequest: HttpRequest = {
-    baseEndpoint: clientConfig.endpoint,
-    endpoint: endpoint.path,
-    method: 'GET',
-    headers: new Headers(),
+  const wsRequest: HttpRequest = createWebSocketRequest({
     abort: signal,
+    baseEndpoint: clientConfig.endpoint,
+    build: built,
+    path: endpoint.path,
+    queryParamsSerializer: clientConfig.queryParamsSerializer,
     withCredentials: clientConfig.withCredentials,
-  }
+  })
 
   const wsHandler = async (req: HttpRequest): Promise<WebSocketSessionLike> => {
     return new Promise((resolveSession, rejectSession) => {
@@ -433,7 +450,7 @@ async function executeWebSocketEndpoint<
       > {
         let url: string
         try {
-          url = createWebSocketUrl(clientConfig.endpoint, endpoint.path, built.params, built.query, clientConfig.queryParamsSerializer)
+          url = createWebSocketUrlFromRequest(req)
         } catch (error) {
           return {
             error: createDefinitionError('REQUEST_VALIDATION_FAILED', error),

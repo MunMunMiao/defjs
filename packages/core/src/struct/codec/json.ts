@@ -1,8 +1,8 @@
 import { JsonTag } from '../tag'
-import type { ParseOptions, SchemaLike } from '../types'
+import type { SchemaLike } from '../types'
 import { decodeObjectByTag, encodeObjectByTag } from './common'
 
-export interface JsonCodecOptions extends ParseOptions {
+export interface JsonCodecOptions {
   requireTag?: boolean
 }
 

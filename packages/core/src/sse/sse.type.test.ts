@@ -1,5 +1,6 @@
+import { createClient, withEndpoint, withSseOptions } from '../client'
 import { struct } from '../struct'
-import { defineEventStream, type EventStreamData, type EventStreamRef, type StreamAwaitResult } from './index'
+import { defineEventStream, type EventStreamData, type EventStreamRef, type StreamAwaitResult, type UseEventStreamConfig } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
@@ -23,6 +24,33 @@ const useRequiredStream = defineEventStream({
     roomId: struct.string(),
   }),
   path: '/events',
+})
+
+const requestInputStream = defineEventStream({
+  build(request, input) {
+    request.setPathParams({ id: input.path.id })
+    request.setQueryParams({ include: input.query.include })
+    request.setHeaders({ 'x-token': input.headers.token })
+
+    // @ts-expect-error SSE schema-aware build context does not support request bodies.
+    request.setJson({ id: input.path.id })
+
+    // @ts-expect-error SSE schema-aware build context does not support request bodies.
+    request.setFormData({ id: input.path.id })
+  },
+  events,
+  input: struct.request({
+    headers: struct.object({
+      token: struct.string(),
+    }),
+    path: struct.object({
+      id: struct.string(),
+    }),
+    query: struct.object({
+      include: struct.boolean(),
+    }),
+  }),
+  path: '/events/:id',
 })
 
 type ExpectedEvent =
@@ -57,6 +85,39 @@ type RefCases = Expect<Equal<ReturnType<typeof useRequiredStream>, EventStreamRe
 type AwaitCases = Expect<Equal<Awaited<ReturnType<typeof useRequiredStream>>, StreamAwaitResult<ExpectedEvent>>>
 type InputCases = Expect<Equal<Parameters<typeof useRequiredStream>, [({ roomId?: string | undefined } | undefined)?]>>
 
+const streamRef = useRequiredStream({ roomId: 'room-1' })
+const streamClient = createClient(
+  withEndpoint('https://api.example.com'),
+  withSseOptions({
+    fetch: globalThis.fetch,
+  }),
+)
+
+streamRef.with({ timeout: 100 })
+streamRef.with({ abort: new AbortController().signal })
+streamRef.with({ abort: AbortSignal.timeout(100) })
+streamRef.with({ client: streamClient })
+
+const streamTimeoutConfig = { timeout: 100 } satisfies UseEventStreamConfig
+const streamAbortConfig = { abort: new AbortController().signal } satisfies UseEventStreamConfig
+void streamTimeoutConfig
+void streamAbortConfig
+
+// @ts-expect-error with.abort and with.timeout are mutually exclusive.
+streamRef.with({ abort: new AbortController().signal, timeout: 100 })
+
+// @ts-expect-error request-level fetch was removed; configure fetch on client.sse and pass client.
+streamRef.with({ fetch: globalThis.fetch })
+
+// @ts-expect-error abort must be an AbortSignal.
+streamRef.with({ abort: true })
+
+// @ts-expect-error abort must be an AbortSignal, not an AbortController.
+streamRef.with({ abort: new AbortController() })
+
+// @ts-expect-error abort must be an AbortSignal, not a callback.
+streamRef.with({ abort: () => {} })
+
 function assertRequiredStreamEvent(event: EventStreamData<typeof events>) {
   if (event.event === 'message' && 'text' in event.data) {
     const data: {
@@ -70,5 +131,7 @@ function assertRequiredStreamEvent(event: EventStreamData<typeof events>) {
 declare const anyStreamEvent: EventStreamData<typeof events>
 
 assertRequiredStreamEvent(anyStreamEvent)
+void requestInputStream
+void streamRef
 
 export type Cases = AwaitCases | EventCases | InputCases | RefCases

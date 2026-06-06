@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors } from '../client'
 import { ERR_ABORTED } from '../error'
 import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
@@ -9,9 +9,7 @@ import { defineRequest } from './index'
 describe('request http runtime errors', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 
@@ -147,17 +145,10 @@ describe('request http runtime errors', () => {
       throw new Error('interceptor boom')
     })
 
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: async () =>
-          makeResponse({
-            body: null,
-            status: 200,
-          }),
-      },
-      interceptors: [throwingInterceptor],
-    })
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(throwingInterceptor),
+    )
 
     const useIntercepted = defineRequest({
       method: 'GET',
@@ -202,6 +193,52 @@ describe('request http runtime errors', () => {
     expect(ref.status).toBe('aborted')
   })
 
+  test('should reject with.abort and with.timeout before parsing HTTP input', async () => {
+    const controller = new AbortController()
+    const useRequest = defineRequest({
+      input: struct.object({
+        id: struct.string(),
+      }),
+      method: 'GET',
+      output: {
+        200: struct.null(),
+      },
+      path: '/null',
+    })
+
+    const ref = useRequest({ id: 1 } as never).with({ abort: controller.signal, timeout: 1 } as never)
+    const [error, result, response] = await ref
+
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+    expect(ref.status).toBe('error')
+  })
+
+  test('should prefer HTTP cancellation config conflict over an already aborted signal', async () => {
+    const controller = new AbortController()
+    controller.abort(ERR_ABORTED)
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        200: struct.null(),
+      },
+      path: '/null',
+    })
+
+    const ref = useRequest().with({ abort: controller.signal, timeout: 1 } as never)
+    const [error, result, response] = await ref
+
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+    expect(ref.status).toBe('error')
+  })
+
   test('should return transport error when client is invalid', async () => {
     const useRequest = defineRequest({
       method: 'GET',
@@ -241,10 +278,10 @@ describe('request http runtime errors', () => {
   })
 
   test('should use HTTP status message when response.error is undefined without output', async () => {
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: async () =>
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () =>
           makeResponse({
             body: null,
             error: undefined,
@@ -252,8 +289,9 @@ describe('request http runtime errors', () => {
             statusText: 'Server Error',
             url: 'https://example.com/test',
           }),
-      },
-    })
+        ),
+      ),
+    )
 
     const useRequest = defineRequest({
       method: 'GET',
@@ -269,10 +307,10 @@ describe('request http runtime errors', () => {
   })
 
   test('should use HTTP status message when response.error is undefined with output schema', async () => {
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: async () =>
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () =>
           makeResponse({
             body: { code: 'ERR' },
             error: undefined,
@@ -281,8 +319,9 @@ describe('request http runtime errors', () => {
             statusText: 'Server Error',
             url: 'https://example.com/test',
           }),
-      },
-    })
+        ),
+      ),
+    )
 
     const useRequest = defineRequest({
       method: 'GET',
@@ -326,12 +365,14 @@ describe('request http runtime errors', () => {
   test('should cancel a pending request', async () => {
     const useDelay = defineRequest({
       build: (request, input) => {
-        request.queryParams({
-          ms: input.ms,
+        request.setQueryParams({
+          ms: input.query.ms,
         })
       },
-      input: struct.object({
-        ms: struct.number(),
+      input: struct.request({
+        query: struct.object({
+          ms: struct.number(),
+        }),
       }),
       method: 'GET',
       output: {
@@ -340,7 +381,7 @@ describe('request http runtime errors', () => {
       path: '/delay',
     })
 
-    const ref = useDelay({ ms: 5000 })
+    const ref = useDelay({ query: { ms: 5000 } })
     ref.cancel()
 
     const [error] = await ref
@@ -358,17 +399,18 @@ describe('request http runtime errors', () => {
       return result
     })
 
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: async () =>
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        abortingInterceptor,
+        createHttpInterceptor(async () =>
           makeResponse({
             body: null,
             status: 200,
           }),
-      },
-      interceptors: [abortingInterceptor],
-    })
+        ),
+      ),
+    )
 
     const useRequest = defineRequest({
       method: 'GET',
@@ -386,50 +428,20 @@ describe('request http runtime errors', () => {
     expect(error?.code).toBe('ABORTED')
   })
 
-  test('should use handler without native timeout support', async () => {
-    let capturedTimeout: number | undefined
-
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: Object.assign(
-          async (req: { timeout?: number }) => {
-            capturedTimeout = req.timeout
-            return makeResponse({ body: null, status: 200 })
-          },
-          { supportsNativeTimeout: true },
-        ),
-      },
-    })
-
-    const useRequest = defineRequest({
-      method: 'GET',
-      output: {
-        200: struct.null(),
-      },
-      path: '/test',
-    })
-
-    const [error] = await useRequest().with({ client, timeout: 5000 })
-
-    expect(error).toBeNull()
-    expect(capturedTimeout).toBe(5000)
-  })
-
   test('should use string error for non-ok response without output', async () => {
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: async () => ({
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () => ({
           body: null,
           error: 'custom string error',
           headers: new Headers(),
           status: 500,
           statusText: 'Server Error',
           url: 'https://example.com/test',
-        }),
-      },
-    })
+        })),
+      ),
+    )
 
     const useRequest = defineRequest({
       method: 'GET',
@@ -445,19 +457,19 @@ describe('request http runtime errors', () => {
   })
 
   test('should use string error for non-ok response with output schema', async () => {
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: async () => ({
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () => ({
           body: { code: 'ERR' },
           error: 'custom string error',
           headers: new Headers([['content-type', 'application/json']]),
           status: 500,
           statusText: 'Server Error',
           url: 'https://example.com/test',
-        }),
-      },
-    })
+        })),
+      ),
+    )
 
     const useRequest = defineRequest({
       method: 'GET',
@@ -479,17 +491,18 @@ describe('request http runtime errors', () => {
   })
 
   test('should return success for ok response without output', async () => {
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: async () =>
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () =>
           makeResponse({
             body: null,
             status: 204,
             url: 'https://example.com/test',
           }),
-      },
-    })
+        ),
+      ),
+    )
 
     const useRequest = defineRequest({
       method: 'GET',
@@ -504,18 +517,19 @@ describe('request http runtime errors', () => {
   })
 
   test('should use Error message for non-ok response without output', async () => {
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: async () =>
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () =>
           makeResponse({
             body: null,
             status: 500,
             statusText: 'Internal Server Error',
             url: 'https://example.com/test',
           }),
-      },
-    })
+        ),
+      ),
+    )
 
     const useRequest = defineRequest({
       method: 'GET',
@@ -532,10 +546,10 @@ describe('request http runtime errors', () => {
   })
 
   test('should use Error message for non-ok response with output schema', async () => {
-    const client = createClient({
-      endpoint: 'https://example.com',
-      http: {
-        handler: async () =>
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () =>
           makeResponse({
             body: { code: 'ERR' },
             headers: new Headers([['content-type', 'application/json']]),
@@ -543,8 +557,9 @@ describe('request http runtime errors', () => {
             statusText: 'Server Error',
             url: 'https://example.com/test',
           }),
-      },
-    })
+        ),
+      ),
+    )
 
     const useRequest = defineRequest({
       method: 'GET',
@@ -569,12 +584,14 @@ describe('request http runtime errors', () => {
   test('should support timeout in second-stage config', async () => {
     const useDelay = defineRequest({
       build: (request, input) => {
-        request.queryParams({
-          ms: input.ms,
+        request.setQueryParams({
+          ms: input.query.ms,
         })
       },
-      input: struct.object({
-        ms: struct.number(),
+      input: struct.request({
+        query: struct.object({
+          ms: struct.number(),
+        }),
       }),
       method: 'GET',
       output: {
@@ -583,7 +600,7 @@ describe('request http runtime errors', () => {
       path: '/delay',
     })
 
-    const [error, result, response] = await useDelay({ ms: 100 }).with({
+    const [error, result, response] = await useDelay({ query: { ms: 100 } }).with({
       timeout: 10,
     })
 

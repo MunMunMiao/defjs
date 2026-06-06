@@ -2,7 +2,7 @@ import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
 import type { HttpRequest } from '../../internal/http_request'
 import { type HttpResponse, type HttpResponseBody, makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
-import { detectHttpContentType, serializeHttpBody } from './body'
+import { applyRequestContentType, serializeHttpBody } from './body'
 import { concatChunks, getContentLength, getContentType, parseBody } from './utils'
 
 type RequestInitWithDuplex = RequestInit & {
@@ -80,13 +80,8 @@ function wrapUploadProgressStream(
 }
 
 export function createFetchRequestInit(request: HttpRequest): RequestInitWithDuplex {
-  const headers = request.headers ?? new Headers()
-  if (!headers.has('Content-Type')) {
-    const detectedType = detectHttpContentType(request.body)
-    if (detectedType) {
-      headers.set('Content-Type', detectedType)
-    }
-  }
+  const headers = new Headers(request.headers)
+  applyRequestContentType(request, headers)
 
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/json, text/plain, */*')

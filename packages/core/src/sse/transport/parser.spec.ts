@@ -3,6 +3,9 @@ import { createLineParser, createMessageParser, type EventStreamMessage, readStr
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
+const noop = () => {
+  /* intentionally empty */
+}
 
 describe('sse parser', () => {
   test('should read stream bytes chunk by chunk', async () => {
@@ -108,13 +111,9 @@ describe('sse parser', () => {
 
   test('should handle partial line across chunks with non-zero line start', async () => {
     const messages: EventStreamMessage[] = []
-    const parseMessage = createMessageParser(
-      () => {},
-      () => {},
-      async message => {
-        messages.push(message)
-      },
-    )
+    const parseMessage = createMessageParser(noop, noop, async message => {
+      messages.push(message)
+    })
     const parseLine = createLineParser(parseMessage)
 
     // First chunk: complete line + partial line (with colon so fieldLength > 0)
@@ -134,13 +133,9 @@ describe('sse parser', () => {
 
   test('should handle crlf line endings and discard trailing newlines', async () => {
     const messages: EventStreamMessage[] = []
-    const parseMessage = createMessageParser(
-      () => {},
-      () => {},
-      async message => {
-        messages.push(message)
-      },
-    )
+    const parseMessage = createMessageParser(noop, noop, async message => {
+      messages.push(message)
+    })
     const parseLine = createLineParser(parseMessage)
 
     // CRLF line endings: \r\n triggers discardTrailingNewline, then next \n is skipped
@@ -158,13 +153,9 @@ describe('sse parser', () => {
 
   test('should handle field with space after colon', async () => {
     const messages: EventStreamMessage[] = []
-    const parseMessage = createMessageParser(
-      () => {},
-      () => {},
-      async message => {
-        messages.push(message)
-      },
-    )
+    const parseMessage = createMessageParser(noop, noop, async message => {
+      messages.push(message)
+    })
     const parseLine = createLineParser(parseMessage)
 
     // Space after colon means valueOffset uses +2 instead of +1
@@ -182,13 +173,9 @@ describe('sse parser', () => {
 
   test('should handle field without space after colon', async () => {
     const messages: EventStreamMessage[] = []
-    const parseMessage = createMessageParser(
-      () => {},
-      () => {},
-      async message => {
-        messages.push(message)
-      },
-    )
+    const parseMessage = createMessageParser(noop, noop, async message => {
+      messages.push(message)
+    })
     const parseLine = createLineParser(parseMessage)
 
     // No space after colon means valueOffset uses +1

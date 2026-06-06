@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { createClient } from '../client'
+import { createClient, withEndpoint, withWebSocketOptions } from '../client'
 import { ERR_ABORTED } from '../error'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
@@ -115,7 +115,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const [error, socket, connection] = await useSocket().with({
-      client: createClient({ endpoint: 'http://localhost' }),
+      client: createClient(withEndpoint('http://localhost')),
     })
 
     expect(socket).toBeUndefined()
@@ -132,7 +132,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const [error, socket, connection] = await useSocket().with({
-      client: createClient({ endpoint: 'http://localhost' }),
+      client: createClient(withEndpoint('http://localhost')),
     })
 
     expect(socket).toBeUndefined()
@@ -152,7 +152,7 @@ describe('web socket runtime environment edge cases', () => {
 
     const ref = useSocket().with({
       abort: controller.signal,
-      client: createClient({ endpoint: 'http://localhost' }),
+      client: createClient(withEndpoint('http://localhost')),
     })
 
     setTimeout(() => controller.abort(ERR_ABORTED), 10)
@@ -175,7 +175,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const [error, socket, connection] = await useSocket().with({
-      client: createClient({ endpoint: 'http://localhost' }),
+      client: createClient(withEndpoint('http://localhost')),
     })
 
     expect(socket).toBeUndefined()
@@ -195,7 +195,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const ref = useSocket().with({
-      client: createClient({ endpoint: 'http://localhost' }),
+      client: createClient(withEndpoint('http://localhost')),
     })
 
     ref.onStateChange(state => {
@@ -229,12 +229,12 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const [error, socket] = await useSocket().with({
-      client: createClient({
-        endpoint: 'http://localhost',
-        webSocket: {
+      client: createClient(
+        withEndpoint('http://localhost'),
+        withWebSocketOptions({
           reconnect: { attempts: 1, delayMs: 50 },
-        },
-      }),
+        }),
+      ),
     })
 
     expect(error).toBeNull()
@@ -266,7 +266,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const [error, socket] = await useSocket().with({
-      client: createClient({ endpoint: 'http://localhost' }),
+      client: createClient(withEndpoint('http://localhost')),
     })
 
     expect(error).toBeNull()

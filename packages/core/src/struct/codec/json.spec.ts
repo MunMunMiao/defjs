@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { decodeJson, encodeJson, StructError, struct, tag } from '../index'
+import { struct, tag } from '../index'
+import { decodeJson, encodeJson } from './json'
 
 describe('codec/json.ts', () => {
   test('maps API JSON field names through tag.json()', () => {
@@ -27,23 +28,24 @@ describe('codec/json.ts', () => {
     expect(encodeJson(user, { pageSize: 50, page: 1 })).toEqual({ page_size: 50, page: 1 })
   })
 
-  test('unknownFields rejects wire keys even when they collide with internal names', () => {
+  test('unknown JSON wire keys are ignored', () => {
     const query = struct.object({
       pageSize: struct.number().tag(tag.json('page_size')),
     })
 
-    expect(() => decodeJson(query, { page_size: 20, pageSize: 99 }, { unknownFields: 'error' })).toThrow(StructError)
+    expect(decodeJson(query, { page_size: 20, pageSize: 99 })).toEqual({ pageSize: 20 })
   })
 
-  test('requireTag still rejects unknown wire keys when unknownFields is error', () => {
+  test('requireTag ignores untagged wire keys', () => {
     const query = struct.object({
       internal: struct.string(),
       pageSize: struct.number().tag(tag.json('page_size')),
     })
 
-    expect(() => decodeJson(query, { internal: 'ignored', page_size: 20 }, { requireTag: true, unknownFields: 'error' })).toThrow(
-      StructError,
-    )
+    expect(decodeJson(query, { internal: 'ignored', page_size: 20 }, { requireTag: true })).toEqual({
+      internal: '',
+      pageSize: 20,
+    })
   })
 
   test('recurses into nested JSON objects', () => {

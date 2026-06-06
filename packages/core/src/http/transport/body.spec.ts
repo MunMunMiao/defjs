@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { detectHttpContentType, serializeHttpBody } from './body'
+import type { HttpRequest } from '../../internal/http_request'
+import { applyRequestContentType, detectHttpContentType, serializeHttpBody } from './body'
 
 describe('http utils', () => {
   test('should keep native body types as-is when serializing', () => {
@@ -52,6 +53,10 @@ describe('http utils', () => {
     expect(detectHttpContentType(arrayBuffer)).toBe('application/octet-stream')
     expect(detectHttpContentType(blob)).toBe(blob.type)
     expect(detectHttpContentType(new Blob(['hello']))).toBe('application/octet-stream')
+    if (typeof File !== 'undefined') {
+      expect(detectHttpContentType(new File(['hello'], 'hello.txt', { type: 'text/plain' }))).toBe('text/plain')
+      expect(detectHttpContentType(new File(['hello'], 'hello.bin'))).toBe('application/octet-stream')
+    }
     expect(detectHttpContentType(searchParams)).toBe('application/x-www-form-urlencoded;charset=UTF-8')
     expect(detectHttpContentType(stream)).toBe('application/octet-stream')
     expect(detectHttpContentType('hello')).toBe('text/plain;charset=UTF-8')
@@ -59,11 +64,56 @@ describe('http utils', () => {
     expect(detectHttpContentType(['a', 'b'])).toBe('application/json')
     expect(detectHttpContentType(true)).toBe('application/json')
     expect(detectHttpContentType(1)).toBe('application/json')
+    expect(detectHttpContentType(null)).toBe('application/json')
   })
 
   test('should return null content type for unsupported bodies', () => {
     expect(detectHttpContentType(undefined)).toBeNull()
-    expect(detectHttpContentType(null)).toBeNull()
     expect(detectHttpContentType((() => 'noop') as never)).toBeNull()
   })
+
+  test('should apply final request content type from body after headers', () => {
+    const body = { ok: true }
+    const headers = new Headers({ 'Content-Type': 'application/custom' })
+    applyRequestContentType(makeRequest({ body, bodyContentType: 'application/json', bodyContentTypeSource: body }), headers)
+
+    expect(headers.get('content-type')).toBe('application/json')
+  })
+
+  test('should ignore stale body content type metadata', () => {
+    const headers = new Headers({ 'Content-Type': 'application/json' })
+    applyRequestContentType(
+      makeRequest({
+        body: 'plain',
+        bodyContentType: 'application/json',
+        bodyContentTypeSource: '{}',
+      }),
+      headers,
+    )
+
+    expect(headers.get('content-type')).toBe('text/plain;charset=UTF-8')
+  })
+
+  test('should allow explicit content type opt-out', () => {
+    const body = 'plain'
+    const headers = new Headers({ 'Content-Type': 'application/json' })
+    applyRequestContentType(makeRequest({ body, bodyContentType: null, bodyContentTypeSource: body }), headers)
+
+    expect(headers.has('content-type')).toBe(false)
+  })
+
+  test('should remove explicit content type for FormData bodies', () => {
+    const headers = new Headers({ 'Content-Type': 'multipart/form-data' })
+    applyRequestContentType(makeRequest({ body: new FormData() }), headers)
+
+    expect(headers.has('content-type')).toBe(false)
+  })
 })
+
+function makeRequest(init: Pick<HttpRequest, 'body'> & Partial<HttpRequest>): HttpRequest {
+  return {
+    endpoint: '/test',
+    method: 'POST',
+    ...init,
+  }
+}

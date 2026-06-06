@@ -1,5 +1,4 @@
 import { describe, expect, test, vi } from 'vitest'
-import { ERR_ABORTED, ERR_TIMEOUT } from '../error'
 import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait } from './reconnect'
 import type { SocketLifecycleOutcome } from './web_socket'
 
@@ -92,20 +91,32 @@ describe('shouldReconnect', () => {
 
 describe('computeReconnectDelay', () => {
   test('computes exponential delay without jitter', () => {
-    const config = normalizeReconnectConfig({ delayMs: 1000, factor: 2 })!
+    const config = normalizeReconnectConfig({ delayMs: 1000, factor: 2 })
+    expect(config).toBeDefined()
+    if (!config) {
+      throw new Error('Expected reconnect config')
+    }
     expect(computeReconnectDelay(config, 1)).toBe(1000)
     expect(computeReconnectDelay(config, 2)).toBe(2000)
     expect(computeReconnectDelay(config, 3)).toBe(4000)
   })
 
   test('caps delay at maxDelayMs', () => {
-    const config = normalizeReconnectConfig({ delayMs: 1000, factor: 2, maxDelayMs: 3000 })!
+    const config = normalizeReconnectConfig({ delayMs: 1000, factor: 2, maxDelayMs: 3000 })
+    expect(config).toBeDefined()
+    if (!config) {
+      throw new Error('Expected reconnect config')
+    }
     expect(computeReconnectDelay(config, 3)).toBe(3000)
     expect(computeReconnectDelay(config, 10)).toBe(3000)
   })
 
   test('applies jitter within range', () => {
-    const config = normalizeReconnectConfig({ delayMs: 1000, factor: 2, jitter: 0.5 })!
+    const config = normalizeReconnectConfig({ delayMs: 1000, factor: 2, jitter: 0.5 })
+    expect(config).toBeDefined()
+    if (!config) {
+      throw new Error('Expected reconnect config')
+    }
     for (let i = 0; i < 20; i++) {
       const delay = computeReconnectDelay(config, 1)
       expect(delay).toBeGreaterThanOrEqual(500)
@@ -114,7 +125,11 @@ describe('computeReconnectDelay', () => {
   })
 
   test('returns 0 for attempt 0', () => {
-    const config = normalizeReconnectConfig({ delayMs: 1000 })!
+    const config = normalizeReconnectConfig({ delayMs: 1000 })
+    expect(config).toBeDefined()
+    if (!config) {
+      throw new Error('Expected reconnect config')
+    }
     expect(computeReconnectDelay(config, 0)).toBe(1000)
   })
 })

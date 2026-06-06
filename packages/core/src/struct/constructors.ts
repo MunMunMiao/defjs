@@ -11,6 +11,10 @@ import type {
   ObjectSchema,
   ObjectShape,
   RecordSchema,
+  RequestBodyCodec,
+  RequestBodySchema,
+  RequestSchema,
+  RequestShape,
   RuntimeSchema,
   Schema,
   SchemaLike,
@@ -129,6 +133,80 @@ export function createObjectSchema<T extends ObjectShape>(shape: T): ObjectSchem
     kind: 'object',
     shape: declaredShape,
   }) as unknown as ObjectSchema<T>
+}
+
+export function createRequestSchema<const T extends RequestShape>(shape: T): RequestSchema<T> {
+  if (!isPlainObject(shape)) {
+    throw new TypeError('request schema requires a plain object')
+  }
+
+  const path = shape.path
+  const query = shape.query
+  const headers = shape.headers
+  const body = shape.body
+
+  if (path) {
+    assertObjectSchema(path, 'request.path')
+  }
+  if (query) {
+    assertObjectSchema(query, 'request.query')
+  }
+  if (headers) {
+    assertObjectSchema(headers, 'request.headers')
+  }
+  if (body) {
+    assertRequestBodySchema(body)
+  }
+
+  return makeSchema({
+    body,
+    flags: DEFAULT_FLAGS,
+    headers,
+    kind: 'request',
+    path,
+    query,
+  }) as unknown as RequestSchema<T>
+}
+
+export function createRequestBodySchema<const C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>>(
+  codec: C,
+  schema: S,
+): RequestBodySchema<C, S> {
+  assertSchema(schema, `${codec} body`)
+
+  return makeSchema({
+    codec,
+    flags: DEFAULT_FLAGS,
+    kind: 'requestBody',
+    schema,
+  }) as unknown as RequestBodySchema<C, S>
+}
+
+function assertRequestBodySchema(schema: SchemaLike<any, any, boolean>): void {
+  assertSchema(schema, 'request.body')
+
+  const definition = (schema as RuntimeSchema)[DEFINITION]
+  if (definition.kind === 'requestBody' || definition.kind === 'blob' || definition.kind === 'arrayBuffer') {
+    return
+  }
+
+  throw new TypeError('body must use a body wrapper schema')
+}
+
+export function createJsonBodySchema<S extends SchemaLike<any, any, boolean>>(schema: S): RequestBodySchema<'json', S> {
+  return createRequestBodySchema('json', schema)
+}
+
+export function createUrlencodedBodySchema<T extends ObjectShape>(shape: T): RequestBodySchema<'urlencoded', ObjectSchema<T>> {
+  return createRequestBodySchema('urlencoded', createObjectSchema(shape))
+}
+
+export function createFormDataBodySchema<T extends ObjectShape>(shape: T): RequestBodySchema<'formData', ObjectSchema<T>> {
+  return createRequestBodySchema('formData', createObjectSchema(shape))
+}
+
+export function createTextBodySchema(): RequestBodySchema<'text', StringSchema> {
+  return createRequestBodySchema('text', createStringSchema())
 }
 
 export function createRecordSchema<S extends SchemaLike<any, any, boolean>>(value: S): RecordSchema<S> {
@@ -295,4 +373,11 @@ export function createArrayBufferSchema(): Schema<ArrayBuffer | undefined, Array
     kind: 'arrayBuffer',
     zero: () => new ArrayBuffer(0),
   })
+}
+
+function assertObjectSchema(value: unknown, label: string): asserts value is ObjectSchema<any> {
+  assertSchema(value, label)
+  if ((value as RuntimeSchema)[DEFINITION].kind !== 'object') {
+    throw new TypeError(`${label} must be an object schema`)
+  }
 }

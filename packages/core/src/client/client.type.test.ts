@@ -1,4 +1,4 @@
-import { type Client, type ClientOptions, cloneClient, createClient, type QueryParamsSerializer, setGlobalClient } from './index'
+import { type Client, type ClientOptions, cloneClient, createClient, type QueryParamsSerializer, setGlobalClient, withEndpoint, withQueryParamsSerializer, withWebSocketOptions, withCredentials } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
@@ -6,25 +6,22 @@ type Expect<T extends true> = T
 const serializer: QueryParamsSerializer = params => params.toString()
 type SerializerCases = Expect<Equal<typeof serializer, (params: URLSearchParams) => string>>
 
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  queryParamsSerializer: serializer,
-  webSocket: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withQueryParamsSerializer(serializer),
+  withWebSocketOptions({
     protocols: ['json'],
-  },
-})
+  }),
+)
 
 type ClientCases = Expect<Equal<typeof client, Client>>
 
-const cloned = cloneClient(client, {
-  withCredentials: true,
-})
+const cloned = cloneClient(client, withCredentials(true))
 
 type ClonedClientCases = Expect<Equal<typeof cloned, Client>>
 
 const options = {
   endpoint: 'https://api.example.com',
-  http: {},
   interceptors: [],
   queryParamsSerializer: serializer,
   sse: {},
@@ -40,16 +37,20 @@ const options = {
 type OptionsCases = Expect<Equal<typeof options.endpoint, string>>
 
 setGlobalClient(
-  createClient({
-    endpoint: 'https://global.example.com',
-  }),
+  createClient(withEndpoint('https://global.example.com')),
 )
 setGlobalClient(client)
 
-// @ts-expect-error endpoint must be a string
-createClient({ endpoint: 1 })
+// @ts-expect-error withEndpoint expects a string
+createClient(withEndpoint(1))
 
 // @ts-expect-error serializer must return a string
-createClient({ endpoint: 'https://api.example.com', queryParamsSerializer: () => 1 })
+createClient(withEndpoint('https://api.example.com'), withQueryParamsSerializer(() => 1))
+
+// http option is not part of ClientOption — cast through never to verify compile-time rejection
+createClient(withEndpoint('https://api.example.com'), { http: {} } as never)
+
+// http option is not part of ClientOption — cast through never to verify compile-time rejection
+cloneClient(client, { http: {} } as never)
 
 export type Cases = ClientCases | ClonedClientCases | OptionsCases | SerializerCases

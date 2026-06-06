@@ -5,7 +5,7 @@ import { startHeartbeat, stopHeartbeat } from './heartbeat'
 import { createSendQueue } from './queue'
 
 describe('heartbeat', () => {
-  function createMockSocket(readyState = WebSocket.OPEN) {
+  function createMockSocket(readyState: number = WebSocket.OPEN) {
     return {
       readyState,
       send: vi.fn(),

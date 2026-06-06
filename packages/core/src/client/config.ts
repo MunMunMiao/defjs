@@ -1,5 +1,3 @@
-import { fetchHandler } from '../http/transport/fetch'
-import type { HttpHandler } from '../http/transport/handler'
 import type { Interceptor } from '../interceptor/interceptor'
 
 export type QueryParamsSerializer = (params: URLSearchParams, rawParams?: Record<string, unknown>) => string
@@ -29,10 +27,6 @@ export interface WebSocketQueueOptions {
   overflow?: 'drop-newest' | 'drop-oldest' | 'error'
 }
 
-export interface ClientHttpOptions {
-  handler?: HttpHandler
-}
-
 export interface ClientSseOptions {
   fetch?: typeof fetch
 }
@@ -47,7 +41,6 @@ export interface ClientWebSocketOptions {
 
 export interface ClientOptions {
   endpoint: string
-  http?: ClientHttpOptions
   interceptors?: Interceptor[]
   queryParamsSerializer?: QueryParamsSerializer
   sse?: ClientSseOptions
@@ -57,16 +50,11 @@ export interface ClientOptions {
 
 export interface ClientConfig {
   endpoint: string
-  http: Required<ClientHttpOptions>
   interceptors: Interceptor[]
   queryParamsSerializer: QueryParamsSerializer
   sse: Required<ClientSseOptions>
   webSocket: ClientWebSocketOptions
   withCredentials?: boolean
-}
-
-export const DEFAULT_HTTP_OPTIONS: Required<ClientHttpOptions> = {
-  handler: fetchHandler,
 }
 
 export const DEFAULT_SSE_OPTIONS: Required<ClientSseOptions> = {

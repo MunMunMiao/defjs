@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest'
-import { decodeJson, StructError, struct, tag } from './index'
+import { decodeJson } from './codec/json'
+import { StructError, struct, tag } from './index'
+import { parseStructTuple as parse } from './introspection'
 
 describe('parse.ts object and composite values', () => {
   test('supports user profile defaults and optional keys', () => {
@@ -10,7 +12,7 @@ describe('parse.ts object and composite values', () => {
       active: struct.boolean(),
     })
 
-    const [err1, val1] = profile.parse({ id: 'u_1' })
+    const [err1, val1] = parse(profile, { id: 'u_1' })
     if (err1) {
       throw err1
     }
@@ -19,7 +21,7 @@ describe('parse.ts object and composite values', () => {
       id: 'u_1',
       score: 0,
     })
-    const [err2, val2] = profile.parse({ id: 'u_1', nickname: undefined })
+    const [err2, val2] = parse(profile, { id: 'u_1', nickname: undefined })
     if (err2) {
       throw err2
     }
@@ -37,14 +39,14 @@ describe('parse.ts object and composite values', () => {
       theme: struct.string().null(),
     })
 
-    const [err1, val1] = requestSchema.parse({})
+    const [err1, val1] = parse(requestSchema, {})
     if (err1) {
       throw err1
     }
     expect(val1).toEqual({
       theme: null,
     })
-    const [err2, val2] = requestSchema.parse({ timezone: null })
+    const [err2, val2] = parse(requestSchema, { timezone: null })
     if (err2) {
       throw err2
     }
@@ -52,7 +54,7 @@ describe('parse.ts object and composite values', () => {
       theme: null,
       timezone: null,
     })
-    const [err3] = requestSchema.parse({ theme: 'dark' })
+    const [err3] = parse(requestSchema, { theme: 'dark' })
     expect(err3).toBeNull()
   })
 
@@ -78,7 +80,7 @@ describe('parse.ts object and composite values', () => {
     const raw = 'raw body'
     const metadata = ['skip', 'validation']
 
-    const [err1, val1] = uploadSchema.parse({ metadata, raw })
+    const [err1, val1] = parse(uploadSchema, { metadata, raw })
     if (err1) {
       throw err1
     }
@@ -90,38 +92,38 @@ describe('parse.ts object and composite values', () => {
     const channel = struct.enum({ Web: 'web', Mobile: 'mobile', Retry: 3 } as const)
     const id = struct.or(struct.string(), struct.number())
 
-    const [s1err, s1val] = status.parse(undefined)
+    const [s1err, s1val] = parse(status, undefined)
     if (s1err) {
       throw s1err
     }
     expect(s1val).toBe('draft')
-    const [c1err, c1val] = channel.parse(undefined)
+    const [c1err, c1val] = parse(channel, undefined)
     if (c1err) {
       throw c1err
     }
     expect(c1val).toBe('web')
-    const [i1err, i1val] = id.parse('u_123')
+    const [i1err, i1val] = parse(id, 'u_123')
     if (i1err) {
       throw i1err
     }
     expect(i1val).toBe('u_123')
-    const [i2err, i2val] = id.parse(9)
+    const [i2err, i2val] = parse(id, 9)
     if (i2err) {
       throw i2err
     }
     expect(i2val).toBe(9)
-    const [l1err, l1val] = struct.literal('ok').parse(undefined)
+    const [l1err, l1val] = parse(struct.literal('ok'), undefined)
     if (l1err) {
       throw l1err
     }
     expect(l1val).toBe('ok')
-    const [se] = status.parse('archived')
+    const [se] = parse(status, 'archived')
     expect(se).toBeInstanceOf(StructError)
-    const [ce] = channel.parse(false)
+    const [ce] = parse(channel, false)
     expect(ce).toBeInstanceOf(StructError)
-    const [le] = struct.literal('ok').parse('no')
+    const [le] = parse(struct.literal('ok'), 'no')
     expect(le).toBeInstanceOf(StructError)
-    const [ie] = id.parse(false)
+    const [ie] = parse(id, false)
     expect(ie).toBeInstanceOf(StructError)
   })
 
@@ -129,33 +131,33 @@ describe('parse.ts object and composite values', () => {
     const coordinate = struct.tuple([struct.number(), struct.number()])
     const headers = struct.record(struct.string())
 
-    const [c1err, c1val] = coordinate.parse([120, 30])
+    const [c1err, c1val] = parse(coordinate, [120, 30])
     if (c1err) {
       throw c1err
     }
     expect(c1val).toEqual([120, 30])
-    const [c2err, c2val] = coordinate.parse([120, 31])
+    const [c2err, c2val] = parse(coordinate, [120, 31])
     if (c2err) {
       throw c2err
     }
     expect(c2val).toEqual([120, 31])
-    const [h1err, h1val] = headers.parse({ 'x-trace-id': 'trace-1' })
+    const [h1err, h1val] = parse(headers, { 'x-trace-id': 'trace-1' })
     if (h1err) {
       throw h1err
     }
     expect(h1val).toEqual({ 'x-trace-id': 'trace-1' })
-    const [h2err, h2val] = headers.parse({})
+    const [h2err, h2val] = parse(headers, {})
     if (h2err) {
       throw h2err
     }
     expect(h2val).toEqual({})
-    const [ce1] = coordinate.parse('bad')
+    const [ce1] = parse(coordinate, 'bad')
     expect(ce1).toBeInstanceOf(StructError)
-    const [ce2] = coordinate.parse([120, 'bad'])
+    const [ce2] = parse(coordinate, [120, 'bad'])
     expect(ce2).toBeInstanceOf(StructError)
-    const [he1] = headers.parse({ retry: 1 })
+    const [he1] = parse(headers, { retry: 1 })
     expect(he1).toBeInstanceOf(StructError)
-    const [he2] = headers.parse([])
+    const [he2] = parse(headers, [])
     expect(he2).toBeInstanceOf(StructError)
   })
 
@@ -168,41 +170,41 @@ describe('parse.ts object and composite values', () => {
     const avatar = new File(['avatar'], 'avatar.png', { type: 'image/png' })
     const bytes = new ArrayBuffer(4)
 
-    const [be1, bv1] = body.parse(bytes)
+    const [be1, bv1] = parse(body, bytes)
     if (be1) {
       throw be1
     }
     expect(bv1).toBe(bytes)
-    const [ce1, cv1] = cover.parse(pdf)
+    const [ce1, cv1] = parse(cover, pdf)
     if (ce1) {
       throw ce1
     }
     expect(cv1).toBe(pdf)
-    const [ae1, av1] = attachment.parse(avatar)
+    const [ae1, av1] = parse(attachment, avatar)
     if (ae1) {
       throw ae1
     }
     expect(av1).toBe(avatar)
-    const [be2, bv2] = body.parse(undefined)
+    const [be2, bv2] = parse(body, undefined)
     if (be2) {
       throw be2
     }
     expect(bv2).toBeInstanceOf(ArrayBuffer)
-    const [ce2, cv2] = cover.parse(undefined)
+    const [ce2, cv2] = parse(cover, undefined)
     if (ce2) {
       throw ce2
     }
     expect(cv2).toBeInstanceOf(Blob)
-    const [ae2, av2] = attachment.parse(undefined)
+    const [ae2, av2] = parse(attachment, undefined)
     if (ae2) {
       throw ae2
     }
     expect(av2).toBeInstanceOf(File)
-    const [be3] = body.parse({})
+    const [be3] = parse(body, {})
     expect(be3).toBeInstanceOf(StructError)
-    const [ce3] = cover.parse('bad')
+    const [ce3] = parse(cover, 'bad')
     expect(ce3).toBeInstanceOf(StructError)
-    const [ae3] = attachment.parse(pdf)
+    const [ae3] = parse(attachment, pdf)
     expect(ae3).toBeInstanceOf(StructError)
   })
 
@@ -211,7 +213,7 @@ describe('parse.ts object and composite values', () => {
       'x-request-id': 'trace-2',
     }) as Record<string, string>
 
-    const [err, val] = struct.record(struct.string()).parse(input)
+    const [err, val] = parse(struct.record(struct.string()), input)
     if (err) {
       throw err
     }
@@ -220,58 +222,15 @@ describe('parse.ts object and composite values', () => {
     })
   })
 
-  test('strip drops unknown keys by default (Go json default)', () => {
+  test('drops unknown keys as the only object parse policy', () => {
     const base = struct.object({
       id: struct.string(),
     })
 
-    const [err, val] = base.parse({ id: 'u_1', extra: 'ignored' })
+    const [err, val] = parse(base, { id: 'u_1', extra: 'ignored' })
     if (err) {
       throw err
     }
     expect(val).toEqual({ id: 'u_1' })
-  })
-
-  test('parse option rejects unknown keys like json.Decoder.DisallowUnknownFields', () => {
-    const user = struct.object({
-      id: struct.string(),
-    })
-
-    const [e1, v1] = user.parse({ id: 'u_1' }, { unknownFields: 'error' })
-    if (e1) {
-      throw e1
-    }
-    expect(v1).toEqual({ id: 'u_1' })
-
-    const [e2] = user.parse({ id: 'u_1', extra: 'no' }, { unknownFields: 'error' })
-    expect(e2).toBeInstanceOf(StructError)
-
-    const [e3] = user.parse({ id: 'u_1', extra: 'no', also: 1 }, { unknownFields: 'error' })
-    expect(e3).toBeInstanceOf(StructError)
-    expect(e3?.issues).toEqual([
-      {
-        code: 'unrecognized_keys',
-        expected: 'declared field',
-        message: 'Unrecognized key "extra"',
-        path: ['extra'],
-        received: 'no',
-      },
-      {
-        code: 'unrecognized_keys',
-        expected: 'declared field',
-        message: 'Unrecognized key "also"',
-        path: ['also'],
-        received: 1,
-      },
-    ])
-  })
-
-  test('decodeJson can reject unknown wire keys through parse options', () => {
-    const renamed = struct.object({
-      pageSize: struct.number().tag(tag.json('page_size')),
-    })
-
-    expect(decodeJson(renamed, { page_size: 20 })).toEqual({ pageSize: 20 })
-    expect(() => decodeJson(renamed, { page_size: 20, extra: 99 }, { unknownFields: 'error' })).toThrow(StructError)
   })
 })

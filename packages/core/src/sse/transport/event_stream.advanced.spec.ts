@@ -22,7 +22,7 @@ describe('fetchEventStream advanced', () => {
 
     const events: EventStreamMessage[] = []
     for await (const event of stream) {
-      events.push(event as EventStreamMessage)
+      events.push(event as unknown as EventStreamMessage)
     }
     expect(events).toEqual([])
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
@@ -252,25 +252,29 @@ describe('fetchEventStream advanced', () => {
   })
 
   test('should retry with default interval when fetch throws network error', async () => {
-    const fetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockRejectedValueOnce(new Error('network error'))
       .mockResolvedValueOnce(
-        new Response(new ReadableStream({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode('data: ok\n\n'))
-            controller.close()
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('data: ok\n\n'))
+              controller.close()
+            },
+          }),
+          {
+            headers: { 'content-type': 'text/event-stream' },
+            status: 200,
           },
-        }), {
-          headers: { 'content-type': 'text/event-stream' },
-          status: 200,
-        }),
-      ) as unknown as typeof fetch
+        ),
+      ) as unknown as typeof globalThis.fetch
 
-    const stream = await fetchEventStream(createRequest('/sse/basic'), { fetch, retryInterval: 1 })
+    const stream = await fetchEventStream(createRequest('/sse/basic'), { fetch: mockFetch, retryInterval: 1 })
 
     const events: EventStreamMessage[] = []
     for await (const event of stream) {
-      events.push(event as EventStreamMessage)
+      events.push(event as unknown as EventStreamMessage)
     }
     expect(events).toEqual([{ data: 'ok', event: '', id: '', retry: undefined }])
   })

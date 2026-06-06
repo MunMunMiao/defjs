@@ -355,7 +355,9 @@ export async function setup({ provide }: TestProject) {
     '/ws/heartbeat-silent',
     upgradeWebSocket(() => ({
       // Intentionally silent — used to test heartbeat timeout on the client side.
-      onMessage() {},
+      onMessage() {
+        /* intentionally empty */
+      },
     })),
   )
 

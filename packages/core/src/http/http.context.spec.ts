@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors } from '../client'
 import { createHttpInterceptor } from '../interceptor/interceptor'
 import { makeHttpContext, makeHttpContextToken } from '../internal/context'
 import { makeResponse } from '../internal/http_response'
@@ -8,9 +8,7 @@ import { defineRequest } from './index'
 describe('request http runtime context', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 
@@ -23,18 +21,9 @@ describe('request http runtime context', () => {
     let seenHeader: string | null = null
 
     setGlobalClient(
-      createClient({
-        endpoint: 'https://example.com',
-        http: {
-          handler: async request => {
-            seenHeader = request.headers?.get('x-transaction-id') ?? null
-            return makeResponse({
-              body: null,
-              status: 200,
-            })
-          },
-        },
-        interceptors: [
+      createClient(
+        withEndpoint('https://example.com'),
+        withInterceptors(
           createHttpInterceptor(async (request, next) => {
             const nextHeaders = new Headers(request.headers)
             const transactionId = request.context?.get(transactionToken)
@@ -47,8 +36,15 @@ describe('request http runtime context', () => {
               headers: nextHeaders,
             })
           }),
-        ],
-      }),
+          createHttpInterceptor(async request => {
+            seenHeader = request.headers?.get('x-transaction-id') ?? null
+            return makeResponse({
+              body: null,
+              status: 200,
+            })
+          }),
+        ),
+      ),
     )
 
     const useTxRequest = defineRequest({

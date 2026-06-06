@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { StructError, struct } from './index'
+import { parseStructTuple as parse } from './introspection'
 
 describe('constructors.ts browser primitives', () => {
   test('blob / file / arrayBuffer validate native Web API instances', () => {
@@ -7,44 +8,44 @@ describe('constructors.ts browser primitives', () => {
     const file = new File(['data'], 'doc.txt', { type: 'text/plain' })
     const buffer = new ArrayBuffer(8)
 
-    const [be, bv] = struct.blob().parse(blob)
+    const [be, bv] = parse(struct.blob(), blob)
     if (be) {
       throw be
     }
     expect(bv).toBe(blob)
 
-    const [fe, fv] = struct.file().parse(file)
+    const [fe, fv] = parse(struct.file(), file)
     if (fe) {
       throw fe
     }
     expect(fv).toBe(file)
 
-    const [ae, av] = struct.arrayBuffer().parse(buffer)
+    const [ae, av] = parse(struct.arrayBuffer(), buffer)
     if (ae) {
       throw ae
     }
     expect(av).toBe(buffer)
 
-    const [badBlob] = struct.blob().parse('not a blob')
+    const [badBlob] = parse(struct.blob(), 'not a blob')
     expect(badBlob).toBeInstanceOf(StructError)
 
-    const [badFile] = struct.file().parse(blob)
+    const [badFile] = parse(struct.file(), blob)
     expect(badFile).toBeInstanceOf(StructError)
 
-    const [badAb] = struct.arrayBuffer().parse(file)
+    const [badAb] = parse(struct.arrayBuffer(), file)
     expect(badAb).toBeInstanceOf(StructError)
   })
 
   test('blob and file zero values are constructible in browser', () => {
-    const [blobErr, zeroBlob] = struct.blob().parse(undefined)
+    const [blobErr, zeroBlob] = parse(struct.blob(), undefined)
     if (blobErr) {
       throw blobErr
     }
-    const [fileErr, zeroFile] = struct.file().parse(undefined)
+    const [fileErr, zeroFile] = parse(struct.file(), undefined)
     if (fileErr) {
       throw fileErr
     }
-    const [bufferErr, zeroBuffer] = struct.arrayBuffer().parse(undefined)
+    const [bufferErr, zeroBuffer] = parse(struct.arrayBuffer(), undefined)
     if (bufferErr) {
       throw bufferErr
     }
@@ -70,7 +71,7 @@ describe('constructors.ts browser primitives', () => {
       caption: 'hello',
     }
 
-    const [err, parsed] = uploadSchema.parse(payload)
+    const [err, parsed] = parse(uploadSchema, payload)
     if (err) {
       throw err
     }
@@ -78,43 +79,41 @@ describe('constructors.ts browser primitives', () => {
     expect(parsed.cover.type).toBe('image/jpeg')
     expect(parsed.bytes.byteLength).toBe(16)
 
-    const [asyncErr, asyncVal] = await uploadSchema.parseAsync(payload)
-    if (asyncErr) {
-      throw asyncErr
+    const [tupleErr, tupleVal] = parse(uploadSchema, payload)
+    if (tupleErr) {
+      throw tupleErr
     }
-    expect(asyncVal).toMatchObject({ caption: 'hello' })
+    expect(tupleVal).toMatchObject({ caption: 'hello' })
   })
 
   test('date and bigint work in browser runtime', () => {
     const d = new Date('2026-05-12T08:00:00Z')
-    const [de, dv] = struct.date().parse(d)
+    const [de, dv] = parse(struct.date(), d)
     if (de) {
       throw de
     }
     expect(dv).toBe(d)
 
-    const [be, bv] = struct.bigint().parse(2026n)
+    const [be, bv] = parse(struct.bigint(), 2026n)
     if (be) {
       throw be
     }
     expect(bv).toBe(2026n)
   })
 
-  test('Standard Schema bridge accepts payloads with Web API instances', () => {
+  test('object schema accepts payloads with Web API instances', () => {
     const userSchema = struct.object({
       avatar: struct.file(),
       name: struct.string(),
     })
 
-    const standard = userSchema['~standard']
-    const result = standard.validate({
+    const [error, value] = parse(userSchema, {
       avatar: new File([''], 'cover.png'),
       name: 'x',
     })
-
-    if (!('value' in result)) {
-      throw new Error('expected success')
+    if (error) {
+      throw error
     }
-    expect((result.value as { name: string }).name).toBe('x')
+    expect(value.name).toBe('x')
   })
 })

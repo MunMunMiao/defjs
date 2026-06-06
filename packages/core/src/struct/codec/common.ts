@@ -1,15 +1,14 @@
 import { encodeValue, matchesDefinition } from '../encode'
-import { issue, StructError } from '../errors'
 import { getStructFields, isObjectStruct, parseStructValue } from '../introspection'
 import { resolveRuntimeSchema } from '../shape'
 import { DEFINITION } from '../symbols'
 import type { FieldTag, TagNamespace } from '../tag'
-import type { ParseOptions, Path, RuntimeSchema, SchemaIssue, SchemaLike } from '../types'
+import type { Path, RuntimeSchema, SchemaLike } from '../types'
 import { hasOwnKey, isPlainObject } from '../utils'
 
 export type TaggedObject = Record<string, unknown>
 
-export type TagObjectOptions = ParseOptions & {
+export type TagObjectOptions = {
   requireTag?: boolean
 }
 
@@ -54,10 +53,10 @@ export function decodeObjectByTag(
   options: TagObjectOptions = {},
 ): unknown {
   if (!isObjectStruct(struct)) {
-    return parseStructValue(struct, decodeTaggedField(struct, value, namespace, options, []), options)
+    return parseStructValue(struct, decodeTaggedField(struct, value, namespace, options, []))
   }
 
-  return parseStructValue(struct, normalizeObjectByTag(struct, value, namespace, options, []), options)
+  return parseStructValue(struct, normalizeObjectByTag(struct, value, namespace, options, []))
 }
 
 function normalizeObjectByTag(
@@ -70,7 +69,6 @@ function normalizeObjectByTag(
   assertPlainObject(value, `${namespace.name} decode expects object value`)
 
   const normalized: TaggedObject = Object.create(null)
-  const declaredWireKeys = new Set<string>()
   for (const field of getStructFields(struct)) {
     const fieldTag = field.tags.get(namespace.kind)
     if (options.requireTag && !fieldTag) {
@@ -78,7 +76,6 @@ function normalizeObjectByTag(
     }
 
     const wireKey = getWireKey(field.key, fieldTag)
-    declaredWireKeys.add(wireKey)
     if (!hasOwnKey(value, wireKey)) {
       continue
     }
@@ -87,23 +84,14 @@ function normalizeObjectByTag(
     normalized[field.key] = decodeTaggedField(field.struct, rawValue, namespace, options, [...path, field.key])
   }
 
-  if (options.unknownFields === 'error') {
-    const issues: SchemaIssue[] = []
-    for (const inputKey of Object.keys(value)) {
-      if (!declaredWireKeys.has(inputKey)) {
-        issues.push(issue([...path, inputKey], 'unrecognized_keys', 'declared field', value[inputKey], `Unrecognized key "${inputKey}"`))
-      }
-    }
-    if (issues.length > 0) {
-      throw new StructError(issues)
-    }
-  }
-
   return normalized
 }
 
 export function getWireKey(fieldKey: string, fieldTag: FieldTag | undefined): string {
-  return typeof fieldTag?.value === 'string' ? fieldTag.value : fieldKey
+  if (typeof fieldTag?.value === 'string') {
+    return fieldTag.value
+  }
+  return fieldKey
 }
 
 export function assertPlainObject(value: unknown, message: string): asserts value is TaggedObject {

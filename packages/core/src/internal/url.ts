@@ -100,7 +100,7 @@ export function createResolvedRequestUrl(baseEndpoint: string, path: string, que
 }
 
 // HttpRequest-flavored convenience: resolve endpoint + base + query string in one go.
-// Replaces the four near-identical `createRequestUrl` helpers previously duplicated in fetch/xhr/sse/test_handler.
+// Replaces the near-identical `createRequestUrl` helpers previously duplicated in fetch/sse/test_handler.
 export function resolveRequestUrl(request: HttpRequest): URL {
   if (!request.baseEndpoint) {
     throw ERR_INVALID_CLIENT_ENDPOINT

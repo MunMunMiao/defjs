@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'vitest'
-import { decodeJson, struct, tag } from './index'
+import { decodeJson } from './codec/json'
+import { struct, tag } from './index'
+import { parseStructTuple as parse } from './introspection'
 
 describe('parse.ts prototype pollution defense', () => {
   test('parseObjectValue strips __proto__ without polluting Object.prototype', () => {
     const s = struct.object({})
-    const [err, val] = s.parse(JSON.parse('{"__proto__":{"polluted":true}}'))
+    const [err, val] = parse(s, JSON.parse('{"__proto__":{"polluted":true}}'))
     if (err) {
       throw err
     }
@@ -14,13 +16,13 @@ describe('parse.ts prototype pollution defense', () => {
 
   test('parseRecordValue does not pollute Object.prototype', () => {
     const s = struct.record(struct.any())
-    s.parse(JSON.parse('{"__proto__":{"polluted":true}}'))
+    parse(s, JSON.parse('{"__proto__":{"polluted":true}}'))
     expect((Object.prototype as Record<string, unknown>)['polluted']).toBeUndefined()
   })
 
   test('parsed object output has null prototype(Object.create(null))', () => {
     const s = struct.object({ x: struct.string() })
-    const [err, val] = s.parse({ x: 'hi' })
+    const [err, val] = parse(s, { x: 'hi' })
     if (err) {
       throw err
     }
@@ -29,7 +31,7 @@ describe('parse.ts prototype pollution defense', () => {
 
   test('parsed record output has null prototype', () => {
     const s = struct.record(struct.string())
-    const [err, val] = s.parse({ k: 'v' })
+    const [err, val] = parse(s, { k: 'v' })
     if (err) {
       throw err
     }
@@ -38,7 +40,7 @@ describe('parse.ts prototype pollution defense', () => {
 
   test('"__proto__" key preserved as own property under record output', () => {
     const s = struct.record(struct.any())
-    const [err, val] = s.parse(JSON.parse('{"__proto__":"data"}'))
+    const [err, val] = parse(s, JSON.parse('{"__proto__":"data"}'))
     if (err) {
       throw err
     }
@@ -54,7 +56,7 @@ describe('parse.ts prototype pollution defense', () => {
     })
 
     try {
-      const [err, val] = s.parse({})
+      const [err, val] = parse(s, {})
       if (err) {
         throw err
       }
@@ -65,7 +67,7 @@ describe('parse.ts prototype pollution defense', () => {
     }
   })
 
-  test('parseObjectValueAsync ignores inherited declared fields', async () => {
+  test('parseObjectValue ignores inherited declared fields in plain input', () => {
     const s = struct.object({ pollutedId: struct.string() })
     Object.defineProperty(Object.prototype, 'pollutedId', {
       configurable: true,
@@ -73,7 +75,7 @@ describe('parse.ts prototype pollution defense', () => {
     })
 
     try {
-      const [err, val] = await s.parseAsync({})
+      const [err, val] = parse(s, {})
       if (err) {
         throw err
       }

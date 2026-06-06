@@ -43,10 +43,6 @@ function encodeTaggedRecord(
   const record: Record<string, RequestBuildValue> = Object.create(null)
   for (const field of getStructFields(struct)) {
     const fieldTag = field.tags.get(namespace.kind)
-    if (!fieldTag) {
-      continue
-    }
-
     const encoded = encodeStructValue(field.struct, value[field.key])
     if (typeof encoded === 'undefined') {
       continue

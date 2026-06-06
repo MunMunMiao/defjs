@@ -7,39 +7,6 @@ export type ParseMode = 'field' | 'value'
 
 export type ParseTuple<O> = [error: StructError | null, value: O]
 export type LiteralValue = boolean | null | number | string
-export type UnknownFieldsPolicy = 'error' | 'strip'
-
-export interface ParseOptions {
-  unknownFields?: UnknownFieldsPolicy
-}
-
-export interface StandardSchemaResultSuccess<TOutput> {
-  readonly value: TOutput
-}
-
-export interface StandardSchemaIssueLike {
-  readonly message?: string
-  readonly path?: readonly (number | string)[]
-}
-
-export interface StandardSchemaResultFailure {
-  readonly issues: readonly StandardSchemaIssueLike[]
-}
-
-export interface StandardSchemaProps<TInput, TOutput> {
-  readonly types?: {
-    readonly input: TInput
-    readonly output: TOutput
-  }
-  readonly validate: (
-    value: unknown,
-  ) =>
-    | StandardSchemaResultFailure
-    | StandardSchemaResultSuccess<TOutput>
-    | Promise<StandardSchemaResultFailure | StandardSchemaResultSuccess<TOutput>>
-  readonly vendor?: string
-  readonly version?: number
-}
 
 export interface SchemaTypes<Input = unknown, Output = unknown, OptionalOut extends boolean = false> {
   input: Input
@@ -59,7 +26,7 @@ export type OptionalOutputSchema = {
 }
 
 export interface SchemaIssue {
-  code: 'custom' | 'invalid_enum' | 'invalid_literal' | 'invalid_type' | 'invalid_union' | 'missing_key' | 'unrecognized_keys'
+  code: 'custom' | 'invalid_enum' | 'invalid_literal' | 'invalid_type' | 'invalid_union' | 'missing_key'
   expected: string
   message: string
   path: Path
@@ -80,12 +47,7 @@ export interface SchemaMethods<I, O, OO extends boolean> {
   null(): Schema<I | null, O | null, OO>
   nullish(): Schema<I | null | undefined, O | null | undefined, true>
   optional(): Schema<I | undefined, O | undefined, true>
-  parse(value: unknown, options?: ParseOptions): ParseTuple<O>
-  parseAsync(value: unknown, options?: ParseOptions): Promise<ParseTuple<O>>
-  brand<B extends string | symbol>(): Schema<I, O & { readonly __brand: B }, OO>
-  encode(value: O): I
   tag(...options: FieldTagOption[]): Schema<I, O, OO>
-  readonly '~standard': StandardSchemaProps<I, O>
 }
 
 export type Schema<Input = unknown, Output = Input, OptionalOut extends boolean = false> = SchemaMethods<Input, Output, OptionalOut> &
@@ -166,13 +128,66 @@ export interface ObjectSchema<T extends ObjectShape>
   readonly _struct: ObjectSchemaTypes<T>
 }
 
+export type RequestBodyCodec = 'arrayBuffer' | 'blob' | 'formData' | 'json' | 'text' | 'urlencoded'
+
+export interface RequestBodySchemaTypes<C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>>
+  extends SchemaTypes<SchemaInput<S>, SchemaOutput<S>, false> {
+  codec: C
+  input: SchemaInput<S>
+  optionalOut: undefined
+  output: SchemaOutput<S>
+}
+
+export interface RequestBodySchema<C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>>
+  extends SchemaMethods<SchemaInput<S>, SchemaOutput<S>, false>,
+    SchemaLike<SchemaInput<S>, SchemaOutput<S>, false> {
+  readonly [TYPES]: RequestBodySchemaTypes<C, S>
+  readonly _struct: RequestBodySchemaTypes<C, S>
+}
+
+export type RequestBinaryBodySchema = Schema<ArrayBuffer | undefined, ArrayBuffer> | Schema<Blob | undefined, Blob>
+export type RequestBodyShapeSchema = RequestBinaryBodySchema | RequestBodySchema<RequestBodyCodec, SchemaLike<any, any, boolean>>
+
+export type RequestShape = {
+  body?: RequestBodyShapeSchema
+  headers?: ObjectSchema<any>
+  path?: ObjectSchema<any>
+  query?: ObjectSchema<any>
+}
+
+export type RequestInput<T extends RequestShape> = Simplify<
+  (T['path'] extends ObjectSchema<any> ? { path?: SchemaInput<T['path']> } : {}) &
+    (T['query'] extends ObjectSchema<any> ? { query?: SchemaInput<T['query']> } : {}) &
+    (T['headers'] extends ObjectSchema<any> ? { headers?: SchemaInput<T['headers']> } : {}) &
+    (T['body'] extends SchemaLike<any, any, boolean> ? { body?: SchemaInput<T['body']> } : {})
+>
+
+export type RequestOutput<T extends RequestShape> = Simplify<
+  (T['path'] extends ObjectSchema<any> ? { path: SchemaOutput<T['path']> } : {}) &
+    (T['query'] extends ObjectSchema<any> ? { query: SchemaOutput<T['query']> } : {}) &
+    (T['headers'] extends ObjectSchema<any> ? { headers: SchemaOutput<T['headers']> } : {}) &
+    (T['body'] extends SchemaLike<any, any, boolean> ? { body: SchemaOutput<T['body']> } : {})
+>
+
+export interface RequestSchemaTypes<T extends RequestShape> extends SchemaTypes<RequestInput<T>, RequestOutput<T>, false> {
+  input: RequestInput<T>
+  optionalOut: undefined
+  output: RequestOutput<T>
+}
+
+export interface RequestSchema<T extends RequestShape>
+  extends SchemaMethods<RequestInput<T>, RequestOutput<T>, false>,
+    SchemaLike<RequestInput<T>, RequestOutput<T>, false> {
+  readonly [TYPES]: RequestSchemaTypes<T>
+  readonly _struct: RequestSchemaTypes<T>
+}
+
 export type RecordSchema<S extends SchemaLike<any, any, boolean>> = Schema<Record<string, SchemaInput<S>>, Record<string, FieldOutput<S>>>
 export type TupleSchema<T extends readonly SchemaLike<any, any, boolean>[]> = Schema<TupleOutput<T>, TupleOutput<T>>
 export type UnionSchema<T extends readonly SchemaLike<any, any, boolean>[]> = Schema<unknown, UnionOutput<T>>
 export type DiscriminatedUnionSchema<TOptions extends readonly ObjectSchema<any>[]> = Schema<unknown, SchemaOutput<TOptions[number]>>
 
 export type SchemaFlags = {
-  branded?: boolean
   nullable: boolean
   optional: boolean
 }
@@ -224,6 +239,20 @@ export type ObjectDefinition = BaseDefinition & {
   shape: ObjectShape
 }
 
+export type RequestBodyDefinition = BaseDefinition & {
+  codec: RequestBodyCodec
+  kind: 'requestBody'
+  schema: SchemaLike<any, any, boolean>
+}
+
+export type RequestDefinition = BaseDefinition & {
+  body?: SchemaLike<any, any, boolean>
+  headers?: ObjectSchema<any>
+  kind: 'request'
+  path?: ObjectSchema<any>
+  query?: ObjectSchema<any>
+}
+
 export type RecordDefinition = BaseDefinition & {
   kind: 'record'
   value: SchemaLike<any, any, boolean>
@@ -263,6 +292,8 @@ export type SchemaDefinition =
   | ObjectDefinition
   | PrimitiveDefinition<PrimitiveKind, any, any>
   | RecordDefinition
+  | RequestBodyDefinition
+  | RequestDefinition
   | TupleDefinition
   | UnknownDefinition
   | UnionDefinition
@@ -279,19 +310,12 @@ export type ParseSuccess<T> = {
 
 export type ParseResult<T> = ParseFailure | ParseSuccess<T>
 
-export type RuntimeParseTuple = [error: StructError | null, value: unknown]
-
 export type RuntimeSchema = {
   readonly [DEFINITION]: SchemaDefinition
   readonly [TYPES]: SchemaTypes<unknown, unknown, boolean>
   readonly _struct: SchemaTypes<unknown, unknown, boolean>
-  readonly '~standard': StandardSchemaProps<unknown, unknown>
   null(): RuntimeSchema
   nullish(): RuntimeSchema
   optional(): RuntimeSchema
-  parse(value: unknown, options?: ParseOptions): RuntimeParseTuple
-  parseAsync(value: unknown, options?: ParseOptions): Promise<RuntimeParseTuple>
-  brand(): RuntimeSchema
-  encode(value: unknown): unknown
   tag(...options: FieldTagOption[]): RuntimeSchema
 }

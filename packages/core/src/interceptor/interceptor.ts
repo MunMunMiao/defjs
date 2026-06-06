@@ -1,4 +1,3 @@
-import type { HttpHandler } from '../http/transport/handler'
 import type { HttpRequest } from '../internal/http_request'
 import type { HttpResponse } from '../internal/http_response'
 import type { EventStreamHandle } from '../sse/transport/event_stream'
@@ -7,7 +6,9 @@ import type { EventStreamHandle } from '../sse/transport/event_stream'
 // HTTP Interceptor
 // ---------------------------------------------------------------------------
 
-export type InterceptorFn = (req: HttpRequest, next: HttpHandler) => Promise<HttpResponse<unknown>>
+export type HttpInterceptorNext = (req: HttpRequest) => Promise<HttpResponse<unknown>>
+
+export type InterceptorFn = (req: HttpRequest, next: HttpInterceptorNext) => Promise<HttpResponse<unknown>>
 
 export interface HttpInterceptor {
   kind: 'http'
@@ -78,7 +79,8 @@ export type Interceptor = HttpInterceptor | SSEInterceptor | WebSocketIntercepto
 // Generic onion-chain builder — HTTP, SSE, and WebSocket chains share this shape.
 function makeChain<TFn extends (req: HttpRequest, next: any) => any>(interceptors: TFn[]): TFn {
   return interceptors.reduceRight<TFn>(
-    (fn, interceptor) => ((initReq: HttpRequest, finalHandlerFn: never) => interceptor(initReq, (req: HttpRequest) => fn(req, finalHandlerFn))) as TFn,
+    (fn, interceptor) =>
+      ((initReq: HttpRequest, finalHandlerFn: never) => interceptor(initReq, (req: HttpRequest) => fn(req, finalHandlerFn))) as TFn,
     ((req: HttpRequest, fn: (req: HttpRequest) => unknown) => fn(req)) as TFn,
   )
 }

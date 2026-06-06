@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { struct } from './index'
+import { parseStructTuple as parse } from './introspection'
 
 describe('shape.ts getter-recursive structures', () => {
   test('parses getter-recursive objects without an explicit recursive constructor', () => {
@@ -15,7 +16,7 @@ describe('shape.ts getter-recursive structures', () => {
       id: struct.string(),
     })
 
-    const [err, value] = category.parse({
+    const [err, value] = parse(category, {
       children: [{ children: [], id: 'child' }],
       id: 'root',
     })
@@ -37,7 +38,7 @@ describe('shape.ts getter-recursive structures', () => {
       },
     })
 
-    const [err] = comment.parse({
+    const [err] = parse(comment, {
       id: 'root',
       replies: [{ id: 1, replies: [] }],
     })

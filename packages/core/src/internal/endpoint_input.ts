@@ -1,14 +1,13 @@
-import { type AnyCompatibleSchema, type CompatibleInput, type CompatibleOutput, parseCompatibleSchema } from '../struct/compatible'
+import type { AnyStruct, Infer } from '../struct'
+import { parseStructValue } from '../struct/introspection'
 
-export type EndpointInput<TInput extends AnyCompatibleSchema | undefined> = TInput extends AnyCompatibleSchema
-  ? CompatibleInput<TInput>
-  : unknown
+export type StructInput<T> = T extends { readonly _struct: { readonly input: infer TInput } } ? TInput : never
 
-export type ParsedInput<TInput extends AnyCompatibleSchema | undefined> = TInput extends AnyCompatibleSchema
-  ? CompatibleOutput<TInput>
-  : unknown
+export type EndpointInput<TInput extends AnyStruct | undefined> = TInput extends AnyStruct ? StructInput<TInput> : unknown
 
-export async function parseEndpointInput<TInput extends AnyCompatibleSchema | undefined>(
+export type ParsedInput<TInput extends AnyStruct | undefined> = TInput extends AnyStruct ? Infer<TInput> : unknown
+
+export async function parseEndpointInput<TInput extends AnyStruct | undefined>(
   schema: TInput,
   input: EndpointInput<TInput> | undefined,
 ): Promise<ParsedInput<TInput>> {
@@ -16,5 +15,5 @@ export async function parseEndpointInput<TInput extends AnyCompatibleSchema | un
     return input as ParsedInput<TInput>
   }
 
-  return (await parseCompatibleSchema(schema, input)) as ParsedInput<TInput>
+  return parseStructValue(schema, input) as ParsedInput<TInput>
 }

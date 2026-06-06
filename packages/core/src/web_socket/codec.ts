@@ -1,5 +1,7 @@
 import { createTransportError, ERR_ABORTED, ERR_TIMEOUT, type TransportError } from '../error'
-import { type AnyCompatibleSchema, isStandardSchemaLike, isStruct, parseCompatibleSchema, StructError } from '../struct'
+import type { AnyStruct } from '../struct'
+import { decodeJson, encodeJson } from '../struct/codec/json'
+import { parseStructValue } from '../struct/introspection'
 import type { ManualSocketCloseReason, SocketSchemas, WebSocketCloseInfo, WebSocketIncomingData, WebSocketOutgoingData } from './web_socket'
 
 // ---- outgoing serialization ----
@@ -23,41 +25,12 @@ export function serializeOutgoingWebSocketMessage<TOutgoing extends SocketSchema
 
   const payload = 'data' in message ? message.data : omitSocketType(message)
 
-  return JSON.stringify(normalizeSocketPayload(message.type, serializeCompatiblePayload(schema, payload)))
+  return JSON.stringify(normalizeSocketPayload(message.type, serializeStructPayload(schema, payload)))
 }
 
-function serializeCompatiblePayload(schema: AnyCompatibleSchema, payload: unknown): unknown {
+function serializeStructPayload(schema: AnyStruct, payload: unknown): unknown {
   // Outgoing validation should stay synchronous for send() ergonomics.
-  if (isStruct(schema)) {
-    const [err, val] = schema.parse(payload)
-    if (err) {
-      throw err
-    }
-    return val
-  }
-
-  if (isStandardSchemaLike(schema)) {
-    const result = schema['~standard'].validate(payload)
-    if (result instanceof Promise) {
-      throw new Error('Async Standard Schema validation is not supported for outgoing WebSocket messages')
-    }
-
-    if ('issues' in result) {
-      throw new StructError(
-        result.issues.map(issue => ({
-          code: 'custom',
-          expected: 'valid value',
-          message: issue.message ?? 'Schema parse failed',
-          path: Array.isArray(issue.path) ? [...issue.path] : [],
-          received: undefined,
-        })),
-      )
-    }
-
-    return result.value
-  }
-
-  return payload
+  return encodeJson(schema, parseStructValue(schema, payload))
 }
 
 // ---- incoming transformation ----
@@ -79,8 +52,9 @@ export async function transformWebSocketMessage<TIncoming extends SocketSchemas>
 
   const payload = 'data' in decoded ? decoded['data'] : omitSocketType(decoded)
 
-  // parseCompatibleSchema throws on validation failure — caller decides between silent drop and runtime-error surface.
-  return normalizeSocketPayload(messageType, await parseCompatibleSchema(schema, payload)) as WebSocketIncomingData<TIncoming>
+  const value = decodeJson(schema, payload)
+
+  return normalizeSocketPayload(messageType, value) as WebSocketIncomingData<TIncoming>
 }
 
 function decodeWebSocketData(raw: unknown): unknown {

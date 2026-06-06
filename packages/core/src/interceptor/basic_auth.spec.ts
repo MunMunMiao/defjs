@@ -76,7 +76,7 @@ describe('Basic Auth Interceptor', () => {
     await chain(hq, fakeSseHandler)
 
     expect(capturedRequest).toBeDefined()
-    expect(capturedRequest!.headers?.get('Authorization')).toEqual(`Basic ${btoa(`${credential.username}:${credential.password}`)}`)
+    expect(capturedRequest?.headers?.get('Authorization')).toEqual(`Basic ${btoa(`${credential.username}:${credential.password}`)}`)
   })
 
   test('should throw error if btoa is not supported', () => {

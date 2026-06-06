@@ -1,16 +1,15 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors } from '../client'
+import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
-import { struct } from '../struct'
+import { struct, tag } from '../struct'
 import type { HttpRequest } from './index'
 import { defineRequest } from './index'
 
 describe('request http runtime', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 
@@ -69,14 +68,47 @@ describe('request http runtime', () => {
     })
   })
 
+  test('should decode response bodies with struct key aliases', async () => {
+    setGlobalClient(
+      createClient(
+        withEndpoint('https://example.com'),
+        withInterceptors(
+          createHttpInterceptor(async () =>
+            makeResponse({
+              body: {
+                user_name: 'Miao',
+              },
+              status: 200,
+            }),
+          ),
+        ),
+      ),
+    )
+
+    const useUser = defineRequest({
+      method: 'GET',
+      output: {
+        200: struct.object({
+          name: struct.string().tag(tag.json('user_name')),
+        }),
+      },
+      path: '/user',
+    })
+
+    const [error, result] = await useUser()
+
+    expect(error).toBeNull()
+    expect(result).toEqual({ name: 'Miao' })
+  })
+
   test('should build params query headers and body, and only execute once per ref', async () => {
     let callCount = 0
     let capturedRequest: HttpRequest | undefined
 
-    const client = createClient({
-      endpoint: 'https://example.com/api',
-      http: {
-        handler: async request => {
+    const client = createClient(
+      withEndpoint('https://example.com/api'),
+      withInterceptors(
+        createHttpInterceptor(async request => {
           callCount += 1
           capturedRequest = request as typeof capturedRequest
           return makeResponse({
@@ -85,32 +117,42 @@ describe('request http runtime', () => {
             },
             status: 200,
           })
-        },
-      },
-    })
+        }),
+      ),
+    )
 
     const useInspectRequest = defineRequest({
       build: (request, input) => {
-        request.json({
-          nickname: input.nickname,
+        request.setJson({
+          nickname: input.body.nickname,
         })
-        request.headers({
-          'x-token': input.token,
+        request.setHeaders({
+          'x-token': input.headers.token,
         })
-        request.pathParams({
-          id: input.id,
+        request.setPathParams({
+          id: input.path.id,
         })
-        request.queryParams({
-          include: input.include,
-          tags: input.tags,
+        request.setQueryParams({
+          include: input.query.include,
+          tags: input.query.tags,
         })
       },
-      input: struct.object({
-        id: struct.number(),
-        include: struct.boolean(),
-        nickname: struct.string(),
-        tags: struct.array(struct.string()),
-        token: struct.string(),
+      input: struct.request({
+        body: struct.json(
+          struct.object({
+            nickname: struct.string(),
+          }),
+        ),
+        headers: struct.object({
+          token: struct.string(),
+        }),
+        path: struct.object({
+          id: struct.number(),
+        }),
+        query: struct.object({
+          include: struct.boolean(),
+          tags: struct.array(struct.string()),
+        }),
       }),
       method: 'POST',
       output: {
@@ -122,11 +164,10 @@ describe('request http runtime', () => {
     })
 
     const ref = useInspectRequest({
-      id: 7,
-      include: true,
-      nickname: 'Miao',
-      tags: ['a', 'b'],
-      token: 'secret',
+      body: { nickname: 'Miao' },
+      headers: { token: 'secret' },
+      path: { id: 7 },
+      query: { include: true, tags: ['a', 'b'] },
     }).with({
       client,
     })
@@ -150,32 +191,34 @@ describe('request http runtime', () => {
     let capturedInput: unknown
 
     setGlobalClient(
-      createClient({
-        endpoint: 'https://example.com',
-        http: {
-          handler: async request =>
+      createClient(
+        withEndpoint('https://example.com'),
+        withInterceptors(
+          createHttpInterceptor(async request =>
             makeResponse({
               body: {
                 ok: request.queryParams?.get('value'),
               },
               status: 200,
             }),
-        },
-      }),
+          ),
+        ),
+      ),
     )
 
     const useRawInput = defineRequest({
       build: (request, input) => {
         capturedInput = input
-        request.queryParams({
-          value: (input as { value: string }).value,
+        request.setQueryParams({
+          value: input.query.value,
         })
       },
+      input: struct.request({ query: struct.object({ value: struct.string() }) }),
       method: 'GET',
       path: '/raw-input',
     })
 
-    const rawInput = { value: 'kept-as-is' }
+    const rawInput = { query: { value: 'kept-as-is' } }
     const [error, result, response] = await useRawInput(rawInput)
 
     expect(error).toBeNull()
@@ -187,18 +230,19 @@ describe('request http runtime', () => {
 
   test('should ignore response body when output is omitted', async () => {
     setGlobalClient(
-      createClient({
-        endpoint: 'https://example.com',
-        http: {
-          handler: async () =>
+      createClient(
+        withEndpoint('https://example.com'),
+        withInterceptors(
+          createHttpInterceptor(async () =>
             makeResponse({
               body: {
                 ignored: true,
               },
               status: 200,
             }),
-        },
-      }),
+          ),
+        ),
+      ),
     )
 
     const useIgnoredOutput = defineRequest({
@@ -216,17 +260,18 @@ describe('request http runtime', () => {
 
   test('should return http error when output is omitted and response is not ok', async () => {
     setGlobalClient(
-      createClient({
-        endpoint: 'https://example.com',
-        http: {
-          handler: async () =>
+      createClient(
+        withEndpoint('https://example.com'),
+        withInterceptors(
+          createHttpInterceptor(async () =>
             makeResponse({
               body: { error: 'fail' },
               status: 500,
               statusText: 'Internal Server Error',
             }),
-        },
-      }),
+          ),
+        ),
+      ),
     )
 
     const useNoOutput = defineRequest({

@@ -57,6 +57,12 @@ export function expectedType(definition: SchemaDefinition): string {
     case 'record':
       return `record<${expectedType((definition.value as RuntimeSchema)[DEFINITION])}>`
 
+    case 'request':
+      return 'request'
+
+    case 'requestBody':
+      return `${definition.codec} body`
+
     case 'tuple':
       return 'tuple'
 

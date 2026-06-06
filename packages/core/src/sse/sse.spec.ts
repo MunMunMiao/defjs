@@ -1,16 +1,15 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors, withSseOptions, withCredentials } from '../client'
 import { ERR_ABORTED } from '../error'
-import { struct } from '../struct'
+import { createSSEInterceptor } from '../interceptor'
+import { struct, tag } from '../struct'
 import { defineEventStream } from './index'
 
 describe('request event stream runtime', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 
@@ -56,10 +55,7 @@ describe('request event stream runtime', () => {
     })
 
     const [error, stream] = await useBasicStream().with({
-      client: createClient({
-        endpoint: inject('testServerHost'),
-        withCredentials: true,
-      }),
+      client: createClient(withEndpoint(inject('testServerHost')), withCredentials(true)),
     })
 
     expect(error).toBeNull()
@@ -164,6 +160,59 @@ describe('request event stream runtime', () => {
     ])
   })
 
+  test('should decode event payloads with struct key aliases', async () => {
+    const useAliasStream = defineEventStream({
+      events: {
+        profile: struct.object({
+          displayName: struct.string().tag(tag.json('display_name')),
+        }),
+      },
+      path: '/alias-stream',
+    })
+
+    const client = createClient(
+      withEndpoint('https://api.example.com'),
+      withSseOptions({
+        fetch: (async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('event: profile\ndata: {"display_name":"Miao"}\n\n'))
+                controller.close()
+              },
+            }),
+            {
+              headers: {
+                'content-type': 'text/event-stream',
+              },
+              status: 200,
+            },
+          )) as unknown as typeof fetch,
+      }),
+    )
+
+    const [error, stream] = await useAliasStream().with({ client })
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+
+    expect(events).toEqual([
+      {
+        data: { displayName: 'Miao' },
+        event: 'profile',
+        id: undefined,
+        retry: undefined,
+      },
+    ])
+  })
+
   test('should allow closing stream refs before startup', async () => {
     const useStream = defineEventStream({
       events: {
@@ -186,6 +235,58 @@ describe('request event stream runtime', () => {
     }
 
     expect(error.code).toBe('ABORTED')
+  })
+
+  test('should reject with.abort and with.timeout before starting SSE transport', async () => {
+    const controller = new AbortController()
+    let interceptorCalls = 0
+    const client = createClient(
+      withEndpoint(inject('testServerHost')),
+      withInterceptors(
+        createSSEInterceptor(async (req, next) => {
+          interceptorCalls += 1
+          return await next(req)
+        }),
+      ),
+    )
+    const useStream = defineEventStream({
+      events: {
+        message: struct.string(),
+      },
+      path: '/sse/basic',
+    })
+
+    const ref = useStream().with({ client, abort: controller.signal, timeout: 1 } as never)
+    const [error, stream, open] = await ref
+
+    expect(stream).toBeUndefined()
+    expect(open).toBeUndefined()
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+    expect(ref.status).toBe('error')
+    expect(interceptorCalls).toBe(0)
+  })
+
+  test('should prefer SSE cancellation config conflict over an already aborted signal', async () => {
+    const controller = new AbortController()
+    controller.abort(ERR_ABORTED)
+    const useStream = defineEventStream({
+      events: {
+        message: struct.string(),
+      },
+      path: '/sse/basic',
+    })
+
+    const ref = useStream().with({ abort: controller.signal, timeout: 1 } as never)
+    const [error, stream, open] = await ref
+
+    expect(stream).toBeUndefined()
+    expect(open).toBeUndefined()
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+    expect(ref.status).toBe('error')
   })
 
   test('should skip unexpected stream messages after startup', async () => {
@@ -441,9 +542,7 @@ describe('request event stream runtime', () => {
 
     // Restore global client for other tests
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 

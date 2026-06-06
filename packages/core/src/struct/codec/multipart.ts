@@ -19,10 +19,6 @@ export function encodeMultipart(struct: SchemaLike<any, any, boolean>, value: un
   const form = new FormData()
   for (const field of getStructFields(struct)) {
     const fieldTag = field.tags.get(MultipartTag.kind)
-    if (!fieldTag) {
-      continue
-    }
-
     appendFormData(form, getWireKey(field.key, fieldTag), encodeStructValue(field.struct, value[field.key]))
   }
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { struct } from '../struct'
 import { createWebSocketBuild, createWebSocketUrl } from './build'
 
 describe('web socket build helpers', () => {
@@ -35,21 +36,15 @@ describe('web socket build helpers', () => {
   })
 
   test('should fill url params with array first element', () => {
-    expect(createWebSocketUrl('http://localhost', '/ws/:id', { id: ['a', 'b'] }, undefined, p => p.toString())).toBe(
-      'ws://localhost/ws/a',
-    )
+    expect(createWebSocketUrl('http://localhost', '/ws/:id', { id: ['a', 'b'] }, undefined, p => p.toString())).toBe('ws://localhost/ws/a')
   })
 
   test('should fill url params with empty array', () => {
-    expect(createWebSocketUrl('http://localhost', '/ws/:id', { id: [] }, undefined, p => p.toString())).toBe(
-      'ws://localhost/ws/undefined',
-    )
+    expect(createWebSocketUrl('http://localhost', '/ws/:id', { id: [] }, undefined, p => p.toString())).toBe('ws://localhost/ws/undefined')
   })
 
   test('should serialize query params with undefined value', () => {
-    expect(createWebSocketUrl('http://localhost', '/ws', undefined, { a: undefined }, p => p.toString())).toBe(
-      'ws://localhost/ws',
-    )
+    expect(createWebSocketUrl('http://localhost', '/ws', undefined, { a: undefined }, p => p.toString())).toBe('ws://localhost/ws')
   })
 
   test('should serialize query params with array values', () => {
@@ -65,43 +60,74 @@ describe('web socket build helpers', () => {
   })
 
   test('should serialize query params with null value', () => {
-    expect(createWebSocketUrl('http://localhost', '/ws', undefined, { data: null }, p => p.toString())).toBe(
-      'ws://localhost/ws?data=null',
-    )
+    expect(createWebSocketUrl('http://localhost', '/ws', undefined, { data: null }, p => p.toString())).toBe('ws://localhost/ws?data=null')
   })
 
   test('createWebSocketBuild should return built request', () => {
-    const built = createWebSocketBuild({ id: 1 }, (request, input) => {
-      request.pathParams({ id: input.id })
-      request.queryParams({ search: 'test' })
+    const input = struct.request({
+      path: struct.object({
+        id: struct.number(),
+      }),
+      query: struct.object({
+        search: struct.string(),
+      }),
     })
+    const built = createWebSocketBuild({ path: { id: 1 }, query: { search: 'test' } }, undefined, input)
     expect(built.params).toEqual({ id: 1 })
     expect(built.query).toEqual({ search: 'test' })
   })
 
   test('createWebSocketBuild should throw for unsupported build options', () => {
+    const bodyInput = struct.request({
+      body: struct.json(struct.object({ body: struct.boolean() })),
+    })
     expect(() =>
-      createWebSocketBuild({}, (request) => {
-        request.json({ body: true })
-      }),
-    ).toThrow('WebSocket build() only supports pathParams() and queryParams()')
+      createWebSocketBuild(
+        { body: { body: true } },
+        (request: any, view: any) => {
+          request.setJson({ body: view.body.body })
+        },
+        bodyInput,
+      ),
+    ).toThrow('WebSocket build() only supports path params and query params')
 
+    const headerInput = struct.request({
+      headers: struct.object({ 'x-auth': struct.string() }),
+    })
     expect(() =>
-      createWebSocketBuild({}, (request) => {
-        request.headers({ 'x-auth': 'token' })
-      }),
-    ).toThrow('WebSocket build() only supports pathParams() and queryParams()')
+      createWebSocketBuild(
+        { headers: { 'x-auth': 'token' } },
+        (request: any, view: any) => {
+          request.setHeaders({ 'x-auth': view.headers['x-auth'] })
+        },
+        headerInput,
+      ),
+    ).toThrow('WebSocket build() only supports path params and query params')
+  })
 
-    expect(() =>
-      createWebSocketBuild({}, (request) => {
-        request.withCredentials(true)
+  test('createWebSocketBuild rejects headers and body request sections', () => {
+    const withHeaders = struct.request({
+      headers: struct.object({
+        token: struct.string(),
       }),
-    ).toThrow('WebSocket build() only supports pathParams() and queryParams()')
+    })
+    expect(() => createWebSocketBuild({ headers: { token: 'secret' } }, undefined, withHeaders)).toThrow(
+      'WebSocket request input does not support headers section',
+    )
+
+    const withBody = struct.request({
+      body: struct.json(
+        struct.object({
+          id: struct.string(),
+        }),
+      ),
+    })
+    expect(() => createWebSocketBuild({ body: { id: '1' } }, undefined, withBody)).toThrow(
+      'WebSocket request input does not support body section',
+    )
   })
 
   test('createWebSocketUrl serializes bigint query param', () => {
-    expect(createWebSocketUrl('http://localhost', '/ws', undefined, { id: 1n as never }, p => p.toString())).toBe(
-      'ws://localhost/ws?id=1',
-    )
+    expect(createWebSocketUrl('http://localhost', '/ws', undefined, { id: 1n as never }, p => p.toString())).toBe('ws://localhost/ws?id=1')
   })
 })

@@ -1,16 +1,13 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
 import { struct } from '../struct'
 import { defineRequest } from './index'
-import { xhrHandler } from './transport'
 
 describe('http browser runtime', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 
@@ -36,23 +33,14 @@ describe('http browser runtime', () => {
     expect(response?.ok).toBe(true)
   })
 
-  test('should support xhr progress hooks in real browsers', async () => {
-    setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-        http: {
-          handler: xhrHandler,
-        },
-      }),
-    )
-
-    const uploadLoaded: number[] = []
+  test('should support fetch download progress hooks in real browsers', async () => {
     const downloadLoaded: number[] = []
 
     const useCreateAccount = defineRequest({
-      build: request => {
-        request.body(new ArrayBuffer(16 * 1024))
+      build: (request, input) => {
+        request.setArrayBuffer(input.body)
       },
+      input: struct.request({ body: struct.arrayBuffer() }),
       method: 'POST',
       path: '/',
     })
@@ -61,9 +49,6 @@ describe('http browser runtime', () => {
       onDownloadProgress(event) {
         downloadLoaded.push(event.loaded)
       },
-      onUploadProgress(event) {
-        uploadLoaded.push(event.loaded)
-      },
     })
 
     const [error, result, response] = await ref
@@ -71,26 +56,15 @@ describe('http browser runtime', () => {
     expect(error).toBeNull()
     expect(result).toBeUndefined()
     expect(response?.ok).toBe(true)
-    expect(uploadLoaded.length).toBeGreaterThan(0)
     expect(downloadLoaded.length).toBeGreaterThan(0)
   })
 
-  test('should preserve xhr timeout semantics in request runtime', async () => {
-    setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-        http: {
-          handler: xhrHandler,
-        },
-      }),
-    )
-
+  test('should preserve fetch timeout semantics in request runtime', async () => {
     const useDelay = defineRequest({
-      build: request => {
-        request.queryParams({
-          ms: 1000,
-        })
+      build: (request, input) => {
+        request.setQueryParams({ ms: input.query.ms })
       },
+      input: struct.request({ query: struct.object({ ms: struct.number() }) }),
       method: 'GET',
       path: '/delay',
     })

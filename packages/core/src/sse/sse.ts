@@ -2,38 +2,37 @@ import { resolveClientConfig } from '../client/client'
 import type { Client } from '../client/resolve'
 import { createDefinitionError, createRequestRuntimeError, ERR_ABORTED, type RequestError } from '../error'
 import { makeSSEInterceptorChain, resolveSSEInterceptors, type SSEHandler } from '../interceptor/interceptor'
-import { mergeAbortSignals } from '../internal/abort'
+import {
+  createAbortTimeoutConflictError,
+  hasAbortTimeoutConflict,
+  mergeAbortSignals,
+  type UseCancellationConfig,
+} from '../internal/abort'
 import type { HttpContext } from '../internal/context'
 import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
 import type { SettledResponse } from '../internal/http_response'
-import type { RequestBuildHandler } from '../internal/request_builder'
-import {
-  type AnyCompatibleSchema,
-  type CompatibleInput,
-  type CompatibleOutput,
-  isCompatibleSchema,
-  parseCompatibleSchema,
-} from '../struct/compatible'
+import type { RequestBuilder, RequestBuildHandler } from '../internal/request_builder'
+import type { AnyStruct, Infer } from '../struct'
+import { decodeJson } from '../struct/codec/json'
 import { createEventStreamRequest } from './request'
 import type { EventStreamHandle, EventStreamOpenInfo } from './transport/event_stream'
 import { fetchEventStream, getErrorOpenInfo } from './transport/event_stream'
 import type { EventStreamMessage } from './transport/parser'
 
-export interface UseEventStreamConfig {
-  abort?: AbortSignal
+interface UseEventStreamBaseConfig {
   client?: Client
   context?: HttpContext
-  fetch?: typeof fetch
-  timeout?: number
 }
 
-export type EventSchemas = Record<string, AnyCompatibleSchema>
+export type UseEventStreamConfig = UseEventStreamBaseConfig & UseCancellationConfig
+
+export type EventSchemas = Record<string, AnyStruct>
 
 type KnownEventKey<TEvents extends EventSchemas> = Exclude<Extract<keyof TEvents, string>, 'default'>
 
 type KnownEventUnion<TEvents extends EventSchemas> = {
   [K in KnownEventKey<TEvents>]: {
-    data: CompatibleOutput<TEvents[K]>
+    data: Infer<TEvents[K]>
     event: K
     id?: string
     retry?: number
@@ -42,7 +41,7 @@ type KnownEventUnion<TEvents extends EventSchemas> = {
 
 type DefaultEventUnion<TEvents extends EventSchemas> = 'default' extends keyof TEvents
   ? {
-      data: CompatibleOutput<TEvents['default']>
+      data: Infer<TEvents['default']>
       event: string
       id?: string
       retry?: number
@@ -56,11 +55,8 @@ type DefaultEventUnion<TEvents extends EventSchemas> = 'default' extends keyof T
 
 export type EventStreamData<TEvents extends EventSchemas> = KnownEventUnion<TEvents> | DefaultEventUnion<TEvents>
 
-export interface EventStreamDefinition<
-  TInput extends AnyCompatibleSchema | undefined = undefined,
-  TEvents extends EventSchemas = EventSchemas,
-> {
-  build?: RequestBuildHandler<ParsedInput<TInput>>
+export interface EventStreamDefinition<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas> {
+  build?: RequestBuildHandler<TInput, 'sse'>
   events: TEvents
   input?: TInput
   method?: string
@@ -84,18 +80,18 @@ export interface EventStreamRef<TEvent = unknown> extends PromiseLike<StreamAwai
   with(config: UseEventStreamConfig): EventStreamRef<TEvent>
 }
 
-type IsInputOptional<TInput extends AnyCompatibleSchema | undefined> = [TInput] extends [undefined]
+type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends CompatibleInput<NonNullable<TInput>>
+  : {} extends EndpointInput<NonNullable<TInput>>
     ? true
     : false
 
-export type UseEventStreamEndpointFn<TInput extends AnyCompatibleSchema | undefined, TEvents extends EventSchemas> =
+export type UseEventStreamEndpointFn<TInput extends AnyStruct | undefined, TEvents extends EventSchemas> =
   IsInputOptional<TInput> extends true
     ? (input?: EndpointInput<TInput>) => EventStreamRef<EventStreamData<TEvents>>
     : (input: EndpointInput<TInput>) => EventStreamRef<EventStreamData<TEvents>>
 
-interface EventStreamEndpoint<TInput extends AnyCompatibleSchema | undefined = undefined, TEvents extends EventSchemas = EventSchemas>
+interface EventStreamEndpoint<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>
   extends EventStreamDefinition<TInput, TEvents> {
   readonly kind: 'event-stream'
   readonly method: string
@@ -109,7 +105,7 @@ type StreamRefState<TEvent> = {
   stream?: EventStreamHandle<TEvent>
 }
 
-export function defineEventStream<TInput extends AnyCompatibleSchema | undefined, TEvents extends EventSchemas>(
+export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
   definition: EventStreamDefinition<TInput, TEvents>,
 ): UseEventStreamEndpointFn<TInput, TEvents> {
   const endpoint: EventStreamEndpoint<TInput, TEvents> = {
@@ -121,7 +117,7 @@ export function defineEventStream<TInput extends AnyCompatibleSchema | undefined
   return ((input?: EndpointInput<TInput>) => createEventStreamRef(endpoint, input)) as UseEventStreamEndpointFn<TInput, TEvents>
 }
 
-function createEventStreamRef<TInput extends AnyCompatibleSchema | undefined, TEvents extends EventSchemas>(
+function createEventStreamRef<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
   endpoint: EventStreamEndpoint<TInput, TEvents>,
   input: EndpointInput<TInput> | undefined,
   config?: UseEventStreamConfig,
@@ -162,7 +158,7 @@ function createEventStreamRef<TInput extends AnyCompatibleSchema | undefined, TE
   }
 }
 
-async function executeEventStreamEndpoint<TInput extends AnyCompatibleSchema | undefined, TEvents extends EventSchemas>(
+async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
   endpoint: EventStreamEndpoint<TInput, TEvents>,
   input: EndpointInput<TInput> | undefined,
   config: UseEventStreamConfig,
@@ -170,6 +166,13 @@ async function executeEventStreamEndpoint<TInput extends AnyCompatibleSchema | u
   state: StreamRefState<EventStreamData<TEvents>>,
 ): Promise<StreamAwaitResult<EventStreamData<TEvents>>> {
   state.status = 'connecting'
+
+  if (hasAbortTimeoutConflict(config)) {
+    const definitionError = createAbortTimeoutConflictError()
+    state.error = definitionError
+    state.status = 'error'
+    return [definitionError, undefined, undefined]
+  }
 
   // Fast path: caller already aborted before we did any schema work.
   if (config.abort?.aborted) {
@@ -203,14 +206,20 @@ async function executeEventStreamEndpoint<TInput extends AnyCompatibleSchema | u
 
   let request
   try {
-    request = createEventStreamRequest(endpoint.method, endpoint.path, parsedInput, endpoint.build, {
-      abort: mergeAbortSignals(controller.signal, [config.abort], config.timeout),
-      baseEndpoint: clientConfig.endpoint,
-      context: config.context,
-      input: endpoint.input,
-      queryParamsSerializer: clientConfig.queryParamsSerializer,
-      withCredentials: clientConfig.withCredentials,
-    })
+    request = createEventStreamRequest(
+      endpoint.method,
+      endpoint.path,
+      parsedInput,
+      endpoint.build as ((request: RequestBuilder, input: unknown) => void) | undefined,
+      {
+        abort: mergeAbortSignals(controller.signal, [config.abort], config.timeout),
+        baseEndpoint: clientConfig.endpoint,
+        context: config.context,
+        input: endpoint.input,
+        queryParamsSerializer: clientConfig.queryParamsSerializer,
+        withCredentials: clientConfig.withCredentials,
+      },
+    )
   } catch (error) {
     const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
     state.error = definitionError
@@ -222,7 +231,7 @@ async function executeEventStreamEndpoint<TInput extends AnyCompatibleSchema | u
     const sseInterceptors = resolveSSEInterceptors(clientConfig.interceptors)
     const sseHandler: SSEHandler = req =>
       fetchEventStream(req, {
-        fetch: config.fetch ?? clientConfig.sse.fetch,
+        fetch: clientConfig.sse.fetch,
         async transformMessage(message) {
           return await transformStreamMessage(endpoint.events, message)
         },
@@ -279,7 +288,7 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
 
   try {
     return {
-      data: await parseCompatibleSchema(eventSchema, rawData),
+      data: await parseEventData(eventSchema, rawData),
       event: eventName,
       id: message.id || undefined,
       retry: message.retry,
@@ -289,18 +298,22 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
   }
 }
 
-function resolveEventSchema<TEvents extends EventSchemas>(events: TEvents, eventName: string): AnyCompatibleSchema | undefined {
+function resolveEventSchema<TEvents extends EventSchemas>(events: TEvents, eventName: string): AnyStruct | undefined {
   const exact = events[eventName]
-  if (isCompatibleSchema(exact)) {
+  if (exact) {
     return exact
   }
 
   const fallback = events['default']
-  if (isCompatibleSchema(fallback)) {
+  if (fallback) {
     return fallback
   }
 
   return undefined
+}
+
+async function parseEventData(schema: AnyStruct, data: unknown): Promise<unknown> {
+  return decodeJson(schema, data)
 }
 
 function decodeEventData(data: string): unknown {

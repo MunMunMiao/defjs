@@ -1,6 +1,6 @@
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
-import { isReadableStreamBody, supportsStreamingRequestBody } from '../../http/transport/fetch'
 import { serializeHttpBody } from '../../http/transport/body'
+import { isReadableStreamBody, supportsStreamingRequestBody } from '../../http/transport/fetch'
 import { AsyncQueue } from '../../internal/async_queue'
 import type { HttpRequest } from '../../internal/http_request'
 import { type HttpResponse, makeResponse } from '../../internal/http_response'
@@ -329,8 +329,6 @@ function createEventStreamRequestInit(request: HttpRequest, headers: Headers, ab
   return init
 }
 
-
-
 function validateOpenResponse(open: EventStreamOpenInfo, requireContentType: boolean): void {
   const { response } = open
   if (response.error) {
@@ -395,10 +393,10 @@ async function wait(ms: number, signal: AbortSignal): Promise<void> {
     }
 
     /* istanbul ignore else -- defensive: signal is rarely already aborted before listener is attached */
-    if (!signal.aborted) {
-      signal.addEventListener('abort', onAbort, { once: true })
-    } else {
+    if (signal.aborted) {
       onAbort()
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true })
     }
   })
 }

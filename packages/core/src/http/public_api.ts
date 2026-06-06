@@ -2,5 +2,3 @@ export type { HttpProgressEvent, HttpProgressFn, HttpRequest, HttpResponseType }
 export * from './http'
 export type { RequestOutputShape, ResponseGroupItem } from './request'
 export { fetchHandler } from './transport/fetch'
-export type { HttpHandler } from './transport/handler'
-export { xhrHandler } from './transport/xhr'

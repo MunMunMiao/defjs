@@ -1,15 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withQueryParamsSerializer } from '../client'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime lifecycle', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 
@@ -87,20 +85,21 @@ describe('web socket runtime lifecycle', () => {
 
   test('should use request-level beforeConnect hook and client query serializer', async () => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-        queryParamsSerializer(params) {
+      createClient(
+        withEndpoint(inject('testServerHost')),
+        withQueryParamsSerializer(params => {
           return `token=${params.get('token') ?? 'missing'}&from=serializer`
-        },
-      }),
+        }),
+      ),
     )
 
     const useBeforeConnectSocket = defineWebSocket({
-      build: request => {
-        request.queryParams({
-          token: 'secret-0',
+      build: (request, input) => {
+        request.setQueryParams({
+          token: input.query.token,
         })
       },
+      input: struct.request({ query: struct.object({ token: struct.string() }) }),
       incoming: {
         connected: struct.object({
           token: struct.string(),

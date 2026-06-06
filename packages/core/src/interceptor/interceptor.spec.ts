@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HttpRequest } from '../http'
+import { createFetchRequestInit } from '../http/transport/fetch'
 import { makeFakeHandler } from '../http/transport/test_handler'
 import { createHttpInterceptor, type InterceptorFn, makeInterceptorChain } from '../interceptor/interceptor'
 
@@ -54,5 +55,98 @@ describe('interceptor', () => {
     const interceptor = createHttpInterceptor((req, next) => next(req))
     expect(interceptor.kind).toBe('http')
     expect(typeof interceptor.fn).toBe('function')
+  })
+
+  it('should preserve body content type metadata when interceptor keeps the body', async () => {
+    const body = '{"ok":true}'
+    let finalHeaders: Headers | undefined
+    const chain = makeInterceptorChain([
+      (req, next) =>
+        next({
+          ...req,
+          headers: new Headers(req.headers),
+        }),
+    ])
+
+    await chain(
+      {
+        baseEndpoint: 'https://api.example.com',
+        method: 'POST',
+        endpoint: '/test',
+        headers: new Headers([['content-type', 'text/plain']]),
+        body,
+        bodyContentType: 'application/json',
+        bodyContentTypeSource: body,
+      },
+      makeFakeHandler({
+        onRequestBefore(req) {
+          finalHeaders = createFetchRequestInit(req).headers as Headers
+        },
+      }),
+    )
+
+    expect(finalHeaders?.get('content-type')).toBe('application/json')
+  })
+
+  it('should ignore stale body content type metadata when interceptor replaces the body', async () => {
+    const oldBody = '{"ok":true}'
+    let finalHeaders: Headers | undefined
+    const chain = makeInterceptorChain([
+      (req, next) =>
+        next({
+          ...req,
+          body: 'plain',
+        }),
+    ])
+
+    await chain(
+      {
+        baseEndpoint: 'https://api.example.com',
+        method: 'POST',
+        endpoint: '/test',
+        headers: new Headers([['content-type', 'application/json']]),
+        body: oldBody,
+        bodyContentType: 'application/json',
+        bodyContentTypeSource: oldBody,
+      },
+      makeFakeHandler({
+        onRequestBefore(req) {
+          finalHeaders = createFetchRequestInit(req).headers as Headers
+        },
+      }),
+    )
+
+    expect(finalHeaders?.get('content-type')).toBe('text/plain;charset=UTF-8')
+  })
+
+  it('should remove stale content type when interceptor replaces the body with FormData', async () => {
+    const oldBody = '{"ok":true}'
+    let finalHeaders: Headers | undefined
+    const chain = makeInterceptorChain([
+      (req, next) =>
+        next({
+          ...req,
+          body: new FormData(),
+        }),
+    ])
+
+    await chain(
+      {
+        baseEndpoint: 'https://api.example.com',
+        method: 'POST',
+        endpoint: '/test',
+        headers: new Headers([['content-type', 'application/json']]),
+        body: oldBody,
+        bodyContentType: 'application/json',
+        bodyContentTypeSource: oldBody,
+      },
+      makeFakeHandler({
+        onRequestBefore(req) {
+          finalHeaders = createFetchRequestInit(req).headers as Headers
+        },
+      }),
+    )
+
+    expect(finalHeaders?.has('content-type')).toBe(false)
   })
 })

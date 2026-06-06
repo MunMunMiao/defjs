@@ -9,12 +9,13 @@ import type {
   LiteralDefinition,
   ObjectDefinition,
   ParseMode,
-  ParseOptions,
   ParseResult,
   Path,
   PrimitiveDefinition,
   PrimitiveKind,
   RecordDefinition,
+  RequestBodyDefinition,
+  RequestDefinition,
   RuntimeSchema,
   SchemaDefinition,
   SchemaIssue,
@@ -23,13 +24,7 @@ import type {
 } from './types'
 import { cloneValue, expectedType, failure, hasOwnKey, isPlainObject, success } from './utils'
 
-export function parseValue(
-  schema: RuntimeSchema,
-  input: unknown,
-  path: Path,
-  mode: ParseMode,
-  options: ParseOptions = {},
-): ParseResult<unknown> {
+export function parseValue(schema: RuntimeSchema, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
   const definition = schema[DEFINITION]
 
   if (input === undefined) {
@@ -49,7 +44,7 @@ export function parseValue(
       return success(input)
 
     case 'array':
-      return parseArrayValue(definition, input, path, options)
+      return parseArrayValue(definition, input, path)
 
     case 'arrayBuffer':
     case 'bigint':
@@ -66,25 +61,31 @@ export function parseValue(
       return parseEnumValue(definition, input, path)
 
     case 'intersection':
-      return parseIntersectionValue(definition, input, path, options)
+      return parseIntersectionValue(definition, input, path)
 
     case 'literal':
       return parseLiteralValue(definition, input, path)
 
     case 'object':
-      return parseObjectValue(schema, definition, input, path, options)
+      return parseObjectValue(schema, definition, input, path)
 
     case 'or':
-      return parseUnionValue(definition, input, path, options)
+      return parseUnionValue(definition, input, path)
 
     case 'discriminatedUnion':
-      return parseDiscriminatedUnionValue(definition, input, path, options)
+      return parseDiscriminatedUnionValue(definition, input, path)
 
     case 'record':
-      return parseRecordValue(definition, input, path, options)
+      return parseRecordValue(definition, input, path)
+
+    case 'request':
+      return parseRequestValue(definition, input, path)
+
+    case 'requestBody':
+      return parseRequestBodyValue(definition, input, path, mode)
 
     case 'tuple':
-      return parseTupleValue(definition, input, path, options)
+      return parseTupleValue(definition, input, path)
   }
 }
 
@@ -122,7 +123,7 @@ function parseLiteralValue(definition: LiteralDefinition<any>, input: unknown, p
   return Object.is(input, definition.value) ? success(input) : failure(issue(path, 'invalid_literal', definition.expected, input))
 }
 
-function parseArrayValue(definition: ArrayDefinition, input: unknown, path: Path, options: ParseOptions): ParseResult<unknown[]> {
+function parseArrayValue(definition: ArrayDefinition, input: unknown, path: Path): ParseResult<unknown[]> {
   if (!Array.isArray(input)) {
     return failure(issue(path, 'invalid_type', 'array', input))
   }
@@ -131,7 +132,7 @@ function parseArrayValue(definition: ArrayDefinition, input: unknown, path: Path
   const issues: SchemaIssue[] = []
 
   for (let index = 0; index < input.length; index += 1) {
-    const result = parseValue(definition.item as RuntimeSchema, input[index], [...path, index], 'value', options)
+    const result = parseValue(definition.item as RuntimeSchema, input[index], [...path, index], 'value')
     if (result.ok) {
       output[index] = result.value
     } else {
@@ -147,7 +148,6 @@ function parseObjectValue(
   definition: ObjectDefinition,
   input: unknown,
   path: Path,
-  options: ParseOptions,
 ): ParseResult<Record<string, unknown>> {
   if (!isPlainObject(input)) {
     return failure(issue(path, 'invalid_type', 'object', input))
@@ -156,12 +156,10 @@ function parseObjectValue(
   const shape = resolveObjectShape(schema, definition)
   const output: Record<string, unknown> = Object.create(null)
   const issues: SchemaIssue[] = []
-  const declared = new Set<string>()
 
   for (const [key, itemSchema] of Object.entries(shape)) {
-    declared.add(key)
     const hasOwnInput = hasOwnKey(input, key)
-    const result = parseValue(itemSchema as RuntimeSchema, hasOwnInput ? input[key] : undefined, [...path, key], 'field', options)
+    const result = parseValue(itemSchema as RuntimeSchema, hasOwnInput ? input[key] : undefined, [...path, key], 'field')
 
     if (result.ok) {
       if (result.value !== OMIT) {
@@ -169,14 +167,6 @@ function parseObjectValue(
       }
     } else {
       issues.push(...result.issues)
-    }
-  }
-
-  if (options.unknownFields === 'error') {
-    for (const inputKey of Object.keys(input)) {
-      if (!declared.has(inputKey)) {
-        issues.push(issue([...path, inputKey], 'unrecognized_keys', 'declared field', input[inputKey], `Unrecognized key "${inputKey}"`))
-      }
     }
   }
 
@@ -187,12 +177,7 @@ export function isFieldRequired(itemDefinition: SchemaDefinition): boolean {
   return !itemDefinition.flags.optional && !itemDefinition.flags.nullable
 }
 
-function parseRecordValue(
-  definition: RecordDefinition,
-  input: unknown,
-  path: Path,
-  options: ParseOptions,
-): ParseResult<Record<string, unknown>> {
+function parseRecordValue(definition: RecordDefinition, input: unknown, path: Path): ParseResult<Record<string, unknown>> {
   if (!isPlainObject(input)) {
     return failure(issue(path, 'invalid_type', 'record', input))
   }
@@ -201,7 +186,7 @@ function parseRecordValue(
   const issues: SchemaIssue[] = []
 
   for (const [key, value] of Object.entries(input)) {
-    const result = parseValue(definition.value as RuntimeSchema, value, [...path, key], 'field', options)
+    const result = parseValue(definition.value as RuntimeSchema, value, [...path, key], 'field')
     if (result.ok) {
       if (result.value !== OMIT) {
         output[key] = result.value
@@ -214,7 +199,35 @@ function parseRecordValue(
   return issues.length > 0 ? failure(...issues) : success(output)
 }
 
-function parseTupleValue(definition: TupleDefinition, input: unknown, path: Path, options: ParseOptions): ParseResult<unknown[]> {
+function parseRequestValue(definition: RequestDefinition, input: unknown, path: Path): ParseResult<Record<string, unknown>> {
+  if (!isPlainObject(input)) {
+    return failure(issue(path, 'invalid_type', 'object', input))
+  }
+
+  const output: Record<string, unknown> = Object.create(null)
+  const issues: SchemaIssue[] = []
+  const sections = getRequestSections(definition)
+
+  for (const [key, sectionSchema] of sections) {
+    const sectionKey = key as string
+    const result = parseValue(sectionSchema, hasOwnKey(input, sectionKey) ? input[sectionKey] : undefined, [...path, sectionKey], 'field')
+    if (result.ok) {
+      if (result.value !== OMIT) {
+        output[sectionKey] = result.value
+      }
+    } else {
+      issues.push(...result.issues)
+    }
+  }
+
+  return issues.length > 0 ? failure(...issues) : success(output)
+}
+
+function parseRequestBodyValue(definition: RequestBodyDefinition, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
+  return parseValue(definition.schema as RuntimeSchema, input, path, mode)
+}
+
+function parseTupleValue(definition: TupleDefinition, input: unknown, path: Path): ParseResult<unknown[]> {
   if (!Array.isArray(input)) {
     return failure(issue(path, 'invalid_type', 'tuple', input))
   }
@@ -223,7 +236,7 @@ function parseTupleValue(definition: TupleDefinition, input: unknown, path: Path
   const issues: SchemaIssue[] = []
 
   for (let index = 0; index < definition.items.length; index += 1) {
-    const result = parseValue(definition.items[index] as RuntimeSchema, input[index], [...path, index], 'value', options)
+    const result = parseValue(definition.items[index] as RuntimeSchema, input[index], [...path, index], 'value')
     if (result.ok) {
       output[index] = result.value
     } else {
@@ -234,9 +247,9 @@ function parseTupleValue(definition: TupleDefinition, input: unknown, path: Path
   return issues.length > 0 ? failure(...issues) : success(output)
 }
 
-function parseUnionValue(definition: UnionDefinition, input: unknown, path: Path, options: ParseOptions): ParseResult<unknown> {
+function parseUnionValue(definition: UnionDefinition, input: unknown, path: Path): ParseResult<unknown> {
   for (const option of definition.options) {
-    const result = parseValue(option as RuntimeSchema, input, path, 'value', options)
+    const result = parseValue(option as RuntimeSchema, input, path, 'value')
     if (result.ok) {
       return result
     }
@@ -245,12 +258,7 @@ function parseUnionValue(definition: UnionDefinition, input: unknown, path: Path
   return failure(issue(path, 'invalid_union', expectedType(definition), input))
 }
 
-function parseDiscriminatedUnionValue(
-  definition: DiscriminatedUnionDefinition,
-  input: unknown,
-  path: Path,
-  options: ParseOptions,
-): ParseResult<unknown> {
+function parseDiscriminatedUnionValue(definition: DiscriminatedUnionDefinition, input: unknown, path: Path): ParseResult<unknown> {
   if (!isPlainObject(input)) {
     return failure(issue(path, 'invalid_type', 'object', input))
   }
@@ -261,21 +269,16 @@ function parseDiscriminatedUnionValue(
     return failure(issue([...path, definition.discriminator], 'invalid_union', definition.expected, value))
   }
 
-  return parseValue(target as RuntimeSchema, input, path, 'value', options)
+  return parseValue(target as RuntimeSchema, input, path, 'value')
 }
 
-function parseIntersectionValue(
-  definition: IntersectionDefinition,
-  input: unknown,
-  path: Path,
-  options: ParseOptions,
-): ParseResult<unknown> {
-  const leftResult = parseValue(definition.left as RuntimeSchema, input, path, 'value', options)
+function parseIntersectionValue(definition: IntersectionDefinition, input: unknown, path: Path): ParseResult<unknown> {
+  const leftResult = parseValue(definition.left as RuntimeSchema, input, path, 'value')
   if (!leftResult.ok) {
     return leftResult
   }
 
-  const rightResult = parseValue(definition.right as RuntimeSchema, input, path, 'value', options)
+  const rightResult = parseValue(definition.right as RuntimeSchema, input, path, 'value')
   if (!rightResult.ok) {
     return rightResult
   }
@@ -344,6 +347,20 @@ export function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
     case 'record':
       return {}
 
+    case 'request': {
+      const output: Record<string, unknown> = Object.create(null)
+      for (const [key, sectionSchema] of getRequestSections(definition)) {
+        const value = buildMissingValue(sectionSchema, [...path, key], 'field')
+        if (value !== OMIT) {
+          output[key] = value
+        }
+      }
+      return output
+    }
+
+    case 'requestBody':
+      return buildMissingValue(definition.schema as RuntimeSchema, path, 'value')
+
     case 'tuple': {
       const output: unknown[] = []
       for (let index = 0; index < definition.items.length; index += 1) {
@@ -370,4 +387,23 @@ function buildMissingValue(schema: RuntimeSchema, path: Path, mode: ParseMode): 
   }
 
   return buildZeroValue(schema, path)
+}
+
+function getRequestSections(
+  definition: RequestDefinition,
+): [keyof Pick<RequestDefinition, 'body' | 'headers' | 'path' | 'query'>, RuntimeSchema][] {
+  const sections: [keyof Pick<RequestDefinition, 'body' | 'headers' | 'path' | 'query'>, RuntimeSchema][] = []
+  if (definition.path) {
+    sections.push(['path', definition.path as unknown as RuntimeSchema])
+  }
+  if (definition.query) {
+    sections.push(['query', definition.query as unknown as RuntimeSchema])
+  }
+  if (definition.headers) {
+    sections.push(['headers', definition.headers as unknown as RuntimeSchema])
+  }
+  if (definition.body) {
+    sections.push(['body', definition.body as unknown as RuntimeSchema])
+  }
+  return sections
 }

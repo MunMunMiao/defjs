@@ -1,9 +1,11 @@
 import { encodeValue } from './encode'
+import { StructError } from './errors'
 import { isStruct } from './guards'
+import { parseValue, safeZeroValue } from './parse'
 import { assertSchema, resolveObjectShape, resolveRuntimeSchema } from './shape'
 import { DEFINITION } from './symbols'
 import { type FieldTag, materializeFieldTags } from './tag'
-import type { ObjectSchema, ObjectShape, ParseOptions, RuntimeSchema, SchemaLike } from './types'
+import type { ObjectSchema, ObjectShape, ParseTuple, RuntimeSchema, SchemaLike } from './types'
 
 export function getFieldTags(field: SchemaLike<any, any, boolean>, fieldKey: string): ReadonlyMap<symbol, FieldTag> {
   assertSchema(field, 'field')
@@ -22,7 +24,7 @@ export interface StructField {
 }
 
 export function isObjectStruct(value: unknown): value is ObjectSchema<ObjectShape> {
-  return isStruct(value) && resolveRuntimeSchema(value as RuntimeSchema)[DEFINITION].kind === 'object'
+  return isStruct(value) && resolveRuntimeSchema(value as unknown as RuntimeSchema)[DEFINITION].kind === 'object'
 }
 
 export function getStructFields(struct: SchemaLike<any, any, boolean>): readonly StructField[] {
@@ -46,9 +48,19 @@ export function encodeStructValue(struct: SchemaLike<any, any, boolean>, value: 
   return encodeValue(struct as RuntimeSchema, value)
 }
 
-export function parseStructValue(struct: SchemaLike<any, any, boolean>, value: unknown, options?: ParseOptions): unknown {
+export function parseStructTuple<S extends SchemaLike<any, any, boolean>>(struct: S, value: unknown): ParseTuple<S['_struct']['output']> {
   assertSchema(struct, 'struct')
-  const [error, output] = (struct as RuntimeSchema).parse(value, options)
+  const runtime = struct as unknown as RuntimeSchema
+  const result = parseValue(runtime, value, [], 'value')
+  if (result.ok) {
+    return [null, result.value as S['_struct']['output']]
+  }
+  return [new StructError(result.issues), safeZeroValue(runtime) as S['_struct']['output']]
+}
+
+export function parseStructValue(struct: SchemaLike<any, any, boolean>, value: unknown): unknown {
+  assertSchema(struct, 'struct')
+  const [error, output] = parseStructTuple(struct, value)
   if (error) {
     throw error
   }

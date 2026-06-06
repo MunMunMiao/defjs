@@ -39,8 +39,8 @@ describe('WebSocket interceptor chain', () => {
     await chain(baseRequest, fakeWsHandler)
 
     expect(callOrder).toEqual(['first', 'second'])
-    expect(capturedRequest!.headers?.get('x-first')).toBe('1')
-    expect(capturedRequest!.headers?.get('x-second')).toBe('2')
+    expect(capturedRequest?.headers?.get('x-first')).toBe('1')
+    expect(capturedRequest?.headers?.get('x-second')).toBe('2')
   })
 
   test('WebSocket interceptor can wrap the returned session', async () => {

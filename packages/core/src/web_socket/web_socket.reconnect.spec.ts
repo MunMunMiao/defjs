@@ -1,14 +1,12 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime reconnect', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 
@@ -19,8 +17,8 @@ describe('web socket runtime reconnect', () => {
   test('should reconnect and flush queued messages', async () => {
     const useReconnectSocket = defineWebSocket({
       build: (request, input) => {
-        request.queryParams({
-          key: input.key,
+        request.setQueryParams({
+          key: input.query.key,
         })
       },
       incoming: {
@@ -31,8 +29,10 @@ describe('web socket runtime reconnect', () => {
           attempt: struct.number(),
         }),
       },
-      input: struct.object({
-        key: struct.string(),
+      input: struct.request({
+        query: struct.object({
+          key: struct.string(),
+        }),
       }),
       outgoing: {
         message: struct.object({
@@ -42,7 +42,7 @@ describe('web socket runtime reconnect', () => {
       path: '/ws/reconnect',
     })
 
-    const ref = useReconnectSocket({ key: 'queue-case' }).with({
+    const ref = useReconnectSocket({ query: { key: 'queue-case' } }).with({
       queue: { maxSize: 2 },
       reconnect: { attempts: 1, delayMs: 0 },
     })
@@ -89,9 +89,7 @@ describe('web socket runtime reconnect', () => {
   })
 
   test('should pass actual reconnect attempt count to shouldReconnect', async () => {
-    const retryClient = createClient({
-      endpoint: 'http://127.0.0.1:1',
-    })
+    const retryClient = createClient(withEndpoint('http://127.0.0.1:1'))
 
     const useRetrySocket = defineWebSocket({
       incoming: {},

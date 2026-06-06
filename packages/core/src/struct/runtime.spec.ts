@@ -1,16 +1,8 @@
 import { describe, expect, test } from 'vitest'
 import { StructError, struct, tag } from './index'
+import { parseStructTuple as parse } from './introspection'
 
 describe('runtime.ts chain methods', () => {
-  test('brand is a runtime no-op preserving nominal output value', () => {
-    const userId = struct.string().brand<'UserId'>()
-    const [err, val] = userId.parse('u_1')
-    if (err) {
-      throw err
-    }
-    expect(val).toBe('u_1')
-  })
-
   test('null, nullish and optional only adjust missing value behavior', () => {
     const schema = struct.object({
       a: struct.string().optional(),
@@ -18,7 +10,7 @@ describe('runtime.ts chain methods', () => {
       c: struct.string().nullish(),
     })
 
-    const [err, val] = schema.parse({})
+    const [err, val] = parse(schema, {})
     if (err) {
       throw err
     }
@@ -30,7 +22,7 @@ describe('runtime.ts chain methods', () => {
       name: struct.string().tag(tag.json('full_name')),
     })
 
-    const [err, val] = user.parse({ name: 'Miao' })
+    const [err, val] = parse(user, { name: 'Miao' })
     if (err) {
       throw err
     }
@@ -38,7 +30,7 @@ describe('runtime.ts chain methods', () => {
   })
 
   test('invalid primitive parse returns StructError and zero value', () => {
-    const [err, val] = struct.string().parse(42)
+    const [err, val] = parse(struct.string(), 42)
 
     expect(err).toBeInstanceOf(StructError)
     expect(val).toBe('')

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { ERR_ABORTED, ERR_TIMEOUT } from '../error'
-import { struct } from '../struct'
+import { struct, tag } from '../struct'
 import {
   extractCloseInfo,
   isManualSocketCloseReason,
@@ -98,7 +98,7 @@ describe('codec helpers', () => {
 
 describe('serializeOutgoingWebSocketMessage', () => {
   test('throws when no outgoing schemas', () => {
-    expect(() => serializeOutgoingWebSocketMessage(undefined, { type: 'msg' })).toThrow('No outgoing WebSocket messages')
+    expect(() => serializeOutgoingWebSocketMessage(undefined, { type: 'msg' } as never)).toThrow('No outgoing WebSocket messages')
   })
 
   test('throws when message lacks type', () => {
@@ -129,75 +129,19 @@ describe('serializeOutgoingWebSocketMessage', () => {
     expect(JSON.parse(result)).toEqual({ type: 'msg', text: 'hello' })
   })
 
+  test('serializes outgoing messages with struct key aliases', () => {
+    const schemas = {
+      msg: struct.object({ text: struct.string().tag(tag.json('message_text')) }),
+    }
+    const result = serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: { text: 'hello' } })
+    expect(JSON.parse(result)).toEqual({ message_text: 'hello', type: 'msg' })
+  })
+
   test('validates outgoing payload with native schema', () => {
     const schemas = {
       msg: struct.object({ text: struct.string() }),
     }
     expect(() => serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: { text: 123 } } as never)).toThrow()
-  })
-
-  test('validates outgoing payload with standard schema', () => {
-    const standardSchema = {
-      '~standard': {
-        validate: (value: unknown) => {
-          if (typeof value === 'string') {
-            return { value }
-          }
-          return { issues: [{ message: 'must be string' }] }
-        },
-        vendor: 'test',
-        version: 1,
-      },
-    }
-    const schemas = { msg: standardSchema as never }
-    const result = serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: 'hello' })
-    expect(JSON.parse(result)).toEqual({ type: 'msg', data: 'hello' })
-
-    expect(() => serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: 123 } as never)).toThrow('must be string')
-  })
-
-  test('validates outgoing payload with standard schema issue path as non-array', () => {
-    const standardSchema = {
-      '~standard': {
-        validate: () => ({ issues: [{ message: 'bad', path: 'not-array' as never }] }),
-        vendor: 'test',
-        version: 1,
-      },
-    }
-    const schemas = { msg: standardSchema as never }
-    expect(() => serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: 'hello' })).toThrow('bad')
-  })
-
-  test('validates outgoing payload with standard schema issue missing message', () => {
-    const standardSchema = {
-      '~standard': {
-        validate: () => ({ issues: [{ path: ['field'] }] }),
-        vendor: 'test',
-        version: 1,
-      },
-    }
-    const schemas = { msg: standardSchema as never }
-    expect(() => serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: 'hello' })).toThrow('Schema parse failed')
-  })
-
-  test('throws for async standard schema', () => {
-    const standardSchema = {
-      '~standard': {
-        validate: () => Promise.resolve({ value: 'test' }),
-        vendor: 'test',
-        version: 1,
-      },
-    }
-    const schemas = { msg: standardSchema as never }
-    expect(() => serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: 'hello' })).toThrow(
-      'Async Standard Schema validation is not supported',
-    )
-  })
-
-  test('serializes with non-schema plain object as passthrough', () => {
-    const schemas = { msg: {} as never }
-    const result = serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: 'hello' })
-    expect(JSON.parse(result)).toEqual({ type: 'msg', data: 'hello' })
   })
 })
 
@@ -238,6 +182,14 @@ describe('transformWebSocketMessage', () => {
       msg: struct.object({ text: struct.string() }),
     }
     const result = await transformWebSocketMessage(incoming, '{"type":"msg","text":"hello"}')
+    expect(result).toEqual({ type: 'msg', text: 'hello' })
+  })
+
+  test('transforms incoming messages with struct key aliases', async () => {
+    const incoming = {
+      msg: struct.object({ text: struct.string().tag(tag.json('message_text')) }),
+    }
+    const result = await transformWebSocketMessage(incoming, '{"type":"msg","message_text":"hello"}')
     expect(result).toEqual({ type: 'msg', text: 'hello' })
   })
 
@@ -288,23 +240,5 @@ describe('transformWebSocketMessage', () => {
       msg: struct.object({ text: struct.string() }),
     }
     await expect(transformWebSocketMessage(incoming, '{"type":"msg","text":123}')).rejects.toThrow()
-  })
-
-  test('validates with standard schema', async () => {
-    const standardSchema = {
-      '~standard': {
-        validate: (value: unknown) => {
-          if (typeof (value as Record<string, unknown>)?.['value'] === 'number') {
-            return { value }
-          }
-          return { issues: [{ message: 'bad value' }] }
-        },
-        vendor: 'test',
-        version: 1,
-      },
-    }
-    const incoming = { msg: standardSchema as never }
-    const result = await transformWebSocketMessage(incoming, '{"type":"msg","value":42}')
-    expect(result).toEqual({ type: 'msg', value: 42 })
   })
 })

@@ -1,15 +1,13 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
-import { createClient, resetGlobalClient, setGlobalClient } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket browser runtime', () => {
   beforeEach(() => {
     setGlobalClient(
-      createClient({
-        endpoint: inject('testServerHost'),
-      }),
+      createClient(withEndpoint(inject('testServerHost'))),
     )
   })
 
@@ -68,8 +66,8 @@ describe('web socket browser runtime', () => {
   test('should reconnect in real browsers', async () => {
     const [error, socket] = await defineWebSocket({
       build: (request, input) => {
-        request.queryParams({
-          key: input.key,
+        request.setQueryParams({
+          key: input.query.key,
         })
       },
       incoming: {
@@ -77,11 +75,13 @@ describe('web socket browser runtime', () => {
           attempt: struct.number(),
         }),
       },
-      input: struct.object({
-        key: struct.string(),
+      input: struct.request({
+        query: struct.object({
+          key: struct.string(),
+        }),
       }),
       path: '/ws/reconnect',
-    })({ key: 'browser-reconnect' }).with({
+    })({ query: { key: 'browser-reconnect' } }).with({
       reconnect: { attempts: 1, delayMs: 0 },
     })
 

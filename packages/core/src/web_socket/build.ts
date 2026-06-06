@@ -1,21 +1,46 @@
 import type { QueryParamsSerializer } from '../client/config'
-import { buildRequest, type RequestBuild, type RequestBuildHandler } from '../internal/request_builder'
+import type { HttpRequest } from '../internal/http_request'
+import { buildRequest, type RequestBuild, type RequestBuilder } from '../internal/request_builder'
 import type { RequestBuildValue } from '../internal/request_values'
-import { createResolvedRequestUrl } from '../internal/url'
+import { createResolvedRequestUrl, resolveRequestUrl } from '../internal/url'
+import type { AnyStruct } from '../struct'
 
-export function createWebSocketBuild<TInput>(input: TInput, build: RequestBuildHandler<TInput> | undefined): RequestBuild {
-  const built = buildRequest(input, build)
+export function createWebSocketBuild<TInput>(
+  input: TInput,
+  build: ((request: RequestBuilder, input: TInput) => void) | undefined,
+  inputSchema?: AnyStruct,
+): RequestBuild {
+  return buildRequest(input, build as ((request: RequestBuilder, input: unknown) => void) | undefined, {
+    input: inputSchema,
+    transport: 'webSocket',
+  })
+}
 
-  if (
-    typeof built.body !== 'undefined' ||
-    typeof built.bodyContentType !== 'undefined' ||
-    typeof built.headers !== 'undefined' ||
-    typeof built.withCredentials !== 'undefined'
-  ) {
-    throw new Error('WebSocket build() only supports pathParams() and queryParams() in v1')
+export function createWebSocketRequest(params: {
+  abort: AbortSignal
+  baseEndpoint: string
+  build: RequestBuild
+  path: string
+  queryParamsSerializer: QueryParamsSerializer
+  withCredentials?: boolean
+}): HttpRequest {
+  const queryParams = createSearchParams(params.build.query)
+  return {
+    abort: params.abort,
+    baseEndpoint: params.baseEndpoint,
+    endpoint: fillUrl(params.path, params.build.params),
+    headers: new Headers(),
+    method: 'GET',
+    queryParams,
+    queryString: params.queryParamsSerializer(queryParams, params.build.query),
+    withCredentials: params.withCredentials ?? false,
   }
+}
 
-  return built
+export function createWebSocketUrlFromRequest(request: HttpRequest): string {
+  const url = resolveRequestUrl(request)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : url.protocol === 'http:' ? 'ws:' : url.protocol
+  return url.toString()
 }
 
 export function createWebSocketUrl(

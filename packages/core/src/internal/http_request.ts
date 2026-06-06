@@ -14,6 +14,9 @@ export interface HttpRequest {
   abort?: AbortSignal
   baseEndpoint?: string
   body?: Blob | ArrayBuffer | FormData | URLSearchParams | ReadableStream<Uint8Array> | object | string | number | boolean | null
+  bodyContentType?: string | null
+  /** @internal Tracks which body value produced bodyContentType so interceptors cannot leave stale metadata behind. */
+  bodyContentTypeSource?: unknown
   context?: HttpContext
   downloadProgress?: HttpProgressFn
   endpoint: string

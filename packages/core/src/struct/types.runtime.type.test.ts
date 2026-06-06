@@ -40,6 +40,12 @@ export type MissingTypeOf = import('./index').TypeOf<never>
 // @ts-expect-error InputOf is intentionally not part of the public struct API.
 export type MissingInputOf = import('./index').InputOf<never>
 
+// @ts-expect-error JSON codec helpers are internal runtime behavior, not public struct API.
+export type MissingEncodeJson = typeof import('./index').encodeJson
+
+// @ts-expect-error JSON codec helpers are internal runtime behavior, not public struct API.
+export type MissingDecodeJson = typeof import('./index').decodeJson
+
 // @ts-expect-error primitive constraints were removed from the Go-style API.
 struct.string().min(1)
 
@@ -58,17 +64,21 @@ struct.string().transform(
 // @ts-expect-error refine was removed from the Go-style API.
 struct.string().refine((value: string) => value.length > 0)
 
-// @ts-expect-error pipe was removed from the Go-style API.
-struct.string().pipe(struct.number())
+// @ts-expect-error parse is internal runtime behavior, not public struct API.
+struct.string().parse('x')
 
-// @ts-expect-error catch was removed from the Go-style API.
-struct.string().catch('fallback')
+// @ts-expect-error key was removed; Go-style wire names must use tag.*().
+const missingKeyMethod = struct.string().key
+void missingKeyMethod
+
+// @ts-expect-error async parsing is not part of the public struct API.
+struct.string().parseAsync('x')
+
+// @ts-expect-error request body requires a body wrapper or binary body struct.
+struct.request({ body: struct.object({ id: struct.string() }) })
 
 // @ts-expect-error default was removed from the Go-style API.
 struct.string().default('fallback')
-
-// @ts-expect-error strict was removed from the Go-style API.
-struct.object({ id: struct.string() }).strict()
 
 // @ts-expect-error passthrough was removed from the Go-style API.
 struct.object({ id: struct.string() }).passthrough()
