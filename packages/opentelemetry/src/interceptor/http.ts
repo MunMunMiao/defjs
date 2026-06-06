@@ -1,5 +1,5 @@
 import { createHttpInterceptor } from '@defjs/core'
-import { propagation, context, trace, type TextMapPropagator, type Tracer } from '@opentelemetry/api'
+import { context, trace, type TextMapPropagator, type Tracer } from '@opentelemetry/api'
 import { headersGetter, headersSetter } from '../propagation/carrier'
 import { createHttpSpan, setSpanHttpResponse, setSpanError } from '../telemetry/trace'
 import type { RequestMetrics } from '../telemetry/metrics'
@@ -19,7 +19,7 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
     const { tracer, propagator, metrics, logger, recordBodies, recordHeaders } = options
 
     // Extract context from incoming headers
-    const parentCtx = propagation.extract(context.active(), req.headers ?? new Headers(), headersGetter)
+    const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
 
     // Build URL for attributes
     let url = req.endpoint
@@ -44,7 +44,7 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
 
     // Inject context into outgoing headers
     const headers = new Headers(req.headers)
-    propagation.inject(spanCtx, headers, headersSetter)
+    propagator.inject(spanCtx, headers, headersSetter)
 
     const startTime = performance.now()
 

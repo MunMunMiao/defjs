@@ -1,5 +1,5 @@
 import { createSSEInterceptor } from '@defjs/core'
-import { propagation, context, trace, type TextMapPropagator, type Tracer } from '@opentelemetry/api'
+import { context, trace, type TextMapPropagator, type Tracer } from '@opentelemetry/api'
 import { headersGetter, headersSetter } from '../propagation/carrier'
 import { createSseSpan, setSpanError, endSpan } from '../telemetry/trace'
 import type { RequestMetrics } from '../telemetry/metrics'
@@ -16,7 +16,7 @@ export function createOpenTelemetrySseInterceptor(options: SseInterceptorOptions
   return createSSEInterceptor(async (req, next) => {
     const { tracer, propagator, metrics, logger } = options
 
-    const parentCtx = propagation.extract(context.active(), req.headers ?? new Headers(), headersGetter)
+    const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
 
     let url = req.endpoint
     if (req.baseEndpoint) {
@@ -31,7 +31,7 @@ export function createOpenTelemetrySseInterceptor(options: SseInterceptorOptions
     const spanCtx = trace.setSpan(parentCtx, span)
 
     const headers = new Headers(req.headers)
-    propagation.inject(spanCtx, headers, headersSetter)
+    propagator.inject(spanCtx, headers, headersSetter)
 
     const startTime = performance.now()
 

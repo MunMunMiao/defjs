@@ -1,5 +1,5 @@
 import { createWebSocketInterceptor } from '@defjs/core'
-import { propagation, context, trace, type TextMapPropagator, type Tracer } from '@opentelemetry/api'
+import { context, trace, type TextMapPropagator, type Tracer } from '@opentelemetry/api'
 import { queryStringSetter } from '../propagation/carrier'
 import { createWebSocketSpan, setSpanError, endSpan } from '../telemetry/trace'
 import type { RequestMetrics } from '../telemetry/metrics'
@@ -35,7 +35,7 @@ export function createOpenTelemetryWebSocketInterceptor(options: WebSocketInterc
 
     if (queryPropagation) {
       const carrier = { params: new URLSearchParams(queryParams) }
-      propagation.inject(spanCtx, carrier, queryStringSetter)
+      propagator.inject(spanCtx, carrier, queryStringSetter)
       queryParams = carrier.params
       queryString = carrier.params.toString()
     }

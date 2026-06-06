@@ -1,14 +1,8 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest'
+import type { Tracer, TextMapPropagator, Context } from '@opentelemetry/api'
 import { createOpenTelemetryHttpInterceptor } from './http'
 
-// Track mock state
-let mockPropagatorInstance: {
-  inject: ReturnType<typeof vi.fn>
-  extract: ReturnType<typeof vi.fn>
-  fields: ReturnType<typeof vi.fn>
-}
-
-let activeSpans: Array<{
+interface MockSpan {
   name: string
   kind: number
   attributes: Record<string, unknown>
@@ -19,72 +13,55 @@ let activeSpans: Array<{
   setStatus: ReturnType<typeof vi.fn>
   recordException: ReturnType<typeof vi.fn>
   end: ReturnType<typeof vi.fn>
-}>
+}
 
-// Mock @opentelemetry/api
-vi.mock('@opentelemetry/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@opentelemetry/api')>()
-
-  return {
-    ...actual,
-    propagation: {
-      inject: (ctx: unknown, carrier: Headers, setter: unknown) => {
-        mockPropagatorInstance.inject(ctx, carrier, setter)
-      },
-      extract: (ctx: unknown, carrier: unknown, getter: unknown) => {
-        return mockPropagatorInstance.extract(ctx, carrier, getter)
-      },
-      fields: () => mockPropagatorInstance.fields(),
-    },
-    context: {
-      active: () => ({}),
-    },
-    trace: {
-      setSpan: (ctx: unknown, span: unknown) => ({ ...ctx, span }),
-      getTracer: actual.trace.getTracer,
-      getActiveSpan: actual.trace.getActiveSpan,
-    },
-  }
-})
+let activeSpans: MockSpan[]
 
 function createMockPropagator() {
-  mockPropagatorInstance = {
-    inject: vi.fn((ctx, carrier: Headers, setter) => {
+  return {
+    inject: vi.fn((ctx: Context, carrier: Headers) => {
       carrier.set('traceparent', 'mock-trace-id')
     }),
-    extract: vi.fn((ctx, carrier, getter) => ctx),
+    extract: vi.fn((ctx: Context) => ctx),
     fields: vi.fn(() => ['traceparent', 'tracestate']),
-  }
-  return mockPropagatorInstance
+  } as unknown as TextMapPropagator<Headers>
 }
 
 function createMockTracer() {
   activeSpans = []
 
+  const startSpan = vi.fn((name: string, options?: { kind?: number; attributes?: Record<string, unknown> }) => {
+    const span: MockSpan = {
+      name,
+      kind: options?.kind ?? 0,
+      attributes: { ...(options?.attributes ?? {}) },
+      status: undefined,
+      ended: false,
+      addEvent: vi.fn(),
+      setAttribute: vi.fn((key: string, value: unknown) => {
+        span.attributes[key] = value
+      }),
+      setStatus: vi.fn((status: { code: number }) => {
+        span.status = status
+      }),
+      recordException: vi.fn(),
+      end: vi.fn(() => {
+        span.ended = true
+      }),
+    }
+    activeSpans.push(span)
+    return span
+  })
+
+  const startActiveSpan = vi.fn(<T>(name: string, fn: (span: MockSpan) => T) => {
+    const span = startSpan(name)
+    return fn(span)
+  })
+
   const tracer = {
-    startSpan: vi.fn((name, options, parentCtx) => {
-      const span = {
-        name,
-        kind: options?.kind ?? 0,
-        attributes: { ...(options?.attributes ?? {}) },
-        status: undefined,
-        ended: false,
-        addEvent: vi.fn(),
-        setAttribute: vi.fn((key: string, value: unknown) => {
-          span.attributes[key] = value
-        }),
-        setStatus: vi.fn((status: { code: number }) => {
-          span.status = status
-        }),
-        recordException: vi.fn(),
-        end: vi.fn(() => {
-          span.ended = true
-        }),
-      }
-      activeSpans.push(span)
-      return span
-    }),
-  }
+    startSpan,
+    startActiveSpan,
+  } as unknown as Tracer
 
   return { tracer, spans: activeSpans }
 }
@@ -125,8 +102,8 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     await interceptor.fn(req, next)
 
     expect(propagator.inject).toHaveBeenCalled()
-    const calledRequest = next.mock.calls[0][0]
-    expect(calledRequest.headers?.get('traceparent')).toBe('mock-trace-id')
+    const calls = (next as unknown as { mock: { calls: [any][] } }).mock.calls
+    expect(calls[0]![0].headers?.get('traceparent')).toBe('mock-trace-id')
   })
 
   test('should create span with correct name', async () => {
@@ -137,7 +114,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     await interceptor.fn(makeRequest(), async () => makeResponse())
 
     expect(spans).toHaveLength(1)
-    expect(spans[0].name).toBe('HTTP GET')
+    expect(spans[0]!.name).toBe('HTTP GET')
   })
 
   test('should set span attributes', async () => {
@@ -147,8 +124,8 @@ describe('createOpenTelemetryHttpInterceptor', () => {
 
     await interceptor.fn(makeRequest(), async () => makeResponse())
 
-    expect(spans[0].attributes['http.request.method']).toBe('GET')
-    expect(spans[0].attributes['url.full']).toBe('https://api.example.com/test')
+    expect(spans[0]!.attributes['http.request.method']).toBe('GET')
+    expect(spans[0]!.attributes['url.full']).toBe('https://api.example.com/test')
   })
 
   test('should end span on success with OK status', async () => {
@@ -158,8 +135,8 @@ describe('createOpenTelemetryHttpInterceptor', () => {
 
     await interceptor.fn(makeRequest(), async () => makeResponse())
 
-    expect(spans[0].ended).toBe(true)
-    expect(spans[0].status?.code).toBe(1) // OK
+    expect(spans[0]!.ended).toBe(true)
+    expect(spans[0]!.status?.code).toBe(1) // OK
   })
 
   test('should record error on exception', async () => {
@@ -173,9 +150,9 @@ describe('createOpenTelemetryHttpInterceptor', () => {
       }),
     ).rejects.toThrow('network error')
 
-    expect(spans[0].ended).toBe(true)
-    expect(spans[0].status?.code).toBe(2) // ERROR
-    expect(spans[0].recordException).toHaveBeenCalled()
+    expect(spans[0]!.ended).toBe(true)
+    expect(spans[0]!.status?.code).toBe(2) // ERROR
+    expect(spans[0]!.recordException).toHaveBeenCalled()
   })
 
   test('should pass request with headers to next', async () => {
@@ -189,9 +166,9 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     await interceptor.fn(req, next)
 
     expect(next).toHaveBeenCalledTimes(1)
-    const passedReq = next.mock.calls[0][0]
-    expect(passedReq.method).toBe('GET')
-    expect(passedReq.endpoint).toBe('/test')
-    expect(passedReq.headers).toBeInstanceOf(Headers)
+    const calls = (next as unknown as { mock: { calls: [any][] } }).mock.calls
+    expect(calls[0]![0].method).toBe('GET')
+    expect(calls[0]![0].endpoint).toBe('/test')
+    expect(calls[0]![0].headers).toBeInstanceOf(Headers)
   })
 })
