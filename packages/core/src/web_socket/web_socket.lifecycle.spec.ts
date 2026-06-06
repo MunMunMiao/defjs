@@ -6,9 +6,7 @@ import { defineWebSocket } from './index'
 
 describe('web socket runtime lifecycle', () => {
   beforeEach(() => {
-    setGlobalClient(
-      createClient(withEndpoint(inject('testServerHost'))),
-    )
+    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
   })
 
   afterEach(() => {

@@ -6,9 +6,7 @@ import { defineRequest } from './index'
 
 describe('http browser runtime', () => {
   beforeEach(() => {
-    setGlobalClient(
-      createClient(withEndpoint(inject('testServerHost'))),
-    )
+    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
   })
 
   afterEach(() => {

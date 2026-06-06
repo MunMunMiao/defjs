@@ -1,9 +1,9 @@
 import { createHttpInterceptor } from '@defjs/core'
-import { context, trace, type TextMapPropagator, type Tracer } from '@opentelemetry/api'
+import { context, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
 import { headersGetter, headersSetter } from '../propagation/carrier'
-import { createHttpSpan, setSpanHttpResponse, setSpanError } from '../telemetry/trace'
-import type { RequestMetrics } from '../telemetry/metrics'
 import type { RequestLogger } from '../telemetry/logs'
+import type { RequestMetrics } from '../telemetry/metrics'
+import { setSpanError, setSpanHttpResponse } from '../telemetry/trace'
 
 export interface HttpInterceptorOptions {
   tracer: Tracer
@@ -32,13 +32,17 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
     }
 
     // Create span with parent context
-    const span = tracer.startSpan(`HTTP ${req.method}`, {
-      kind: 2, // SpanKind.CLIENT
-      attributes: {
-        'http.request.method': req.method,
-        'url.full': url,
+    const span = tracer.startSpan(
+      `HTTP ${req.method}`,
+      {
+        kind: 2, // SpanKind.CLIENT
+        attributes: {
+          'http.request.method': req.method,
+          'url.full': url,
+        },
       },
-    }, parentCtx)
+      parentCtx,
+    )
 
     const spanCtx = trace.setSpan(parentCtx, span)
 

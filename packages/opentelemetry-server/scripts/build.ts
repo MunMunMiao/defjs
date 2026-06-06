@@ -13,8 +13,12 @@ async function build() {
 
   if (exitCode !== 0) {
     console.error('tsc failed:')
-    if (stdout) console.error(stdout)
-    if (stderr) console.error(stderr)
+    if (stdout) {
+      console.error(stdout)
+    }
+    if (stderr) {
+      console.error(stderr)
+    }
     throw new Error(`tsc exited with code ${exitCode}`)
   }
 }

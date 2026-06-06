@@ -1,9 +1,9 @@
 import { createSSEInterceptor } from '@defjs/core'
-import { context, trace, type TextMapPropagator, type Tracer } from '@opentelemetry/api'
+import { context, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
 import { headersGetter, headersSetter } from '../propagation/carrier'
-import { createSseSpan, setSpanError, endSpan } from '../telemetry/trace'
-import type { RequestMetrics } from '../telemetry/metrics'
 import type { RequestLogger } from '../telemetry/logs'
+import type { RequestMetrics } from '../telemetry/metrics'
+import { createSseSpan, endSpan, setSpanError } from '../telemetry/trace'
 
 export interface SseInterceptorOptions {
   tracer: Tracer
@@ -44,7 +44,7 @@ export function createOpenTelemetrySseInterceptor(options: SseInterceptorOptions
       const durationMs = performance.now() - startTime
 
       span.addEvent('sse.connected', {
-        'duration_ms': durationMs,
+        duration_ms: durationMs,
       })
 
       // End span when stream closes

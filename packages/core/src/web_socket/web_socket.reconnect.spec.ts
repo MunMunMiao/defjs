@@ -5,9 +5,7 @@ import { defineWebSocket } from './index'
 
 describe('web socket runtime reconnect', () => {
   beforeEach(() => {
-    setGlobalClient(
-      createClient(withEndpoint(inject('testServerHost'))),
-    )
+    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
   })
 
   afterEach(() => {

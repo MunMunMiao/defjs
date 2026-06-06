@@ -1,4 +1,4 @@
-import { type TextMapGetter, type TextMapSetter } from '@opentelemetry/api'
+import type { TextMapGetter, TextMapSetter } from '@opentelemetry/api'
 
 export const headersSetter: TextMapSetter<Headers> = {
   set(carrier, key, value) {
@@ -10,11 +10,15 @@ export const headersSetter: TextMapSetter<Headers> = {
 
 export const headersGetter: TextMapGetter<Headers> = {
   keys(carrier) {
-    if (!carrier) return []
+    if (!carrier) {
+      return []
+    }
     return Array.from(carrier.keys())
   },
   get(carrier, key) {
-    if (!carrier || !key) return undefined
+    if (!carrier || !key) {
+      return undefined
+    }
     const values = carrier.get(key)
     return values ?? undefined
   },
@@ -35,11 +39,15 @@ export const queryStringSetter: TextMapSetter<QueryStringCarrier> = {
 
 export const queryStringGetter: TextMapGetter<QueryStringCarrier> = {
   keys(carrier) {
-    if (!carrier) return []
+    if (!carrier) {
+      return []
+    }
     return Array.from(carrier.params.keys())
   },
   get(carrier, key) {
-    if (!carrier || !key) return undefined
+    if (!carrier || !key) {
+      return undefined
+    }
     const value = carrier.params.get(key)
     return value ?? undefined
   },

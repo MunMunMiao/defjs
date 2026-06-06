@@ -8,9 +8,7 @@ import { defineRequest } from './index'
 
 describe('request http runtime errors', () => {
   beforeEach(() => {
-    setGlobalClient(
-      createClient(withEndpoint(inject('testServerHost'))),
-    )
+    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
   })
 
   afterEach(() => {
@@ -145,10 +143,7 @@ describe('request http runtime errors', () => {
       throw new Error('interceptor boom')
     })
 
-    const client = createClient(
-      withEndpoint('https://example.com'),
-      withInterceptors(throwingInterceptor),
-    )
+    const client = createClient(withEndpoint('https://example.com'), withInterceptors(throwingInterceptor))
 
     const useIntercepted = defineRequest({
       method: 'GET',

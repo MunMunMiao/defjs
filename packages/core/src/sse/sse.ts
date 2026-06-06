@@ -2,12 +2,7 @@ import { resolveClientConfig } from '../client/client'
 import type { Client } from '../client/resolve'
 import { createDefinitionError, createRequestRuntimeError, ERR_ABORTED, type RequestError } from '../error'
 import { makeSSEInterceptorChain, resolveSSEInterceptors, type SSEHandler } from '../interceptor/interceptor'
-import {
-  createAbortTimeoutConflictError,
-  hasAbortTimeoutConflict,
-  mergeAbortSignals,
-  type UseCancellationConfig,
-} from '../internal/abort'
+import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals, type UseCancellationConfig } from '../internal/abort'
 import type { HttpContext } from '../internal/context'
 import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
 import type { SettledResponse } from '../internal/http_response'

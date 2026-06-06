@@ -2,12 +2,7 @@ import { resolveClientConfig } from '../client/client'
 import type { Client } from '../client/resolve'
 import { createDefinitionError, createTransportError, ERR_ABORTED, type HttpStatusError, type RequestError } from '../error'
 import { makeInterceptorChain, resolveHttpInterceptors } from '../interceptor/interceptor'
-import {
-  createAbortTimeoutConflictError,
-  hasAbortTimeoutConflict,
-  mergeAbortSignals,
-  type UseCancellationConfig,
-} from '../internal/abort'
+import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals, type UseCancellationConfig } from '../internal/abort'
 import type { HttpContext } from '../internal/context'
 import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpProgressFn, HttpResponseType } from '../internal/http_request'

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { ERR_NOT_FOUND_GLOBAL_CLIENT } from '../error'
 import { cloneClient, createClient } from './client'
-import { withEndpoint, withSseOptions, withWebSocketOptions } from './index'
 import { DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import { getGlobalClient, resetGlobalClient, restGlobalClient, setGlobalClient } from './global'
+import { withEndpoint, withSseOptions, withWebSocketOptions } from './index'
 import type { Client } from './resolve'
 import { getClientConfig, isClient } from './resolve'
 
@@ -44,9 +44,7 @@ describe('Client', () => {
   })
 
   test('should setGlobalClient set global client', () => {
-    setGlobalClient(
-      createClient(withEndpoint('https://example.com/v1')),
-    )
+    setGlobalClient(createClient(withEndpoint('https://example.com/v1')))
 
     const client = getGlobalClient()
     expect(isClient(client)).toBe(true)

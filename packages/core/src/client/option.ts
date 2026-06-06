@@ -1,5 +1,5 @@
-import type { ClientConfig, ClientSseOptions, ClientWebSocketOptions, QueryParamsSerializer } from './config'
 import type { Interceptor } from '../interceptor/interceptor'
+import type { ClientConfig, ClientSseOptions, ClientWebSocketOptions, QueryParamsSerializer } from './config'
 
 export type ClientOption = (config: ClientConfig) => void
 

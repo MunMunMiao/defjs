@@ -114,8 +114,12 @@ requiredRef.with({ abort: true })
 // @ts-expect-error abort must be an AbortSignal, not an AbortController.
 requiredRef.with({ abort: new AbortController() })
 
-// @ts-expect-error abort must be an AbortSignal, not a callback.
-requiredRef.with({ abort: () => {} })
+requiredRef.with({
+  // @ts-expect-error abort must be an AbortSignal, not a callback.
+  abort: () => {
+    void 0
+  },
+})
 
 const arrayInputSchema = struct.request({
   body: struct.json(

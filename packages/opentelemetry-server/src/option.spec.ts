@@ -1,6 +1,6 @@
+import type { ClientConfig } from '@defjs/core'
 import { describe, expect, test } from 'vitest'
 import { withOpenTelemetry } from './option'
-import type { ClientConfig } from '@defjs/core'
 
 function makeConfig(): ClientConfig {
   return {

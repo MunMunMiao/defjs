@@ -1,12 +1,12 @@
+import type { Interceptor } from '@defjs/core'
 import { type ClientOption, withInterceptors } from '@defjs/core'
-import { propagation, type TextMapPropagator, trace } from '@opentelemetry/api'
-import { W3CTraceContextPropagator, W3CBaggagePropagator, CompositePropagator } from '@opentelemetry/core'
+import { type TextMapPropagator, trace } from '@opentelemetry/api'
+import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
 import { createOpenTelemetryHttpInterceptor } from './interceptor/http'
 import { createOpenTelemetrySseInterceptor } from './interceptor/sse'
 import { createOpenTelemetryWebSocketInterceptor } from './interceptor/web_socket'
-import { createRequestMetrics } from './telemetry/metrics'
 import { createRequestLogger } from './telemetry/logs'
-import type { Interceptor } from '@defjs/core'
+import { createRequestMetrics } from './telemetry/metrics'
 
 export interface OpenTelemetryOptions {
   /** Service name for telemetry resources */
@@ -39,10 +39,7 @@ export function withOpenTelemetry(options: OpenTelemetryOptions = {}): ClientOpt
     recordHeaders = false,
     webSocketQueryPropagation = true,
     propagator = new CompositePropagator({
-      propagators: [
-        new W3CTraceContextPropagator(),
-        new W3CBaggagePropagator(),
-      ],
+      propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
     }),
   } = options
 

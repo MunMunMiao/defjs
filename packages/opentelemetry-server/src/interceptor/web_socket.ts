@@ -1,9 +1,9 @@
 import { createWebSocketInterceptor } from '@defjs/core'
-import { context, trace, type TextMapPropagator, type Tracer } from '@opentelemetry/api'
+import { context, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
 import { queryStringSetter } from '../propagation/carrier'
-import { createWebSocketSpan, setSpanError, endSpan } from '../telemetry/trace'
-import type { RequestMetrics } from '../telemetry/metrics'
 import type { RequestLogger } from '../telemetry/logs'
+import type { RequestMetrics } from '../telemetry/metrics'
+import { createWebSocketSpan, endSpan, setSpanError } from '../telemetry/trace'
 
 export interface WebSocketInterceptorOptions {
   tracer: Tracer
@@ -13,7 +13,9 @@ export interface WebSocketInterceptorOptions {
   queryPropagation?: boolean
 }
 
-export function createOpenTelemetryWebSocketInterceptor(options: WebSocketInterceptorOptions): ReturnType<typeof createWebSocketInterceptor> {
+export function createOpenTelemetryWebSocketInterceptor(
+  options: WebSocketInterceptorOptions,
+): ReturnType<typeof createWebSocketInterceptor> {
   return createWebSocketInterceptor(async (req, next) => {
     const { tracer, propagator, metrics, logger, queryPropagation = true } = options
 
@@ -52,7 +54,7 @@ export function createOpenTelemetryWebSocketInterceptor(options: WebSocketInterc
       const durationMs = performance.now() - startTime
 
       span.addEvent('websocket.connected', {
-        'duration_ms': durationMs,
+        duration_ms: durationMs,
       })
 
       // Track session lifecycle

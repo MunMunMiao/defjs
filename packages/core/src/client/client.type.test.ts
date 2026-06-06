@@ -1,4 +1,15 @@
-import { type Client, type ClientOptions, cloneClient, createClient, type QueryParamsSerializer, setGlobalClient, withEndpoint, withQueryParamsSerializer, withWebSocketOptions, withCredentials } from './index'
+import {
+  type Client,
+  type ClientOptions,
+  cloneClient,
+  createClient,
+  type QueryParamsSerializer,
+  setGlobalClient,
+  withCredentials,
+  withEndpoint,
+  withQueryParamsSerializer,
+  withWebSocketOptions,
+} from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
@@ -36,16 +47,17 @@ const options = {
 
 type OptionsCases = Expect<Equal<typeof options.endpoint, string>>
 
-setGlobalClient(
-  createClient(withEndpoint('https://global.example.com')),
-)
+setGlobalClient(createClient(withEndpoint('https://global.example.com')))
 setGlobalClient(client)
 
 // @ts-expect-error withEndpoint expects a string
 createClient(withEndpoint(1))
 
-// @ts-expect-error serializer must return a string
-createClient(withEndpoint('https://api.example.com'), withQueryParamsSerializer(() => 1))
+createClient(
+  withEndpoint('https://api.example.com'),
+  // @ts-expect-error serializer must return a string
+  withQueryParamsSerializer(() => 1),
+)
 
 // http option is not part of ClientOption — cast through never to verify compile-time rejection
 createClient(withEndpoint('https://api.example.com'), { http: {} } as never)

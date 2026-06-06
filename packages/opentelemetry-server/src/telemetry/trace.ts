@@ -1,4 +1,4 @@
-import { type Span, SpanKind, SpanStatusCode, type Tracer, trace } from '@opentelemetry/api'
+import { type Span, SpanKind, SpanStatusCode, type Tracer } from '@opentelemetry/api'
 
 export interface SpanContext {
   span: Span

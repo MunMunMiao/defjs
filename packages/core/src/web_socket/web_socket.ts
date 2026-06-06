@@ -3,12 +3,7 @@ import type { ClientConfig, WebSocketBeforeConnect, WebSocketHeartbeatOptions } 
 import type { Client } from '../client/resolve'
 import { createDefinitionError, createTransportError, ERR_ABORTED, type RequestError } from '../error'
 import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors, type WebSocketSessionLike } from '../interceptor/interceptor'
-import {
-  createAbortTimeoutConflictError,
-  hasAbortTimeoutConflict,
-  mergeAbortSignals,
-  type UseCancellationConfig,
-} from '../internal/abort'
+import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals, type UseCancellationConfig } from '../internal/abort'
 import { AsyncQueue } from '../internal/async_queue'
 import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpRequest } from '../internal/http_request'
@@ -129,8 +124,8 @@ interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
   reconnect?: WebSocketReconnectConfig
 }
 
-export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> =
-  UseWebSocketBaseConfig<TIncoming, TOutgoing> & UseCancellationConfig
+export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketBaseConfig<TIncoming, TOutgoing> &
+  UseCancellationConfig
 
 export interface WebSocketRef<TIncoming = unknown, TOutgoing = never> extends PromiseLike<SocketAwaitResult<TIncoming, TOutgoing>> {
   readonly connection?: WebSocketConnectionInfo

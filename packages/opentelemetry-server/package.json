@@ -1,5 +1,5 @@
 {
-  "name": "@defjs/opentelemetry",
+  "name": "@defjs/opentelemetry-server",
   "version": "0.1.0",
   "type": "module",
   "exports": {
@@ -20,7 +20,8 @@
   },
   "peerDependencies": {
     "@defjs/core": "^0.3.0",
-    "@opentelemetry/api": "^1.0.0"
+    "@opentelemetry/api": "^1.0.0",
+    "@opentelemetry/core": "^1.0.0"
   },
   "scripts": {
     "build": "bun scripts/build.ts",

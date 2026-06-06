@@ -10,7 +10,6 @@ export type {
   WebSocketReconnectOptions,
 } from './config'
 export { getGlobalClient, resetGlobalClient, restGlobalClient, setGlobalClient } from './global'
-export type { Client } from './resolve'
 export type { ClientOption } from './option'
 export {
   withCredentials,
@@ -20,3 +19,4 @@ export {
   withSseOptions,
   withWebSocketOptions,
 } from './option'
+export type { Client } from './resolve'

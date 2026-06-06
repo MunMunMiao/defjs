@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { ERR_NOT_FOUND_GLOBAL_CLIENT } from '../error'
 import { createClient, resolveClientConfig } from './client'
-import { withEndpoint } from './index'
 import { resetGlobalClient, setGlobalClient } from './global'
+import { withEndpoint } from './index'
 
 describe('client resolve helpers', () => {
   afterEach(() => {

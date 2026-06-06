@@ -116,8 +116,12 @@ socketRef.with({ abort: true })
 // @ts-expect-error abort must be an AbortSignal, not an AbortController.
 socketRef.with({ abort: new AbortController() })
 
-// @ts-expect-error abort must be an AbortSignal, not a callback.
-socketRef.with({ abort: () => {} })
+socketRef.with({
+  // @ts-expect-error abort must be an AbortSignal, not a callback.
+  abort: () => {
+    void 0
+  },
+})
 
 function assertSocketSession(session: WebSocketSession<ExpectedIncoming, ExpectedOutgoing>) {
   session.send({

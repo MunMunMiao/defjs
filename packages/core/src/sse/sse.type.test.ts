@@ -115,8 +115,12 @@ streamRef.with({ abort: true })
 // @ts-expect-error abort must be an AbortSignal, not an AbortController.
 streamRef.with({ abort: new AbortController() })
 
-// @ts-expect-error abort must be an AbortSignal, not a callback.
-streamRef.with({ abort: () => {} })
+streamRef.with({
+  // @ts-expect-error abort must be an AbortSignal, not a callback.
+  abort: () => {
+    void 0
+  },
+})
 
 function assertRequiredStreamEvent(event: EventStreamData<typeof events>) {
   if (event.event === 'message' && 'text' in event.data) {

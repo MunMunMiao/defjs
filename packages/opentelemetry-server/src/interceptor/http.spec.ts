@@ -1,5 +1,5 @@
-import { describe, expect, test, vi, beforeEach } from 'vitest'
-import type { Tracer, TextMapPropagator, Context } from '@opentelemetry/api'
+import type { Context, TextMapPropagator, Tracer } from '@opentelemetry/api'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createOpenTelemetryHttpInterceptor } from './http'
 
 interface MockSpan {
@@ -103,7 +103,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
 
     expect(propagator.inject).toHaveBeenCalled()
     const calls = (next as unknown as { mock: { calls: [any][] } }).mock.calls
-    expect(calls[0]![0].headers?.get('traceparent')).toBe('mock-trace-id')
+    expect(calls[0]?.[0].headers?.get('traceparent')).toBe('mock-trace-id')
   })
 
   test('should create span with correct name', async () => {
@@ -114,7 +114,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     await interceptor.fn(makeRequest(), async () => makeResponse())
 
     expect(spans).toHaveLength(1)
-    expect(spans[0]!.name).toBe('HTTP GET')
+    expect(spans[0]?.name).toBe('HTTP GET')
   })
 
   test('should set span attributes', async () => {
@@ -124,8 +124,8 @@ describe('createOpenTelemetryHttpInterceptor', () => {
 
     await interceptor.fn(makeRequest(), async () => makeResponse())
 
-    expect(spans[0]!.attributes['http.request.method']).toBe('GET')
-    expect(spans[0]!.attributes['url.full']).toBe('https://api.example.com/test')
+    expect(spans[0]?.attributes['http.request.method']).toBe('GET')
+    expect(spans[0]?.attributes['url.full']).toBe('https://api.example.com/test')
   })
 
   test('should end span on success with OK status', async () => {
@@ -135,8 +135,8 @@ describe('createOpenTelemetryHttpInterceptor', () => {
 
     await interceptor.fn(makeRequest(), async () => makeResponse())
 
-    expect(spans[0]!.ended).toBe(true)
-    expect(spans[0]!.status?.code).toBe(1) // OK
+    expect(spans[0]?.ended).toBe(true)
+    expect(spans[0]?.status?.code).toBe(1) // OK
   })
 
   test('should record error on exception', async () => {
@@ -150,9 +150,9 @@ describe('createOpenTelemetryHttpInterceptor', () => {
       }),
     ).rejects.toThrow('network error')
 
-    expect(spans[0]!.ended).toBe(true)
-    expect(spans[0]!.status?.code).toBe(2) // ERROR
-    expect(spans[0]!.recordException).toHaveBeenCalled()
+    expect(spans[0]?.ended).toBe(true)
+    expect(spans[0]?.status?.code).toBe(2) // ERROR
+    expect(spans[0]?.recordException).toHaveBeenCalled()
   })
 
   test('should pass request with headers to next', async () => {
@@ -167,8 +167,8 @@ describe('createOpenTelemetryHttpInterceptor', () => {
 
     expect(next).toHaveBeenCalledTimes(1)
     const calls = (next as unknown as { mock: { calls: [any][] } }).mock.calls
-    expect(calls[0]![0].method).toBe('GET')
-    expect(calls[0]![0].endpoint).toBe('/test')
-    expect(calls[0]![0].headers).toBeInstanceOf(Headers)
+    expect(calls[0]?.[0].method).toBe('GET')
+    expect(calls[0]?.[0].endpoint).toBe('/test')
+    expect(calls[0]?.[0].headers).toBeInstanceOf(Headers)
   })
 })

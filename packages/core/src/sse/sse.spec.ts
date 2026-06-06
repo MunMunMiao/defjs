@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors, withSseOptions, withCredentials } from '../client'
+import {
+  createClient,
+  resetGlobalClient,
+  setGlobalClient,
+  withCredentials,
+  withEndpoint,
+  withInterceptors,
+  withSseOptions,
+} from '../client'
 import { ERR_ABORTED } from '../error'
 import { createSSEInterceptor } from '../interceptor'
 import { struct, tag } from '../struct'
@@ -8,9 +16,7 @@ import { defineEventStream } from './index'
 
 describe('request event stream runtime', () => {
   beforeEach(() => {
-    setGlobalClient(
-      createClient(withEndpoint(inject('testServerHost'))),
-    )
+    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
   })
 
   afterEach(() => {
@@ -541,9 +547,7 @@ describe('request event stream runtime', () => {
     expect(error?.kind).toBe('transport')
 
     // Restore global client for other tests
-    setGlobalClient(
-      createClient(withEndpoint(inject('testServerHost'))),
-    )
+    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
   })
 
   test('should return http error on non-ok response', async () => {

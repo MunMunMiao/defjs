@@ -1,4 +1,4 @@
-import { metrics, type Meter } from '@opentelemetry/api'
+import { type Meter, metrics } from '@opentelemetry/api'
 
 export interface MetricsOptions {
   serviceName: string
