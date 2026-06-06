@@ -1,0 +1,29 @@
+{
+  "name": "@defjs/opentelemetry",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "module": "src/index.ts",
+  "typings": "src/index.ts",
+  "license": "MIT",
+  "publishConfig": {
+    "directory": "dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/defjs/defjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/defjs/defjs/issues"
+  },
+  "peerDependencies": {
+    "@defjs/core": "^0.3.0",
+    "@opentelemetry/api": "^1.0.0"
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "test:node": "bun x vitest run --config vitest.config.node.ts"
+  }
+}
