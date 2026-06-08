@@ -8,34 +8,73 @@ export type SendQueue = {
   shift(): string | undefined
 }
 
+type QueueNode = {
+  next?: QueueNode
+  value: string
+}
+
 export function createSendQueue(config?: WebSocketQueueConfig): SendQueue {
-  const queue: string[] = []
+  let head: QueueNode | undefined
+  let tail: QueueNode | undefined
+  let size = 0
   const maxSize = config?.maxSize ?? Number.POSITIVE_INFINITY
   const overflow = config?.overflow ?? 'drop-oldest'
 
   return {
     clear() {
-      queue.length = 0
+      head = undefined
+      tail = undefined
+      size = 0
     },
     enqueue(serialized) {
-      if (queue.length < maxSize) {
-        queue.push(serialized)
+      if (size < maxSize) {
+        const node: QueueNode = { value: serialized }
+        if (!tail) {
+          head = tail = node
+        } else {
+          tail.next = node
+          tail = node
+        }
+        size++
         return
       }
 
       switch (overflow) {
         case 'drop-newest':
           return
-        case 'drop-oldest':
-          queue.shift()
-          queue.push(serialized)
+        case 'drop-oldest': {
+          if (head) {
+            head = head.next
+            if (!head) {
+              tail = undefined
+            }
+            size--
+          }
+          const node: QueueNode = { value: serialized }
+          if (!tail) {
+            head = tail = node
+          } else {
+            tail.next = node
+            tail = node
+          }
+          size++
           return
+        }
         case 'error':
           throw new Error('WebSocket send queue overflow')
       }
     },
     shift() {
-      return queue.shift()
+      if (!head) {
+        return undefined
+      }
+      const value = head.value
+      head = head.next
+      if (!head) {
+        tail = undefined
+      }
+      size--
+      return value
     },
   }
 }

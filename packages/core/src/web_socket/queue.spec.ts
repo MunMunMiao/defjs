@@ -52,4 +52,32 @@ describe('web socket send queue', () => {
     }
     expect(queue.shift()).toBe('0')
   })
+
+  test('should preserve FIFO order across many enqueue/shift cycles', () => {
+    const queue = createSendQueue()
+
+    for (let i = 0; i < 1_000; i += 1) {
+      queue.enqueue(String(i))
+    }
+
+    for (let i = 0; i < 1_000; i += 1) {
+      expect(queue.shift()).toBe(String(i))
+    }
+
+    expect(queue.shift()).toBeUndefined()
+  })
+
+  test('should preserve overflow drop-oldest order at large volume', () => {
+    const queue = createSendQueue({ maxSize: 100 })
+
+    for (let i = 0; i < 200; i += 1) {
+      queue.enqueue(String(i))
+    }
+
+    for (let i = 100; i < 200; i += 1) {
+      expect(queue.shift()).toBe(String(i))
+    }
+
+    expect(queue.shift()).toBeUndefined()
+  })
 })
