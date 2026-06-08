@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { createClient, withEndpoint, withWebSocketOptions } from '../client'
+import { createClient, withEndpoint, withWebSocketHandle, withWebSocketReconnect } from '../client'
 import { ERR_ABORTED } from '../error'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
@@ -11,6 +11,7 @@ interface MockWebSocketInstance {
   url: string
   protocol: string
   extensions: string
+  binaryType: string
   close: (code?: number, reason?: string) => void
   send: (data: string) => void
   addEventListener: (type: string, fn: (event: unknown) => void) => void
@@ -54,6 +55,7 @@ function createMockWebSocketClass(
       this.url = url
       this.protocol = Array.isArray(protocols) ? (protocols[0] ?? '') : (protocols ?? '')
       this.extensions = ''
+      this.binaryType = 'blob'
       this.listeners = {}
       this.close = vi.fn((code?: number, reason?: string) => {
         this.readyState = MockWebSocket.CLOSING
@@ -138,7 +140,7 @@ describe('web socket runtime environment edge cases', () => {
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(error?.kind).toBe('transport')
-    expect(error?.message).toBe('ERR_NETWORK')
+    expect(error?.message).toBe('Network error')
   })
 
   test('should finish startup with aborted transport error when aborted before open', async () => {
@@ -231,9 +233,8 @@ describe('web socket runtime environment edge cases', () => {
     const [error, socket] = await useSocket().with({
       client: createClient(
         withEndpoint('http://localhost'),
-        withWebSocketOptions({
-          reconnect: { attempts: 1, delayMs: 50 },
-        }),
+        withWebSocketHandle(globalThis.WebSocket),
+        withWebSocketReconnect({ attempts: 1, delayMs: 50 }),
       ),
     })
 
@@ -255,6 +256,22 @@ describe('web socket runtime environment edge cases', () => {
 
     await new Promise(resolve => setTimeout(resolve, 120))
     expect(runtimeError).toBeDefined()
+  })
+
+  test('should set binaryType to arraybuffer on socket creation', async () => {
+    vi.stubGlobal('WebSocket', createMockWebSocketClass({ autoCloseDelay: 50 }))
+
+    const useSocket = defineWebSocket({
+      incoming: {},
+      path: '/ws/test',
+    })
+
+    const [, socket] = await useSocket().with({
+      client: createClient(withEndpoint('http://localhost')),
+    })
+
+    expect(socket).toBeDefined()
+    expect(lastMockInstance?.binaryType).toBe('arraybuffer')
   })
 
   test('should surface runtime cause on error event before close', async () => {

@@ -93,7 +93,7 @@ export async function setup({ provide }: TestProject) {
     return c.body(null, 200)
   })
 
-  const basicSseHandler = (c: any) => {
+  const basicSSEHandler = (c: any) => {
     c.header('x-request-id', 'trace-sse-basic')
     return streamSSE(c, async stream => {
       await stream.writeSSE({
@@ -110,8 +110,8 @@ export async function setup({ provide }: TestProject) {
     })
   }
 
-  app.get('/sse/basic', basicSseHandler)
-  app.post('/sse/basic', basicSseHandler)
+  app.get('/sse/basic', basicSSEHandler)
+  app.post('/sse/basic', basicSSEHandler)
 
   app.get('/sse/retry', c => {
     const lastEventId = c.req.header('last-event-id')
@@ -391,6 +391,20 @@ export async function setup({ provide }: TestProject) {
         setTimeout(() => {
           if (ws.readyState === 1) {
             ws.send(createSocketMessage('unknown', { note: 'skip-me' }))
+            ws.close(1000, 'done')
+          }
+        }, 10)
+      },
+    })),
+  )
+
+  app.get(
+    '/ws/binary',
+    upgradeWebSocket(() => ({
+      onOpen(_event, ws) {
+        ws.send(Buffer.from(JSON.stringify({ type: 'message', text: 'hello-binary' })))
+        setTimeout(() => {
+          if (ws.readyState === 1) {
             ws.close(1000, 'done')
           }
         }, 10)

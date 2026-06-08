@@ -39,7 +39,7 @@ export async function transformWebSocketMessage<TIncoming extends SocketSchemas>
   incoming: TIncoming,
   raw: unknown,
 ): Promise<WebSocketIncomingData<TIncoming> | undefined> {
-  const decoded = decodeWebSocketData(raw)
+  const decoded = await decodeWebSocketData(raw)
   if (!isRecord(decoded) || typeof decoded['type'] !== 'string' || decoded['type'].length === 0) {
     return undefined
   }
@@ -57,7 +57,7 @@ export async function transformWebSocketMessage<TIncoming extends SocketSchemas>
   return normalizeSocketPayload(messageType, value) as WebSocketIncomingData<TIncoming>
 }
 
-function decodeWebSocketData(raw: unknown): unknown {
+async function decodeWebSocketData(raw: unknown): Promise<unknown> {
   if (typeof raw === 'string') {
     return decodeWebSocketText(raw)
   }
@@ -71,7 +71,7 @@ function decodeWebSocketData(raw: unknown): unknown {
   }
 
   if (typeof Blob !== 'undefined' && raw instanceof Blob) {
-    return undefined
+    return decodeWebSocketText(new TextDecoder().decode(await raw.arrayBuffer()))
   }
 
   return undefined

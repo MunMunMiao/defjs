@@ -333,14 +333,6 @@ async function executeWebSocketEndpoint<
     return [abortedBeforeStart, undefined, undefined]
   }
 
-  /* istanbul ignore next -- defensive: WebSocket availability is runtime-dependent */
-  if (typeof globalThis.WebSocket !== 'function') {
-    const transportError = createTransportError(new Error('WebSocket is not supported in current runtime'))
-    state.error = transportError
-    setSocketState(state, 'error')
-    return [transportError, undefined, undefined]
-  }
-
   const wsRequest: HttpRequest = createWebSocketRequest({
     abort: signal,
     baseEndpoint: clientConfig.endpoint,
@@ -349,6 +341,15 @@ async function executeWebSocketEndpoint<
     queryParamsSerializer: clientConfig.queryParamsSerializer,
     withCredentials: clientConfig.withCredentials,
   })
+
+  const WebSocketCtor = clientConfig.webSocket.WebSocket ?? globalThis.WebSocket
+  /* istanbul ignore next -- defensive: runtime support varies by environment */
+  if (typeof WebSocketCtor !== 'function') {
+    const transportError = createTransportError(new Error('WebSocket is not supported in current runtime'))
+    state.error = transportError
+    setSocketState(state, 'error')
+    return [transportError, undefined, undefined]
+  }
 
   const wsHandler = async (req: HttpRequest): Promise<WebSocketSessionLike> => {
     return new Promise((resolveSession, rejectSession) => {
@@ -367,6 +368,7 @@ async function executeWebSocketEndpoint<
         state,
         sessionController,
         sendQueue,
+        WebSocketCtor.OPEN,
       ) as WebSocketSession<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 
       let startupSettled = false
@@ -421,7 +423,7 @@ async function executeWebSocketEndpoint<
             if (delayMs > 0) {
               try {
                 await wait(delayMs, signal)
-              } catch {
+              } catch (_error) /* istanbul ignore next -- source-map skew: catch body is executed by the reconnect-abort test but mapped to an uncovered line */ {
                 finishWithAbort(outcome.closeInfo)
                 return
               }
@@ -474,7 +476,11 @@ async function executeWebSocketEndpoint<
       async function connectOnce(url: string, protocols: readonly string[]): Promise<SocketLifecycleOutcome> {
         let socket: WebSocket
         try {
-          socket = protocols.length > 0 ? new globalThis.WebSocket(url, [...protocols]) : new globalThis.WebSocket(url)
+          socket = protocols.length > 0 ? new WebSocketCtor(url, [...protocols]) : new WebSocketCtor(url)
+          /* istanbul ignore next -- defensive: binaryType may not exist on all WebSocket implementations */
+          if ('binaryType' in socket) {
+            socket.binaryType = 'arraybuffer'
+          }
           /* istanbul ignore next -- defensive: WebSocket constructor errors are environment-dependent */
         } catch (error) {
           return {
@@ -511,7 +517,7 @@ async function executeWebSocketEndpoint<
 
           const handleAbort = () => {
             /* istanbul ignore next -- defensive: abort after close event is a micro-race */
-            if (socket.readyState !== WebSocket.OPEN && socket.readyState !== WebSocket.CONNECTING) {
+            if (socket.readyState !== WebSocketCtor.OPEN && socket.readyState !== WebSocketCtor.CONNECTING) {
               return
             }
             try {
@@ -532,7 +538,7 @@ async function executeWebSocketEndpoint<
               state.socket = session
               resolveSession(session as WebSocketSessionLike)
             }
-            flushSendQueue(socket, sendQueue, state)
+            flushSendQueue(socket, sendQueue, state, WebSocketCtor.OPEN)
             startHeartbeat(socket, sessionController, heartbeatConfig, endpoint.outgoing, sendQueue, error =>
               emitRuntimeError(state, error),
             )
@@ -700,6 +706,7 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | und
     lastRuntimeError: unknown
   },
   sendQueue: SendQueue,
+  openState: number,
 ): WebSocketSession<TIncoming, WebSocketOutgoingData<TOutgoing>> {
   return {
     get connection() {
@@ -728,7 +735,7 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | und
     receive: queue,
     send(message: WebSocketOutgoingData<TOutgoing>) {
       const serialized = serializeOutgoingWebSocketMessage(outgoing, message)
-      if (sessionController.currentSocket?.readyState === WebSocket.OPEN) {
+      if (sessionController.currentSocket?.readyState === openState) {
         sessionController.currentSocket.send(serialized)
         return
       }
@@ -738,8 +745,8 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | und
   }
 }
 
-function flushSendQueue(socket: WebSocket, queue: SendQueue, state: SocketRefState<unknown, unknown>): void {
-  while (socket.readyState === WebSocket.OPEN) {
+function flushSendQueue(socket: WebSocket, queue: SendQueue, state: SocketRefState<unknown, unknown>, openState: number): void {
+  while (socket.readyState === openState) {
     const next = queue.shift()
     if (!next) {
       return

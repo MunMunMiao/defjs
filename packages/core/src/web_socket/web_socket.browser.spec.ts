@@ -61,6 +61,32 @@ describe('web socket browser runtime', () => {
     await expect(socket.closed).resolves.toMatchObject({ code: 1000 })
   })
 
+  test('should receive binary websocket frames as typed messages', async () => {
+    const useBinarySocket = defineWebSocket({
+      incoming: {
+        message: struct.object({
+          text: struct.string(),
+        }),
+      },
+      path: '/ws/binary',
+    })
+
+    const [error, socket] = await useBinarySocket().with({
+      protocols: ['json'],
+    })
+
+    expect(error).toBeNull()
+    if (!socket) {
+      throw new Error('Expected socket session')
+    }
+
+    const iterator = socket.receive[Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: { text: 'hello-binary', type: 'message' },
+    })
+  })
+
   test('should reconnect in real browsers', async () => {
     const [error, socket] = await defineWebSocket({
       build: (request, input) => {

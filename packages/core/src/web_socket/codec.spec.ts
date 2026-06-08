@@ -121,6 +121,14 @@ describe('serializeOutgoingWebSocketMessage', () => {
     expect(JSON.parse(result)).toEqual({ type: 'msg', text: 'hello' })
   })
 
+  test('serializes primitive payload into data field', () => {
+    const schemas = {
+      msg: struct.string(),
+    }
+    const result = serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: 'hello' })
+    expect(JSON.parse(result)).toEqual({ type: 'msg', data: 'hello' })
+  })
+
   test('serializes with spread fields', () => {
     const schemas = {
       msg: struct.object({ text: struct.string() }),
@@ -221,10 +229,19 @@ describe('transformWebSocketMessage', () => {
     expect(result).toEqual({ type: 'msg', text: 'hello' })
   })
 
-  test('returns undefined for Blob data', async () => {
+  test('returns undefined for Blob data with undeclared type', async () => {
     const incoming = { msg: struct.string() }
-    const blob = new Blob(['{"type":"msg"}'])
+    const blob = new Blob(['{"type":"other"}'])
     expect(await transformWebSocketMessage(incoming, blob)).toBeUndefined()
+  })
+
+  test('transforms Blob message', async () => {
+    const incoming = {
+      msg: struct.object({ text: struct.string() }),
+    }
+    const blob = new Blob([JSON.stringify({ type: 'msg', text: 'hello' })])
+    const result = await transformWebSocketMessage(incoming, blob)
+    expect(result).toEqual({ type: 'msg', text: 'hello' })
   })
 
   test('validates with data field', async () => {
