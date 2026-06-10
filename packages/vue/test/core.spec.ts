@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { createApp, inject } from 'vue'
-import { withHost, withInterceptors, provideClient, injectClient, HTTP_CLIENT } from '../src'
+import { getGlobalClient, resetGlobalClient } from '@defjs/core'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { createApp } from 'vue'
+import { injectClient, provideClient, provideGlobalClient, withHost, withInterceptors } from '../src'
 import { startHonoServer } from './server'
 
 describe('withHost', () => {
@@ -46,7 +47,7 @@ describe('provideClient', () => {
   it('should create a Plugin', () => {
     const plugin = provideClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
+      withInterceptors(() => ({})),
     )
     expect(plugin).toHaveProperty('install')
   })
@@ -57,15 +58,58 @@ describe('provideClient', () => {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
 
-    app.use(provideClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
+    app.use(
+      provideClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
 
     // 验证插件已正确安装（app.use 不会抛出错误）
     expect(app).toBeDefined()
+  })
+})
+
+describe('provideGlobalClient', () => {
+  let server: any
+
+  beforeAll(async () => {
+    server = await startHonoServer()
+  })
+
+  afterAll(async () => {
+    await server.close()
+  })
+
+  afterEach(() => {
+    resetGlobalClient()
+  })
+
+  it('should create a Plugin', () => {
+    const plugin = provideGlobalClient(
+      withHost(`http://localhost:${server.port}`),
+      withInterceptors(() => ({})),
+    )
+    expect(plugin).toHaveProperty('install')
+  })
+
+  it('should set global client', () => {
+    const app = createApp({
+      template: '<div></div>',
+    })
+
+    app.use(
+      provideGlobalClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
+
+    // 验证全局 client 已被设置且可通过 getGlobalClient 获取
+    const globalClient = getGlobalClient()
+    expect(globalClient).toBeDefined()
   })
 })
