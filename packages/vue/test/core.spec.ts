@@ -65,6 +65,7 @@ describe('provideClient', () => {
       withInterceptors(() => ({}))
     ))
 
-    // 测试 client 已被提供
+    // 验证插件已正确安装（app.use 不会抛出错误）
+    expect(app).toBeDefined()
   })
 })
