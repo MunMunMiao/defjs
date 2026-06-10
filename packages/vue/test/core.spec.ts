@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest'
-import { withHost, withInterceptors } from '../src'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { createApp, inject } from 'vue'
+import { withHost, withInterceptors, provideClient, injectClient, HTTP_CLIENT } from '../src'
+import { startHonoServer } from './server'
 
 describe('withHost', () => {
   it('should return a ClientOption function', () => {
@@ -27,5 +29,42 @@ describe('withInterceptors', () => {
     const option = withInterceptors(() => interceptor)
     option(config)
     expect(config.interceptors).toEqual([interceptor])
+  })
+})
+
+describe('provideClient', () => {
+  let server: any
+
+  beforeAll(async () => {
+    server = await startHonoServer()
+  })
+
+  afterAll(async () => {
+    await server.close()
+  })
+
+  it('should create a Plugin', () => {
+    const plugin = provideClient(
+      withHost(`http://localhost:${server.port}`),
+      withInterceptors(() => ({}))
+    )
+    expect(plugin).toHaveProperty('install')
+  })
+
+  it('should provide client via app.provide', async () => {
+    const app = createApp({
+      setup() {
+        const client = injectClient()
+        return { client }
+      },
+      template: '<div></div>'
+    })
+
+    app.use(provideClient(
+      withHost(`http://localhost:${server.port}`),
+      withInterceptors(() => ({}))
+    ))
+
+    // 测试 client 已被提供
   })
 })
