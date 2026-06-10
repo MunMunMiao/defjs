@@ -1,18 +1,18 @@
-import { serve, type ServerType } from '@hono/node-server'
+import { type ServerType, serve } from '@hono/node-server'
 import { Hono } from 'hono'
 
 export async function startHonoServer() {
   const app = new Hono()
 
   // 定义测试路由
-  app.get('/api/users', (c) => {
+  app.get('/api/users', c => {
     return c.json([
       { id: 1, name: 'John' },
       { id: 2, name: 'Jane' },
     ])
   })
 
-  app.get('/api/users/:id', (c) => {
+  app.get('/api/users/:id', c => {
     const id = c.req.param('id')
     return c.json({ id: Number(id), name: 'John' })
   })
@@ -25,7 +25,7 @@ export async function startHonoServer() {
         fetch: app.fetch,
         port: 0, // 随机端口
       },
-      (info) => {
+      info => {
         resolve(info.port)
       },
     )
