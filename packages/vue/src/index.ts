@@ -1,1 +1,1 @@
-export { withHost } from './core'
+export { withHost, withInterceptors } from './core'
