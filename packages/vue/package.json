@@ -1,0 +1,32 @@
+{
+  "name": "@defjs/vue",
+  "version": "1.0.0",
+  "type": "module",
+  "module": "dist/index.js",
+  "typings": "dist/index.d.ts",
+  "license": "MIT",
+  "peerDependencies": {
+    "vue": ">=3.0.0",
+    "@defjs/core": "^0.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/defjs/defjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/defjs/defjs/issues"
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "pub": "cd dist && bun publish"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  }
+}
