@@ -1,9 +1,6 @@
 packages:
   - 'packages/*'
 
-allowBuilds:
-  esbuild: true
-
 catalog:
   '@biomejs/biome': '2.5.0'
   '@changesets/changelog-github': '^0.7.0'
@@ -23,22 +20,3 @@ catalog:
   typescript: '^6.0.3'
   vite: '^8.0.16'
   vitest: '^4.1.8'
-
-minimumReleaseAgeExclude:
-  - '@biomejs/biome@2.5.0'
-  - '@biomejs/cli-darwin-arm64@2.5.0'
-  - '@biomejs/cli-darwin-x64@2.5.0'
-  - '@biomejs/cli-linux-arm64-musl@2.5.0'
-  - '@biomejs/cli-linux-arm64@2.5.0'
-  - '@biomejs/cli-linux-x64-musl@2.5.0'
-  - '@biomejs/cli-linux-x64@2.5.0'
-  - '@biomejs/cli-win32-arm64@2.5.0'
-  - '@biomejs/cli-win32-x64@2.5.0'
-  - '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260612.1'
-  - '@typescript/native-preview-darwin-x64@7.0.0-dev.20260612.1'
-  - '@typescript/native-preview-linux-arm64@7.0.0-dev.20260612.1'
-  - '@typescript/native-preview-linux-arm@7.0.0-dev.20260612.1'
-  - '@typescript/native-preview-linux-x64@7.0.0-dev.20260612.1'
-  - '@typescript/native-preview-win32-arm64@7.0.0-dev.20260612.1'
-  - '@typescript/native-preview-win32-x64@7.0.0-dev.20260612.1'
-  - '@typescript/native-preview@7.0.0-dev.20260612.1'
