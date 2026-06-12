@@ -37,7 +37,7 @@
     "build": "tsdown",
     "lint": "biome check",
     "lint:fix": "biome check --write",
-    "pub": "bun publish dist",
+    "pub": "pnpm publish",
     "test": "vitest run --config vitest.config.ts --coverage.provider istanbul",
     "typecheck": "tsgo --project tsconfig.json --noEmit"
   }
