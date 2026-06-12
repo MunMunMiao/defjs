@@ -1,12 +1,10 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
-    "baseUrl": ".",
     "outDir": "./dist",
     "declaration": true,
     "noEmit": false,
     "emitDeclarationOnly": false,
-    "esModuleInterop": false,
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "target": "ESNext",
     "module": "ESNext",
@@ -21,5 +19,5 @@
     "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": true
   },
-  "include": ["src/**/*.ts", "test-setup.ts"]
+  "include": ["src/**/*.ts"]
 }

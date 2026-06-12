@@ -18,11 +18,11 @@
     "url": "https://github.com/defjs/defjs/issues"
   },
   "scripts": {
-    "build": "bun scripts/build.ts",
+    "build": "tsdown",
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "pub": "bun publish dist",
-    "typecheck": "bun x tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsgo --project tsconfig.json --noEmit"
   },
   "exports": {
     "./package.json": "./package.json",
@@ -30,5 +30,11 @@
       "types": "./index.d.ts",
       "default": "./index.js"
     }
+  },
+  "devDependencies": {
+    "@typescript/native-preview": "catalog:",
+    "tsdown": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:"
   }
 }
