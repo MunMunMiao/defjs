@@ -1,35 +1,17 @@
 {
   "name": "@defjs/angular",
   "version": "19.0.0",
-  "type": "module",
-  "engines": {
-    "node": ">=26"
+  "bugs": {
+    "url": "https://github.com/defjs/defjs/issues"
   },
-  "module": "dist/index.js",
-  "typings": "dist/index.d.ts",
   "license": "MIT",
-  "publishConfig": {
-    "directory": "dist"
-  },
-  "peerDependencies": {
-    "@angular/common": ">=18.0.0 <=22.0.0",
-    "@angular/core": ">=18.0.0 <=22.0.0",
-    "@defjs/core": "workspace:^"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/defjs/defjs.git"
   },
-  "bugs": {
-    "url": "https://github.com/defjs/defjs/issues"
-  },
-  "scripts": {
-    "build": "tsdown",
-    "lint": "biome check",
-    "lint:fix": "biome check --write",
-    "pub": "pnpm publish",
-    "typecheck": "tsgo --project tsconfig.json --noEmit"
-  },
+  "type": "module",
+  "module": "dist/index.js",
+  "typings": "dist/index.d.ts",
   "exports": {
     "./package.json": "./package.json",
     ".": {
@@ -37,10 +19,30 @@
       "default": "./index.js"
     }
   },
+  "publishConfig": {
+    "directory": "dist"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "pub": "pnpm publish",
+    "typecheck": "tsgo --project tsconfig.json --noEmit",
+    "fmt": "oxfmt . --write",
+    "fmt:check": "oxfmt . --check"
+  },
   "devDependencies": {
     "@typescript/native-preview": "catalog:",
     "tsdown": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "@angular/common": ">=18.0.0 <=22.0.0",
+    "@angular/core": ">=18.0.0 <=22.0.0",
+    "@defjs/core": "workspace:^"
+  },
+  "engines": {
+    "node": ">=26"
   }
 }

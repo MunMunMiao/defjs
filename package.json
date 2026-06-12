@@ -3,12 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.6.0",
-  "engines": {
-    "node": ">=26"
+  "scripts": {
+    "build": "pnpm -r run build",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "check": "pnpm lint && pnpm fmt:check && pnpm typecheck",
+    "fmt": "oxfmt . --write",
+    "fmt:check": "oxfmt . --check",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r --if-present run typecheck"
   },
   "devDependencies": {
-    "@biomejs/biome": "catalog:",
     "@changesets/changelog-github": "catalog:",
     "@changesets/cli": "catalog:",
     "@hono/node-server": "catalog:",
@@ -20,6 +27,9 @@
     "@vitest/coverage-istanbul": "catalog:",
     "@vitest/ui": "catalog:",
     "hono": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
     "playwright": "catalog:",
     "tsdown": "catalog:",
     "tsx": "catalog:",
@@ -27,13 +37,8 @@
     "vite": "catalog:",
     "vitest": "catalog:"
   },
-  "scripts": {
-    "build": "pnpm -r run build",
-    "changeset": "changeset",
-    "changeset:version": "changeset version",
-    "lint": "biome check .",
-    "lint:fix": "biome check . --write",
-    "test": "pnpm -r run test",
-    "typecheck": "pnpm -r --if-present run typecheck"
-  }
+  "engines": {
+    "node": ">=26"
+  },
+  "packageManager": "pnpm@11.6.0"
 }

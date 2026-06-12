@@ -1,18 +1,32 @@
 {
   "name": "@defjs/core",
   "version": "0.4.0",
-  "type": "module",
-  "engines": {
-    "node": ">=26"
+  "bugs": {
+    "url": "https://github.com/defjs/defjs/issues"
   },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/defjs/defjs.git"
+  },
+  "type": "module",
+  "module": "src/index.ts",
+  "typings": "src/index.ts",
   "exports": {
     ".": "./src/index.ts"
   },
-  "module": "src/index.ts",
-  "typings": "src/index.ts",
-  "license": "MIT",
   "publishConfig": {
     "directory": "dist"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "pub": "pnpm publish",
+    "test": "vitest run --config vitest.config.ts --coverage",
+    "typecheck": "tsgo --project tsconfig.json --noEmit",
+    "fmt": "oxfmt . --write",
+    "fmt:check": "oxfmt . --check"
   },
   "devDependencies": {
     "@hono/node-server": "catalog:",
@@ -26,19 +40,7 @@
     "tsdown": "catalog:",
     "vitest": "catalog:"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/defjs/defjs.git"
-  },
-  "bugs": {
-    "url": "https://github.com/defjs/defjs/issues"
-  },
-  "scripts": {
-    "build": "tsdown",
-    "lint": "biome check",
-    "lint:fix": "biome check --write",
-    "pub": "pnpm publish",
-    "test": "vitest run --config vitest.config.ts --coverage",
-    "typecheck": "tsgo --project tsconfig.json --noEmit"
+  "engines": {
+    "node": ">=26"
   }
 }
