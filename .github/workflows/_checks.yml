@@ -1,0 +1,74 @@
+name: Checks
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: 'Package to run checks for (empty = all packages)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm-deps
+      - name: Check lockfile health
+        run: pnpm dedupe --check
+
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm-deps
+      - name: ${{ matrix.task }}
+        run: |
+          if [ -n "${{ inputs.package }}" ]; then
+            pnpm --filter @defjs/${{ inputs.package }} run ${{ matrix.task }}
+          else
+            pnpm run ${{ matrix.task }}
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm-deps
+      - name: Get Playwright version
+        id: playwright-version
+        shell: bash
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium firefox
+      - name: Test
+        run: |
+          if [ -n "${{ inputs.package }}" ]; then
+            pnpm --filter @defjs/${{ inputs.package }} run test
+          else
+            pnpm run test
+          fi
+
+  build:
+    needs: [lockfile, quality, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm-deps
+      - name: Build
+        run: |
+          if [ -n "${{ inputs.package }}" ]; then
+            pnpm --filter @defjs/${{ inputs.package }} run build
+          else
+            pnpm run build
+          fi

@@ -2,112 +2,47 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      any: ${{ steps.filter.outputs.any }}
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-
-  test-node:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
         with:
-          node-version: 22
-      - run: npm ci
-      - run: cd packages/core && npm run test:node
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4.5.0
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          filters: |
+            any:
+              - '**'
+              - '!**.md'
+              - '!docs/**'
+              - '!**/*.drawio'
+              - '!LICENSE'
 
-  test-bun:
+  checks:
+    needs: changes
+    if: ${{ needs.changes.outputs.any == 'true' }}
+    uses: ./.github/workflows/_checks.yml
+    secrets: inherit
+
+  dependency-review:
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.any == 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run test:bun
-
-  test-deno:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/dependency-review-action@v4
         with:
-          node-version: 22
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: deno cache --node-modules-dir=auto --lock=deno.lock --frozen npm:vitest
-      - run: cd packages/core && npm run test:deno
-
-  test-browser-chrome:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: cd packages/core && bun run test:chrome
-
-  test-browser-firefox:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: cd packages/core && bun run test:firefox
-
-  test-browser-safari:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: safaridriver --enable
-      - run: cd packages/core && bun run test:safari
-
-  build:
-    needs:
-      - lint
-      - typecheck
-      - test-node
-      - test-bun
-      - test-deno
-      - test-browser-chrome
-      - test-browser-firefox
-      - test-browser-safari
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run build
+          fail-on-severity: moderate
