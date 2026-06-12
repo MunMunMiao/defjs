@@ -1,1 +1,1 @@
-export { injectClient, provideClient, provideGlobalClient, withHost, withInterceptors } from './core'
+export * from './public_api'

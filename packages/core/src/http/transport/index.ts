@@ -1,1 +1,1 @@
-export { fetchHandler } from './fetch'
+export * from './public_api'
