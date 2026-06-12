@@ -1,0 +1,192 @@
+import { ROOT_CONTEXT, SpanKind, SpanStatusCode } from '@opentelemetry/api'
+import { describe, expect, test, vi } from 'vitest'
+import { createMockTracer } from '../test-utils'
+import {
+  addSpanEvent,
+  createHttpSpan,
+  createSSESpan,
+  createWebSocketSpan,
+  endSpan,
+  runSpanHook,
+  setSpanError,
+  setSpanHttpResponse,
+} from './trace'
+
+describe('trace helpers', () => {
+  test('createHttpSpan', () => {
+    const { tracer, spans } = createMockTracer()
+    createHttpSpan(tracer, 'POST', 'https://api.example.com/test', ROOT_CONTEXT)
+
+    expect(spans).toHaveLength(1)
+    expect(spans[0]?.name).toBe('HTTP POST')
+    expect(spans[0]?.kind).toBe(SpanKind.CLIENT)
+    expect(spans[0]?.attributes['http.request.method']).toBe('POST')
+    expect(spans[0]?.attributes['url.full']).toBe('https://api.example.com/test')
+  })
+
+  test('createSSESpan', () => {
+    const { tracer, spans } = createMockTracer()
+    createSSESpan(tracer, 'https://api.example.com/events', ROOT_CONTEXT)
+
+    expect(spans).toHaveLength(1)
+    expect(spans[0]?.name).toBe('SSE')
+    expect(spans[0]?.kind).toBe(SpanKind.CLIENT)
+    expect(spans[0]?.attributes['url.full']).toBe('https://api.example.com/events')
+  })
+
+  test('createWebSocketSpan', () => {
+    const { tracer, spans } = createMockTracer()
+    createWebSocketSpan(tracer, 'wss://api.example.com/ws', ROOT_CONTEXT)
+
+    expect(spans).toHaveLength(1)
+    expect(spans[0]?.name).toBe('WebSocket')
+    expect(spans[0]?.kind).toBe(SpanKind.CLIENT)
+    expect(spans[0]?.attributes['url.full']).toBe('wss://api.example.com/ws')
+  })
+
+  test('setSpanHttpResponse with 2xx status', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanHttpResponse(span, 200)
+
+    expect(spans[0]?.attributes['http.response.status_code']).toBe(200)
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.OK)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('setSpanHttpResponse with non-2xx status', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanHttpResponse(span, 500)
+
+    expect(spans[0]?.attributes['http.response.status_code']).toBe(500)
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('setSpanError with Error instance', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanError(span, new Error('boom'))
+
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('setSpanError with non-Error value', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanError(span, 'string error')
+
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('setSpanError with undefined', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanError(span, undefined)
+
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('endSpan', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    endSpan(span)
+
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.OK)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('runSpanHook returns without calling missing hook', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    runSpanHook(span, 'missingHook', undefined)
+
+    expect(spans[0]?.addEvent).not.toHaveBeenCalled()
+    expect(spans[0]?.recordException).not.toHaveBeenCalled()
+  })
+
+  test('runSpanHook calls provided hook', () => {
+    const { tracer } = createMockTracer()
+    const span = tracer.startSpan('test')
+    const hook = vi.fn()
+    runSpanHook(span, 'requestHook', hook)
+
+    expect(hook).toHaveBeenCalledTimes(1)
+  })
+
+  test('runSpanHook records non-Error hook failures', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    const error: unknown = 'boom'
+    runSpanHook(span, 'requestHook', () => {
+      throw error
+    })
+
+    expect(spans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', {
+      'error.type': 'boom',
+      'hook.name': 'requestHook',
+    })
+    expect(spans[0]?.recordException).toHaveBeenCalledWith(new Error('boom'))
+  })
+
+  test('runSpanHook uses Error fallback when Error name is empty', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    const error = new Error('boom')
+    error.name = ''
+
+    runSpanHook(span, 'requestHook', () => {
+      throw error
+    })
+
+    expect(spans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', {
+      'error.type': 'Error',
+      'hook.name': 'requestHook',
+    })
+    expect(spans[0]?.recordException).toHaveBeenCalledWith(error)
+  })
+
+  test('runSpanHook records non-string non-Error hook failures', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    runSpanHook(span, 'requestHook', () => {
+      throw 42
+    })
+
+    expect(spans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', {
+      'error.type': 'number',
+      'hook.name': 'requestHook',
+    })
+    expect(spans[0]?.recordException).toHaveBeenCalledWith(new Error('42'))
+  })
+
+  test('endSpan does not overwrite already set status', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanError(span, new Error('boom'))
+    endSpan(span)
+
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('addSpanEvent calls span.addEvent without attributes', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    addSpanEvent(span, 'custom.event')
+
+    expect(spans[0]?.addEvent).toHaveBeenCalledWith('custom.event')
+  })
+
+  test('addSpanEvent calls span.addEvent with attributes', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    addSpanEvent(span, 'custom.event', { 'custom.key': 'value' })
+
+    expect(spans[0]?.addEvent).toHaveBeenCalledWith('custom.event', { 'custom.key': 'value' })
+  })
+})

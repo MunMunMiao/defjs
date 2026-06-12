@@ -27,7 +27,7 @@
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "pub": "pnpm publish",
-    "test": "vitest run --config vitest.config.ts",
+    "test": "vitest run --config vitest.config.ts --coverage",
     "typecheck": "tsgo --project tsconfig.json --noEmit"
   },
   "exports": {

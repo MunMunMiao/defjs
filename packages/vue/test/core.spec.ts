@@ -33,6 +33,19 @@ describe('withInterceptors', () => {
   })
 })
 
+describe('injectClient', () => {
+  it('should throw when no client is provided', () => {
+    const app = createApp({
+      setup() {
+        return { client: injectClient() }
+      },
+      template: '<div></div>',
+    })
+
+    expect(() => app.mount(document.createElement('div'))).toThrow('No HTTP client provided')
+  })
+})
+
 describe('provideClient', () => {
   let server: any
 
@@ -53,10 +66,11 @@ describe('provideClient', () => {
   })
 
   it('should provide client via app.provide', async () => {
+    let injectedClient: ReturnType<typeof injectClient> | undefined
     const app = createApp({
       setup() {
-        const client = injectClient()
-        return { client }
+        injectedClient = injectClient()
+        return { client: injectedClient }
       },
       template: '<div></div>',
     })
@@ -68,8 +82,8 @@ describe('provideClient', () => {
       ),
     )
 
-    // 验证插件已正确安装（app.use 不会抛出错误）
-    expect(app).toBeDefined()
+    app.mount(document.createElement('div'))
+    expect(injectedClient).toBeDefined()
   })
 })
 

@@ -6,10 +6,10 @@ const browserConfig = fileURLToPath(new URL('./vitest.config.browser.ts', import
 
 export default defineConfig({
   test: {
+    coverage: {
+      enabled: true,
+      provider: 'istanbul',
+    },
     projects: [nodeConfig, browserConfig],
-  },
-  coverage: {
-    enabled: true,
-    provider: 'istanbul',
   },
 })

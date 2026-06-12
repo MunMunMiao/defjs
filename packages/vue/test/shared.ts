@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 export const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 export const globalSetupPath = resolve(packageRoot, 'test/setup.ts')
 export const coverageConfig = {
-  enabled: false,
+  enabled: true,
   provider: 'istanbul' as const,
   reporter: ['lcov', 'json', 'html', 'text'],
   reportsDirectory: resolve(packageRoot, 'coverage'),
