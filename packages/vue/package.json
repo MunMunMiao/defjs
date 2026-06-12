@@ -17,13 +17,12 @@
     "url": "https://github.com/defjs/defjs/issues"
   },
   "scripts": {
-    "build": "bun scripts/build.ts",
+    "build": "tsdown",
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "pub": "bun publish dist",
-    "test:chrome": "bun x vitest run --config vitest.config.browser.chrome.ts",
-    "test:firefox": "bun x vitest run --config vitest.config.browser.firefox.ts",
-    "typecheck": "bun x tsc -p tsconfig.json --noEmit"
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsgo --project tsconfig.json --noEmit"
   },
   "exports": {
     "./package.json": "./package.json",
@@ -31,5 +30,18 @@
       "types": "./index.d.ts",
       "default": "./index.js"
     }
+  },
+  "devDependencies": {
+    "@hono/node-server": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "@vitest/browser": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "hono": "catalog:",
+    "playwright": "catalog:",
+    "tsdown": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

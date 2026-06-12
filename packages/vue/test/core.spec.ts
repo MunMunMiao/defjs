@@ -20,14 +20,14 @@ describe('withHost', () => {
 
 describe('withInterceptors', () => {
   it('should return a ClientOption function', () => {
-    const option = withInterceptors(() => ({}))
+    const option = withInterceptors((() => ({})) as unknown as Parameters<typeof withInterceptors>[0])
     expect(typeof option).toBe('function')
   })
 
   it('should set interceptors in config', () => {
     const config = {} as any
-    const interceptor = () => ({})
-    const option = withInterceptors(() => interceptor)
+    const interceptor = (() => ({})) as unknown as Parameters<typeof withInterceptors>[0]
+    const option = withInterceptors(interceptor)
     option(config)
     expect(config.interceptors).toEqual([interceptor])
   })
@@ -47,7 +47,7 @@ describe('provideClient', () => {
   it('should create a Plugin', () => {
     const plugin = provideClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({})),
+      withInterceptors((() => ({})) as unknown as Parameters<typeof withInterceptors>[0]),
     )
     expect(plugin).toHaveProperty('install')
   })
@@ -64,7 +64,7 @@ describe('provideClient', () => {
     app.use(
       provideClient(
         withHost(`http://localhost:${server.port}`),
-        withInterceptors(() => ({})),
+        withInterceptors((() => ({})) as unknown as Parameters<typeof withInterceptors>[0]),
       ),
     )
 
@@ -91,7 +91,7 @@ describe('provideGlobalClient', () => {
   it('should create a Plugin', () => {
     const plugin = provideGlobalClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({})),
+      withInterceptors((() => ({})) as unknown as Parameters<typeof withInterceptors>[0]),
     )
     expect(plugin).toHaveProperty('install')
   })
@@ -104,7 +104,7 @@ describe('provideGlobalClient', () => {
     app.use(
       provideGlobalClient(
         withHost(`http://localhost:${server.port}`),
-        withInterceptors(() => ({})),
+        withInterceptors((() => ({})) as unknown as Parameters<typeof withInterceptors>[0]),
       ),
     )
 
