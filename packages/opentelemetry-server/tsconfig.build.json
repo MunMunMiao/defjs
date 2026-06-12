@@ -1,11 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": [],
-    "declaration": true,
-    "outDir": "./dist",
-    "rootDir": "./src"
+    "types": []
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.spec.ts", "src/**/*.type.test.ts"]
+  "exclude": ["test", "scripts", "src/**/*.spec.ts", "src/**/*.type.test.ts", "e2e.spec.ts"]
 }

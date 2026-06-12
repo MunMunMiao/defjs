@@ -24,10 +24,22 @@
     "@opentelemetry/core": "^1.0.0"
   },
   "scripts": {
-    "build": "bun scripts/build.ts",
+    "build": "tsdown",
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "pub": "bun publish dist",
-    "typecheck": "bun x tsc -p tsconfig.json --noEmit"
+    "test": "vitest run --config vitest.config.node.ts",
+    "typecheck": "tsgo --project tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@hono/node-server": "catalog:",
+    "@hono/node-ws": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "hono": "catalog:",
+    "tsdown": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

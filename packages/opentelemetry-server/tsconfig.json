@@ -2,8 +2,11 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["vitest/globals"]
+    "types": ["@types/node", "vitest/globals"],
+    "isolatedModules": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noPropertyAccessFromIndexSignature": true
   },
-  "include": ["src/**/*", "test-setup.ts"],
-  "exclude": ["node_modules", "dist", "src/**/*.spec.ts"]
+  "include": ["src/**/*", "test/**/*.ts", "e2e.spec.ts", "scripts/**/*.ts"]
 }
