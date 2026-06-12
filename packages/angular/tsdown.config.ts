@@ -32,7 +32,9 @@ export default defineConfig({
   minify: false,
   sourcemap: false,
   tsconfig: './tsconfig.build.json',
-  external: ['@angular/common', '@angular/core', '@defjs/core'],
+  deps: {
+    neverBundle: ['@angular/common', '@angular/core', '@defjs/core'],
+  },
   copy: ['../../LICENSE', './README.md'],
   hooks: {
     async 'build:done'({ options }) {

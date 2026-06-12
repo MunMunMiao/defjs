@@ -32,7 +32,9 @@ export default defineConfig({
   minify: false,
   sourcemap: false,
   tsconfig: './tsconfig.build.json',
-  external: ['vue', '@defjs/core'],
+  deps: {
+    neverBundle: ['vue', '@defjs/core'],
+  },
   copy: ['../../LICENSE', './README.md'],
   hooks: {
     async 'build:done'({ options }) {

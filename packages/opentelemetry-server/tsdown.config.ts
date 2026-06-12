@@ -33,7 +33,9 @@ export default defineConfig([
     minify: true,
     sourcemap: false,
     tsconfig: './tsconfig.build.json',
-    external: ['@defjs/core', '@opentelemetry/api', '@opentelemetry/core'],
+    deps: {
+      neverBundle: ['@defjs/core', '@opentelemetry/api', '@opentelemetry/core'],
+    },
     outExtensions: () => ({ js: '.min.js' }),
   },
   {
@@ -47,7 +49,9 @@ export default defineConfig([
     minify: false,
     sourcemap: false,
     tsconfig: './tsconfig.build.json',
-    external: ['@defjs/core', '@opentelemetry/api', '@opentelemetry/core'],
+    deps: {
+      neverBundle: ['@defjs/core', '@opentelemetry/api', '@opentelemetry/core'],
+    },
     copy: ['../../LICENSE', './README.md'],
     hooks: {
       async 'build:done'({ options }) {
