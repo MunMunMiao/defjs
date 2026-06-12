@@ -12,7 +12,16 @@
     "directory": "dist"
   },
   "devDependencies": {
-    "tsdown": "catalog:"
+    "@hono/node-server": "catalog:",
+    "@hono/node-ws": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "@vitest/browser": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "hono": "catalog:",
+    "playwright": "catalog:",
+    "tsdown": "catalog:",
+    "vitest": "catalog:"
   },
   "repository": {
     "type": "git",
@@ -26,7 +35,7 @@
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "pub": "bun publish dist",
-    "test": "bun x vitest run --config vitest.config.ts",
-    "typecheck": "bun x tsc -p tsconfig.json --noEmit"
+    "test": "vitest run --config vitest.config.ts --coverage.provider istanbul",
+    "typecheck": "tsgo --project tsconfig.json --noEmit"
   }
 }

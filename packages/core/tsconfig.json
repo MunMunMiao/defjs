@@ -19,5 +19,6 @@
     "noUnusedLocals": true,
     "noPropertyAccessFromIndexSignature": true
   },
-  "include": ["src/**/*.ts", "test-setup.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["src/handler"]
 }

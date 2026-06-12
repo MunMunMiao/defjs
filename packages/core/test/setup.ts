@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import type { TestProject } from 'vitest/node'
+import { registerXsrfRoutes } from './xsrf-middleware'
 
 declare module 'vitest' {
   export interface ProvidedContext {
@@ -25,9 +26,27 @@ type ServerConnectionCleanup = {
 
 export async function setup({ provide }: TestProject) {
   const app = new Hono()
+  registerXsrfRoutes(app)
   const reconnectAttempts = new Map<string, number>()
 
-  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+  const delay = (ms: number, signal?: AbortSignal) =>
+    new Promise<void>(resolve => {
+      if (ms <= 0 || signal?.aborted) {
+        resolve()
+        return
+      }
+
+      const timeout = setTimeout(done, ms)
+      timeout.unref?.()
+
+      function done() {
+        clearTimeout(timeout)
+        signal?.removeEventListener('abort', done)
+        resolve()
+      }
+
+      signal?.addEventListener('abort', done, { once: true })
+    })
 
   function createSocketMessage(type: string, payload: unknown): string {
     if (typeof payload === 'object' && payload !== null && !Array.isArray(payload)) {
@@ -89,7 +108,7 @@ export async function setup({ provide }: TestProject) {
   app.get('/account/not-found', c => c.json({ code: 'ACCOUNT_NOT_FOUND', message: 'Account not found' }, 404))
 
   app.get('/delay', async c => {
-    await delay(Number(c.req.query('ms') ?? '0'))
+    await delay(Number(c.req.query('ms') ?? '0'), c.req.raw.signal)
     return c.body(null, 200)
   })
 
@@ -139,7 +158,7 @@ export async function setup({ provide }: TestProject) {
   })
 
   app.get('/sse/slow', async c => {
-    await delay(500)
+    await delay(500, c.req.raw.signal)
     return c.body(null, 500)
   })
 
@@ -205,6 +224,7 @@ export async function setup({ provide }: TestProject) {
 
   app.get('/sse/infinite', c => {
     c.header('x-request-id', 'trace-sse-infinite')
+    const requestSignal = c.req.raw.signal
     return streamSSE(c, async stream => {
       let count = 0
 
@@ -220,20 +240,33 @@ export async function setup({ provide }: TestProject) {
       await writeTick()
 
       await new Promise<void>(resolve => {
+        let settled = false
         const interval = setInterval(() => {
           if (stream.aborted) {
-            clearInterval(interval)
-            resolve()
+            done()
             return
           }
 
           void writeTick()
         }, 20)
+        interval.unref?.()
 
-        stream.onAbort(() => {
+        function done() {
+          if (settled) {
+            return
+          }
+
+          settled = true
           clearInterval(interval)
+          requestSignal.removeEventListener('abort', done)
           resolve()
-        })
+        }
+
+        stream.onAbort(done)
+        requestSignal.addEventListener('abort', done, { once: true })
+        if (requestSignal.aborted) {
+          done()
+        }
       })
     })
   })
@@ -402,7 +435,7 @@ export async function setup({ provide }: TestProject) {
     '/ws/binary',
     upgradeWebSocket(() => ({
       onOpen(_event, ws) {
-        ws.send(Buffer.from(JSON.stringify({ type: 'message', text: 'hello-binary' })))
+        ws.send(new TextEncoder().encode(JSON.stringify({ type: 'message', text: 'hello-binary' })))
         setTimeout(() => {
           if (ws.readyState === 1) {
             ws.close(1000, 'done')
