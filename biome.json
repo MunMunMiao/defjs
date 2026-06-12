@@ -1,22 +1,31 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.8/schema.json",
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
   "files": {
-    "ignoreUnknown": true,
-    "includes": [
-      "**/*",
-      "!**/coverage",
-      "!**/coverage/**",
-      "!**/coverage-*",
-      "!**/coverage-*/**",
-      "!**/dist",
-      "!**/dist/**",
-      "!**/research",
-      "!**/research/**"
-    ]
+    "ignoreUnknown": true
   },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "overrides": [
+    {
+      "includes": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/coverage/**",
+        "**/test-out/**",
+        "**/build/**",
+        "**/.next/**",
+        "**/out/**",
+        "**/.claude/**",
+        "**/playwright-report/**",
+        "**/blob-report/**",
+        "**/test-results/**"
+      ],
+      "linter": { "enabled": false },
+      "formatter": { "enabled": false },
+      "assist": { "enabled": false }
+    }
+  ],
   "javascript": {
-    "globals": ["Bun"],
+    "globals": [],
     "formatter": {
       "quoteStyle": "single",
       "jsxQuoteStyle": "single",
@@ -32,10 +41,11 @@
   },
   "linter": {
     "enabled": true,
-    "includes": ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.js", "**/*.,js", "**/*.json"],
+    "includes": ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.js", "**/*.json"],
     "rules": {
-      "recommended": false,
+      "preset": "none",
       "complexity": {
+        "noBannedTypes": "error",
         "noExtraBooleanCast": "error",
         "noStaticOnlyClass": "error",
         "noUselessCatch": "error",
@@ -71,6 +81,7 @@
         "noUnusedImports": "error",
         "noUnusedLabels": "error",
         "noUnusedPrivateClassMembers": "error",
+        "noUnusedVariables": "error",
         "useIsNan": "error",
         "useValidForDirection": "error",
         "useYield": "error",
