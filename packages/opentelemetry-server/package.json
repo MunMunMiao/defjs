@@ -1,6 +1,6 @@
 {
   "name": "@defjs/opentelemetry-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -19,12 +19,15 @@
     "url": "https://github.com/defjs/defjs/issues"
   },
   "peerDependencies": {
-    "@defjs/core": "^0.3.0",
+    "@defjs/core": "workspace:^",
     "@opentelemetry/api": "^1.0.0",
     "@opentelemetry/core": "^1.0.0"
   },
   "scripts": {
     "build": "bun scripts/build.ts",
-    "test:node": "bun x vitest run --config vitest.config.node.ts"
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "pub": "bun publish dist",
+    "typecheck": "bun x tsc -p tsconfig.json --noEmit"
   }
 }

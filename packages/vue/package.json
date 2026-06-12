@@ -7,7 +7,7 @@
   "license": "MIT",
   "peerDependencies": {
     "vue": ">=3.0.0",
-    "@defjs/core": "^0.4.0"
+    "@defjs/core": "workspace:^"
   },
   "repository": {
     "type": "git",
@@ -20,9 +20,10 @@
     "build": "bun scripts/build.ts",
     "lint": "biome check",
     "lint:fix": "biome check --write",
-    "pub": "cd dist && bun publish",
-    "test:bun": "env -u NODE PATH=\"${PATH#$NODE:}\" bun ../../node_modules/vitest/vitest.mjs run --config vitest.config.bun.ts src",
-    "test:chrome": "bun x vitest run --config vitest.config.browser.chrome.ts"
+    "pub": "bun publish dist",
+    "test:chrome": "bun x vitest run --config vitest.config.browser.chrome.ts",
+    "test:firefox": "bun x vitest run --config vitest.config.browser.firefox.ts",
+    "typecheck": "bun x tsc -p tsconfig.json --noEmit"
   },
   "exports": {
     "./package.json": "./package.json",

@@ -6,9 +6,9 @@
   "typings": "dist/index.d.ts",
   "license": "MIT",
   "peerDependencies": {
-    "@angular/common": "^19.0.0",
-    "@angular/core": "^19.0.0",
-    "@defjs/core": "^0.3.0"
+    "@angular/common": ">=18.0.0 <=22.0.0",
+    "@angular/core": ">=18.0.0 <=22.0.0",
+    "@defjs/core": "workspace:^"
   },
   "repository": {
     "type": "git",
@@ -21,7 +21,8 @@
     "build": "bun scripts/build.ts",
     "lint": "biome check",
     "lint:fix": "biome check --write",
-    "pub": "cd dist && bun publish"
+    "pub": "bun publish dist",
+    "typecheck": "bun x tsc -p tsconfig.json --noEmit"
   },
   "exports": {
     "./package.json": "./package.json",

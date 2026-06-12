@@ -1,6 +1,6 @@
 {
   "name": "@defjs/core",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -11,6 +11,9 @@
   "publishConfig": {
     "directory": "dist"
   },
+  "devDependencies": {
+    "tsdown": "catalog:"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/defjs/defjs.git"
@@ -19,13 +22,11 @@
     "url": "https://github.com/defjs/defjs/issues"
   },
   "scripts": {
-    "test:bun": "bun x vitest run --config vitest.config.bun.ts",
-    "test:chrome": "bun x vitest run --config vitest.config.browser.chrome.ts",
-    "test:deno": "deno run --lock=../../deno.lock --frozen -A npm:vitest run --config vitest.config.deno.ts",
-    "test:firefox": "bun x vitest run --config vitest.config.browser.firefox.ts",
-    "test:node": "npm exec -- vitest run --config vitest.config.node.ts",
-    "test:struct:coverage": "bun x vitest run --config vitest.config.node.ts src/struct --coverage --coverage.include='src/struct/**/*.ts' && bun scripts/check-struct-coverage.ts",
-    "test:safari": "bun x vitest run --config vitest.config.browser.safari.ts",
-    "test:types": "bun x vitest run --typecheck --config vitest.config.typecheck.ts"
+    "build": "tsdown",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "pub": "bun publish dist",
+    "test": "bun x vitest run --config vitest.config.ts",
+    "typecheck": "bun x tsc -p tsconfig.json --noEmit"
   }
 }
