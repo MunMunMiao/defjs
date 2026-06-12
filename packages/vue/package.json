@@ -2,9 +2,15 @@
   "name": "@defjs/vue",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
   "module": "dist/index.js",
   "typings": "dist/index.d.ts",
   "license": "MIT",
+  "publishConfig": {
+    "directory": "dist"
+  },
   "peerDependencies": {
     "vue": ">=3.0.0",
     "@defjs/core": "workspace:^"
@@ -20,7 +26,7 @@
     "build": "tsdown",
     "lint": "biome check",
     "lint:fix": "biome check --write",
-    "pub": "bun publish dist",
+    "pub": "pnpm publish",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsgo --project tsconfig.json --noEmit"
   },

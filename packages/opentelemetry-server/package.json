@@ -2,6 +2,9 @@
   "name": "@defjs/opentelemetry-server",
   "version": "0.2.0",
   "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
   "exports": {
     ".": "./src/index.ts"
   },
@@ -27,7 +30,7 @@
     "build": "tsdown",
     "lint": "biome check",
     "lint:fix": "biome check --write",
-    "pub": "bun publish dist",
+    "pub": "pnpm publish",
     "test": "vitest run --config vitest.config.node.ts",
     "typecheck": "tsgo --project tsconfig.json --noEmit"
   },

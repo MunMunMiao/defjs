@@ -131,6 +131,20 @@ importers:
       '@defjs/core':
         specifier: workspace:^
         version: link:../core/dist
+    devDependencies:
+      '@typescript/native-preview':
+        specifier: 'catalog:'
+        version: 7.0.0-dev.20260612.1
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.22.2(@typescript/native-preview@7.0.0-dev.20260612.1)(tsx@4.22.4)(typescript@6.0.3)
+      tsx:
+        specifier: 'catalog:'
+        version: 4.22.4
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+    publishDirectory: dist
 
   packages/core:
     devDependencies:
@@ -177,6 +191,34 @@ importers:
       '@opentelemetry/core':
         specifier: ^1.0.0
         version: 1.30.1(@opentelemetry/api@1.9.1)
+    devDependencies:
+      '@hono/node-server':
+        specifier: 'catalog:'
+        version: 2.0.4(hono@4.12.25)
+      '@hono/node-ws':
+        specifier: 'catalog:'
+        version: 1.3.1(@hono/node-server@2.0.4(hono@4.12.25))(hono@4.12.25)
+      '@typescript/native-preview':
+        specifier: 'catalog:'
+        version: 7.0.0-dev.20260612.1
+      '@vitest/coverage-istanbul':
+        specifier: 'catalog:'
+        version: 4.1.8(vitest@4.1.8)
+      hono:
+        specifier: 'catalog:'
+        version: 4.12.25
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.22.2(@typescript/native-preview@7.0.0-dev.20260612.1)(tsx@4.22.4)(typescript@6.0.3)
+      tsx:
+        specifier: 'catalog:'
+        version: 4.22.4
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(@vitest/browser-playwright@4.1.8)(@vitest/coverage-istanbul@4.1.8)(@vitest/ui@4.1.8)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.0)(tsx@4.22.4))
     publishDirectory: dist
 
   packages/vue:
@@ -187,6 +229,41 @@ importers:
       vue:
         specifier: '>=3.0.0'
         version: 3.5.38(typescript@6.0.3)
+    devDependencies:
+      '@hono/node-server':
+        specifier: 'catalog:'
+        version: 2.0.4(hono@4.12.25)
+      '@typescript/native-preview':
+        specifier: 'catalog:'
+        version: 7.0.0-dev.20260612.1
+      '@vitest/browser':
+        specifier: 'catalog:'
+        version: 4.1.8(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.0)(tsx@4.22.4))(vitest@4.1.8)
+      '@vitest/browser-playwright':
+        specifier: 'catalog:'
+        version: 4.1.8(playwright@1.60.0)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.0)(tsx@4.22.4))(vitest@4.1.8)
+      '@vitest/coverage-istanbul':
+        specifier: 'catalog:'
+        version: 4.1.8(vitest@4.1.8)
+      hono:
+        specifier: 'catalog:'
+        version: 4.12.25
+      playwright:
+        specifier: 'catalog:'
+        version: 1.60.0
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.22.2(@typescript/native-preview@7.0.0-dev.20260612.1)(tsx@4.22.4)(typescript@6.0.3)
+      tsx:
+        specifier: 'catalog:'
+        version: 4.22.4
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(@vitest/browser-playwright@4.1.8)(@vitest/coverage-istanbul@4.1.8)(@vitest/ui@4.1.8)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.0)(tsx@4.22.4))
+    publishDirectory: dist
 
 packages:
 

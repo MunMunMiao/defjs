@@ -2,9 +2,15 @@
   "name": "@defjs/angular",
   "version": "19.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
   "module": "dist/index.js",
   "typings": "dist/index.d.ts",
   "license": "MIT",
+  "publishConfig": {
+    "directory": "dist"
+  },
   "peerDependencies": {
     "@angular/common": ">=18.0.0 <=22.0.0",
     "@angular/core": ">=18.0.0 <=22.0.0",
@@ -21,7 +27,7 @@
     "build": "tsdown",
     "lint": "biome check",
     "lint:fix": "biome check --write",
-    "pub": "bun publish dist",
+    "pub": "pnpm publish",
     "typecheck": "tsgo --project tsconfig.json --noEmit"
   },
   "exports": {
