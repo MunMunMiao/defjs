@@ -480,12 +480,12 @@ export async function setup({ provide }: TestProject) {
 
 export async function teardown() {
   if (nodeWebSocket) {
-    nodeWebSocket.wss.clients.forEach((client) => {
+    nodeWebSocket.wss.clients.forEach((client: { terminate(): void }) => {
       client.terminate()
     })
 
     await new Promise<void>((resolve, reject) => {
-      nodeWebSocket?.wss.close((error) => {
+      nodeWebSocket?.wss.close((error: Error | undefined) => {
         if (error) {
           reject(error)
           return

@@ -1,7 +1,49 @@
+import type { HttpRequest } from '../internal/http_request'
+import type { HttpResponse } from '../internal/http_response'
+import type { EventStreamHandle } from '../sse/transport/event_stream'
+import type {
+  HttpInterceptorNext,
+  InterceptorFn,
+  SSEHandler,
+  SSEInterceptorFn,
+  WebSocketHandler,
+  WebSocketInterceptorFn,
+  WebSocketSessionLike,
+  makeInterceptorChain,
+  makeSSEInterceptorChain,
+  makeWebSocketInterceptorChain,
+} from './interceptor'
 import type { HttpInterceptor, SSEInterceptor } from './index'
 import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './index'
 
-type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+type IsAny<T> = 0 extends 1 & T ? true : false
+type ContainsAny<T> =
+  IsAny<T> extends true
+    ? true
+    : [T] extends [never]
+      ? false
+      : T extends (...args: infer Args) => infer Result
+        ? ContainsAny<Args> extends true
+          ? true
+          : ContainsAny<Result>
+        : T extends Promise<infer Value>
+          ? ContainsAny<Value>
+          : T extends HttpResponse<infer Body>
+            ? ContainsAny<Body>
+            : T extends EventStreamHandle<infer Event>
+              ? ContainsAny<Event>
+              : T extends readonly unknown[]
+                ? number extends T['length']
+                  ? ContainsAny<T[number]>
+                  : ContainsAnyTuple<T>
+                : false
+type ContainsAnyTuple<T extends readonly unknown[]> = T extends readonly [infer Head, ...infer Tail]
+  ? ContainsAny<Head> extends true
+    ? true
+    : ContainsAnyTuple<Tail>
+  : false
+type StrictEqual<A, B> =
+  ContainsAny<A> extends true ? false : ContainsAny<B> extends true ? false : [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
 
 const httpInterceptor = basicAuthHttpInterceptor(() => ({
@@ -14,8 +56,28 @@ const sseInterceptor = basicAuthSSEInterceptor(() => ({
   username: 'miao',
 }))
 
-type HttpInterceptorCase = Expect<Equal<typeof httpInterceptor, HttpInterceptor>>
-type SSEInterceptorCase = Expect<Equal<typeof sseInterceptor, SSEInterceptor>>
+type HttpInterceptorCase = Expect<StrictEqual<typeof httpInterceptor, HttpInterceptor>>
+type SSEInterceptorCase = Expect<StrictEqual<typeof sseInterceptor, SSEInterceptor>>
+
+type MakeHttpChainCase = Expect<StrictEqual<ReturnType<typeof makeInterceptorChain>, InterceptorFn>>
+type MakeSSEChainCase = Expect<StrictEqual<ReturnType<typeof makeSSEInterceptorChain>, SSEInterceptorFn>>
+type MakeWebSocketChainCase = Expect<StrictEqual<ReturnType<typeof makeWebSocketInterceptorChain>, WebSocketInterceptorFn>>
+
+type HttpChainParametersCase = Expect<StrictEqual<Parameters<ReturnType<typeof makeInterceptorChain>>, [HttpRequest, HttpInterceptorNext]>>
+type SSEChainParametersCase = Expect<StrictEqual<Parameters<ReturnType<typeof makeSSEInterceptorChain>>, [HttpRequest, SSEHandler]>>
+type WebSocketChainParametersCase = Expect<
+  StrictEqual<Parameters<ReturnType<typeof makeWebSocketInterceptorChain>>, [HttpRequest, WebSocketHandler]>
+>
+
+type HttpChainNextCase = Expect<StrictEqual<Parameters<ReturnType<typeof makeInterceptorChain>>[1], HttpInterceptorNext>>
+type SSEChainNextCase = Expect<StrictEqual<Parameters<ReturnType<typeof makeSSEInterceptorChain>>[1], SSEHandler>>
+type WebSocketChainNextCase = Expect<StrictEqual<Parameters<ReturnType<typeof makeWebSocketInterceptorChain>>[1], WebSocketHandler>>
+
+type HttpChainResultCase = Expect<StrictEqual<ReturnType<ReturnType<typeof makeInterceptorChain>>, Promise<HttpResponse<unknown>>>>
+type SSEChainResultCase = Expect<StrictEqual<ReturnType<ReturnType<typeof makeSSEInterceptorChain>>, Promise<EventStreamHandle<unknown>>>>
+type WebSocketChainResultCase = Expect<
+  StrictEqual<ReturnType<ReturnType<typeof makeWebSocketInterceptorChain>>, Promise<WebSocketSessionLike>>
+>
 
 basicAuthHttpInterceptor(
   () => ({
@@ -40,4 +102,18 @@ basicAuthSSEInterceptor(() => ({
   username: 'miao',
 }))
 
-export type Cases = HttpInterceptorCase | SSEInterceptorCase
+export type Cases =
+  | HttpChainNextCase
+  | HttpChainParametersCase
+  | HttpChainResultCase
+  | HttpInterceptorCase
+  | MakeHttpChainCase
+  | MakeSSEChainCase
+  | MakeWebSocketChainCase
+  | SSEChainNextCase
+  | SSEChainParametersCase
+  | SSEChainResultCase
+  | SSEInterceptorCase
+  | WebSocketChainNextCase
+  | WebSocketChainParametersCase
+  | WebSocketChainResultCase

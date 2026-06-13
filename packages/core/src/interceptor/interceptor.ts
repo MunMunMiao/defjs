@@ -77,11 +77,17 @@ export type Interceptor = HttpInterceptor | SSEInterceptor | WebSocketIntercepto
 // ---------------------------------------------------------------------------
 
 // Generic onion-chain builder — HTTP, SSE, and WebSocket chains share this shape.
-function makeChain<TFn extends (req: HttpRequest, next: any) => any>(interceptors: TFn[]): TFn {
-  return interceptors.reduceRight<TFn>(
-    (fn, interceptor) =>
-      ((initReq: HttpRequest, finalHandlerFn: never) => interceptor(initReq, (req: HttpRequest) => fn(req, finalHandlerFn))) as TFn,
-    ((req: HttpRequest, fn: (req: HttpRequest) => unknown) => fn(req)) as TFn,
+type Handler<TReq, TResult> = (req: TReq) => TResult
+type InterceptorChainFn<TReq, TResult> = (req: TReq, next: Handler<TReq, TResult>) => TResult
+
+function dispatch<TReq, TResult>(req: TReq, next: Handler<TReq, TResult>): TResult {
+  return next(req)
+}
+
+function makeChain<TReq, TResult>(interceptors: InterceptorChainFn<TReq, TResult>[]): InterceptorChainFn<TReq, TResult> {
+  return interceptors.reduceRight<InterceptorChainFn<TReq, TResult>>(
+    (fn, interceptor) => (req, next) => interceptor(req, (nextReq) => fn(nextReq, next)),
+    dispatch,
   )
 }
 
@@ -102,13 +108,13 @@ export function makeWebSocketInterceptorChain(interceptors: WebSocketInterceptor
 // ---------------------------------------------------------------------------
 
 export function resolveHttpInterceptors(interceptors: Interceptor[]): InterceptorFn[] {
-  return interceptors.filter((i): i is HttpInterceptor => i.kind === 'http').map(i => i.fn)
+  return interceptors.filter((i): i is HttpInterceptor => i.kind === 'http').map((i) => i.fn)
 }
 
 export function resolveSSEInterceptors(interceptors: Interceptor[]): SSEInterceptorFn[] {
-  return interceptors.filter((i): i is SSEInterceptor => i.kind === 'sse').map(i => i.fn)
+  return interceptors.filter((i): i is SSEInterceptor => i.kind === 'sse').map((i) => i.fn)
 }
 
 export function resolveWebSocketInterceptors(interceptors: Interceptor[]): WebSocketInterceptorFn[] {
-  return interceptors.filter((i): i is WebSocketInterceptor => i.kind === 'web-socket').map(i => i.fn)
+  return interceptors.filter((i): i is WebSocketInterceptor => i.kind === 'web-socket').map((i) => i.fn)
 }
