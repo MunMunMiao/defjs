@@ -61,7 +61,7 @@ function createMockWebSocketClass(
         this.readyState = MockWebSocket.CLOSING
         setTimeout(() => {
           this.readyState = MockWebSocket.CLOSED
-          this.listeners['close']?.forEach(fn => {
+          this.listeners['close']?.forEach((fn) => {
             fn({ code: code ?? 1000, reason: reason ?? '', wasClean: true })
           })
         }, 0)
@@ -76,18 +76,18 @@ function createMockWebSocketClass(
         this.listeners[type].push(fn)
       }
       this.removeEventListener = (type: string, fn: (event: unknown) => void) => {
-        this.listeners[type] = this.listeners[type]?.filter(listener => listener !== fn) || []
+        this.listeners[type] = this.listeners[type]?.filter((listener) => listener !== fn) || []
       }
       this.triggerOpen = () => {
         this.readyState = MockWebSocket.OPEN
-        this.listeners['open']?.forEach(fn => fn(new Event('open')))
+        this.listeners['open']?.forEach((fn) => fn(new Event('open')))
       }
       this.triggerClose = (event: { code: number; reason: string; wasClean: boolean }) => {
         this.readyState = MockWebSocket.CLOSED
-        this.listeners['close']?.forEach(fn => fn(event))
+        this.listeners['close']?.forEach((fn) => fn(event))
       }
       this.triggerError = () => {
-        this.listeners['error']?.forEach(fn => fn(new Event('error')))
+        this.listeners['error']?.forEach((fn) => fn(new Event('error')))
       }
 
       lastMockInstance = this
@@ -126,7 +126,13 @@ describe('web socket runtime environment edge cases', () => {
   })
 
   test('should return transport error when WebSocket constructor throws non-Error', async () => {
-    vi.stubGlobal('WebSocket', createMockWebSocketClass({ throwOnConstruct: 'connection refused' as unknown as Error }))
+    vi.stubGlobal(
+      'WebSocket',
+      createMockWebSocketClass({
+        // @ts-expect-error testing runtime defensive behavior when constructor throws a non-Error value
+        throwOnConstruct: 'connection refused',
+      }),
+    )
 
     const useSocket = defineWebSocket({
       incoming: {},
@@ -200,7 +206,7 @@ describe('web socket runtime environment edge cases', () => {
       client: createClient(withEndpoint('http://localhost')),
     })
 
-    ref.onStateChange(state => {
+    ref.onStateChange((state) => {
       states.push(state)
     })
 
@@ -210,13 +216,13 @@ describe('web socket runtime environment edge cases', () => {
       throw new Error('Expected socket')
     }
 
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 10))
 
     lastMockInstance?.triggerOpen()
     lastMockInstance?.triggerOpen()
 
     await expect(socket.closed).resolves.toMatchObject({ code: 1000 })
-    expect(states.filter(state => state === 'open')).toHaveLength(1)
+    expect(states.filter((state) => state === 'open')).toHaveLength(1)
   })
 
   test('should emit runtime error when send throws during queued flush', async () => {
@@ -244,17 +250,17 @@ describe('web socket runtime environment edge cases', () => {
     }
 
     let runtimeError: unknown
-    socket.onRuntimeError(err => {
+    socket.onRuntimeError((err) => {
       runtimeError = err
     })
 
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 10))
     lastMockInstance?.triggerClose({ code: 1000, reason: '', wasClean: true })
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 10))
 
     socket.send({ type: 'msg', text: 'queued' })
 
-    await new Promise(resolve => setTimeout(resolve, 120))
+    await new Promise((resolve) => setTimeout(resolve, 120))
     expect(runtimeError).toBeDefined()
   })
 
@@ -291,7 +297,7 @@ describe('web socket runtime environment edge cases', () => {
       throw new Error('Expected socket')
     }
 
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 10))
     lastMockInstance?.triggerError()
 
     const closeInfo = await socket.closed

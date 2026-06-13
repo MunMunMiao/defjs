@@ -262,7 +262,10 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const ref = useStream().with({ client, abort: controller.signal, timeout: 1 } as never)
+    const ref = useStream().with(
+      // @ts-expect-error testing runtime defensive behavior with invalid config combination
+      { client, abort: controller.signal, timeout: 1 },
+    )
     const [error, stream, open] = await ref
 
     expect(stream).toBeUndefined()
@@ -284,7 +287,10 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const ref = useStream().with({ abort: controller.signal, timeout: 1 } as never)
+    const ref = useStream().with(
+      // @ts-expect-error testing runtime defensive behavior with invalid config combination
+      { abort: controller.signal, timeout: 1 },
+    )
     const [error, stream, open] = await ref
 
     expect(stream).toBeUndefined()
@@ -526,7 +532,7 @@ describe('request event stream runtime', () => {
     expect(ref.status).toBe('open')
 
     ref.close()
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(ref.status).toBe('aborted')
   })
 
@@ -577,7 +583,10 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream, open] = await useStream({ id: 'invalid' } as never)
+    const [error, stream, open] = await useStream(
+      // @ts-expect-error testing runtime defensive behavior with invalid input type
+      { id: 'invalid' },
+    )
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()

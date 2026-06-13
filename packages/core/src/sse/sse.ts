@@ -106,6 +106,17 @@ type StreamRefState<TEvent> = {
   stream?: EventStreamHandle<TEvent>
 }
 
+function createTypedEventStreamEndpoint<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+  endpoint: EventStreamEndpoint<TInput, TEvents>,
+): UseEventStreamEndpointFn<TInput, TEvents> {
+  return (input: EndpointInput<TInput> | undefined) => createEventStreamRef(endpoint, input)
+}
+
+function castParsedEventStreamInput<TInput extends AnyStruct | undefined>(value: unknown): ParsedInput<TInput> {
+  // Type boundary: parseEndpointInput validates with endpoint.input before this helper is called.
+  return value as ParsedInput<TInput>
+}
+
 export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
   definition: EventStreamDefinition<TInput, TEvents>,
 ): UseEventStreamEndpointFn<TInput, TEvents> {
@@ -115,7 +126,7 @@ export function defineEventStream<TInput extends AnyStruct | undefined = undefin
     method: definition.method ?? 'GET',
   }
 
-  return ((input?: EndpointInput<TInput>) => createEventStreamRef(endpoint, input)) as UseEventStreamEndpointFn<TInput, TEvents>
+  return createTypedEventStreamEndpoint(endpoint)
 }
 
 function createEventStreamRef<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
@@ -186,7 +197,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
 
   let parsedInput: ParsedInput<TInput>
   try {
-    parsedInput = (await parseEndpointInput(endpoint.input, input)) as ParsedInput<TInput>
+    parsedInput = castParsedEventStreamInput<TInput>(await parseEndpointInput(endpoint.input, input))
   } catch (error) {
     const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
     state.error = definitionError
@@ -211,6 +222,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
       endpoint.method,
       endpoint.path,
       parsedInput,
+      // Type boundary: build signature is transport-specific; the generic handler accepts unknown.
       endpoint.build as ((request: RequestBuilder, input: unknown) => void) | undefined,
       {
         abort: mergeAbortSignals(controller.signal, [config.abort], config.timeout),
@@ -231,6 +243,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
   try {
     const sseInterceptors = resolveSSEInterceptors(clientConfig.interceptors)
     const sseHandler: SSEHandler = (req) =>
+      // Type boundary: SSEHandler returns EventStreamHandle<unknown>; the concrete type is narrowed by the interceptor chain.
       fetchEventStream(req, {
         fetch: clientConfig.sse.fetch,
         async transformMessage(message) {
@@ -238,6 +251,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
         },
       }) as Promise<EventStreamHandle<unknown>>
     const sseChain = makeSSEInterceptorChain(sseInterceptors)
+    // Type boundary: interceptor chain returns EventStreamHandle<unknown>; runtime message transform narrows it to the endpoint's event types.
     const stream = (await sseChain(request, sseHandler)) as EventStreamHandle<EventStreamData<TEvents>>
 
     state.stream = stream
@@ -264,6 +278,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
       state.status = 'closed'
     })
 
+    // Type boundary: state.open is set by normalizeOpenInfo(stream.open) immediately before this return.
     return [null, stream, state.open as StreamOpenInfo]
   } catch (error) {
     const openInfo = normalizeOpenInfo(extractOpenInfo(error))
@@ -293,6 +308,7 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
       event: eventName,
       id: message.id || undefined,
       retry: message.retry,
+      // Type boundary: parseEventData validates against the resolved event schema; the shape matches EventStreamData<TEvents>.
     } as EventStreamData<TEvents>
   } catch {
     return undefined

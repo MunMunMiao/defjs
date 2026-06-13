@@ -197,6 +197,19 @@ export type WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> =
   message?: <T = TOutgoing>() => T | unknown
 }
 
+function createTypedWebSocketEndpoint<
+  TInput extends AnyStruct | undefined,
+  TIncoming extends SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined,
+>(endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>): UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing> {
+  return (input: EndpointInput<TInput> | undefined) => createWebSocketRef(endpoint, input)
+}
+
+function castParsedWebSocketInput<TInput extends AnyStruct | undefined>(value: unknown): ParsedInput<TInput> {
+  // Type boundary: parseEndpointInput validates with endpoint.input before this helper is called.
+  return value as ParsedInput<TInput>
+}
+
 export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketSchemas = SocketSchemas,
@@ -207,7 +220,7 @@ export function defineWebSocket<
     kind: 'web-socket' as const,
   }
 
-  return ((input?: EndpointInput<TInput>) => createWebSocketRef(endpoint, input)) as UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing>
+  return createTypedWebSocketEndpoint(endpoint)
 }
 
 function createWebSocketRef<
@@ -293,7 +306,7 @@ async function executeWebSocketEndpoint<
 
   let parsedInput: ParsedInput<TInput>
   try {
-    parsedInput = (await parseEndpointInput(endpoint.input, input)) as ParsedInput<TInput>
+    parsedInput = castParsedWebSocketInput<TInput>(await parseEndpointInput(endpoint.input, input))
   } catch (error) {
     const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
     state.error = definitionError
@@ -305,6 +318,7 @@ async function executeWebSocketEndpoint<
   try {
     built = createWebSocketBuild(
       parsedInput,
+      // Type boundary: build signature is transport-specific; the generic handler accepts unknown.
       endpoint.build as ((request: RequestBuilder, input: unknown) => void) | undefined,
       endpoint.input,
     )
@@ -365,6 +379,7 @@ async function executeWebSocketEndpoint<
       const sessionController = {
         currentSocket: undefined as WebSocket | undefined,
         heartbeat: undefined as HeartbeatRuntime<WebSocketIncomingData<TIncoming>> | undefined,
+        // Type boundary: lastRuntimeError is written by the error handler and read only inside the closure; unknown is the narrowest safe type.
         lastRuntimeError: undefined as unknown,
       }
       const sendQueue = createSendQueue(config?.queue ?? clientConfig.webSocket.queue)
@@ -376,6 +391,7 @@ async function executeWebSocketEndpoint<
         sessionController,
         sendQueue,
         WebSocketCtor.OPEN,
+        // Type boundary: createWebSocketSession is generic over TIncoming/TOutgoing; the cast aligns the locally-typed session with the endpoint's schema types.
       ) as WebSocketSession<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 
       let startupSettled = false
@@ -385,8 +401,8 @@ async function executeWebSocketEndpoint<
 
       const reconnect = normalizeReconnectConfig(config?.reconnect ?? clientConfig.webSocket.reconnect)
       const heartbeatConfig = (config?.heartbeat ?? clientConfig.webSocket.heartbeat) as
-        | WebSocketHeartbeatConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
-        | undefined
+        // Type boundary: client config stores the heartbeat as a generic shape; the local type adds incoming/outgoing specificity.
+        WebSocketHeartbeatConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>> | undefined
       const beforeConnect = config?.beforeConnect ?? clientConfig.webSocket.beforeConnect
       const baseProtocols = [...(config?.protocols ?? clientConfig.webSocket.protocols ?? endpoint.protocols ?? [])]
 
@@ -543,6 +559,7 @@ async function executeWebSocketEndpoint<
             if (!startupSettled) {
               startupSettled = true
               state.socket = session
+              // Type boundary: session is created as WebSocketSession<...> above; resolveSession expects WebSocketSessionLike (structural match).
               resolveSession(session as WebSocketSessionLike)
             }
             flushSendQueue(socket, sendQueue, state, WebSocketCtor.OPEN)
@@ -674,8 +691,10 @@ async function executeWebSocketEndpoint<
 
   try {
     const session = await wsChain(wsRequest, wsHandler)
+    // Type boundary: interceptor chain returns WebSocketSessionLike; the concrete type matches the endpoint's incoming/outgoing schemas.
     return [null, session as WebSocketSession<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>, session.connection]
   } catch (error) {
+    // Type boundary: wsChain rejects with RequestError<unknown> per interceptor contract.
     return [error as RequestError<unknown>, undefined, state.connection]
   }
 }
@@ -728,6 +747,7 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | und
       return state.status
     },
     onRuntimeError(listener) {
+      // Type boundary: listener is typed as (error: unknown) => void at the call site; the set stores the same runtime value.
       state.listeners.runtimeError.add(listener as (error: unknown) => void)
       return () => {
         state.listeners.runtimeError.delete(listener as (error: unknown) => void)

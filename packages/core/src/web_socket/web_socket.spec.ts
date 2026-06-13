@@ -21,7 +21,8 @@ describe('web socket runtime', () => {
     })
 
     const [error, socket, connection] = await useSocket().with({
-      client: {} as never,
+      // @ts-expect-error testing runtime defensive behavior with invalid client
+      client: {},
     })
 
     expect(socket).toBeUndefined()
@@ -37,13 +38,16 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const ref = useSocket().with({
-      abort: controller.signal,
-      beforeConnect: () => {
-        beforeConnectCalls += 1
+    const ref = useSocket().with(
+      // @ts-expect-error testing runtime defensive behavior with invalid config combination
+      {
+        abort: controller.signal,
+        beforeConnect: () => {
+          beforeConnectCalls += 1
+        },
+        timeout: 1,
       },
-      timeout: 1,
-    } as never)
+    )
     const [error, socket, connection] = await ref
 
     expect(socket).toBeUndefined()
@@ -63,7 +67,10 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const ref = useSocket().with({ abort: controller.signal, timeout: 1 } as never)
+    const ref = useSocket().with(
+      // @ts-expect-error testing runtime defensive behavior with invalid config combination
+      { abort: controller.signal, timeout: 1 },
+    )
     const [error, socket, connection] = await ref
 
     expect(socket).toBeUndefined()
@@ -203,11 +210,11 @@ describe('web socket runtime', () => {
     }
 
     let runtimeError: unknown
-    socket.onRuntimeError(err => {
+    socket.onRuntimeError((err) => {
       runtimeError = err
     })
 
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, 50))
 
     expect(runtimeError).toBeDefined()
     await expect(socket.closed).resolves.toBeDefined()
@@ -229,7 +236,7 @@ describe('web socket runtime', () => {
     const [error, socket] = await useHeartbeatSocket().with({
       heartbeat: {
         intervalMs: 10,
-        isAck: message => message.type === 'pong',
+        isAck: (message) => message.type === 'pong',
         message: () => ({ type: 'ping' }),
         timeoutMs: 30,
       },
@@ -241,7 +248,7 @@ describe('web socket runtime', () => {
     }
 
     let runtimeError: unknown
-    socket.onRuntimeError(err => {
+    socket.onRuntimeError((err) => {
       runtimeError = err
     })
 
@@ -293,7 +300,7 @@ describe('web socket runtime', () => {
     }
 
     let runtimeError: unknown
-    socket.onRuntimeError(err => {
+    socket.onRuntimeError((err) => {
       runtimeError = err
     })
 
@@ -341,7 +348,7 @@ describe('web socket runtime', () => {
     const ref = useSocket()
     const states: string[] = []
     const refStates: string[] = []
-    const unsubscribeRefState = ref.onStateChange(state => {
+    const unsubscribeRefState = ref.onStateChange((state) => {
       refStates.push(state)
     })
     const unsubscribeRefError = ref.onRuntimeError(() => {
@@ -367,7 +374,7 @@ describe('web socket runtime', () => {
       throw new Error('Expected socket')
     }
 
-    const unsubscribeSocketState = socket.onStateChange(state => {
+    const unsubscribeSocketState = socket.onStateChange((state) => {
       states.push(state)
     })
     const unsubscribeSocketError = socket.onRuntimeError(() => {
@@ -439,7 +446,10 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const [error, socket, connection] = await useSocket({ id: 'bad' } as never)
+    const [error, socket, connection] = await useSocket(
+      // @ts-expect-error testing runtime defensive behavior with invalid input type
+      { id: 'bad' },
+    )
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -531,7 +541,7 @@ describe('web socket runtime', () => {
     }
 
     const iterator = socket.receive[Symbol.asyncIterator]()
-    await new Promise(resolve => setTimeout(resolve, 40))
+    await new Promise((resolve) => setTimeout(resolve, 40))
     socket.send({ type: 'message', text: 'queued-before-reconnect' })
 
     await expect(iterator.next()).resolves.toEqual({
@@ -573,7 +583,7 @@ describe('web socket runtime', () => {
       throw new Error('Expected socket')
     }
 
-    await new Promise(resolve => setTimeout(resolve, 40))
+    await new Promise((resolve) => setTimeout(resolve, 40))
     controller.abort(ERR_ABORTED)
 
     await expect(socket.closed).resolves.toBeDefined()
