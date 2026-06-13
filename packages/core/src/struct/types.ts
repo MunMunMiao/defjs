@@ -55,8 +55,8 @@ export type Schema<Input = unknown, Output = Input, OptionalOut extends boolean 
 
 export type AnySchema = Schema<any, any, boolean>
 
-type SchemaInput<T> = T extends { readonly _struct: { readonly input: any } } ? T['_struct']['input'] : never
-type SchemaOutput<T> = T extends { readonly _struct: { readonly output: any } } ? T['_struct']['output'] : never
+type SchemaInput<T> = T extends { readonly _struct: { readonly input: unknown } } ? T['_struct']['input'] : never
+type SchemaOutput<T> = T extends { readonly _struct: { readonly output: unknown } } ? T['_struct']['output'] : never
 
 export type Infer<T> = SchemaOutput<T>
 

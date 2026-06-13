@@ -1,17 +1,25 @@
 import { DEFINITION, TYPES } from './symbols'
 import type { FieldTagOption } from './tag'
-import type { PrimitiveDefinition, PrimitiveKind, RuntimeSchema, Schema, SchemaDefinition, SchemaFlags } from './types'
+import type { PrimitiveDefinition, PrimitiveKind, RuntimeSchema, Schema, SchemaDefinition, SchemaFlags, SchemaLike } from './types'
 
 export function createPrimitiveSchema<TInput, TOutput = TInput>(
   definition: Omit<PrimitiveDefinition<PrimitiveKind, TInput, TOutput>, 'flags'>,
 ): Schema<TInput | undefined, TOutput> {
-  return makeSchema({
-    ...definition,
-    flags: DEFAULT_FLAGS,
-  }) as unknown as Schema<TInput | undefined, TOutput>
+  return castSchema<Schema<TInput | undefined, TOutput>>(
+    makeSchema({
+      ...definition,
+      flags: DEFAULT_FLAGS,
+    }),
+  )
 }
 
 export const DEFAULT_FLAGS: SchemaFlags = { nullable: false, optional: false }
+
+export function castSchema<TSchema extends SchemaLike>(schema: SchemaLike): TSchema {
+  // Type boundary: all schema runtime objects are created by makeSchema/createPrimitiveSchema; the branded generic surface
+  // exists only for compile-time input/output inference and has no distinct runtime representation.
+  return schema as TSchema
+}
 
 export function makeSchema(definition: SchemaDefinition): RuntimeSchema {
   const schema: RuntimeSchema = {
@@ -47,7 +55,7 @@ export function makeSchema(definition: SchemaDefinition): RuntimeSchema {
       })
     },
     tag(...options: FieldTagOption[]) {
-      if (options.some(option => typeof option !== 'function')) {
+      if (options.some((option) => typeof option !== 'function')) {
         throw new TypeError('tag() requires tag option functions')
       }
 

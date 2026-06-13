@@ -1,5 +1,5 @@
 import { issue } from './errors'
-import { createPrimitiveSchema, DEFAULT_FLAGS, makeSchema } from './runtime'
+import { castSchema, createPrimitiveSchema, DEFAULT_FLAGS, makeSchema } from './runtime'
 import { assertSchema } from './shape'
 import { DEFINITION } from './symbols'
 import type {
@@ -25,21 +25,25 @@ import type {
 import { describeValue, failure, isPlainObject, success } from './utils'
 
 export function createStringSchema(): StringSchema {
-  return createPrimitiveSchema({
-    expected: 'string',
-    is: (value): value is string => typeof value === 'string',
-    kind: 'string',
-    zero: () => '',
-  }) as unknown as StringSchema
+  return castSchema<StringSchema>(
+    createPrimitiveSchema({
+      expected: 'string',
+      is: (value): value is string => typeof value === 'string',
+      kind: 'string',
+      zero: () => '',
+    }),
+  )
 }
 
 export function createNumberSchema(): NumberSchema {
-  return createPrimitiveSchema({
-    expected: 'number',
-    is: (value): value is number => typeof value === 'number' && !Number.isNaN(value),
-    kind: 'number',
-    zero: () => 0,
-  }) as unknown as NumberSchema
+  return castSchema<NumberSchema>(
+    createPrimitiveSchema({
+      expected: 'number',
+      is: (value): value is number => typeof value === 'number' && !Number.isNaN(value),
+      kind: 'number',
+      zero: () => 0,
+    }),
+  )
 }
 
 export function createBooleanSchema(): Schema<boolean | undefined, boolean> {
@@ -52,45 +56,57 @@ export function createBooleanSchema(): Schema<boolean | undefined, boolean> {
 }
 
 export function createNullSchema(): Schema<null, null> {
-  return createPrimitiveSchema({
-    expected: 'null',
-    is: (value): value is null => value === null,
-    kind: 'null',
-    zero: () => null,
-  }) as unknown as Schema<null, null>
+  return castSchema<Schema<null, null>>(
+    createPrimitiveSchema({
+      expected: 'null',
+      is: (value): value is null => value === null,
+      kind: 'null',
+      zero: () => null,
+    }),
+  )
 }
 
 export function createAnySchema(): Schema<unknown, any> {
-  return makeSchema({
-    flags: DEFAULT_FLAGS,
-    kind: 'any',
-  }) as unknown as Schema<unknown, any>
+  // Type boundary: struct.any() intentionally models an unconstrained decoded value; any is the correct
+  // representation of "no static type information" at the output boundary.
+  return castSchema<Schema<unknown, any>>(
+    makeSchema({
+      flags: DEFAULT_FLAGS,
+      kind: 'any',
+    }),
+  )
 }
 
 export function createUnknownSchema(): Schema<unknown, unknown> {
-  return makeSchema({
-    flags: DEFAULT_FLAGS,
-    kind: 'unknown',
-  }) as unknown as Schema<unknown, unknown>
+  return castSchema<Schema<unknown, unknown>>(
+    makeSchema({
+      flags: DEFAULT_FLAGS,
+      kind: 'unknown',
+    }),
+  )
 }
 
 export function createLiteralSchema<const T extends LiteralValue>(value: T): Schema<T | undefined, T> {
-  return makeSchema({
-    expected: describeValue(value),
-    flags: DEFAULT_FLAGS,
-    kind: 'literal',
-    value,
-  }) as unknown as Schema<T | undefined, T>
+  return castSchema<Schema<T | undefined, T>>(
+    makeSchema({
+      expected: describeValue(value),
+      flags: DEFAULT_FLAGS,
+      kind: 'literal',
+      value,
+    }),
+  )
 }
 
 export function createEnumSchema<const T extends readonly [string, ...string[]]>(values: T): Schema<T[number] | undefined, T[number]> {
   const enumValues = [...values] as unknown as T
-  return makeSchema({
-    expected: enumValues.map(item => JSON.stringify(item)).join(' | '),
-    flags: DEFAULT_FLAGS,
-    kind: 'enum',
-    values: enumValues,
-  }) as unknown as Schema<T[number] | undefined, T[number]>
+  return castSchema<Schema<T[number] | undefined, T[number]>>(
+    makeSchema({
+      expected: enumValues.map((item) => JSON.stringify(item)).join(' | '),
+      flags: DEFAULT_FLAGS,
+      kind: 'enum',
+      values: enumValues,
+    }),
+  )
 }
 
 export function createObjectEnumSchema<const T extends Record<string, number | string>>(
@@ -102,22 +118,26 @@ export function createObjectEnumSchema<const T extends Record<string, number | s
     throw new TypeError('enum schema requires at least one string or number value')
   }
 
-  return makeSchema({
-    expected: values.map(item => JSON.stringify(item)).join(' | '),
-    flags: DEFAULT_FLAGS,
-    kind: 'enum',
-    values: values as [T[keyof T], ...T[keyof T][]],
-  }) as unknown as Schema<T[keyof T] | undefined, T[keyof T]>
+  return castSchema<Schema<T[keyof T] | undefined, T[keyof T]>>(
+    makeSchema({
+      expected: values.map((item) => JSON.stringify(item)).join(' | '),
+      flags: DEFAULT_FLAGS,
+      kind: 'enum',
+      values: values as [T[keyof T], ...T[keyof T][]],
+    }),
+  )
 }
 
 export function createArraySchema<S extends SchemaLike<any, any, boolean>>(item: S): ArraySchema<S> {
   assertSchema(item, 'array item')
 
-  return makeSchema({
-    flags: DEFAULT_FLAGS,
-    item,
-    kind: 'array',
-  }) as unknown as ArraySchema<S>
+  return castSchema<ArraySchema<S>>(
+    makeSchema({
+      flags: DEFAULT_FLAGS,
+      item,
+      kind: 'array',
+    }),
+  )
 }
 
 export function createObjectSchema<T extends ObjectShape>(shape: T): ObjectSchema<T> {
@@ -127,12 +147,14 @@ export function createObjectSchema<T extends ObjectShape>(shape: T): ObjectSchem
 
   const declaredShape = snapshotObjectShape(shape)
 
-  return makeSchema({
-    cache: new WeakMap(),
-    flags: DEFAULT_FLAGS,
-    kind: 'object',
-    shape: declaredShape,
-  }) as unknown as ObjectSchema<T>
+  return castSchema<ObjectSchema<T>>(
+    makeSchema({
+      cache: new WeakMap(),
+      flags: DEFAULT_FLAGS,
+      kind: 'object',
+      shape: declaredShape,
+    }),
+  )
 }
 
 export function createRequestSchema<const T extends RequestShape>(shape: T): RequestSchema<T> {
@@ -158,14 +180,16 @@ export function createRequestSchema<const T extends RequestShape>(shape: T): Req
     assertRequestBodySchema(body)
   }
 
-  return makeSchema({
-    body,
-    flags: DEFAULT_FLAGS,
-    headers,
-    kind: 'request',
-    path,
-    query,
-  }) as unknown as RequestSchema<T>
+  return castSchema<RequestSchema<T>>(
+    makeSchema({
+      body,
+      flags: DEFAULT_FLAGS,
+      headers,
+      kind: 'request',
+      path,
+      query,
+    }),
+  )
 }
 
 export function createRequestBodySchema<const C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>>(
@@ -174,12 +198,14 @@ export function createRequestBodySchema<const C extends RequestBodyCodec, S exte
 ): RequestBodySchema<C, S> {
   assertSchema(schema, `${codec} body`)
 
-  return makeSchema({
-    codec,
-    flags: DEFAULT_FLAGS,
-    kind: 'requestBody',
-    schema,
-  }) as unknown as RequestBodySchema<C, S>
+  return castSchema<RequestBodySchema<C, S>>(
+    makeSchema({
+      codec,
+      flags: DEFAULT_FLAGS,
+      kind: 'requestBody',
+      schema,
+    }),
+  )
 }
 
 function assertRequestBodySchema(schema: SchemaLike<any, any, boolean>): void {
@@ -212,11 +238,13 @@ export function createTextBodySchema(): RequestBodySchema<'text', StringSchema> 
 export function createRecordSchema<S extends SchemaLike<any, any, boolean>>(value: S): RecordSchema<S> {
   assertSchema(value, 'record value')
 
-  return makeSchema({
-    flags: DEFAULT_FLAGS,
-    kind: 'record',
-    value,
-  }) as unknown as RecordSchema<S>
+  return castSchema<RecordSchema<S>>(
+    makeSchema({
+      flags: DEFAULT_FLAGS,
+      kind: 'record',
+      value,
+    }),
+  )
 }
 
 export function createTupleSchema<const T extends readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]>(
@@ -227,11 +255,13 @@ export function createTupleSchema<const T extends readonly [SchemaLike<any, any,
     assertSchema(item, 'tuple item')
   }
 
-  return makeSchema({
-    flags: DEFAULT_FLAGS,
-    items: tupleItems,
-    kind: 'tuple',
-  }) as unknown as TupleSchema<T>
+  return castSchema<TupleSchema<T>>(
+    makeSchema({
+      flags: DEFAULT_FLAGS,
+      items: tupleItems,
+      kind: 'tuple',
+    }),
+  )
 }
 
 export function createUnionSchema<const T extends readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]>(
@@ -242,11 +272,13 @@ export function createUnionSchema<const T extends readonly [SchemaLike<any, any,
     assertSchema(option, 'or option')
   }
 
-  return makeSchema({
-    flags: DEFAULT_FLAGS,
-    kind: 'or',
-    options: unionOptions,
-  }) as unknown as UnionSchema<T>
+  return castSchema<UnionSchema<T>>(
+    makeSchema({
+      flags: DEFAULT_FLAGS,
+      kind: 'or',
+      options: unionOptions,
+    }),
+  )
 }
 
 export function createDiscriminatedUnionSchema<
@@ -280,14 +312,16 @@ export function createDiscriminatedUnionSchema<
     values.push(fieldDef.value)
   }
 
-  return makeSchema({
-    discriminator,
-    expected: values.map(item => JSON.stringify(item)).join(' | '),
-    flags: DEFAULT_FLAGS,
-    kind: 'discriminatedUnion',
-    map,
-    options: unionOptions,
-  }) as unknown as DiscriminatedUnionSchema<TOptions>
+  return castSchema<DiscriminatedUnionSchema<TOptions>>(
+    makeSchema({
+      discriminator,
+      expected: values.map((item) => JSON.stringify(item)).join(' | '),
+      flags: DEFAULT_FLAGS,
+      kind: 'discriminatedUnion',
+      map,
+      options: unionOptions,
+    }),
+  )
 }
 
 function snapshotObjectShape<T extends ObjectShape>(shape: T): T {
@@ -317,7 +351,7 @@ export function createBigIntSchema(): Schema<bigint | string | undefined, bigint
         return failure(issue(path, 'invalid_type', 'bigint', input))
       }
     },
-    encode: value => value.toString(),
+    encode: (value) => value.toString(),
     expected: 'bigint',
     is: (value): value is bigint | string => typeof value === 'bigint' || typeof value === 'string',
     kind: 'bigint',
@@ -334,7 +368,7 @@ export function createDateSchema(): Schema<Date | number | string | undefined, D
       }
       return success(date)
     },
-    encode: value => value.toISOString(),
+    encode: (value) => value.toISOString(),
     expected: 'Date',
     is: (value): value is Date | number | string => value instanceof Date || typeof value === 'string' || typeof value === 'number',
     kind: 'date',
@@ -349,12 +383,14 @@ export function createIntersectionSchema<A extends SchemaLike<any, any, boolean>
   assertSchema(left, 'intersection left')
   assertSchema(right, 'intersection right')
 
-  return makeSchema({
-    flags: DEFAULT_FLAGS,
-    kind: 'intersection',
-    left,
-    right,
-  }) as unknown as Schema<unknown, Infer<A> & Infer<B>>
+  return castSchema<Schema<unknown, Infer<A> & Infer<B>>>(
+    makeSchema({
+      flags: DEFAULT_FLAGS,
+      kind: 'intersection',
+      left,
+      right,
+    }),
+  )
 }
 
 export function createFileSchema(): Schema<File | undefined, File> {
