@@ -150,12 +150,12 @@ type RequestBuilderState = {
   snapshot: RequestBuild
 }
 
-export function buildRequest(
+export function buildRequest<TInput extends AnyStruct | undefined, TTransport extends RequestTransport = 'http'>(
   input: unknown,
-  build: ((request: RequestBuilder, input: unknown) => void) | undefined,
-  options: RequestAutoBuildOptions & { input?: AnyStruct },
+  build: RequestBuildHandler<TInput, TTransport> | undefined,
+  options: RequestAutoBuildOptions & { input?: TInput; transport?: TTransport },
 ): RequestBuild {
-  const transport = options.transport ?? 'http'
+  const transport = resolveTypedBuildTransport(options.transport)
 
   if (!build) {
     return buildDefaultRequest(input, options, transport)
@@ -171,11 +171,33 @@ export function buildRequest(
 
   const owner = Symbol('buildInput')
   const plan: BuildPlanStep[] = []
-  const boundInput = createBoundView(options.input as unknown as RuntimeSchema, [], owner)
-  build(createBuildPlanBuilder(plan), boundInput)
+  const boundInput = createTypedBuildInput(options.input, owner)
+  build(createTypedBuildContext(plan, transport), boundInput)
   materializeBuildPlan(plan, input, state, owner)
   assertTransportBuild(state.snapshot, transport)
   return state.snapshot
+}
+
+function resolveTypedBuildTransport<TTransport extends RequestTransport>(transport: TTransport | undefined): TTransport {
+  // Type boundary: the public default transport is HTTP; omitting options.transport is equivalent to passing 'http'.
+  return (transport ?? 'http') as TTransport
+}
+
+function createTypedBuildContext<TTransport extends RequestTransport>(
+  plan: BuildPlanStep[],
+  _transport: TTransport,
+): RequestBuildContext<TTransport> {
+  // Type boundary: assertTransportBuild validates transport-specific output after materialization; the builder object exposes
+  // the superset of methods internally and is narrowed here to the transport-specific public build context.
+  return createBuildPlanBuilder(plan) as RequestBuildContext<TTransport>
+}
+
+function createTypedBuildInput<TInput extends AnyStruct | undefined>(
+  schema: NonNullable<TInput>,
+  owner: symbol,
+): RequestBuildInput<TInput> {
+  // Type boundary: createBoundView materializes a runtime proxy from the same schema used by RequestBuildInput's conditional type.
+  return createBoundView(schema as unknown as RuntimeSchema, [], owner) as RequestBuildInput<TInput>
 }
 
 function buildDefaultRequest<TInput>(input: TInput, options: RequestAutoBuildOptions, transport: RequestTransport): RequestBuild {
@@ -488,7 +510,7 @@ function createBoundView(schema: RuntimeSchema, path: readonly BoundPathSegment[
 function defineBoundSection(
   view: Record<PropertyKey, unknown>,
   key: 'body' | 'headers' | 'path' | 'query',
-  schema: SchemaLike<any, any, boolean> | undefined,
+  schema: SchemaLike<unknown, unknown, boolean> | undefined,
   path: readonly BoundPathSegment[],
   owner: symbol,
 ): void {
@@ -552,7 +574,7 @@ function materializeProjection(projection: unknown, input: unknown, scope: Build
     if (!Array.isArray(sourceValue)) {
       throw new Error('ArrayProjection source must resolve to an array')
     }
-    return sourceValue.map(item => {
+    return sourceValue.map((item) => {
       const nextScope = new Map(scope)
       nextScope.set(arrayProjection.itemToken, item)
       return materializeProjection(arrayProjection.itemProjection, input, nextScope, target, owner)
@@ -560,7 +582,7 @@ function materializeProjection(projection: unknown, input: unknown, scope: Build
   }
 
   if (Array.isArray(projection)) {
-    return projection.map(item => materializeProjection(item, input, scope, target, owner))
+    return projection.map((item) => materializeProjection(item, input, scope, target, owner))
   }
 
   if (isPlainObject(projection)) {

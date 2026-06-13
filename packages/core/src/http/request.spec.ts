@@ -36,7 +36,7 @@ describe('http request helpers', () => {
         path: { id: 7 },
         query: { include: true, tags: ['a', 'b'] },
       },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setHeaders({
           'x-token': input.headers.token,
         })
@@ -56,7 +56,7 @@ describe('http request helpers', () => {
         baseEndpoint: 'https://api.example.com/v1',
         context: configContext,
         input,
-        queryParamsSerializer: params => `custom=${params.toString()}`,
+        queryParamsSerializer: (params) => `custom=${params.toString()}`,
         responseType: 'json',
         withCredentials: true,
       },
@@ -131,7 +131,7 @@ describe('http request helpers', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -177,7 +177,7 @@ describe('http request helpers', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -194,14 +194,14 @@ describe('http request helpers', () => {
       'POST',
       '/text',
       { body: 'hello' },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setText(input.body)
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: textInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -215,14 +215,14 @@ describe('http request helpers', () => {
       'POST',
       '/xml',
       { body: '<root />' },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setText(input.body, { contentType: 'text/xml;charset=UTF-8' })
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: xmlInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -238,7 +238,7 @@ describe('http request helpers', () => {
       'POST',
       '/form',
       { body: { ids: [1, 2] } },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setFormUrlEncoded({
           ids: input.body.ids,
         })
@@ -247,7 +247,7 @@ describe('http request helpers', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: formInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -262,14 +262,14 @@ describe('http request helpers', () => {
       'POST',
       '/raw',
       { body: new Uint8Array([1, 2, 3]).buffer },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setArrayBuffer(input.body)
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: rawInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -286,7 +286,7 @@ describe('http request helpers', () => {
       'POST',
       '/json',
       { body: { ok: true }, headers: { ct: 'text/plain' } },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setHeaders({ 'content-type': input.headers.ct })
         builder.setJson({ ok: input.body.ok })
       },
@@ -294,7 +294,7 @@ describe('http request helpers', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: jsonInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -306,7 +306,7 @@ describe('http request helpers', () => {
       'POST',
       '/text',
       { body: 'hello', headers: { ct: 'text/plain' } },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setHeaders({ 'content-type': input.headers.ct })
         builder.setText(input.body, { contentType: null })
       },
@@ -314,7 +314,7 @@ describe('http request helpers', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: textInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -325,14 +325,14 @@ describe('http request helpers', () => {
       'POST',
       '/urlencoded',
       { body: { id: '1' } },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setFormUrlEncoded({ id: input.body.id })
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: formInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -343,14 +343,14 @@ describe('http request helpers', () => {
       'POST',
       '/raw-null',
       { body: null },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setJson(input.body)
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: nullInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -361,14 +361,14 @@ describe('http request helpers', () => {
       'POST',
       '/json-undefined',
       { body: undefined },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setJson(input.body)
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: noBodyInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -387,14 +387,14 @@ describe('http request helpers', () => {
       'POST',
       '/json-string',
       { body: 'hello' },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setJson(input.body as never)
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: stringInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -403,14 +403,14 @@ describe('http request helpers', () => {
       'POST',
       '/json-number',
       { body: 1 },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setJson(input.body as never)
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: numberInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -419,14 +419,14 @@ describe('http request helpers', () => {
       'POST',
       '/json-boolean',
       { body: true },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setJson(input.body as never)
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: booleanInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -435,14 +435,14 @@ describe('http request helpers', () => {
       'POST',
       '/json-null',
       { body: null },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setJson(input.body as never)
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input: nullInput,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -473,7 +473,7 @@ describe('http request helpers', () => {
           name: 'Miao',
         },
       },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setFormData({
           age: input.body.age,
           avatar: input.body.avatar,
@@ -485,7 +485,7 @@ describe('http request helpers', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -502,14 +502,14 @@ describe('http request helpers', () => {
         'POST',
         '/upload',
         { body: { profile: { nested: true } } },
-        (builder: any, input: any) => {
+        (builder, input) => {
           builder.setFormData({ profile: input.body.profile as never })
         },
         {
           abort: new AbortController().signal,
           baseEndpoint: 'https://api.example.com',
           input: badInput,
-          queryParamsSerializer: params => params.toString(),
+          queryParamsSerializer: (params) => params.toString(),
         },
       ),
     ).toThrowError('formData binding does not support nested object for key "profile"')
@@ -525,14 +525,14 @@ describe('http request helpers', () => {
       'POST',
       '/upload',
       { body: { name: 'Miao' } },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setFormData({ name: input.body.name })
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -552,7 +552,7 @@ describe('http request helpers', () => {
       'POST',
       '/conflict',
       { body: { msg: 'hello' } },
-      (builder: any, input: any) => {
+      (builder, input) => {
         builder.setJson({ msg: input.body.msg })
         builder.setText(input.body.msg)
       },
@@ -560,7 +560,7 @@ describe('http request helpers', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://api.example.com',
         input,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 

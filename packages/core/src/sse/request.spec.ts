@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'vitest'
+import type { RequestBuildHandler } from '../internal/request_builder'
+import type { AnyStruct } from '../struct'
 import { struct, tag } from '../struct'
 import { createEventStreamRequest } from './request'
+
+function unsupportedSseBuild<TInput extends AnyStruct>(build: RequestBuildHandler<TInput>): RequestBuildHandler<TInput, 'sse'> {
+  // Type boundary: this spec intentionally builds a body so the SSE transport runtime guard rejects it.
+  return build as unknown as RequestBuildHandler<TInput, 'sse'>
+}
 
 describe('createEventStreamRequest', () => {
   test('builds request-shaped path query and headers', () => {
@@ -25,7 +32,7 @@ describe('createEventStreamRequest', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://example.com',
         input,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 
@@ -43,14 +50,14 @@ describe('createEventStreamRequest', () => {
         'GET',
         '/events',
         { body: { key: 'value' } },
-        (req: any, view: any) => {
+        unsupportedSseBuild<typeof input>((req, view) => {
           req.setJson({ key: view.body.key })
-        },
+        }),
         {
           abort: new AbortController().signal,
           baseEndpoint: 'https://api.example.com',
           input,
-          queryParamsSerializer: params => params.toString(),
+          queryParamsSerializer: (params) => params.toString(),
         },
       ),
     ).toThrow('SSE build() does not support request body')
@@ -70,7 +77,7 @@ describe('createEventStreamRequest', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://example.com',
         input,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       }),
     ).toThrow('SSE request input does not support body section')
   })
@@ -85,14 +92,14 @@ describe('createEventStreamRequest', () => {
       'GET',
       '/events',
       { headers: { accept: 'text/event-stream' } },
-      (req: any, view: any) => {
+      (req, view) => {
         req.setHeaders({ accept: view.headers.accept })
       },
       {
         abort: new AbortController().signal,
         baseEndpoint: 'https://example.com',
         input,
-        queryParamsSerializer: params => params.toString(),
+        queryParamsSerializer: (params) => params.toString(),
       },
     )
 

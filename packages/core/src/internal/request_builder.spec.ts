@@ -12,7 +12,7 @@ describe('request_builder formUrlEncoded', () => {
     })
     const built = buildRequest(
       { body: { a: '1', b: '2' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormUrlEncoded({ a: view.body.a, b: view.body.b })
       },
       { input },
@@ -33,7 +33,7 @@ describe('request_builder formUrlEncoded', () => {
     })
     const built = buildRequest(
       { body: { x: 'y' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormUrlEncoded({ x: view.body.x }, { contentType: 'application/x-www-form-urlencoded; charset=ascii' })
       },
       { input },
@@ -59,7 +59,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { a: 1 } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setJson({ a: view.body.a })
       },
       { input },
@@ -78,7 +78,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { a: 1 } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setJson({ a: view.body.a }, { contentType: 'application/vnd+json' })
       },
       { input },
@@ -92,7 +92,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: 'hello' },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setText(view.body)
       },
       { input },
@@ -107,7 +107,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: '<div>hello</div>' },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setHtml(view.body)
       },
       { input },
@@ -122,7 +122,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: '<?xml version="1.0"?>' },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setHtml(view.body)
       },
       { input },
@@ -144,21 +144,21 @@ describe('request_builder general', () => {
 
     const json = buildRequest(
       { body: { a: 1 } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setJson({ a: view.body.a }, { contentType: null })
       },
       { input: jsonInput },
     )
     const text = buildRequest(
       { body: 'hello' },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setText(view.body, { contentType: null })
       },
       { input: textInput },
     )
     const formUrlEncoded = buildRequest(
       { body: { id: 1 } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormUrlEncoded({ id: view.body.id }, { contentType: null })
       },
       { input: urlencodedInput },
@@ -179,7 +179,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { msg: 'hello' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setJson({ msg: view.body.msg })
         request.setText(view.body.msg)
       },
@@ -198,7 +198,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { headers: { 'x-auth': 'token' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setHeaders({ 'x-auth': view.headers['x-auth'] })
       },
       { input },
@@ -215,7 +215,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { headers: { 'x-auth': 'token' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setHeaders({ 'x-auth': view.headers['x-auth'], 'x-missing': view.headers['x-missing'] })
       },
       { input },
@@ -232,7 +232,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { headers: { 'x-tag': ['a', 'b'] } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setHeaders({ 'x-tag': view.headers['x-tag'] })
       },
       { input },
@@ -250,7 +250,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { headers: { 'x-old': '1', 'x-token': 'old' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setHeaders({ 'x-old': view.headers['x-old'], 'x-token': view.headers['x-token'] })
         request.setHeaders({ 'x-token': view.headers['x-token'] })
       },
@@ -270,7 +270,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { path: { id: '1' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setPathParams({ id: view.path.id })
         request.setPathParams({ name: view.path.name })
       },
@@ -288,7 +288,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { query: { page: '1' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setQueryParams({ page: view.query.page })
         request.setQueryParams({ size: view.query.size })
       },
@@ -308,7 +308,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { text: 'hello', num: 42, bool: true, nil: null } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormData({
           bool: view.body.bool,
           nil: view.body.nil,
@@ -334,7 +334,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { tags: ['a', 'b'] } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormData({ tags: view.body.tags })
       },
       { input },
@@ -352,7 +352,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { a: '1' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormData({ a: view.body.a, b: view.body.b })
       },
       { input },
@@ -370,7 +370,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { file: blob } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormData({ file: view.body.file })
       },
       { input },
@@ -388,7 +388,7 @@ describe('request_builder general', () => {
     expect(() =>
       buildRequest(
         { body: { obj: { nested: true } } },
-        (request: any, view: any) => {
+        (request, view) => {
           request.setFormData({ obj: view.body.obj as never })
         },
         { input },
@@ -404,7 +404,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { id: 1n } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormUrlEncoded({ id: view.body.id })
       },
       { input },
@@ -421,7 +421,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { tags: ['a', 'b'] } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormUrlEncoded({ tags: view.body.tags })
       },
       { input },
@@ -439,7 +439,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { a: '1' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormUrlEncoded({ a: view.body.a, b: view.body.b })
       },
       { input },
@@ -456,7 +456,7 @@ describe('request_builder general', () => {
     })
     const built = buildRequest(
       { body: { data: null } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormUrlEncoded({ data: view.body.data })
       },
       { input },
@@ -737,7 +737,7 @@ describe('request_builder request-shaped input', () => {
         path: { userId: 1 },
         query: { includeProfile: true },
       },
-      (ctx: any, view: any) => {
+      (ctx, view) => {
         ctx.setPathParams({ id: view.path.userId })
         ctx.setJson({
           data: {
@@ -796,7 +796,7 @@ describe('request_builder request-shaped input', () => {
           secondPage: 2,
         },
       },
-      (ctx: any, view: any) => {
+      (ctx, view) => {
         ctx.setPathParams({ id: view.path.firstId })
         ctx.setPathParams({ id: view.path.secondId })
         ctx.setQueryParams({ page: view.query.firstPage })
@@ -839,9 +839,9 @@ describe('request_builder request-shaped input', () => {
           ],
         },
       },
-      (ctx: any, view: any) => {
+      (ctx, view) => {
         ctx.setJson({
-          users: view.body.users.map((user: any) => ({
+          users: view.body.users.map((user) => ({
             id: user.id,
             name: user.name,
           })),
@@ -869,7 +869,7 @@ describe('request_builder request-shaped input', () => {
             name: 'Miao',
           },
         },
-        ctx => {
+        (ctx) => {
           ctx.setJson({ name: 'literal' } as never)
         },
         { input },
@@ -897,7 +897,7 @@ describe('request_builder request-shaped input', () => {
             },
           },
         },
-        (ctx: any, view: any) => {
+        (ctx, view) => {
           ctx.setQueryParams({ profile: view.body.profile } as never)
         },
         { input },
@@ -913,7 +913,7 @@ describe('request_builder request-shaped input', () => {
             },
           },
         },
-        (ctx: any, view: any) => {
+        (ctx, view) => {
           ctx.setFormUrlEncoded({ profile: view.body.profile } as never)
         },
         { input },
@@ -931,7 +931,7 @@ describe('request_builder request-shaped input', () => {
     expect(() =>
       buildRequest(
         { headers: { token: 'secret' } },
-        ctx => {
+        (ctx) => {
           ctx.setHeaders(new Headers({ 'x-token': 'raw' }) as never)
         },
         { input },
@@ -949,7 +949,7 @@ describe('request_builder request-shaped input', () => {
 
     buildRequest(
       { query: { id: 1 } },
-      (_ctx: any, view: any) => {
+      (_ctx, view) => {
         captured = view.query.id
       },
       { input },
@@ -958,7 +958,7 @@ describe('request_builder request-shaped input', () => {
     expect(() =>
       buildRequest(
         { query: { id: 2 } },
-        ctx => {
+        (ctx) => {
           ctx.setQueryParams({ id: captured } as never)
         },
         { input },
@@ -983,8 +983,8 @@ describe('request_builder request-shaped input', () => {
     expect(() =>
       buildRequest(
         { body: { users: [{ id: 1 }] } },
-        (ctx: any, view: any) => {
-          view.body.users.map((user: any) => {
+        (ctx, view) => {
+          view.body.users.map((user) => {
             leaked = user.id
             return { id: user.id }
           })
@@ -1009,7 +1009,7 @@ describe('request_builder request-shaped input', () => {
     expect(() =>
       buildRequest(
         { body: { payload: { name: 'Miao' } } },
-        (ctx: any, view: any) => {
+        (ctx, view) => {
           ctx.setBlob(view.body.payload as never)
         },
         { input },
@@ -1026,7 +1026,7 @@ describe('request_builder request-shaped input', () => {
 
     const headersFirst = buildRequest(
       { body: { name: 'Miao' } },
-      (ctx: any, view: any) => {
+      (ctx, view) => {
         ctx.setHeaders({ 'content-type': view.body.name })
         ctx.setFormData({ name: view.body.name })
       },
@@ -1035,7 +1035,7 @@ describe('request_builder request-shaped input', () => {
 
     const bodyFirst = buildRequest(
       { body: { name: 'Miao' } },
-      (ctx: any, view: any) => {
+      (ctx, view) => {
         ctx.setFormData({ name: view.body.name })
         ctx.setHeaders({ 'content-type': view.body.name })
       },
@@ -1059,7 +1059,7 @@ describe('request_builder addXxx', () => {
     })
     const built = buildRequest(
       { headers: { 'x-auth': 'token', 'x-trace': 'id' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setHeaders({ 'x-auth': view.headers['x-auth'] })
         request.addHeaders({ 'x-trace': view.headers['x-trace'] })
       },
@@ -1077,7 +1077,7 @@ describe('request_builder addXxx', () => {
     })
     const built = buildRequest(
       { headers: { 'x-auth': 'token' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.addHeaders({ 'x-auth': view.headers['x-auth'] })
       },
       { input },
@@ -1093,7 +1093,7 @@ describe('request_builder addXxx', () => {
     })
     const built = buildRequest(
       { headers: { 'x-tag': ['a', 'b'] } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.addHeaders({ 'x-tag': view.headers['x-tag'] })
       },
       { input },
@@ -1111,7 +1111,7 @@ describe('request_builder addXxx', () => {
     })
     const built = buildRequest(
       { body: { a: '1', b: '2' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormUrlEncoded({ a: view.body.a })
         request.addFormUrlEncoded({ b: view.body.b })
       },
@@ -1130,7 +1130,7 @@ describe('request_builder addXxx', () => {
     })
     const built = buildRequest(
       { body: { a: '1' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setJson({ a: view.body.a })
         request.addFormUrlEncoded({ a: view.body.a })
       },
@@ -1149,7 +1149,7 @@ describe('request_builder addXxx', () => {
     })
     const built = buildRequest(
       { body: { a: '1', b: '2' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setFormData({ a: view.body.a })
         request.addFormData({ b: view.body.b })
       },
@@ -1168,7 +1168,7 @@ describe('request_builder addXxx', () => {
     })
     const built = buildRequest(
       { body: { a: '1' } },
-      (request: any, view: any) => {
+      (request, view) => {
         request.setJson({ a: view.body.a })
         request.addFormData({ a: view.body.a })
       },
