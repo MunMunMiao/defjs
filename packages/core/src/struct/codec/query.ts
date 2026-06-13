@@ -1,6 +1,7 @@
 import type { RequestBuildValue } from '../../internal/request_values'
 import { encodeStructValue, getStructFields, isObjectStruct } from '../introspection'
-import { HeaderTag, QueryTag, type TagNamespace, UriTag } from '../tag'
+import type { TagNamespace } from '../tag'
+import { HeaderTag, QueryTag, UriTag } from '../tag'
 import type { SchemaLike } from '../types'
 import { assertPlainObject, getWireKey } from './common'
 import { isSearchParamScalar } from './urlencoded'
@@ -57,7 +58,7 @@ function encodeTaggedRecord(
 
 function normalizeRecordValue(label: string, key: string, value: unknown, options: QueryCodecOptions): RequestBuildValue {
   if (Array.isArray(value)) {
-    return options.allowComplex ? value : value.map(item => normalizeScalarRecordValue(label, key, item))
+    return options.allowComplex ? value : value.map((item) => normalizeScalarRecordValue(label, key, item))
   }
 
   if (options.allowComplex && typeof value === 'object' && value !== null) {

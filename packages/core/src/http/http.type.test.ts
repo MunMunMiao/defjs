@@ -1,5 +1,6 @@
 import { struct } from '../struct'
-import { defineRequest, type UseRequestConfig } from './index'
+import type { UseRequestConfig } from './index'
+import { defineRequest } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
@@ -137,13 +138,13 @@ const arrayInputSchema = struct.request({
 const arrayEndpoint = defineRequest({
   build(request, input) {
     request.setJson({
-      users: input.body.users.map(user => ({
+      users: input.body.users.map((user) => ({
         id: user.id,
       })),
     })
 
     // @ts-expect-error ArrayProjection only supports map().
-    input.body.users.filter(user => user.id)
+    input.body.users.filter((user) => user.id)
   },
   input: arrayInputSchema,
   method: 'POST',

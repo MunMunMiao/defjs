@@ -13,7 +13,8 @@ import {
 } from './codes'
 import { hasErrorCode } from './normalize'
 import { unwrapErrorCause } from './protocol'
-import { type DefinitionError, DefjsError, type RequestError, type SettledResponseLike, type TransportError } from './types'
+import type { DefinitionError, RequestError, SettledResponseLike, TransportError } from './types'
+import { DefjsError } from './types'
 
 export const ERR_ABORTED = new DefjsError(CODE_ABORTED)
 export const ERR_TIMEOUT = new DefjsError(CODE_TIMEOUT)

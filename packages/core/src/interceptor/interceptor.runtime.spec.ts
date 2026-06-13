@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../http'
 import type { EventStreamHandle } from '../sse/transport/event_stream'
-import { createSSEInterceptor, makeSSEInterceptorChain, type SSEInterceptorFn } from './interceptor'
+import type { SSEInterceptorFn } from './interceptor'
+import { createSSEInterceptor, makeSSEInterceptorChain } from './interceptor'
 
 describe('SSE interceptor chain', () => {
   test('should apply SSE interceptors and pass modified request to handler', async () => {

@@ -1,4 +1,5 @@
-import { basicAuthHttpInterceptor, basicAuthSSEInterceptor, type HttpInterceptor, type SSEInterceptor } from './index'
+import type { HttpInterceptor, SSEInterceptor } from './index'
+import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
@@ -22,7 +23,7 @@ basicAuthHttpInterceptor(
     username: 'miao',
   }),
   {
-    encode: credential => `${credential.username}:${credential.password}`,
+    encode: (credential) => `${credential.username}:${credential.password}`,
   },
 )
 

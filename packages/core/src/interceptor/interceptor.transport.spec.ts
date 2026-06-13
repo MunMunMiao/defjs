@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest'
+import type { Interceptor } from './interceptor'
 import {
   createHttpInterceptor,
   createSSEInterceptor,
   createWebSocketInterceptor,
-  type Interceptor,
   resolveHttpInterceptors,
   resolveSSEInterceptors,
   resolveWebSocketInterceptors,

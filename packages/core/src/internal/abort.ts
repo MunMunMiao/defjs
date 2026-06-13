@@ -1,4 +1,5 @@
-import { createDefinitionError, type DefinitionError } from '../error'
+import type { DefinitionError } from '../error'
+import { createDefinitionError } from '../error'
 
 export const ABORT_TIMEOUT_CONFLICT_MESSAGE = 'with.abort and with.timeout cannot be used together'
 

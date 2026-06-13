@@ -2,7 +2,8 @@ import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../http'
 import { makeFakeHandler } from '../http/transport/test_handler'
 import type { EventStreamHandle } from '../sse/transport/event_stream'
-import { type BasicCredential, basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './basic_auth'
+import type { BasicCredential } from './basic_auth'
+import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './basic_auth'
 import { makeInterceptorChain, makeSSEInterceptorChain } from './interceptor'
 
 describe('Basic Auth Interceptor', () => {
@@ -24,7 +25,7 @@ describe('Basic Auth Interceptor', () => {
         status: 200,
         statusText: 'OK',
       },
-      onRequestBefore: req => {
+      onRequestBefore: (req) => {
         const authorization = req.headers?.get('Authorization')
         expect(req.headers).toBeInstanceOf(Headers)
         expect(authorization).toEqual(`Basic ${btoa(`${credential.username}:${credential.password}`)}`)
@@ -41,7 +42,7 @@ describe('Basic Auth Interceptor', () => {
       method: 'GET',
     }
     const interceptor = basicAuthHttpInterceptor(() => credential, {
-      encode: data => btoa(`${data.username}:${data.password}`),
+      encode: (data) => btoa(`${data.username}:${data.password}`),
     })
     const chain = makeInterceptorChain([interceptor.fn])
     const handler = makeFakeHandler({
@@ -49,7 +50,7 @@ describe('Basic Auth Interceptor', () => {
         status: 200,
         statusText: 'OK',
       },
-      onRequestBefore: req => {
+      onRequestBefore: (req) => {
         const authorization = req.headers?.get('Authorization')
         expect(authorization).toEqual(`Basic ${btoa(`${credential.username}:${credential.password}`)}`)
       },

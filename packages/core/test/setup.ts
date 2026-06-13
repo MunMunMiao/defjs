@@ -1,6 +1,8 @@
 import type { Socket } from 'node:net'
-import { createAdaptorServer, type ServerType } from '@hono/node-server'
-import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
+import type { ServerType } from '@hono/node-server'
+import { createAdaptorServer } from '@hono/node-server'
+import type { NodeWebSocket } from '@hono/node-ws'
+import { createNodeWebSocket } from '@hono/node-ws'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
@@ -30,7 +32,7 @@ export async function setup({ provide }: TestProject) {
   const reconnectAttempts = new Map<string, number>()
 
   const delay = (ms: number, signal?: AbortSignal) =>
-    new Promise<void>(resolve => {
+    new Promise<void>((resolve) => {
       if (ms <= 0 || signal?.aborted) {
         resolve()
         return
@@ -76,9 +78,9 @@ export async function setup({ provide }: TestProject) {
     }),
   )
 
-  app.get('/', c => c.body(null, 200))
+  app.get('/', (c) => c.body(null, 200))
 
-  app.post('/', async c => {
+  app.post('/', async (c) => {
     const contentType = c.req.header('content-type') ?? ''
 
     if (contentType.includes('application/json')) {
@@ -95,26 +97,26 @@ export async function setup({ provide }: TestProject) {
     })
   })
 
-  app.get('/text', c => c.text('Hello World!'))
-  app.get('/json', c => c.json({ id: 1 }))
-  app.get('/null', c => c.body(null, 200))
-  app.get('/no-content-type', c => {
+  app.get('/text', (c) => c.text('Hello World!'))
+  app.get('/json', (c) => c.json({ id: 1 }))
+  app.get('/null', (c) => c.body(null, 200))
+  app.get('/no-content-type', (c) => {
     c.header('content-type', '')
     return c.body('hello', 200)
   })
-  app.get('/500', c => c.body(null, { status: 500, statusText: 'Internal Server Error' }))
-  app.on('HEAD', '/head', c => c.body(null, { status: 204, statusText: 'No Content' }))
-  app.post('/account', c => c.json({ id: 1, name: 'Jack' }))
-  app.get('/account/not-found', c => c.json({ code: 'ACCOUNT_NOT_FOUND', message: 'Account not found' }, 404))
+  app.get('/500', (c) => c.body(null, { status: 500, statusText: 'Internal Server Error' }))
+  app.on('HEAD', '/head', (c) => c.body(null, { status: 204, statusText: 'No Content' }))
+  app.post('/account', (c) => c.json({ id: 1, name: 'Jack' }))
+  app.get('/account/not-found', (c) => c.json({ code: 'ACCOUNT_NOT_FOUND', message: 'Account not found' }, 404))
 
-  app.get('/delay', async c => {
+  app.get('/delay', async (c) => {
     await delay(Number(c.req.query('ms') ?? '0'), c.req.raw.signal)
     return c.body(null, 200)
   })
 
   const basicSSEHandler = (c: any) => {
     c.header('x-request-id', 'trace-sse-basic')
-    return streamSSE(c, async stream => {
+    return streamSSE(c, async (stream) => {
       await stream.writeSSE({
         data: 'first',
         event: 'message',
@@ -132,12 +134,12 @@ export async function setup({ provide }: TestProject) {
   app.get('/sse/basic', basicSSEHandler)
   app.post('/sse/basic', basicSSEHandler)
 
-  app.get('/sse/retry', c => {
+  app.get('/sse/retry', (c) => {
     const lastEventId = c.req.header('last-event-id')
 
     if (lastEventId === '1') {
       c.header('x-request-id', 'trace-sse-retry-2')
-      return streamSSE(c, async stream => {
+      return streamSSE(c, async (stream) => {
         await stream.writeSSE({
           data: 'second',
           event: 'message',
@@ -147,7 +149,7 @@ export async function setup({ provide }: TestProject) {
     }
 
     c.header('x-request-id', 'trace-sse-retry-1')
-    return streamSSE(c, async stream => {
+    return streamSSE(c, async (stream) => {
       await stream.writeSSE({
         data: 'first',
         event: 'message',
@@ -157,14 +159,14 @@ export async function setup({ provide }: TestProject) {
     })
   })
 
-  app.get('/sse/slow', async c => {
+  app.get('/sse/slow', async (c) => {
     await delay(500, c.req.raw.signal)
     return c.body(null, 500)
   })
 
   const sseRetryAttempts = new Map<string, number>()
 
-  app.get('/sse/500-once', c => {
+  app.get('/sse/500-once', (c) => {
     const key = c.req.query('key') ?? 'default'
     const attempt = (sseRetryAttempts.get(key) ?? 0) + 1
     sseRetryAttempts.set(key, attempt)
@@ -173,15 +175,15 @@ export async function setup({ provide }: TestProject) {
       return c.body(null, 500)
     }
 
-    return streamSSE(c, async stream => {
+    return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: 'ok', event: 'message', id: '1' })
     })
   })
 
-  app.get('/sse/500-always', c => c.body(null, 500))
+  app.get('/sse/500-always', (c) => c.body(null, 500))
 
-  app.get('/sse/no-id', c => {
-    return streamSSE(c, async stream => {
+  app.get('/sse/no-id', (c) => {
+    return streamSSE(c, async (stream) => {
       await stream.writeSSE({
         data: 'no-id-message',
         event: 'message',
@@ -189,43 +191,43 @@ export async function setup({ provide }: TestProject) {
     })
   })
 
-  app.get('/sse/empty-id', c => {
+  app.get('/sse/empty-id', (c) => {
     c.header('content-type', 'text/event-stream')
-    return streamSSE(c, async stream => {
+    return streamSSE(c, async (stream) => {
       const encoder = new TextEncoder()
       await stream.write(encoder.encode('data: hello\nid:\nevent: message\n\n'))
     })
   })
 
-  app.get('/sse/mixed', c => {
-    return streamSSE(c, async stream => {
+  app.get('/sse/mixed', (c) => {
+    return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: JSON.stringify({ uid: 1 }), event: 'userconnect', id: '1' })
       await stream.writeSSE({ data: JSON.stringify({ note: 'fallback' }), event: 'something-else', id: '2' })
     })
   })
 
-  app.get('/sse/unknown-event', c => {
-    return streamSSE(c, async stream => {
+  app.get('/sse/unknown-event', (c) => {
+    return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: 'hello', event: 'unknown', id: '1' })
     })
   })
 
-  app.get('/sse/empty-data', c => {
-    return streamSSE(c, async stream => {
+  app.get('/sse/empty-data', (c) => {
+    return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: '', event: 'message', id: '1' })
     })
   })
 
-  app.get('/sse/no-event-name', c => {
-    return streamSSE(c, async stream => {
+  app.get('/sse/no-event-name', (c) => {
+    return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: 'hello', id: '1' })
     })
   })
 
-  app.get('/sse/infinite', c => {
+  app.get('/sse/infinite', (c) => {
     c.header('x-request-id', 'trace-sse-infinite')
     const requestSignal = c.req.raw.signal
-    return streamSSE(c, async stream => {
+    return streamSSE(c, async (stream) => {
       let count = 0
 
       const writeTick = async () => {
@@ -239,7 +241,7 @@ export async function setup({ provide }: TestProject) {
 
       await writeTick()
 
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         let settled = false
         const interval = setInterval(() => {
           if (stream.aborted) {
@@ -279,7 +281,7 @@ export async function setup({ provide }: TestProject) {
 
   app.get(
     '/ws/basic',
-    upgradeWebSocket(c => {
+    upgradeWebSocket((c) => {
       const roomId = c.req.query('roomId') ?? 'default'
 
       return {
@@ -324,7 +326,7 @@ export async function setup({ provide }: TestProject) {
 
   app.get(
     '/ws/before-connect',
-    upgradeWebSocket(c => {
+    upgradeWebSocket((c) => {
       const token = c.req.query('token') ?? 'missing'
 
       return {
@@ -342,7 +344,7 @@ export async function setup({ provide }: TestProject) {
 
   app.get(
     '/ws/reconnect',
-    upgradeWebSocket(c => {
+    upgradeWebSocket((c) => {
       const key = c.req.query('key') ?? 'default'
       const attempt = (reconnectAttempts.get(key) ?? 0) + 1
       reconnectAttempts.set(key, attempt)
@@ -451,7 +453,7 @@ export async function setup({ provide }: TestProject) {
   })
   testServer = server
 
-  server.on('connection', socket => {
+  server.on('connection', (socket) => {
     testServerSockets.add(socket)
     socket.on('close', () => {
       testServerSockets.delete(socket)
@@ -478,12 +480,12 @@ export async function setup({ provide }: TestProject) {
 
 export async function teardown() {
   if (nodeWebSocket) {
-    nodeWebSocket.wss.clients.forEach(client => {
+    nodeWebSocket.wss.clients.forEach((client) => {
       client.terminate()
     })
 
     await new Promise<void>((resolve, reject) => {
-      nodeWebSocket?.wss.close(error => {
+      nodeWebSocket?.wss.close((error) => {
         if (error) {
           reject(error)
           return
@@ -512,13 +514,13 @@ export async function teardown() {
     serverWithCleanup.closeAllConnections?.()
   }
 
-  testServerSockets.forEach(socket => {
+  testServerSockets.forEach((socket) => {
     socket.destroy()
   })
   testServerSockets.clear()
 
   await new Promise<void>((resolve, reject) => {
-    testServer?.close(error => {
+    testServer?.close((error) => {
       if (error) {
         if ((error as NodeJS.ErrnoException).code === 'ERR_SERVER_NOT_RUNNING') {
           resolve()

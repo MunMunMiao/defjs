@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../http'
-import { createWebSocketInterceptor, makeWebSocketInterceptorChain, type WebSocketInterceptorFn } from './interceptor'
+import type { WebSocketInterceptorFn } from './interceptor'
+import { createWebSocketInterceptor, makeWebSocketInterceptorChain } from './interceptor'
 
 describe('WebSocket interceptor chain', () => {
   test('should apply WebSocket interceptors and pass modified request to handler', async () => {

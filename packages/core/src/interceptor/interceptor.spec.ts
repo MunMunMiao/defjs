@@ -2,14 +2,15 @@ import { describe, expect, it } from 'vitest'
 import type { HttpRequest } from '../http'
 import { createFetchRequestInit } from '../http/transport/fetch'
 import { makeFakeHandler } from '../http/transport/test_handler'
-import { createHttpInterceptor, type InterceptorFn, makeInterceptorChain } from '../interceptor/interceptor'
+import type { InterceptorFn } from '../interceptor/interceptor'
+import { createHttpInterceptor, makeInterceptorChain } from '../interceptor/interceptor'
 
 describe('interceptor', () => {
   it('should work with InterceptorFn chain', async () => {
     const result: number[] = []
     const fun1: InterceptorFn = (req, next) => {
       result.push(1)
-      return next(req).then(r => {
+      return next(req).then((r) => {
         result.push(1.1)
         return r
       })
@@ -17,7 +18,7 @@ describe('interceptor', () => {
 
     const fun2: InterceptorFn = (req, next) => {
       result.push(2)
-      return next(req).then(r => {
+      return next(req).then((r) => {
         result.push(2.1)
         return r
       })
@@ -25,7 +26,7 @@ describe('interceptor', () => {
 
     const fun3: InterceptorFn = (req, next) => {
       result.push(3)
-      return next(req).then(r => {
+      return next(req).then((r) => {
         result.push(3.1)
         return r
       })

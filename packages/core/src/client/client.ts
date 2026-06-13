@@ -2,7 +2,8 @@ import type { ClientConfig } from './config'
 import { DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import { getGlobalClient } from './global'
 import type { ClientOption } from './option'
-import { CLIENT, type Client, getClientConfig } from './resolve'
+import type { Client } from './resolve'
+import { CLIENT, getClientConfig } from './resolve'
 
 export function createClient(...options: ClientOption[]): Client {
   const conf: ClientConfig = {

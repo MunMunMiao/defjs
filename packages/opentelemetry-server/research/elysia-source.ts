@@ -1,29 +1,16 @@
 // Source code from @elysia/opentelemetry v1.4.12
 // https://github.com/elysiajs/opentelemetry
 
-import {
-  type Attributes,
-  type Context,
-  type ContextManager,
-  metrics,
-  context as otelContext,
-  ProxyTracerProvider,
-  propagation,
-  type Span,
-  SpanKind,
-  type SpanOptions,
-  SpanStatusCode,
-  type TraceAPI,
-  type TracerProvider,
-  trace,
-} from '@opentelemetry/api'
+import type { Attributes, Context, ContextManager, Span, SpanOptions, TraceAPI, TracerProvider } from '@opentelemetry/api'
+import { metrics, context as otelContext, ProxyTracerProvider, propagation, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api'
 import { NodeSDK } from '@opentelemetry/sdk-node'
-import { Elysia, StatusMap, type TraceEvent, type TraceProcess } from 'elysia'
+import type { TraceEvent, TraceProcess } from 'elysia'
+import { Elysia, StatusMap } from 'elysia'
 
 // @ts-ignore bun only
 const headerHasToJSON = typeof new Headers().toJSON === 'function'
 
-const toHeaderNameSet = (names: string[] | undefined): Set<string> => new Set((names ?? []).map(name => name.toLowerCase()))
+const toHeaderNameSet = (names: string[] | undefined): Set<string> => new Set((names ?? []).map((name) => name.toLowerCase()))
 
 const SENSITIVE_QUERY_KEYS = new Set([
   'token',
@@ -126,11 +113,11 @@ const createActiveSpanHandler = (fn: (span: Span) => unknown) => (span: Span) =>
     if (result instanceof Promise || typeof result?.then === 'function')
       // @ts-ignore
       return Promise.resolve(result).then(
-        value => {
+        (value) => {
           span.end()
           return value
         },
-        rejectResult => {
+        (rejectResult) => {
           span.setStatus({
             code: SpanStatusCode.ERROR,
             message: rejectResult instanceof Error ? rejectResult.message : JSON.stringify(rejectResult ?? 'Unknown error'),
@@ -361,7 +348,7 @@ export const opentelemetry = ({
 
       const ctx = propagation.extract(otelContext.active(), headers)
 
-      return tracer.startActiveSpan('Root', { kind: SpanKind.SERVER }, ctx, rootSpan => {
+      return tracer.startActiveSpan('Root', { kind: SpanKind.SERVER }, ctx, (rootSpan) => {
         const spanContext = trace.setSpan(ctx, rootSpan)
         // Execute fn within the span's context using with() instead of bind()
         // This ensures proper cleanup when the function completes or errors
@@ -417,7 +404,7 @@ export const opentelemetry = ({
             )
               return
 
-            tracer.startActiveSpan(name, {}, createContext(rootSpan), event => {
+            tracer.startActiveSpan(name, {}, createContext(rootSpan), (event) => {
               if (
                 // @ts-ignore
                 rootSpan.ended
@@ -548,7 +535,7 @@ export const opentelemetry = ({
         })
 
         onAfterHandle(inspect('AfterHandle'))
-        onError(event => {
+        onError((event) => {
           inspect('Error')(event)
 
           event.onStop(({ error }) => {
@@ -763,7 +750,7 @@ export const opentelemetry = ({
           }
         })
 
-        onAfterResponse(event => {
+        onAfterResponse((event) => {
           inspect('AfterResponse')(event)
 
           {

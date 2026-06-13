@@ -1,5 +1,6 @@
 import type { Socket } from 'node:net'
-import { createAdaptorServer, type ServerType } from '@hono/node-server'
+import type { ServerType } from '@hono/node-server'
+import { createAdaptorServer } from '@hono/node-server'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
@@ -18,7 +19,7 @@ export async function setup({ provide }: TestProject) {
   const app = new Hono()
 
   // HTTP: echo back received headers
-  app.post('/echo-headers', async c => {
+  app.post('/echo-headers', async (c) => {
     const headers: Record<string, string> = {}
     c.req.raw.headers.forEach((value, key) => {
       headers[key] = value
@@ -27,25 +28,25 @@ export async function setup({ provide }: TestProject) {
   })
 
   // HTTP: return 500 for error testing
-  app.get('/500', c => c.body(null, { status: 500, statusText: 'Internal Server Error' }))
+  app.get('/500', (c) => c.body(null, { status: 500, statusText: 'Internal Server Error' }))
 
   // SSE: echo back traceparent header, then close
-  app.get('/sse', c => {
+  app.get('/sse', (c) => {
     const traceparent = c.req.header('traceparent') ?? 'missing'
-    return streamSSE(c, async stream => {
+    return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: traceparent, event: 'traceparent', id: '1' })
     })
   })
 
   // SSE: 500 error
-  app.get('/sse/500', c => c.body(null, 500))
+  app.get('/sse/500', (c) => c.body(null, 500))
 
   // WebSocket: echo back traceparent query param, then close
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app, baseUrl: 'http://127.0.0.1' })
 
   app.get(
     '/ws',
-    upgradeWebSocket(c => {
+    upgradeWebSocket((c) => {
       const traceparent = c.req.query('traceparent') ?? 'missing'
       return {
         onOpen(_event, ws) {
@@ -63,7 +64,7 @@ export async function setup({ provide }: TestProject) {
   const server = createAdaptorServer({ fetch: app.fetch, hostname: '127.0.0.1' })
   testServer = server
 
-  server.on('connection', socket => {
+  server.on('connection', (socket) => {
     testServerSockets.add(socket)
     socket.on('close', () => {
       testServerSockets.delete(socket)
@@ -92,10 +93,10 @@ export async function teardown() {
     return
   }
 
-  testServerSockets.forEach(socket => socket.destroy())
+  testServerSockets.forEach((socket) => socket.destroy())
   testServerSockets.clear()
 
-  await new Promise<void>(resolve => {
+  await new Promise<void>((resolve) => {
     testServer?.close(() => resolve())
   })
 

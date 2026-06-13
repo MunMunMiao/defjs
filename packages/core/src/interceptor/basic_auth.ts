@@ -1,5 +1,6 @@
 import type { HttpRequest } from '../internal/http_request'
-import { createHttpInterceptor, createSSEInterceptor, type HttpInterceptor, type SSEInterceptor } from './interceptor'
+import type { HttpInterceptor, SSEInterceptor } from './interceptor'
+import { createHttpInterceptor, createSSEInterceptor } from './interceptor'
 
 export type BasicCredential = {
   username: string

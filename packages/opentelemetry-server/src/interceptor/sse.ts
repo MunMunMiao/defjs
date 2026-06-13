@@ -1,5 +1,6 @@
 import { createSSEInterceptor } from '@defjs/core'
-import { context, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
+import type { TextMapPropagator, Tracer } from '@opentelemetry/api'
+import { context, trace } from '@opentelemetry/api'
 import type { RequestMetrics } from '../option'
 import { headersGetter, headersSetter } from '../propagation/carrier'
 import { createSseSpan, endSpan, setSpanError } from '../telemetry/trace'

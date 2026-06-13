@@ -1,5 +1,6 @@
 import type { Socket } from 'node:net'
-import { createAdaptorServer, type ServerType } from '@hono/node-server'
+import type { ServerType } from '@hono/node-server'
+import { createAdaptorServer } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { TestProject } from 'vitest/node'
@@ -28,14 +29,14 @@ export async function setup({ provide }: TestProject) {
     }),
   )
 
-  app.get('/api/users', c => {
+  app.get('/api/users', (c) => {
     return c.json([
       { id: 1, name: 'John' },
       { id: 2, name: 'Jane' },
     ])
   })
 
-  app.get('/api/users/:id', c => {
+  app.get('/api/users/:id', (c) => {
     const id = c.req.param('id')
     return c.json({ id: Number(id), name: 'John' })
   })
@@ -46,7 +47,7 @@ export async function setup({ provide }: TestProject) {
   })
   testServer = server
 
-  server.on('connection', socket => {
+  server.on('connection', (socket) => {
     testServerSockets.add(socket)
     socket.on('close', () => {
       testServerSockets.delete(socket)
@@ -80,13 +81,13 @@ export async function teardown() {
     return
   }
 
-  testServerSockets.forEach(socket => {
+  testServerSockets.forEach((socket) => {
     socket.destroy()
   })
   testServerSockets.clear()
 
   await new Promise<void>((resolve, reject) => {
-    testServer?.close(error => {
+    testServer?.close((error) => {
       if (error) {
         if ((error as NodeJS.ErrnoException).code === 'ERR_SERVER_NOT_RUNNING') {
           resolve()

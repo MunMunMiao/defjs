@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { createTagNamespace, type FieldTagOption, getFieldTag, getFieldTags, struct, tag } from './index'
+import type { FieldTagOption } from './index'
+import { createTagNamespace, getFieldTag, getFieldTags, struct, tag } from './index'
 
 describe('tag.ts metadata', () => {
   test('should materialize built-in value tags with field-key fallback', () => {

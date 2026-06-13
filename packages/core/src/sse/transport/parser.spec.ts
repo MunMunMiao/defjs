@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { createLineParser, createMessageParser, type EventStreamMessage, readStreamBytes } from './parser'
+import type { EventStreamMessage } from './parser'
+import { createLineParser, createMessageParser, readStreamBytes } from './parser'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -9,7 +10,7 @@ const noop = () => {
 
 describe('sse parser', () => {
   test('should read stream bytes chunk by chunk', async () => {
-    const chunks = ['first', 'second', 'third'].map(value => encoder.encode(value))
+    const chunks = ['first', 'second', 'third'].map((value) => encoder.encode(value))
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         for (const chunk of chunks) {
@@ -20,7 +21,7 @@ describe('sse parser', () => {
     })
 
     const seen: string[] = []
-    await readStreamBytes(stream, async chunk => {
+    await readStreamBytes(stream, async (chunk) => {
       seen.push(decoder.decode(chunk))
     })
 
@@ -52,13 +53,13 @@ describe('sse parser', () => {
     const retries: number[] = []
     const messages: EventStreamMessage[] = []
     const parseMessage = createMessageParser(
-      id => {
+      (id) => {
         ids.push(id)
       },
-      retry => {
+      (retry) => {
         retries.push(retry)
       },
-      async message => {
+      async (message) => {
         messages.push(message)
       },
     )
@@ -83,13 +84,13 @@ describe('sse parser', () => {
     const retries: number[] = []
     const messages: EventStreamMessage[] = []
     const parseMessage = createMessageParser(
-      id => {
+      (id) => {
         ids.push(id)
       },
-      retry => {
+      (retry) => {
         retries.push(retry)
       },
-      async message => {
+      async (message) => {
         messages.push(message)
       },
     )
@@ -111,7 +112,7 @@ describe('sse parser', () => {
 
   test('should handle partial line across chunks with non-zero line start', async () => {
     const messages: EventStreamMessage[] = []
-    const parseMessage = createMessageParser(noop, noop, async message => {
+    const parseMessage = createMessageParser(noop, noop, async (message) => {
       messages.push(message)
     })
     const parseLine = createLineParser(parseMessage)
@@ -133,7 +134,7 @@ describe('sse parser', () => {
 
   test('should handle crlf line endings and discard trailing newlines', async () => {
     const messages: EventStreamMessage[] = []
-    const parseMessage = createMessageParser(noop, noop, async message => {
+    const parseMessage = createMessageParser(noop, noop, async (message) => {
       messages.push(message)
     })
     const parseLine = createLineParser(parseMessage)
@@ -153,7 +154,7 @@ describe('sse parser', () => {
 
   test('should handle field with space after colon', async () => {
     const messages: EventStreamMessage[] = []
-    const parseMessage = createMessageParser(noop, noop, async message => {
+    const parseMessage = createMessageParser(noop, noop, async (message) => {
       messages.push(message)
     })
     const parseLine = createLineParser(parseMessage)
@@ -173,7 +174,7 @@ describe('sse parser', () => {
 
   test('should handle field without space after colon', async () => {
     const messages: EventStreamMessage[] = []
-    const parseMessage = createMessageParser(noop, noop, async message => {
+    const parseMessage = createMessageParser(noop, noop, async (message) => {
       messages.push(message)
     })
     const parseLine = createLineParser(parseMessage)

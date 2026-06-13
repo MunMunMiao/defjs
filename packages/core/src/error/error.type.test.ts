@@ -1,11 +1,5 @@
-import {
-  createDefinitionError,
-  createRequestRuntimeError,
-  createTransportError,
-  type DefinitionError,
-  type RequestError,
-  type TransportError,
-} from './index'
+import type { DefinitionError, RequestError, TransportError } from './index'
+import { createDefinitionError, createRequestRuntimeError, createTransportError } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T

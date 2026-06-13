@@ -1,5 +1,6 @@
 import type { HttpRequest } from '../../internal/http_request'
-import { type HttpResponse, makeResponse } from '../../internal/http_response'
+import type { HttpResponse } from '../../internal/http_response'
+import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
 
 export type TestHandler = (req: HttpRequest) => Promise<HttpResponse<unknown>>
@@ -18,7 +19,7 @@ export function makeFakeHandler(init?: {
   const { onRequestBefore, onRequestAfter, response } = init ?? {}
   const { status, statusText, body, headers } = response ?? {}
   return (req: HttpRequest) => {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const url = resolveRequestUrl(req)
 
       onRequestBefore?.(req)

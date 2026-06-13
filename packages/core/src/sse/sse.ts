@@ -1,10 +1,14 @@
 import { resolveClientConfig } from '../client/client'
 import type { Client } from '../client/resolve'
-import { createDefinitionError, createRequestRuntimeError, ERR_ABORTED, type RequestError } from '../error'
-import { makeSSEInterceptorChain, resolveSSEInterceptors, type SSEHandler } from '../interceptor/interceptor'
-import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals, type UseCancellationConfig } from '../internal/abort'
+import type { RequestError } from '../error'
+import { createDefinitionError, createRequestRuntimeError, ERR_ABORTED } from '../error'
+import type { SSEHandler } from '../interceptor/interceptor'
+import { makeSSEInterceptorChain, resolveSSEInterceptors } from '../interceptor/interceptor'
+import type { UseCancellationConfig } from '../internal/abort'
+import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals } from '../internal/abort'
 import type { HttpContext } from '../internal/context'
-import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
+import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
+import { parseEndpointInput } from '../internal/endpoint_input'
 import type { SettledResponse } from '../internal/http_response'
 import type { RequestBuilder, RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct, Infer } from '../struct'
@@ -86,8 +90,10 @@ export type UseEventStreamEndpointFn<TInput extends AnyStruct | undefined, TEven
     ? (input?: EndpointInput<TInput>) => EventStreamRef<EventStreamData<TEvents>>
     : (input: EndpointInput<TInput>) => EventStreamRef<EventStreamData<TEvents>>
 
-interface EventStreamEndpoint<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>
-  extends EventStreamDefinition<TInput, TEvents> {
+interface EventStreamEndpoint<
+  TInput extends AnyStruct | undefined = undefined,
+  TEvents extends EventSchemas = EventSchemas,
+> extends EventStreamDefinition<TInput, TEvents> {
   readonly kind: 'event-stream'
   readonly method: string
 }
@@ -224,7 +230,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
 
   try {
     const sseInterceptors = resolveSSEInterceptors(clientConfig.interceptors)
-    const sseHandler: SSEHandler = req =>
+    const sseHandler: SSEHandler = (req) =>
       fetchEventStream(req, {
         fetch: clientConfig.sse.fetch,
         async transformMessage(message) {
@@ -238,7 +244,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
     state.open = normalizeOpenInfo(stream.open)
     state.status = 'open'
 
-    void stream.closed.then(closeInfo => {
+    void stream.closed.then((closeInfo) => {
       if (closeInfo.code === 'aborted') {
         state.status = 'aborted'
         /* istanbul ignore next -- unreachable: state.error is never set before stream resolves */

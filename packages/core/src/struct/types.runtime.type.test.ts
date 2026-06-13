@@ -1,4 +1,17 @@
-import { type Infer, struct } from './index'
+import type { Infer } from './index'
+
+// @ts-expect-error TypeOf is intentionally not part of the public struct API.
+import type { TypeOf } from './index'
+
+// @ts-expect-error InputOf is intentionally not part of the public struct API.
+import type { InputOf } from './index'
+
+// @ts-expect-error JSON codec helpers are internal runtime behavior, not public struct API.
+import type { encodeJson } from './index'
+
+// @ts-expect-error JSON codec helpers are internal runtime behavior, not public struct API.
+import type { decodeJson } from './index'
+import { struct } from './index'
 
 type IsAny<T> = 0 extends 1 & T ? true : false
 type StrictEqual<A, B> =
@@ -34,17 +47,10 @@ const result = struct.or(struct.string(), struct.number())
 type UnionCase = Expect<StrictEqual<Infer<typeof result>, string | number>>
 type AnyGuard = Expect<StrictEqual<IsAny<Infer<typeof profile>>, false>>
 
-// @ts-expect-error TypeOf is intentionally not part of the public struct API.
-export type MissingTypeOf = import('./index').TypeOf<never>
-
-// @ts-expect-error InputOf is intentionally not part of the public struct API.
-export type MissingInputOf = import('./index').InputOf<never>
-
-// @ts-expect-error JSON codec helpers are internal runtime behavior, not public struct API.
-export type MissingEncodeJson = typeof import('./index').encodeJson
-
-// @ts-expect-error JSON codec helpers are internal runtime behavior, not public struct API.
-export type MissingDecodeJson = typeof import('./index').decodeJson
+export type MissingTypeOf = TypeOf<never>
+export type MissingInputOf = InputOf<never>
+export type MissingEncodeJson = typeof encodeJson
+export type MissingDecodeJson = typeof decodeJson
 
 // @ts-expect-error primitive constraints were removed from the Go-style API.
 struct.string().min(1)

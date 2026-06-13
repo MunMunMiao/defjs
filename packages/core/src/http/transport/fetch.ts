@@ -1,6 +1,7 @@
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
 import type { HttpRequest } from '../../internal/http_request'
-import { type HttpResponse, type HttpResponseBody, makeResponse } from '../../internal/http_response'
+import type { HttpResponse, HttpResponseBody } from '../../internal/http_response'
+import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
 import { applyRequestContentType, serializeHttpBody } from './body'
 import { concatChunks, getContentLength, getContentType, parseBody } from './utils'

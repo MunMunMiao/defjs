@@ -1,5 +1,6 @@
 import { createWebSocketInterceptor } from '@defjs/core'
-import { context, type TextMapPropagator, type Tracer, trace } from '@opentelemetry/api'
+import type { TextMapPropagator, Tracer } from '@opentelemetry/api'
+import { context, trace } from '@opentelemetry/api'
 import type { RequestMetrics } from '../option'
 import { headersGetter, queryStringSetter } from '../propagation/carrier'
 import { createWebSocketSpan, endSpan, setSpanError } from '../telemetry/trace'

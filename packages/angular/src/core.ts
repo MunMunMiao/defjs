@@ -1,13 +1,8 @@
 import { DOCUMENT } from '@angular/common'
-import { APP_INITIALIZER, type EnvironmentProviders, InjectionToken, inject, makeEnvironmentProviders } from '@angular/core'
-import {
-  type Client,
-  createClient,
-  type Interceptor,
-  setGlobalClient,
-  withInterceptors as withClientInterceptors,
-  withEndpoint,
-} from '@defjs/core'
+import type { EnvironmentProviders } from '@angular/core'
+import { APP_INITIALIZER, InjectionToken, inject, makeEnvironmentProviders } from '@angular/core'
+import type { Client, Interceptor } from '@defjs/core'
+import { createClient, setGlobalClient, withEndpoint, withInterceptors as withClientInterceptors } from '@defjs/core'
 
 const HTTP_CLIENT = new InjectionToken<Client>('HTTP_CLIENT')
 const HTTP_INTERCEPTOR_FNS = new InjectionToken<Interceptor[]>('HTTP_INTERCEPTOR_FNS')
@@ -24,7 +19,7 @@ export function withHost(host: string): EnvironmentProviders {
 
 export function withInterceptors(...fns: (() => Interceptor)[]): EnvironmentProviders {
   return makeEnvironmentProviders(
-    fns.map(fn => ({
+    fns.map((fn) => ({
       provide: HTTP_INTERCEPTOR_FNS,
       useFactory: fn,
       multi: true,

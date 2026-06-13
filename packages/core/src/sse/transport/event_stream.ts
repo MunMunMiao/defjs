@@ -3,9 +3,11 @@ import { serializeHttpBody } from '../../http/transport/body'
 import { isReadableStreamBody, supportsStreamingRequestBody } from '../../http/transport/fetch'
 import { AsyncQueue } from '../../internal/async_queue'
 import type { HttpRequest } from '../../internal/http_request'
-import { type HttpResponse, makeResponse } from '../../internal/http_response'
+import type { HttpResponse } from '../../internal/http_response'
+import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
-import { createLineParser, createMessageParser, type EventStreamMessage, readStreamBytes } from './parser'
+import type { EventStreamMessage } from './parser'
+import { createLineParser, createMessageParser, readStreamBytes } from './parser'
 
 export const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream'
 export const LAST_EVENT_ID_HEADER = 'last-event-id'
@@ -207,7 +209,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       stream,
       createLineParser(
         createMessageParser(
-          id => {
+          (id) => {
             lastEventId = id
             if (id) {
               headers.set(LAST_EVENT_ID_HEADER, id)
@@ -215,10 +217,10 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
               headers.delete(LAST_EVENT_ID_HEADER)
             }
           },
-          retry => {
+          (retry) => {
             retryInterval = retry
           },
-          async message => {
+          async (message) => {
             try {
               options.onmessage?.(message)
               const transformed = options.transformMessage ? await options.transformMessage(message) : (message as TEvent)

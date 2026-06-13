@@ -1,6 +1,7 @@
 import { createClient, withEndpoint, withSseOptions } from '../client'
 import { struct } from '../struct'
-import { defineEventStream, type EventStreamData, type EventStreamRef, type StreamAwaitResult, type UseEventStreamConfig } from './index'
+import type { EventStreamData, EventStreamRef, StreamAwaitResult, UseEventStreamConfig } from './index'
+import { defineEventStream } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T

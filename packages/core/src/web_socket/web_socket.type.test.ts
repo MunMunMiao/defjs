@@ -1,12 +1,6 @@
 import { struct } from '../struct'
-import {
-  defineWebSocket,
-  type UseWebSocketConfig,
-  type WebSocketIncomingData,
-  type WebSocketOutgoingData,
-  type WebSocketRef,
-  type WebSocketSession,
-} from './index'
+import type { UseWebSocketConfig, WebSocketIncomingData, WebSocketOutgoingData, WebSocketRef, WebSocketSession } from './index'
+import { defineWebSocket } from './index'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
@@ -97,7 +91,7 @@ socketRef.with({ abort: AbortSignal.timeout(100) })
 socketRef.with({
   heartbeat: {
     intervalMs: 1000,
-    isAck: message => message.type === 'joined',
+    isAck: (message) => message.type === 'joined',
     message: () => ({ text: 'hello', type: 'message' }),
   },
 })

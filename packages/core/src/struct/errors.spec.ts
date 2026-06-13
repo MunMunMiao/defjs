@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest'
-import { type ErrorMap, StructError, setErrorMap, struct } from './index'
+import type { ErrorMap } from './index'
+import { StructError, setErrorMap, struct } from './index'
 import { parseStructTuple as parse } from './introspection'
 
 afterEach(() => {
@@ -106,7 +107,7 @@ describe('StructError format / flatten / prettify', () => {
 
 describe('errors.ts errorMap', () => {
   test('setErrorMap overrides default issue messages', () => {
-    const map: ErrorMap = issue => {
+    const map: ErrorMap = (issue) => {
       if (issue.code === 'invalid_type') {
         return `字段 ${issue.path.join('.')} 类型不符（期望 ${issue.expected}）`
       }

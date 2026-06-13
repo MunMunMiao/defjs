@@ -1,4 +1,5 @@
-import { createTransportError, ERR_ABORTED, ERR_TIMEOUT, type TransportError } from '../error'
+import type { TransportError } from '../error'
+import { createTransportError, ERR_ABORTED, ERR_TIMEOUT } from '../error'
 import type { AnyStruct } from '../struct'
 import { decodeJson, encodeJson } from '../struct/codec/json'
 import { parseStructValue } from '../struct/introspection'

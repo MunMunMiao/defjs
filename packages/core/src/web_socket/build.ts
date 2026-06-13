@@ -1,6 +1,7 @@
 import type { QueryParamsSerializer } from '../client/config'
 import type { HttpRequest } from '../internal/http_request'
-import { buildRequest, type RequestBuild, type RequestBuilder } from '../internal/request_builder'
+import type { RequestBuild, RequestBuilder } from '../internal/request_builder'
+import { buildRequest } from '../internal/request_builder'
 import type { RequestBuildValue } from '../internal/request_values'
 import { createResolvedRequestUrl, resolveRequestUrl } from '../internal/url'
 import type { AnyStruct } from '../struct'

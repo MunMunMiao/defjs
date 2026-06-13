@@ -4,7 +4,8 @@ import { isStruct } from './guards'
 import { parseValue, safeZeroValue } from './parse'
 import { assertSchema, resolveObjectShape, resolveRuntimeSchema } from './shape'
 import { DEFINITION } from './symbols'
-import { type FieldTag, materializeFieldTags } from './tag'
+import type { FieldTag } from './tag'
+import { materializeFieldTags } from './tag'
 import type { ObjectSchema, ObjectShape, ParseTuple, RuntimeSchema, SchemaLike } from './types'
 
 export function getFieldTags(field: SchemaLike<any, any, boolean>, fieldKey: string): ReadonlyMap<symbol, FieldTag> {

@@ -1,5 +1,6 @@
 import type { Context } from '@opentelemetry/api'
-import { type Span, SpanKind, SpanStatusCode, type Tracer } from '@opentelemetry/api'
+import type { Span, Tracer } from '@opentelemetry/api'
+import { SpanKind, SpanStatusCode } from '@opentelemetry/api'
 
 export function createHttpSpan(tracer: Tracer, method: string, url: string, parentCtx: Context): Span {
   return tracer.startSpan(

@@ -1,11 +1,15 @@
 import { resolveClientConfig } from '../client/client'
 import type { ClientConfig, WebSocketBeforeConnect, WebSocketHeartbeatOptions } from '../client/config'
 import type { Client } from '../client/resolve'
-import { createDefinitionError, createTransportError, ERR_ABORTED, type RequestError } from '../error'
-import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors, type WebSocketSessionLike } from '../interceptor/interceptor'
-import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals, type UseCancellationConfig } from '../internal/abort'
+import type { RequestError } from '../error'
+import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
+import type { WebSocketSessionLike } from '../interceptor/interceptor'
+import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors } from '../interceptor/interceptor'
+import type { UseCancellationConfig } from '../internal/abort'
+import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals } from '../internal/abort'
 import { AsyncQueue } from '../internal/async_queue'
-import { type EndpointInput, type ParsedInput, parseEndpointInput } from '../internal/endpoint_input'
+import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
+import { parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpRequest } from '../internal/http_request'
 import type { RequestBuild, RequestBuilder, RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct, Infer } from '../struct'
@@ -17,9 +21,12 @@ import {
   serializeOutgoingWebSocketMessage,
   transformWebSocketMessage,
 } from './codec'
-import { type HeartbeatRuntime, startHeartbeat, stopHeartbeat } from './heartbeat'
-import { createSendQueue, type SendQueue, type WebSocketQueueConfig } from './queue'
-import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, type WebSocketReconnectConfig, wait } from './reconnect'
+import type { HeartbeatRuntime } from './heartbeat'
+import { startHeartbeat, stopHeartbeat } from './heartbeat'
+import type { SendQueue, WebSocketQueueConfig } from './queue'
+import { createSendQueue } from './queue'
+import type { WebSocketReconnectConfig } from './reconnect'
+import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait } from './reconnect'
 
 export type WebSocketState = 'aborted' | 'closed' | 'closing' | 'connecting' | 'error' | 'idle' | 'open' | 'reconnecting'
 
@@ -498,7 +505,7 @@ async function executeWebSocketEndpoint<
         let opened = false
         let runtimeCause: unknown
 
-        return await new Promise<SocketLifecycleOutcome>(resolveAttempt => {
+        return await new Promise<SocketLifecycleOutcome>((resolveAttempt) => {
           const cleanup = () => {
             stopHeartbeat(sessionController)
             socket.removeEventListener('open', handleOpen)
@@ -539,7 +546,7 @@ async function executeWebSocketEndpoint<
               resolveSession(session as WebSocketSessionLike)
             }
             flushSendQueue(socket, sendQueue, state, WebSocketCtor.OPEN)
-            startHeartbeat(socket, sessionController, heartbeatConfig, endpoint.outgoing, sendQueue, error =>
+            startHeartbeat(socket, sessionController, heartbeatConfig, endpoint.outgoing, sendQueue, (error) =>
               emitRuntimeError(state, error),
             )
           }

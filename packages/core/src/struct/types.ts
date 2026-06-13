@@ -1,5 +1,5 @@
 import type { StructError } from './errors'
-import { DEFINITION, TYPES } from './symbols'
+import type { DEFINITION, TYPES } from './symbols'
 import type { FieldTagOption } from './tag'
 
 export type Path = Array<number | string>
@@ -109,8 +109,7 @@ export interface ArraySchemaTypes<S extends SchemaLike<any, any, boolean>> exten
 }
 
 export interface ArraySchema<S extends SchemaLike<any, any, boolean>>
-  extends SchemaMethods<ArrayInput<S>, ArrayOutput<S>, false>,
-    SchemaLike<ArrayInput<S>, ArrayOutput<S>, false> {
+  extends SchemaMethods<ArrayInput<S>, ArrayOutput<S>, false>, SchemaLike<ArrayInput<S>, ArrayOutput<S>, false> {
   readonly [TYPES]: ArraySchemaTypes<S>
   readonly _struct: ArraySchemaTypes<S>
 }
@@ -122,16 +121,18 @@ export interface ObjectSchemaTypes<T extends ObjectShape> extends SchemaTypes<Ob
 }
 
 export interface ObjectSchema<T extends ObjectShape>
-  extends SchemaMethods<ObjectInput<T>, ObjectOutput<T>, false>,
-    SchemaLike<ObjectInput<T>, ObjectOutput<T>, false> {
+  extends SchemaMethods<ObjectInput<T>, ObjectOutput<T>, false>, SchemaLike<ObjectInput<T>, ObjectOutput<T>, false> {
   readonly [TYPES]: ObjectSchemaTypes<T>
   readonly _struct: ObjectSchemaTypes<T>
 }
 
 export type RequestBodyCodec = 'arrayBuffer' | 'blob' | 'formData' | 'json' | 'text' | 'urlencoded'
 
-export interface RequestBodySchemaTypes<C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>>
-  extends SchemaTypes<SchemaInput<S>, SchemaOutput<S>, false> {
+export interface RequestBodySchemaTypes<C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>> extends SchemaTypes<
+  SchemaInput<S>,
+  SchemaOutput<S>,
+  false
+> {
   codec: C
   input: SchemaInput<S>
   optionalOut: undefined
@@ -139,8 +140,7 @@ export interface RequestBodySchemaTypes<C extends RequestBodyCodec, S extends Sc
 }
 
 export interface RequestBodySchema<C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>>
-  extends SchemaMethods<SchemaInput<S>, SchemaOutput<S>, false>,
-    SchemaLike<SchemaInput<S>, SchemaOutput<S>, false> {
+  extends SchemaMethods<SchemaInput<S>, SchemaOutput<S>, false>, SchemaLike<SchemaInput<S>, SchemaOutput<S>, false> {
   readonly [TYPES]: RequestBodySchemaTypes<C, S>
   readonly _struct: RequestBodySchemaTypes<C, S>
 }
@@ -176,8 +176,7 @@ export interface RequestSchemaTypes<T extends RequestShape> extends SchemaTypes<
 }
 
 export interface RequestSchema<T extends RequestShape>
-  extends SchemaMethods<RequestInput<T>, RequestOutput<T>, false>,
-    SchemaLike<RequestInput<T>, RequestOutput<T>, false> {
+  extends SchemaMethods<RequestInput<T>, RequestOutput<T>, false>, SchemaLike<RequestInput<T>, RequestOutput<T>, false> {
   readonly [TYPES]: RequestSchemaTypes<T>
   readonly _struct: RequestSchemaTypes<T>
 }

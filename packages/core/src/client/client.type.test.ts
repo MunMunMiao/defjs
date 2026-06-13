@@ -1,9 +1,7 @@
+import type { Client, ClientOptions, QueryParamsSerializer } from './index'
 import {
-  type Client,
-  type ClientOptions,
   cloneClient,
   createClient,
-  type QueryParamsSerializer,
   setGlobalClient,
   withCredentials,
   withEndpoint,
@@ -14,7 +12,7 @@ import {
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
 
-const serializer: QueryParamsSerializer = params => params.toString()
+const serializer: QueryParamsSerializer = (params) => params.toString()
 type SerializerCases = Expect<Equal<typeof serializer, (params: URLSearchParams) => string>>
 
 const client = createClient(
