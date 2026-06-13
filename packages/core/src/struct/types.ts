@@ -63,9 +63,8 @@ type SchemaOutput<T> = T extends { readonly _struct: { readonly output: unknown 
 
 export type Infer<T> = SchemaOutput<T>
 
-// Type boundary: FieldOutput inspects the generic schema surface; `any` here is a wildcard that lets the
+// Type boundary: FieldOutput inspects the generic schema surface; `unknown` lets the
 // conditional type match any SchemaLike without over-constraining callers.
-// oxlint-disable-next-line typescript/no-explicit-any
 export type FieldOutput<S> =
   S extends SchemaLike<unknown, unknown, boolean>
     ? S extends OptionalOutputSchema
@@ -100,11 +99,9 @@ export type TupleOutput<T extends readonly SchemaLike<unknown, unknown, boolean>
   -readonly [K in keyof T]: SchemaOutput<T[K]>
 }
 
-// Type boundary: UnionOutput ranges over arbitrary schema elements; `any` matches any SchemaLike.
-// oxlint-disable-next-line typescript/no-explicit-any
+// Type boundary: UnionOutput ranges over arbitrary schema elements; `unknown` matches any SchemaLike.
 export type UnionOutput<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = {
-  // Type boundary: per-element schema output extraction; `any` is required to preserve distributivity over all schemas.
-  // oxlint-disable-next-line typescript/no-explicit-any
+  // Type boundary: per-element schema output extraction; `unknown` preserves distributivity over all schemas.
   [K in keyof T]: T[K] extends SchemaLike<unknown, unknown, boolean> ? SchemaOutput<T[K]> : never
 }[number]
 
@@ -112,14 +109,11 @@ export type StringSchema = Schema<string | undefined, string>
 
 export type NumberSchema = Schema<number | undefined, number>
 
-// Type boundary: ArrayInput/Output work with any schema element; `any` is the generic placeholder.
-// oxlint-disable-next-line typescript/no-explicit-any
+// Type boundary: ArrayInput/Output work with any element schema; `unknown` is the generic placeholder.
 export type ArrayInput<S extends SchemaLike<unknown, unknown, boolean>> = SchemaInput<S>[]
-// oxlint-disable-next-line typescript/no-explicit-any
 export type ArrayOutput<S extends SchemaLike<unknown, unknown, boolean>> = SchemaOutput<S>[]
 
 // Type boundary: ArraySchemaTypes generalises over any element schema.
-// oxlint-disable-next-line typescript/no-explicit-any
 export interface ArraySchemaTypes<S extends SchemaLike<unknown, unknown, boolean>> extends SchemaTypes<
   ArrayInput<S>,
   ArrayOutput<S>,
@@ -131,7 +125,6 @@ export interface ArraySchemaTypes<S extends SchemaLike<unknown, unknown, boolean
 }
 
 // Type boundary: ArraySchema generalises over any element schema.
-// oxlint-disable-next-line typescript/no-explicit-any
 export interface ArraySchema<S extends SchemaLike<unknown, unknown, boolean>>
   extends SchemaMethods<ArrayInput<S>, ArrayOutput<S>, false>, SchemaLike<ArrayInput<S>, ArrayOutput<S>, false> {
   readonly [TYPES]: ArraySchemaTypes<S>
