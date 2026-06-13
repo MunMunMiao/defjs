@@ -2,11 +2,11 @@
 
 ## 背景
 
-| 项目 | 当前 | 目标 |
-|------|------|------|
-| 包名 | `@defjs/opentelemetry` | `@defjs/opentelemetry-server` |
-| 定位 | HTTP 客户端 instrumentation（interceptor 挂载到 `@defjs/core`） | 服务端 instrumentation（类似 Elysia 插件） |
-| 核心差异 | extract → create CLIENT span → inject | extract → create SERVER span → execute → record |
+| 项目     | 当前                                                            | 目标                                            |
+| -------- | --------------------------------------------------------------- | ----------------------------------------------- |
+| 包名     | `@defjs/opentelemetry`                                          | `@defjs/opentelemetry-server`                   |
+| 定位     | HTTP 客户端 instrumentation（interceptor 挂载到 `@defjs/core`） | 服务端 instrumentation（类似 Elysia 插件）      |
+| 核心差异 | extract → create CLIENT span → inject                           | extract → create SERVER span → execute → record |
 
 ---
 
@@ -39,14 +39,14 @@
 
 **当前功能**
 
-| 函数 | 当前行为 |
-|------|----------|
-| `createHttpSpan` | 创建 `SpanKind.CLIENT` 的 HTTP span |
-| `createSseSpan` | 创建 `SpanKind.CLIENT` 的 SSE span |
-| `createWebSocketSpan` | 创建 `SpanKind.CLIENT` 的 WebSocket span |
+| 函数                  | 当前行为                                         |
+| --------------------- | ------------------------------------------------ |
+| `createHttpSpan`      | 创建 `SpanKind.CLIENT` 的 HTTP span              |
+| `createSseSpan`       | 创建 `SpanKind.CLIENT` 的 SSE span               |
+| `createWebSocketSpan` | 创建 `SpanKind.CLIENT` 的 WebSocket span         |
 | `setSpanHttpResponse` | 设置 response status_code、span status、end span |
-| `setSpanError` | 记录 exception、设置 ERROR status、end span |
-| `endSpan` | 设置 OK status、end span |
+| `setSpanError`        | 记录 exception、设置 ERROR status、end span      |
+| `endSpan`             | 设置 OK status、end span                         |
 
 **服务端需求**
 
@@ -248,20 +248,20 @@
 
 ### 代码量统计
 
-| 文件 | 行数 | 建议 | 可复用率 | 可复用行数 |
-|------|------|------|----------|------------|
-| `carrier.ts` | 54 | 修改 | 30% | 16 |
-| `trace.ts` | 57 | 修改 | 60% | 34 |
-| `metrics.ts` | 30 | 修改 | 50% | 15 |
-| `logs.ts` | 24 | **删除** | 0% | 0 |
-| `interceptor/http.ts` | 86 | **重写** | 0% | 0 |
-| `interceptor/sse.ts` | 79 | **删除** | 0% | 0 |
-| `interceptor/web_socket.ts` | 87 | **删除** | 0% | 0 |
-| `option.ts` | 89 | **重写** | 20% | 18 |
-| `index.ts` | 1 | **重写** | 0% | 0 |
-| `public_api.ts` | 2 | **重写** | 0% | 0 |
-| `interceptor/http.spec.ts` | 174 | **重写** | 10% | 17 |
-| **总计** | **683** | — | **~15%** | **~100** |
+| 文件                        | 行数    | 建议     | 可复用率 | 可复用行数 |
+| --------------------------- | ------- | -------- | -------- | ---------- |
+| `carrier.ts`                | 54      | 修改     | 30%      | 16         |
+| `trace.ts`                  | 57      | 修改     | 60%      | 34         |
+| `metrics.ts`                | 30      | 修改     | 50%      | 15         |
+| `logs.ts`                   | 24      | **删除** | 0%       | 0          |
+| `interceptor/http.ts`       | 86      | **重写** | 0%       | 0          |
+| `interceptor/sse.ts`        | 79      | **删除** | 0%       | 0          |
+| `interceptor/web_socket.ts` | 87      | **删除** | 0%       | 0          |
+| `option.ts`                 | 89      | **重写** | 20%      | 18         |
+| `index.ts`                  | 1       | **重写** | 0%       | 0          |
+| `public_api.ts`             | 2       | **重写** | 0%       | 0          |
+| `interceptor/http.spec.ts`  | 174     | **重写** | 10%      | 17         |
+| **总计**                    | **683** | —        | **~15%** | **~100**   |
 
 ### 关键结论
 

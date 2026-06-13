@@ -200,17 +200,17 @@ Oxlint 配置应尽量覆盖当前 Biome lint 与新增类型安全约束。具�
 
 因为明确不使用独立约束检查命令，自动化边界如下：
 
-| 约束 | 自动化方式 |
-| --- | --- |
-| `public_api.ts` 出口统一 | 本次手动修复 + code review 维护 |
-| 普通 import 顶置 | Oxfmt/Oxlint 尽量覆盖 |
-| 禁止运行时 `import()` / `require()` | Oxlint 规则若支持则启用；否则 code review 维护 |
-| 禁止类型位置 `import('...')` | Oxlint 规则若支持则启用；否则 code review 维护 |
-| 禁止 namespace import | Oxlint 规则若支持则启用；否则 code review 维护 |
-| 禁止 `any` | Oxlint TypeScript rule |
-| `@ts-expect-error` 必须有说明 | Oxlint 若兼容相关规则选项则启用 |
-| non-null assertion | Oxlint TypeScript rule 若支持则启用 |
-| `as` 必须有备注 | 本次重构消除 + 保留项人工备注 + code review 维护 |
+| 约束                                | 自动化方式                                       |
+| ----------------------------------- | ------------------------------------------------ |
+| `public_api.ts` 出口统一            | 本次手动修复 + code review 维护                  |
+| 普通 import 顶置                    | Oxfmt/Oxlint 尽量覆盖                            |
+| 禁止运行时 `import()` / `require()` | Oxlint 规则若支持则启用；否则 code review 维护   |
+| 禁止类型位置 `import('...')`        | Oxlint 规则若支持则启用；否则 code review 维护   |
+| 禁止 namespace import               | Oxlint 规则若支持则启用；否则 code review 维护   |
+| 禁止 `any`                          | Oxlint TypeScript rule                           |
+| `@ts-expect-error` 必须有说明       | Oxlint 若兼容相关规则选项则启用                  |
+| non-null assertion                  | Oxlint TypeScript rule 若支持则启用              |
+| `as` 必须有备注                     | 本次重构消除 + 保留项人工备注 + code review 维护 |
 
 本设计不声称工具能完全防止未来回退；本次验收要求是当前代码按约束修干净，并通过 Oxlint/Oxfmt/TypeScript/test/build 验证。
 

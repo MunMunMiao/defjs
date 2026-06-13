@@ -33,11 +33,13 @@ const Input = struct.request({
   headers: struct.object({
     traceId: struct.string().tag(tag.header('x-trace-id')),
   }),
-  body: struct.json(struct.object({
-    profile: struct.object({
-      displayName: struct.string().tag(tag.json('display_name')),
+  body: struct.json(
+    struct.object({
+      profile: struct.object({
+        displayName: struct.string().tag(tag.json('display_name')),
+      }),
     }),
-  })),
+  ),
 })
 
 const updateUser = defineRequest({
@@ -114,24 +116,24 @@ const UploadInput = struct.request({
 
 request-shaped default build 必须按 transport 裁剪能力：
 
-| request section | HTTP | SSE | WebSocket |
-|---|---|---|---|
-| `path` | 使用 | 使用 | 使用 |
-| `query` | 使用 | 使用 | 使用 |
-| `headers` | 使用 | 使用 | 禁止 |
-| `body` | 使用 | 禁止 | 禁止 |
+| request section | HTTP | SSE  | WebSocket |
+| --------------- | ---- | ---- | --------- |
+| `path`          | 使用 | 使用 | 使用      |
+| `query`         | 使用 | 使用 | 使用      |
+| `headers`       | 使用 | 使用 | 禁止      |
+| `body`          | 使用 | 禁止 | 禁止      |
 
 对应的 explicit build ctx 也必须遵守同一能力矩阵：
 
-| ctx 方法 | HTTP | SSE | WebSocket |
-|---|---|---|---|
-| `bindPathParams(...)` | 合法 | 合法 | 合法 |
-| `bindQueryParams(...)` | 合法 | 合法 | 合法 |
-| `bindHeaders(...)` | 合法 | 合法 | 非法 |
-| `bindJson(...)` | 合法 | 非法 | 非法 |
-| `bindFormUrlEncoded(...)` | 合法 | 非法 | 非法 |
-| `bindFormData(...)` | 合法 | 非法 | 非法 |
-| `bindText(...)` / `bindBlob(...)` / `bindArrayBuffer(...)` | 合法 | 非法 | 非法 |
+| ctx 方法                                                   | HTTP | SSE  | WebSocket |
+| ---------------------------------------------------------- | ---- | ---- | --------- |
+| `bindPathParams(...)`                                      | 合法 | 合法 | 合法      |
+| `bindQueryParams(...)`                                     | 合法 | 合法 | 合法      |
+| `bindHeaders(...)`                                         | 合法 | 合法 | 非法      |
+| `bindJson(...)`                                            | 合法 | 非法 | 非法      |
+| `bindFormUrlEncoded(...)`                                  | 合法 | 非法 | 非法      |
+| `bindFormData(...)`                                        | 合法 | 非法 | 非法      |
+| `bindText(...)` / `bindBlob(...)` / `bindArrayBuffer(...)` | 合法 | 非法 | 非法      |
 
 ## Explicit Build
 
@@ -182,11 +184,13 @@ const Input = struct.request({
   headers: struct.object({
     traceId: struct.string().tag(tag.header('x-trace-id')),
   }),
-  body: struct.json(struct.object({
-    profile: struct.object({
-      displayName: struct.string().tag(tag.json('display_name')),
+  body: struct.json(
+    struct.object({
+      profile: struct.object({
+        displayName: struct.string().tag(tag.json('display_name')),
+      }),
     }),
-  })),
+  ),
 })
 
 defineRequest({
@@ -241,13 +245,17 @@ array source 只能在 JSON projection 中通过 `map(...)` 重组：
 
 ```ts
 const Input = struct.request({
-  body: struct.json(struct.object({
-    users: struct.array(struct.object({
-      id: struct.number(),
-      name: struct.string(),
-      password: struct.string(),
-    })),
-  })),
+  body: struct.json(
+    struct.object({
+      users: struct.array(
+        struct.object({
+          id: struct.number(),
+          name: struct.string(),
+          password: struct.string(),
+        }),
+      ),
+    }),
+  ),
 })
 
 defineRequest({
@@ -256,7 +264,7 @@ defineRequest({
   input: Input,
   build(ctx, input) {
     ctx.bindJson({
-      users: input.body.users.map(user => ({
+      users: input.body.users.map((user) => ({
         id: user.id,
         name: user.name,
       })),
@@ -283,14 +291,14 @@ typed input value -> HTTP request
 
 二者是对偶启发，不是行为照搬。
 
-| 框架/库 | Go 生态事实 | 对 `zen-kit` 的结论 |
-|---|---|---|
-| Gin / Echo / Fiber / Hertz | 支持 JSON/form/query/path/header 等来源绑定，也支持 source-specific binder。 | 保留 request sections 和 explicit build，不默认 all-source merge。 |
-| Echo / Fiber / Hertz | 多来源聚合必须定义覆盖顺序。 | `struct.request(...)` 不做隐式 merge；一个字段只能属于一个 request section path。 |
-| Huma | 一个 input struct 表示整份 request，body 是特殊位置。 | `struct.request({ path, query, headers, body })` 是合理方向。 |
-| Beego / Buffalo | body codec 由 Content-Type 或显式方法决定。 | client 侧用 body wrapper 静态决定 codec，不用 endpoint-level selector。 |
-| `net/http` / Chi | 手写解析是一等路径。 | `build(ctx, input)` 必须是完整逃生舱。 |
-| GoFrame | fuzzy matching 对 server app 友好。 | client SDK 不采用 fuzzy field matching，避免 wire contract 隐式化。 |
+| 框架/库                    | Go 生态事实                                                                  | 对 `zen-kit` 的结论                                                               |
+| -------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Gin / Echo / Fiber / Hertz | 支持 JSON/form/query/path/header 等来源绑定，也支持 source-specific binder。 | 保留 request sections 和 explicit build，不默认 all-source merge。                |
+| Echo / Fiber / Hertz       | 多来源聚合必须定义覆盖顺序。                                                 | `struct.request(...)` 不做隐式 merge；一个字段只能属于一个 request section path。 |
+| Huma                       | 一个 input struct 表示整份 request，body 是特殊位置。                        | `struct.request({ path, query, headers, body })` 是合理方向。                     |
+| Beego / Buffalo            | body codec 由 Content-Type 或显式方法决定。                                  | client 侧用 body wrapper 静态决定 codec，不用 endpoint-level selector。           |
+| `net/http` / Chi           | 手写解析是一等路径。                                                         | `build(ctx, input)` 必须是完整逃生舱。                                            |
+| GoFrame                    | fuzzy matching 对 server app 友好。                                          | client SDK 不采用 fuzzy field matching，避免 wire contract 隐式化。               |
 
 ## 旧设计迁移
 
@@ -304,9 +312,11 @@ const Input = struct.request({
   query: struct.object({
     includeProfile: struct.boolean().tag(tag.query('include_profile')),
   }),
-  body: struct.json(struct.object({
-    name: struct.string(),
-  })),
+  body: struct.json(
+    struct.object({
+      name: struct.string(),
+    }),
+  ),
 })
 
 defineRequest({

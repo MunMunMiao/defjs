@@ -35,23 +35,20 @@ import { struct, tag } from '@defjs/struct'
 import { gorm } from '@defjs/gorm/tag'
 
 const createUserInput = struct.object({
-  id: struct.number().tag(
-    tag.json('id'),
-    tag.uri('id'),
-    gorm('column', 'id'),
-    gorm('primaryKey', true),
-  ),
+  id: struct.number().tag(tag.json('id'), tag.uri('id'), gorm('column', 'id'), gorm('primaryKey', true)),
   page: struct.number().tag(tag.query('page')),
   avatar: struct.file().tag(tag.multipart('avatar')),
   token: struct.string().tag(tag.header('X-Token')),
-  name: struct.string().tag(
-    tag.json('user_name'),
-    tag.xml('user_name'),
-    tag.urlencoded('user_name'),
-    gorm('column', 'user_name'),
-    gorm('size', 128),
-    gorm('notNull', true),
-  ),
+  name: struct
+    .string()
+    .tag(
+      tag.json('user_name'),
+      tag.xml('user_name'),
+      tag.urlencoded('user_name'),
+      gorm('column', 'user_name'),
+      gorm('size', 128),
+      gorm('notNull', true),
+    ),
 })
 ```
 
@@ -163,11 +160,7 @@ form('name')
 ```ts
 import { gorm } from '@defjs/gorm/tag'
 
-struct.string().tag(
-  tag.json('user_name'),
-  gorm('column', 'user_name'),
-  gorm('notNull', true),
-)
+struct.string().tag(tag.json('user_name'), gorm('column', 'user_name'), gorm('notNull', true))
 ```
 
 ---
@@ -267,7 +260,7 @@ tag.header('X-Token')
 
 ```ts
 function defineValueTag(namespace: TagNamespace): (value?: string) => FieldTagOption {
-  return value => context => {
+  return (value) => (context) => {
     const tag = ensureTag(context.tags, namespace)
     tag.value = value ?? context.fieldKey
   }
@@ -292,7 +285,7 @@ gorm('primaryKey', true)
 ```ts
 function defineConfigTag(namespace: TagNamespace) {
   return (key: string, value: TagScalar = true): FieldTagOption =>
-    context => {
+    (context) => {
       const tag = ensureTag(context.tags, namespace)
       tag.config.set(key, value)
     }
@@ -317,10 +310,7 @@ gorm('primaryKey', false)
 同一 namespace 下，同一 key 后写覆盖前写。
 
 ```ts
-struct.string().tag(
-  gorm('column', 'name'),
-  gorm('column', 'user_name'),
-)
+struct.string().tag(gorm('column', 'name'), gorm('column', 'user_name'))
 ```
 
 最终结果：
@@ -332,10 +322,7 @@ gorm.column = "user_name"
 value tag 也按同一规则处理：它可以看成写入保留 key `value`。
 
 ```ts
-struct.string().tag(
-  tag.json('name'),
-  tag.json('user_name'),
-)
+struct.string().tag(tag.json('name'), tag.json('user_name'))
 ```
 
 最终 JSON 字段名是 `user_name`。
@@ -359,16 +346,8 @@ bun:"id,pk,autoincrement"
 
 ```ts
 const user = struct.object({
-  id: struct.number().tag(
-    gorm('column', 'id'),
-    gorm('primaryKey'),
-    gorm('autoIncrement'),
-  ),
-  name: struct.string().tag(
-    gorm('column', 'user_name'),
-    gorm('size', 128),
-    gorm('notNull'),
-  ),
+  id: struct.number().tag(gorm('column', 'id'), gorm('primaryKey'), gorm('autoIncrement')),
+  name: struct.string().tag(gorm('column', 'user_name'), gorm('size', 128), gorm('notNull')),
 })
 ```
 
@@ -562,10 +541,7 @@ const GormTag = {
 
 const gorm = tag.defineConfig(GormTag)
 
-struct.number().tag(
-  gorm('column', 'id'),
-  gorm('primaryKey'),
-)
+struct.number().tag(gorm('column', 'id'), gorm('primaryKey'))
 ```
 
 metadata 读取：

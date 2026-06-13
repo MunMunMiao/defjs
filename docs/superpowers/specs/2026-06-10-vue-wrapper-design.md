@@ -63,14 +63,14 @@
 
 ### 与 Angular 包装器的映射
 
-| Angular | Vue 3 | 实现方式 |
-|---------|-------|----------|
-| `HTTP_CLIENT` (InjectionToken) | `HTTP_CLIENT` (InjectionKey) | `Symbol() as InjectionKey<Client>` |
+| Angular                                 | Vue 3                                 | 实现方式                                  |
+| --------------------------------------- | ------------------------------------- | ----------------------------------------- |
+| `HTTP_CLIENT` (InjectionToken)          | `HTTP_CLIENT` (InjectionKey)          | `Symbol() as InjectionKey<Client>`        |
 | `HTTP_INTERCEPTOR_FNS` (InjectionToken) | `HTTP_INTERCEPTOR_FNS` (InjectionKey) | `Symbol() as InjectionKey<Interceptor[]>` |
-| `HTTP_HOST` (InjectionToken) | `HTTP_HOST` (InjectionKey) | `Symbol() as InjectionKey<string>` |
-| `makeEnvironmentProviders()` | `Plugin.install()` | `app.provide()` |
-| `APP_INITIALIZER` | 同步调用 | `install` 函数内直接调用 |
-| `inject(HTTP_CLIENT)` | `inject(HTTP_CLIENT)` | composable 封装 |
+| `HTTP_HOST` (InjectionToken)            | `HTTP_HOST` (InjectionKey)            | `Symbol() as InjectionKey<string>`        |
+| `makeEnvironmentProviders()`            | `Plugin.install()`                    | `app.provide()`                           |
+| `APP_INITIALIZER`                       | 同步调用                              | `install` 函数内直接调用                  |
+| `inject(HTTP_CLIENT)`                   | `inject(HTTP_CLIENT)`                 | composable 封装                           |
 
 ### 关键设计决策
 
@@ -107,16 +107,10 @@ import { provideClient, provideGlobalClient, withHost, withInterceptors } from '
 const app = createApp(App)
 
 // 方式 1：provideClient（不设置全局）
-app.use(provideClient(
-  withHost('https://api.example.com'),
-  withInterceptors(authInterceptor, loggingInterceptor)
-))
+app.use(provideClient(withHost('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 
 // 方式 2：provideGlobalClient（设置全局）
-app.use(provideGlobalClient(
-  withHost('https://api.example.com'),
-  withInterceptors(authInterceptor, loggingInterceptor)
-))
+app.use(provideGlobalClient(withHost('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 
 // 组件中使用
 import { injectClient } from '@defjs/vue'
@@ -142,7 +136,7 @@ export function withHost(host: string): ClientOption {
 // withInterceptors 返回一个 ClientOption 函数
 export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
   return (config: ClientConfig) => {
-    config.interceptors = fns.map(fn => fn())
+    config.interceptors = fns.map((fn) => fn())
   }
 }
 ```
@@ -188,10 +182,7 @@ const app = createApp(App)
 #### 2. 注册 Plugin
 
 ```typescript
-app.use(provideClient(
-  withHost('https://api.example.com'),
-  withInterceptors(authInterceptor, loggingInterceptor)
-))
+app.use(provideClient(withHost('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 ```
 
 #### 3. Plugin.install 执行
@@ -201,13 +192,13 @@ app.use(provideClient(
 install(app) {
   // 3.1 创建配置对象
   const config: ClientConfig = {}
-  
+
   // 3.2 执行 ClientOption 函数，配置 config
   feature.forEach(option => option(config))
-  
+
   // 3.3 创建 Client 实例
   const client = createClient(config)
-  
+
   // 3.4 提供 Client 实例
   app.provide(HTTP_CLIENT, client)
 }
@@ -226,7 +217,7 @@ function withHost(host: string): ClientOption {
 // withInterceptors 返回的 ClientOption 函数
 function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
   return (config: ClientConfig) => {
-    config.interceptors = fns.map(fn => fn())
+    config.interceptors = fns.map((fn) => fn())
   }
 }
 ```
@@ -269,7 +260,7 @@ provideGlobalClient 的数据流与 provideClient 基本相同，但多一步：
 install(app) {
   // 1-6. 与 provideClient 相同
   // ...
-  
+
   // 7. 设置全局 Client 实例
   setGlobalClient(client)
 }
@@ -292,10 +283,10 @@ install(app) {
   if (!config.host) {
     throw new Error('Host is required')
   }
-  
+
   // 创建 Client 实例
   const client = createClient(config)
-  
+
   // 提供 Client 实例
   app.provide(HTTP_CLIENT, client)
 }
@@ -311,11 +302,11 @@ install(app) {
 // injectClient 实现
 export function injectClient(): Client {
   const client = inject(HTTP_CLIENT)
-  
+
   if (!client) {
     throw new Error('Client not provided. Did you call provideClient()?')
   }
-  
+
   return client
 }
 ```
@@ -340,11 +331,11 @@ try {
 
 ### 错误处理策略
 
-| 错误类型 | 处理方式 | 示例 |
-|----------|----------|------|
-| 配置错误 | 抛出异常 | `throw new Error('Host is required')` |
-| 依赖缺失 | 抛出异常 | `throw new Error('Client not provided')` |
-| 运行时错误 | 由 @defjs/core 处理 | `catch (error) { ... }` |
+| 错误类型   | 处理方式            | 示例                                     |
+| ---------- | ------------------- | ---------------------------------------- |
+| 配置错误   | 抛出异常            | `throw new Error('Host is required')`    |
+| 依赖缺失   | 抛出异常            | `throw new Error('Client not provided')` |
+| 运行时错误 | 由 @defjs/core 处理 | `catch (error) { ... }`                  |
 
 ## 测试设计
 
@@ -371,6 +362,7 @@ try {
 **环境**: 真实浏览器（Chrome、Firefox、Safari）
 
 **测试工具**:
+
 - **Vitest**: 测试框架
 - **Playwright**: 真实浏览器测试
 - **@vue/test-utils**: Vue 组件测试工具
@@ -384,7 +376,7 @@ describe('withHost', () => {
     const option = withHost('https://api.example.com')
     expect(typeof option).toBe('function')
   })
-  
+
   it('should set host in config', () => {
     const config = {}
     const option = withHost('https://api.example.com')
@@ -399,6 +391,7 @@ describe('withHost', () => {
 **环境**: 真实 Vue 应用 + 真实浏览器 + Hono 服务器
 
 **测试工具**:
+
 - **Vitest**: 测试框架
 - **Playwright**: 真实浏览器测试
 - **@vue/test-utils**: Vue 组件测试工具
@@ -410,39 +403,41 @@ describe('withHost', () => {
 // provideClient 测试（真实 Vue 应用 + Hono 服务器）
 describe('provideClient', () => {
   let server: Server
-  
+
   beforeAll(async () => {
     // 启动 Hono 服务器
     server = await startHonoServer()
   })
-  
+
   afterAll(async () => {
     // 关闭 Hono 服务器
     await server.close()
   })
-  
+
   it('should create a Plugin', () => {
     const plugin = provideClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
+      withInterceptors(() => ({})),
     )
     expect(plugin).toHaveProperty('install')
   })
-  
+
   it('should provide client via app.provide', async () => {
     const app = createApp({
       setup() {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
-    
-    app.use(provideClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
-    
+
+    app.use(
+      provideClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
+
     // 使用 Playwright 测试真实浏览器行为
     // ...
   })
@@ -454,6 +449,7 @@ describe('provideClient', () => {
 **环境**: 真实 Vue 应用 + 真实 SSR（Nuxt 3）+ Hono 服务器
 
 **测试工具**:
+
 - **Vitest**: 测试框架
 - **Playwright**: 真实浏览器测试
 - **Hono**: HTTP 服务器
@@ -465,17 +461,17 @@ describe('provideClient', () => {
 // 完整使用场景测试（真实 SSR + Hono 服务器）
 describe('end-to-end', () => {
   let server: Server
-  
+
   beforeAll(async () => {
     // 启动 Hono 服务器
     server = await startHonoServer()
   })
-  
+
   afterAll(async () => {
     // 关闭 Hono 服务器
     await server.close()
   })
-  
+
   it('should work with provideClient in Nuxt 3', async () => {
     // 创建 Nuxt 3 应用
     // 使用 provideClient 配置
@@ -483,7 +479,7 @@ describe('end-to-end', () => {
     // 测试客户端激活
     // 测试真实 HTTP 请求
   })
-  
+
   it('should work with provideGlobalClient in Nuxt 3', async () => {
     // 创建 Nuxt 3 应用
     // 使用 provideGlobalClient 配置
@@ -503,7 +499,7 @@ import { serve } from '@hono/node-server'
 
 export async function startHonoServer() {
   const app = new Hono()
-  
+
   // 定义测试路由
   app.get('/api/users', (c) => {
     return c.json([
@@ -511,22 +507,22 @@ export async function startHonoServer() {
       { id: 2, name: 'Jane' },
     ])
   })
-  
+
   app.get('/api/users/:id', (c) => {
     const id = c.req.param('id')
     return c.json({ id: Number(id), name: 'John' })
   })
-  
+
   // 启动服务器
   const server = serve({
     fetch: app.fetch,
     port: 0, // 随机端口
   })
-  
+
   // 获取服务器地址
   const address = server.address()
   const port = typeof address === 'string' ? 0 : address.port
-  
+
   return {
     port,
     close: () => server.close(),
@@ -559,6 +555,7 @@ export default defineConfig({
 ### 测试覆盖
 
 **测试覆盖目标**:
+
 - 函数式选项模式: 100% 覆盖（真实浏览器）
 - Plugin 和 composable: 100% 覆盖（真实 Vue 应用 + Hono 服务器）
 - 错误处理: 100% 覆盖（真实浏览器）
@@ -572,6 +569,7 @@ export default defineConfig({
 **构建工具**: Bun + bun-plugin-dts
 
 **与 Angular 包装器的一致性**:
+
 - 使用相同的构建工具
 - 使用相同的构建流程
 - 使用相同的输出格式
@@ -697,6 +695,7 @@ main()
 ### 构建输出
 
 **输出文件**:
+
 - `dist/index.js` - ESM 格式的 JavaScript 文件
 - `dist/index.d.ts` - TypeScript 类型定义文件
 - `dist/package.json` - 包配置文件
@@ -783,7 +782,7 @@ export function withHost(host: string): ClientOption {
 // withInterceptors 实现
 export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
   return (config: ClientConfig) => {
-    config.interceptors = fns.map(fn => fn())
+    config.interceptors = fns.map((fn) => fn())
   }
 }
 
@@ -793,17 +792,14 @@ export function provideClient(...feature: ClientOption[]): Plugin {
     install(app: App) {
       // 执行 ClientOption 函数，配置 config
       const config: ClientConfig = {}
-      feature.forEach(option => option(config))
-      
+      feature.forEach((option) => option(config))
+
       // 创建 Client 实例
-      const client = createClient(
-        withEndpoint(config.host || ''),
-        withClientInterceptors(...(config.interceptors || []))
-      )
-      
+      const client = createClient(withEndpoint(config.host || ''), withClientInterceptors(...(config.interceptors || [])))
+
       // 提供 Client 实例
       app.provide(HTTP_CLIENT, client)
-    }
+    },
   }
 }
 
@@ -813,31 +809,28 @@ export function provideGlobalClient(...feature: ClientOption[]): Plugin {
     install(app: App) {
       // 执行 ClientOption 函数，配置 config
       const config: ClientConfig = {}
-      feature.forEach(option => option(config))
-      
+      feature.forEach((option) => option(config))
+
       // 创建 Client 实例
-      const client = createClient(
-        withEndpoint(config.host || ''),
-        withClientInterceptors(...(config.interceptors || []))
-      )
-      
+      const client = createClient(withEndpoint(config.host || ''), withClientInterceptors(...(config.interceptors || [])))
+
       // 提供 Client 实例
       app.provide(HTTP_CLIENT, client)
-      
+
       // 设置全局 Client 实例
       setGlobalClient(client)
-    }
+    },
   }
 }
 
 // injectClient 实现
 export function injectClient(): Client {
   const client = inject(HTTP_CLIENT)
-  
+
   if (!client) {
     throw new Error('Client not provided. Did you call provideClient()?')
   }
-  
+
   return client
 }
 ```
@@ -921,7 +914,7 @@ import { serve } from '@hono/node-server'
 
 export async function startHonoServer() {
   const app = new Hono()
-  
+
   // 定义测试路由
   app.get('/api/users', (c) => {
     return c.json([
@@ -929,22 +922,22 @@ export async function startHonoServer() {
       { id: 2, name: 'Jane' },
     ])
   })
-  
+
   app.get('/api/users/:id', (c) => {
     const id = c.req.param('id')
     return c.json({ id: Number(id), name: 'John' })
   })
-  
+
   // 启动服务器
   const server = serve({
     fetch: app.fetch,
     port: 0, // 随机端口
   })
-  
+
   // 获取服务器地址
   const address = server.address()
   const port = typeof address === 'string' ? 0 : address.port
-  
+
   return {
     port,
     close: () => server.close(),
@@ -968,7 +961,7 @@ describe('withHost', () => {
     const option = withHost('https://api.example.com')
     expect(typeof option).toBe('function')
   })
-  
+
   it('should set host in config', () => {
     const config = {}
     const option = withHost('https://api.example.com')
@@ -982,7 +975,7 @@ describe('withInterceptors', () => {
     const option = withInterceptors(() => ({}))
     expect(typeof option).toBe('function')
   })
-  
+
   it('should set interceptors in config', () => {
     const config = {}
     const interceptor = () => ({})
@@ -994,106 +987,112 @@ describe('withInterceptors', () => {
 
 describe('provideClient', () => {
   let server: any
-  
+
   beforeAll(async () => {
     server = await startHonoServer()
   })
-  
+
   afterAll(async () => {
     await server.close()
   })
-  
+
   it('should create a Plugin', () => {
     const plugin = provideClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
+      withInterceptors(() => ({})),
     )
     expect(plugin).toHaveProperty('install')
   })
-  
+
   it('should provide client via app.provide', async () => {
     const app = createApp({
       setup() {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
-    
-    app.use(provideClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
-    
+
+    app.use(
+      provideClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
+
     // 测试 client 已被提供
   })
 })
 
 describe('provideGlobalClient', () => {
   let server: any
-  
+
   beforeAll(async () => {
     server = await startHonoServer()
   })
-  
+
   afterAll(async () => {
     await server.close()
   })
-  
+
   it('should create a Plugin', () => {
     const plugin = provideGlobalClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
+      withInterceptors(() => ({})),
     )
     expect(plugin).toHaveProperty('install')
   })
-  
+
   it('should set global client', async () => {
     const app = createApp({
       setup() {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
-    
-    app.use(provideGlobalClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
-    
+
+    app.use(
+      provideGlobalClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
+
     // 测试全局 client 已被设置
   })
 })
 
 describe('injectClient', () => {
   let server: any
-  
+
   beforeAll(async () => {
     server = await startHonoServer()
   })
-  
+
   afterAll(async () => {
     await server.close()
   })
-  
+
   it('should return client when provided', async () => {
     const app = createApp({
       setup() {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
-    
-    app.use(provideClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
-    
+
+    app.use(
+      provideClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
+
     // 测试 client 已被返回
   })
-  
+
   it('should throw error when not provided', async () => {
     // 测试未提供 client 时的行为
   })
@@ -1102,52 +1101,52 @@ describe('injectClient', () => {
 
 ### 文件职责总结
 
-| 文件 | 职责 |
-|------|------|
-| src/core.ts | 实现核心功能（provideClient, provideGlobalClient, injectClient, withHost, withInterceptors） |
-| src/index.ts | 导出入口 |
-| scripts/build.ts | 构建脚本 |
-| test/server.ts | Hono 测试服务器 |
-| test/*.spec.ts | 测试文件 |
+| 文件             | 职责                                                                                         |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| src/core.ts      | 实现核心功能（provideClient, provideGlobalClient, injectClient, withHost, withInterceptors） |
+| src/index.ts     | 导出入口                                                                                     |
+| scripts/build.ts | 构建脚本                                                                                     |
+| test/server.ts   | Hono 测试服务器                                                                              |
+| test/\*.spec.ts  | 测试文件                                                                                     |
 
 ## 与 Angular 包装器的对比
 
 ### 功能对比
 
-| 功能 | Angular 包装器 | Vue 包装器 |
-|------|----------------|------------|
-| provideClient | ✅ | ✅ |
-| provideGlobalClient | ✅ | ✅ |
-| injectClient | ✅ | ✅ |
-| withHost | ✅ | ✅ |
-| withInterceptors | ✅ | ✅ |
+| 功能                | Angular 包装器 | Vue 包装器 |
+| ------------------- | -------------- | ---------- |
+| provideClient       | ✅             | ✅         |
+| provideGlobalClient | ✅             | ✅         |
+| injectClient        | ✅             | ✅         |
+| withHost            | ✅             | ✅         |
+| withInterceptors    | ✅             | ✅         |
 
 ### API 对比
 
-| API | Angular 包装器 | Vue 包装器 |
-|-----|----------------|------------|
-| provideClient | `provideClient(...feature: EnvironmentProviders[]): EnvironmentProviders` | `provideClient(...feature: ClientOption[]): Plugin` |
-| provideGlobalClient | `provideGlobalClient(...feature: EnvironmentProviders[]): EnvironmentProviders` | `provideGlobalClient(...feature: ClientOption[]): Plugin` |
-| injectClient | `injectClient(): Client` | `injectClient(): Client` |
-| withHost | `withHost(host: string): EnvironmentProviders` | `withHost(host: string): ClientOption` |
-| withInterceptors | `withInterceptors(...fns: (() => Interceptor)[]): EnvironmentProviders` | `withInterceptors(...fns: (() => Interceptor)[]): ClientOption` |
+| API                 | Angular 包装器                                                                  | Vue 包装器                                                      |
+| ------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| provideClient       | `provideClient(...feature: EnvironmentProviders[]): EnvironmentProviders`       | `provideClient(...feature: ClientOption[]): Plugin`             |
+| provideGlobalClient | `provideGlobalClient(...feature: EnvironmentProviders[]): EnvironmentProviders` | `provideGlobalClient(...feature: ClientOption[]): Plugin`       |
+| injectClient        | `injectClient(): Client`                                                        | `injectClient(): Client`                                        |
+| withHost            | `withHost(host: string): EnvironmentProviders`                                  | `withHost(host: string): ClientOption`                          |
+| withInterceptors    | `withInterceptors(...fns: (() => Interceptor)[]): EnvironmentProviders`         | `withInterceptors(...fns: (() => Interceptor)[]): ClientOption` |
 
 ### 实现对比
 
-| 实现 | Angular 包装器 | Vue 包装器 |
-|------|----------------|------------|
-| 依赖注入 | InjectionToken + makeEnvironmentProviders | InjectionKey + app.provide |
-| 初始化时机 | APP_INITIALIZER（异步） | install 函数（同步） |
-| 类型系统 | Angular DI 系统 | Vue provide/inject |
-| 构建工具 | Bun + bun-plugin-dts | Bun + bun-plugin-dts |
+| 实现       | Angular 包装器                            | Vue 包装器                 |
+| ---------- | ----------------------------------------- | -------------------------- |
+| 依赖注入   | InjectionToken + makeEnvironmentProviders | InjectionKey + app.provide |
+| 初始化时机 | APP_INITIALIZER（异步）                   | install 函数（同步）       |
+| 类型系统   | Angular DI 系统                           | Vue provide/inject         |
+| 构建工具   | Bun + bun-plugin-dts                      | Bun + bun-plugin-dts       |
 
 ### 测试对比
 
-| 测试 | Angular 包装器 | Vue 匣装器 |
-|------|----------------|------------|
-| 单元测试 | Jasmine + Karma | Vitest + Playwright |
-| 集成测试 | Angular TestBed | Vue Test Utils + Hono |
-| 端到端测试 | Protractor | Playwright + Nuxt 3 |
+| 测试       | Angular 包装器  | Vue 匣装器            |
+| ---------- | --------------- | --------------------- |
+| 单元测试   | Jasmine + Karma | Vitest + Playwright   |
+| 集成测试   | Angular TestBed | Vue Test Utils + Hono |
+| 端到端测试 | Protractor      | Playwright + Nuxt 3   |
 
 ## 待确认问题
 

@@ -66,9 +66,11 @@ export function createNullSchema(): Schema<null, null> {
   )
 }
 
+// oxlint-disable-next-line typescript/no-explicit-any
 export function createAnySchema(): Schema<unknown, any> {
   // Type boundary: struct.any() intentionally models an unconstrained decoded value; any is the correct
   // representation of "no static type information" at the output boundary.
+  // oxlint-disable-next-line typescript/no-explicit-any
   return castSchema<Schema<unknown, any>>(
     makeSchema({
       flags: DEFAULT_FLAGS,
@@ -128,7 +130,7 @@ export function createObjectEnumSchema<const T extends Record<string, number | s
   )
 }
 
-export function createArraySchema<S extends SchemaLike<any, any, boolean>>(item: S): ArraySchema<S> {
+export function createArraySchema<S extends SchemaLike<unknown, unknown, boolean>>(item: S): ArraySchema<S> {
   assertSchema(item, 'array item')
 
   return castSchema<ArraySchema<S>>(
@@ -192,7 +194,7 @@ export function createRequestSchema<const T extends RequestShape>(shape: T): Req
   )
 }
 
-export function createRequestBodySchema<const C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>>(
+export function createRequestBodySchema<const C extends RequestBodyCodec, S extends SchemaLike<unknown, unknown, boolean>>(
   codec: C,
   schema: S,
 ): RequestBodySchema<C, S> {
@@ -208,10 +210,10 @@ export function createRequestBodySchema<const C extends RequestBodyCodec, S exte
   )
 }
 
-function assertRequestBodySchema(schema: SchemaLike<any, any, boolean>): void {
+function assertRequestBodySchema(schema: SchemaLike<unknown, unknown, boolean>): void {
   assertSchema(schema, 'request.body')
 
-  const definition = (schema as RuntimeSchema)[DEFINITION]
+  const definition = (schema as unknown as RuntimeSchema)[DEFINITION]
   if (definition.kind === 'requestBody' || definition.kind === 'blob' || definition.kind === 'arrayBuffer') {
     return
   }
@@ -219,7 +221,7 @@ function assertRequestBodySchema(schema: SchemaLike<any, any, boolean>): void {
   throw new TypeError('body must use a body wrapper schema')
 }
 
-export function createJsonBodySchema<S extends SchemaLike<any, any, boolean>>(schema: S): RequestBodySchema<'json', S> {
+export function createJsonBodySchema<S extends SchemaLike<unknown, unknown, boolean>>(schema: S): RequestBodySchema<'json', S> {
   return createRequestBodySchema('json', schema)
 }
 
@@ -235,7 +237,7 @@ export function createTextBodySchema(): RequestBodySchema<'text', StringSchema> 
   return createRequestBodySchema('text', createStringSchema())
 }
 
-export function createRecordSchema<S extends SchemaLike<any, any, boolean>>(value: S): RecordSchema<S> {
+export function createRecordSchema<S extends SchemaLike<unknown, unknown, boolean>>(value: S): RecordSchema<S> {
   assertSchema(value, 'record value')
 
   return castSchema<RecordSchema<S>>(
@@ -247,9 +249,9 @@ export function createRecordSchema<S extends SchemaLike<any, any, boolean>>(valu
   )
 }
 
-export function createTupleSchema<const T extends readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]>(
-  items: T,
-): TupleSchema<T> {
+export function createTupleSchema<
+  const T extends readonly [SchemaLike<unknown, unknown, boolean>, ...SchemaLike<unknown, unknown, boolean>[]],
+>(items: T): TupleSchema<T> {
   const tupleItems = [...items] as unknown as T
   for (const item of tupleItems) {
     assertSchema(item, 'tuple item')
@@ -264,9 +266,9 @@ export function createTupleSchema<const T extends readonly [SchemaLike<any, any,
   )
 }
 
-export function createUnionSchema<const T extends readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]>(
-  options: T,
-): UnionSchema<T> {
+export function createUnionSchema<
+  const T extends readonly [SchemaLike<unknown, unknown, boolean>, ...SchemaLike<unknown, unknown, boolean>[]],
+>(options: T): UnionSchema<T> {
   const unionOptions = [...options] as unknown as T
   for (const option of unionOptions) {
     assertSchema(option, 'or option')
@@ -283,10 +285,10 @@ export function createUnionSchema<const T extends readonly [SchemaLike<any, any,
 
 export function createDiscriminatedUnionSchema<
   const TDiscriminator extends string,
-  const TOptions extends readonly [ObjectSchema<any>, ...ObjectSchema<any>[]],
+  const TOptions extends readonly [ObjectSchema<ObjectShape>, ...ObjectSchema<ObjectShape>[]],
 >(discriminator: TDiscriminator, options: TOptions): DiscriminatedUnionSchema<TOptions> {
   const unionOptions = [...options] as unknown as TOptions
-  const map = new Map<unknown, SchemaLike<any, any, boolean>>()
+  const map = new Map<unknown, SchemaLike<unknown, unknown, boolean>>()
   const values: unknown[] = []
 
   for (const option of unionOptions) {
@@ -296,7 +298,7 @@ export function createDiscriminatedUnionSchema<
     if (optionDef.kind !== 'object') {
       throw new TypeError('discriminatedUnion options must be object schemas')
     }
-    const fieldSchema = optionDef.shape[discriminator] as RuntimeSchema | undefined
+    const fieldSchema = optionDef.shape[discriminator] as unknown as RuntimeSchema | undefined
     if (!fieldSchema) {
       throw new TypeError(`discriminatedUnion option missing discriminator field "${discriminator}"`)
     }
@@ -376,7 +378,7 @@ export function createDateSchema(): Schema<Date | number | string | undefined, D
   }) as Schema<Date | number | string | undefined, Date>
 }
 
-export function createIntersectionSchema<A extends SchemaLike<any, any, boolean>, B extends SchemaLike<any, any, boolean>>(
+export function createIntersectionSchema<A extends SchemaLike<unknown, unknown, boolean>, B extends SchemaLike<unknown, unknown, boolean>>(
   left: A,
   right: B,
 ): Schema<unknown, Infer<A> & Infer<B>> {
@@ -411,9 +413,9 @@ export function createArrayBufferSchema(): Schema<ArrayBuffer | undefined, Array
   })
 }
 
-function assertObjectSchema(value: unknown, label: string): asserts value is ObjectSchema<any> {
+function assertObjectSchema(value: unknown, label: string): asserts value is ObjectSchema<ObjectShape> {
   assertSchema(value, label)
-  if ((value as RuntimeSchema)[DEFINITION].kind !== 'object') {
+  if ((value as unknown as RuntimeSchema)[DEFINITION].kind !== 'object') {
     throw new TypeError(`${label} must be an object schema`)
   }
 }

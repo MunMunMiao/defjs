@@ -9,7 +9,7 @@ export function createPrimitiveSchema<TInput, TOutput = TInput>(
     makeSchema({
       ...definition,
       flags: DEFAULT_FLAGS,
-    }),
+    } as SchemaDefinition),
   )
 }
 

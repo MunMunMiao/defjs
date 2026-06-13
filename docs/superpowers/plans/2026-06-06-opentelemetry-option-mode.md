@@ -14,49 +14,50 @@
 
 ### Core 变更
 
-| 文件 | 操作 | 职责 |
-|---|---|---|
-| `packages/core/src/client/option.ts` | 新建 | `ClientOption` 类型 + 内置 option 工厂 |
-| `packages/core/src/client/client.ts` | 修改 | `createClient` / `cloneClient` 改 option 模式 |
-| `packages/core/src/client/public_api.ts` | 修改 | 导出 option API |
-| `packages/core/src/client/client.type.test.ts` | 修改 | 类型测试适配 option 模式 |
-| `packages/core/src/client/client.spec.ts` | 修改 | 单元测试适配 option 模式 |
-| `packages/core/src/index.ts` | 修改 | 根导出增加 option |
-| 大量 `*.spec.ts` | 修改 | 所有调用 `createClient({ endpoint: ... })` 的测试文件 |
+| 文件                                           | 操作 | 职责                                                  |
+| ---------------------------------------------- | ---- | ----------------------------------------------------- |
+| `packages/core/src/client/option.ts`           | 新建 | `ClientOption` 类型 + 内置 option 工厂                |
+| `packages/core/src/client/client.ts`           | 修改 | `createClient` / `cloneClient` 改 option 模式         |
+| `packages/core/src/client/public_api.ts`       | 修改 | 导出 option API                                       |
+| `packages/core/src/client/client.type.test.ts` | 修改 | 类型测试适配 option 模式                              |
+| `packages/core/src/client/client.spec.ts`      | 修改 | 单元测试适配 option 模式                              |
+| `packages/core/src/index.ts`                   | 修改 | 根导出增加 option                                     |
+| 大量 `*.spec.ts`                               | 修改 | 所有调用 `createClient({ endpoint: ... })` 的测试文件 |
 
 ### Angular 适配
 
-| 文件 | 操作 | 职责 |
-|---|---|---|
+| 文件                           | 操作 | 职责                              |
+| ------------------------------ | ---- | --------------------------------- |
 | `packages/angular/src/core.ts` | 修改 | `createClient` 调用改 option 模式 |
 
 ### Opentelemetry 包
 
-| 文件 | 操作 | 职责 |
-|---|---|---|
-| `packages/opentelemetry/package.json` | 新建 | 包元数据、peerDependencies |
-| `packages/opentelemetry/scripts/build.ts` | 新建 | Bun 构建脚本 |
-| `packages/opentelemetry/tsconfig.json` | 新建 | TypeScript 配置 |
-| `packages/opentelemetry/tsconfig.build.json` | 新建 | 构建专用 TS 配置 |
-| `packages/opentelemetry/biome.json` | 新建 | 代码风格 |
-| `packages/opentelemetry/src/index.ts` | 新建 | 根入口 |
-| `packages/opentelemetry/src/public_api.ts` | 新建 | 公共 API 导出 |
-| `packages/opentelemetry/src/option.ts` | 新建 | `withOpenTelemetry` option 工厂 |
-| `packages/opentelemetry/src/interceptor/http.ts` | 新建 | HTTP interceptor |
-| `packages/opentelemetry/src/interceptor/sse.ts` | 新建 | SSE interceptor |
-| `packages/opentelemetry/src/interceptor/web_socket.ts` | 新建 | WebSocket interceptor |
-| `packages/opentelemetry/src/propagation/carrier.ts` | 新建 | Headers / query string carrier 适配 |
-| `packages/opentelemetry/src/telemetry/trace.ts` | 新建 | Trace span 管理 |
-| `packages/opentelemetry/src/telemetry/metrics.ts` | 新建 | Metrics 收集 |
-| `packages/opentelemetry/src/telemetry/logs.ts` | 新建 | Logs 记录 |
-| `packages/opentelemetry/test-setup.ts` | 新建 | 测试配置 |
-| `packages/opentelemetry/vitest.config.node.ts` | 新建 | Node 测试配置 |
+| 文件                                                   | 操作 | 职责                                |
+| ------------------------------------------------------ | ---- | ----------------------------------- |
+| `packages/opentelemetry/package.json`                  | 新建 | 包元数据、peerDependencies          |
+| `packages/opentelemetry/scripts/build.ts`              | 新建 | Bun 构建脚本                        |
+| `packages/opentelemetry/tsconfig.json`                 | 新建 | TypeScript 配置                     |
+| `packages/opentelemetry/tsconfig.build.json`           | 新建 | 构建专用 TS 配置                    |
+| `packages/opentelemetry/biome.json`                    | 新建 | 代码风格                            |
+| `packages/opentelemetry/src/index.ts`                  | 新建 | 根入口                              |
+| `packages/opentelemetry/src/public_api.ts`             | 新建 | 公共 API 导出                       |
+| `packages/opentelemetry/src/option.ts`                 | 新建 | `withOpenTelemetry` option 工厂     |
+| `packages/opentelemetry/src/interceptor/http.ts`       | 新建 | HTTP interceptor                    |
+| `packages/opentelemetry/src/interceptor/sse.ts`        | 新建 | SSE interceptor                     |
+| `packages/opentelemetry/src/interceptor/web_socket.ts` | 新建 | WebSocket interceptor               |
+| `packages/opentelemetry/src/propagation/carrier.ts`    | 新建 | Headers / query string carrier 适配 |
+| `packages/opentelemetry/src/telemetry/trace.ts`        | 新建 | Trace span 管理                     |
+| `packages/opentelemetry/src/telemetry/metrics.ts`      | 新建 | Metrics 收集                        |
+| `packages/opentelemetry/src/telemetry/logs.ts`         | 新建 | Logs 记录                           |
+| `packages/opentelemetry/test-setup.ts`                 | 新建 | 测试配置                            |
+| `packages/opentelemetry/vitest.config.node.ts`         | 新建 | Node 测试配置                       |
 
 ---
 
 ## Task 1: Core — 新增 Option 类型和内置工厂
 
 **Files:**
+
 - Create: `packages/core/src/client/option.ts`
 - Modify: `packages/core/src/client/public_api.ts`
 - Modify: `packages/core/src/index.ts`
@@ -73,25 +74,25 @@ import type { QueryParamsSerializer, ClientSseOptions, ClientWebSocketOptions } 
 export type ClientOption = (config: ClientConfig) => void
 
 export function withEndpoint(endpoint: string): ClientOption {
-  return config => {
+  return (config) => {
     config.endpoint = endpoint
   }
 }
 
 export function withInterceptors(...interceptors: Interceptor[]): ClientOption {
-  return config => {
+  return (config) => {
     config.interceptors.push(...interceptors)
   }
 }
 
 export function withQueryParamsSerializer(serializer: QueryParamsSerializer): ClientOption {
-  return config => {
+  return (config) => {
     config.queryParamsSerializer = serializer
   }
 }
 
 export function withSseOptions(options: ClientSseOptions): ClientOption {
-  return config => {
+  return (config) => {
     config.sse = {
       ...config.sse,
       ...options,
@@ -100,7 +101,7 @@ export function withSseOptions(options: ClientSseOptions): ClientOption {
 }
 
 export function withWebSocketOptions(options: ClientWebSocketOptions): ClientOption {
-  return config => {
+  return (config) => {
     config.webSocket = {
       ...config.webSocket,
       protocols: options.protocols ? [...options.protocols] : config.webSocket.protocols,
@@ -121,7 +122,7 @@ export function withWebSocketOptions(options: ClientWebSocketOptions): ClientOpt
 }
 
 export function withCredentials(value: boolean): ClientOption {
-  return config => {
+  return (config) => {
     config.withCredentials = value
   }
 }
@@ -133,14 +134,7 @@ export function withCredentials(value: boolean): ClientOption {
 
 ```ts
 export type { ClientOption } from './option'
-export {
-  withCredentials,
-  withEndpoint,
-  withInterceptors,
-  withQueryParamsSerializer,
-  withSseOptions,
-  withWebSocketOptions,
-} from './option'
+export { withCredentials, withEndpoint, withInterceptors, withQueryParamsSerializer, withSseOptions, withWebSocketOptions } from './option'
 ```
 
 - [ ] **Step 3: 更新根入口 index.ts 导出 option**
@@ -159,6 +153,7 @@ git commit -m "feat(core): add Go-style option types and factories for client co
 ## Task 2: Core — 改造 createClient / cloneClient 为 Option 模式
 
 **Files:**
+
 - Modify: `packages/core/src/client/client.ts`
 - Modify: `packages/core/src/client/client.spec.ts`
 
@@ -339,6 +334,7 @@ git commit -m "feat(core): convert createClient/cloneClient to option mode"
 ## Task 3: Core — 更新所有测试文件中的 createClient 调用
 
 **Files:**
+
 - 修改: 所有 `*.spec.ts` 中调用 `createClient({ ... })` 的文件
 
 **Context:** 需要把 `createClient({ endpoint: '...', ... })` 全部改为 `createClient(withEndpoint('...'), ...)`。这是一个机械替换，但文件数量很多。
@@ -366,11 +362,13 @@ createClient(\n  withEndpoint('...'),
 但对于计划来说，我可以给出通用替换规则：
 
 对于简单的 `createClient({ endpoint: '...' })`：
+
 ```ts
 createClient(withEndpoint('...'))
 ```
 
 对于 `createClient({ endpoint: '...', interceptors: [...] })`：
+
 ```ts
 createClient(
   withEndpoint('...'),
@@ -379,6 +377,7 @@ createClient(
 ```
 
 对于 `cloneClient(client, { withCredentials: true })`：
+
 ```ts
 cloneClient(client, withCredentials(true))
 ```
@@ -464,9 +463,7 @@ setGlobalClient(
 )
 
 // 改后
-setGlobalClient(
-  createClient(withEndpoint('https://global.example.com')),
-)
+setGlobalClient(createClient(withEndpoint('https://global.example.com')))
 ```
 
 ```ts
@@ -541,6 +538,7 @@ git commit -m "test(core): adapt all tests to option mode"
 ## Task 4: Angular — 适配 option 模式
 
 **Files:**
+
 - Modify: `packages/angular/src/core.ts`
 
 **Context:** Angular 包里的 `createClient` 调用需要改。
@@ -558,10 +556,7 @@ return createClient({
 })
 
 // 改后
-return createClient(
-  withEndpoint(host),
-  withInterceptors(...interceptors),
-)
+return createClient(withEndpoint(host), withInterceptors(...interceptors))
 ```
 
 注意：Angular 包里用 `withHost` 而不是 `withEndpoint`。让我检查 `withHost` 和 `host` 的关系。
@@ -580,10 +575,7 @@ createClient({
 改成：
 
 ```ts
-createClient(
-  withEndpoint(host),
-  withInterceptors(...interceptors),
-)
+createClient(withEndpoint(host), withInterceptors(...interceptors))
 ```
 
 等等，我看了 `packages/angular/src/core.ts`，发现它实际上用的是 `host` 而不是 `endpoint`。让我再看一遍。
@@ -758,6 +750,7 @@ export interface ClientOptions {
 ```
 
 `host` 不是 `ClientOptions` 的字段！这说明要么：
+
 1. Angular 包有自己包装的 `createClient`
 2. 我读错了代码
 
@@ -771,15 +764,15 @@ export interface ClientOptions {
 32:       provide: HTTP_CLIENT,
 33:       useFactory: () => {
 34:         let host = inject(HTTP_HOST, { optional: true })
-35: 
+35:
 36:         if (!host) {
 37:           const document: Document | null = inject(DOCUMENT, { optional: true })
-38: 
+38:
 39:           host = document?.location.origin ?? ''
 40:         }
-41: 
+41:
 42:         const interceptors = inject(HTTP_INTERCEPTOR_FNS, { optional: true }) ?? []
-43: 
+43:
 44:         return createClient({
 45:           host,
 46:           interceptors,
@@ -803,10 +796,7 @@ export interface ClientOptions {
 算了，不管了。在计划中我写为将 `{ host, interceptors }` 替换为 option 调用。实际上用户可以在实施时自己决定字段名。让我写正确的代码：
 
 ```ts
-return createClient(
-  withEndpoint(host),
-  withInterceptors(...interceptors),
-)
+return createClient(withEndpoint(host), withInterceptors(...interceptors))
 ```
 
 - [ ] **Step 2: Commit**
@@ -821,6 +811,7 @@ git commit -m "feat(angular): adapt to core option mode"
 ## Task 5: Opentelemetry — 包骨架
 
 **Files:**
+
 - Create: `packages/opentelemetry/package.json`
 - Create: `packages/opentelemetry/tsconfig.json`
 - Create: `packages/opentelemetry/tsconfig.build.json`
@@ -966,6 +957,7 @@ git commit -m "chore(opentelemetry): scaffold package skeleton"
 ## Task 6: Opentelemetry — Propagation Carrier 适配
 
 **Files:**
+
 - Create: `packages/opentelemetry/src/propagation/carrier.ts`
 
 **Context:** OpenTelemetry 的 `propagation.inject` / `propagation.extract` 需要 `TextMapSetter` / `TextMapGetter` 接口。HTTP 使用 `Headers` 作为 carrier，WebSocket 使用 query string 作为 carrier。
@@ -1031,6 +1023,7 @@ git commit -m "feat(opentelemetry): add propagation carrier adapters"
 ## Task 7: Opentelemetry — Trace Span 管理
 
 **Files:**
+
 - Create: `packages/opentelemetry/src/telemetry/trace.ts`
 
 **Context:** 使用 `@opentelemetry/api` 的 `trace` API 创建和管理 span。只依赖 API，不依赖 SDK。
@@ -1038,14 +1031,7 @@ git commit -m "feat(opentelemetry): add propagation carrier adapters"
 - [ ] **Step 1: 编写 trace.ts**
 
 ```ts
-import {
-  type Context,
-  type Span,
-  type SpanKind,
-  type SpanOptions,
-  type Tracer,
-  trace,
-} from '@opentelemetry/api'
+import { type Context, type Span, type SpanKind, type SpanOptions, type Tracer, trace } from '@opentelemetry/api'
 
 export interface TraceOptions {
   serviceName: string
@@ -1056,11 +1042,7 @@ export function createTracer(options: TraceOptions): Tracer {
   return trace.getTracer(options.serviceName)
 }
 
-export function startSpan(
-  tracer: Tracer,
-  name: string,
-  options?: SpanOptions & { parent?: Context },
-): Span {
+export function startSpan(tracer: Tracer, name: string, options?: SpanOptions & { parent?: Context }): Span {
   const ctx = options?.parent ?? trace.setSpanContext(Context.ROOT, {})
   return tracer.startSpan(name, { ...options }, ctx)
 }
@@ -1096,6 +1078,7 @@ export function recordHttpSpan(
 ```
 
 等等，让我更仔细地设计这个 trace 模块。实际上，对于 interceptor 来说，span 的生命周期是：
+
 1. interceptor 进入时创建 span
 2. 执行请求
 3. 拿到响应后设置属性
@@ -1106,26 +1089,14 @@ export function recordHttpSpan(
 让我重新设计：
 
 ```ts
-import {
-  type Context,
-  type Span,
-  type SpanOptions,
-  type Tracer,
-  SpanKind,
-  SpanStatusCode,
-  trace,
-} from '@opentelemetry/api'
+import { type Context, type Span, type SpanOptions, type Tracer, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api'
 
 export interface SpanContext {
   span: Span
   ctx: Context
 }
 
-export function createHttpSpan(
-  tracer: Tracer,
-  method: string,
-  url: string,
-): SpanContext {
+export function createHttpSpan(tracer: Tracer, method: string, url: string): SpanContext {
   const span = tracer.startSpan(`HTTP ${method}`, {
     kind: SpanKind.CLIENT,
     attributes: {
@@ -1140,10 +1111,7 @@ export function createHttpSpan(
   }
 }
 
-export function createSseSpan(
-  tracer: Tracer,
-  url: string,
-): SpanContext {
+export function createSseSpan(tracer: Tracer, url: string): SpanContext {
   const span = tracer.startSpan('SSE connect', {
     kind: SpanKind.CLIENT,
     attributes: {
@@ -1157,10 +1125,7 @@ export function createSseSpan(
   }
 }
 
-export function createWebSocketSpan(
-  tracer: Tracer,
-  url: string,
-): SpanContext {
+export function createWebSocketSpan(tracer: Tracer, url: string): SpanContext {
   const span = tracer.startSpan('WebSocket connect', {
     kind: SpanKind.CLIENT,
     attributes: {
@@ -1174,11 +1139,7 @@ export function createWebSocketSpan(
   }
 }
 
-export function setSpanHttpResponse(
-  span: Span,
-  status: number,
-  error?: unknown,
-): void {
+export function setSpanHttpResponse(span: Span, status: number, error?: unknown): void {
   span.setAttribute('http.response.status_code', status)
 
   if (error) {
@@ -1217,6 +1178,7 @@ git commit -m "feat(opentelemetry): add trace span utilities"
 ## Task 8: Opentelemetry — Metrics 收集
 
 **Files:**
+
 - Create: `packages/opentelemetry/src/telemetry/metrics.ts`
 
 **Context:** 使用 `@opentelemetry/api` 的 `metrics` API。注意 API 层面 metrics 支持可能有限，如果 API 版本不支持，可以暂时用 counter 实现。
@@ -1255,12 +1217,7 @@ export function createRequestMetrics(options: MetricsOptions): RequestMetrics {
   }
 }
 
-export function recordHttpRequest(
-  metrics: RequestMetrics,
-  method: string,
-  durationMs: number,
-  error?: boolean,
-): void {
+export function recordHttpRequest(metrics: RequestMetrics, method: string, durationMs: number, error?: boolean): void {
   const attributes = { 'http.request.method': method }
 
   metrics.requestCounter.add(1, attributes)
@@ -1284,6 +1241,7 @@ git commit -m "feat(opentelemetry): add request metrics collection"
 ## Task 9: Opentelemetry — Logs 记录
 
 **Files:**
+
 - Create: `packages/opentelemetry/src/telemetry/logs.ts`
 
 **Context:** 使用 `@opentelemetry/api` 的 logs API。如果 API 版本没有 logs，可以先空实现。
@@ -1329,7 +1287,7 @@ export function createRequestLogger(options: LogOptions): RequestLogger {
           'http.request.method': method,
           'url.full': url,
           'http.response.status_code': status,
-          'duration_ms': durationMs,
+          duration_ms: durationMs,
         },
       })
     },
@@ -1364,6 +1322,7 @@ git commit -m "feat(opentelemetry): add request logging utilities"
 ## Task 10: Opentelemetry — HTTP Interceptor
 
 **Files:**
+
 - Create: `packages/opentelemetry/src/interceptor/http.ts`
 
 **Context:** HTTP interceptor 需要：1) 从 incoming request 的 headers 提取 context；2) 创建 span；3) 将当前 context 注入 outgoing request 的 headers；4) 请求完成后记录响应信息并结束 span。
@@ -1396,13 +1355,17 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
     const parentCtx = propagation.extract(context.active(), req.headers ?? new Headers(), headersGetter)
 
     // Create span with parent context
-    const span = tracer.startSpan(`HTTP ${req.method}`, {
-      kind: 2, // SpanKind.CLIENT
-      attributes: {
-        'http.request.method': req.method,
-        'url.full': resolveRequestUrl(req).toString(),
+    const span = tracer.startSpan(
+      `HTTP ${req.method}`,
+      {
+        kind: 2, // SpanKind.CLIENT
+        attributes: {
+          'http.request.method': req.method,
+          'url.full': resolveRequestUrl(req).toString(),
+        },
       },
-    }, parentCtx)
+      parentCtx,
+    )
 
     const spanCtx = context.setSpan(parentCtx, span)
 
@@ -1449,11 +1412,13 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
 Wait，这里有个问题。`resolveRequestUrl` 是从 `@defjs/core` 的 internal 模块导出的。让我检查它是否在 public API 中。
 
 看 `packages/core/src/index.ts`：
+
 ```ts
 export * from './public_api'
 ```
 
 看 `packages/core/src/public_api.ts`：
+
 ```ts
 export * from './client'
 export * from './error'
@@ -1472,9 +1437,7 @@ export * from './web_socket'
 HTTP interceptor 不需要完整的 URL，只需要 endpoint + baseEndpoint 即可。让我简化：
 
 ```ts
-const url = req.baseEndpoint
-  ? `${req.baseEndpoint.replace(/\/$/, '')}/${req.endpoint.replace(/^\//, '')}`
-  : req.endpoint
+const url = req.baseEndpoint ? `${req.baseEndpoint.replace(/\/$/, '')}/${req.endpoint.replace(/^\//, '')}` : req.endpoint
 ```
 
 不，这样太 hack 了。让我直接不用 `resolveRequestUrl`，而是用更简单的方式：
@@ -1539,13 +1502,17 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
     }
 
     // Create span with parent context
-    const span = tracer.startSpan(`HTTP ${req.method}`, {
-      kind: 2, // SpanKind.CLIENT
-      attributes: {
-        'http.request.method': req.method,
-        'url.full': url,
+    const span = tracer.startSpan(
+      `HTTP ${req.method}`,
+      {
+        kind: 2, // SpanKind.CLIENT
+        attributes: {
+          'http.request.method': req.method,
+          'url.full': url,
+        },
       },
-    }, parentCtx)
+      parentCtx,
+    )
 
     const spanCtx = context.setSpan(parentCtx, span)
 
@@ -1621,6 +1588,7 @@ git commit -m "feat(opentelemetry): add HTTP interceptor with trace/metrics/logs
 ## Task 11: Opentelemetry — SSE Interceptor
 
 **Files:**
+
 - Create: `packages/opentelemetry/src/interceptor/sse.ts`
 
 **Context:** SSE 请求本质上是 HTTP GET，所以可以用类似的逻辑。但 SSE 的响应是流式的， interceptor 在连接建立后就返回了，后续的 stream 事件需要在另一个 span 或 span event 中处理。
@@ -1659,13 +1627,17 @@ export function createOpenTelemetrySseInterceptor(options: SseInterceptorOptions
     }
 
     // Create span
-    const span = tracer.startSpan('SSE connect', {
-      kind: SpanKind.CLIENT,
-      attributes: {
-        'http.request.method': req.method,
-        'url.full': url,
+    const span = tracer.startSpan(
+      'SSE connect',
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          'http.request.method': req.method,
+          'url.full': url,
+        },
       },
-    }, parentCtx)
+      parentCtx,
+    )
 
     const spanCtx = trace.setSpan(parentCtx, span)
 
@@ -1686,7 +1658,7 @@ export function createOpenTelemetrySseInterceptor(options: SseInterceptorOptions
       // SSE 连接成功，但 stream 还在进行中
       // 记录连接成功，但不结束 span
       span.addEvent('sse.connected', {
-        'duration_ms': durationMs,
+        duration_ms: durationMs,
       })
 
       // 当 stream closed 时结束 span
@@ -1739,6 +1711,7 @@ git commit -m "feat(opentelemetry): add SSE interceptor with trace/metrics/logs"
 ## Task 12: Opentelemetry — WebSocket Interceptor
 
 **Files:**
+
 - Create: `packages/opentelemetry/src/interceptor/web_socket.ts`
 
 **Context:** WebSocket 的限制是浏览器 `WebSocket` 构造函数不支持自定义 headers。所以 propagation 需要走 query string。Interceptor 在 WebSocket 连接时创建 span，并在连接生命周期中记录事件。
@@ -1761,7 +1734,9 @@ export interface WebSocketInterceptorOptions {
   queryPropagation?: boolean
 }
 
-export function createOpenTelemetryWebSocketInterceptor(options: WebSocketInterceptorOptions): ReturnType<typeof createWebSocketInterceptor> {
+export function createOpenTelemetryWebSocketInterceptor(
+  options: WebSocketInterceptorOptions,
+): ReturnType<typeof createWebSocketInterceptor> {
   return createWebSocketInterceptor(async (req, next) => {
     const { tracer, propagator, metrics, logger, queryPropagation = true } = options
 
@@ -1807,7 +1782,7 @@ export function createOpenTelemetryWebSocketInterceptor(options: WebSocketInterc
       const durationMs = performance.now() - startTime
 
       span.addEvent('websocket.connected', {
-        'duration_ms': durationMs,
+        duration_ms: durationMs,
       })
 
       // Track session lifecycle
@@ -1852,6 +1827,7 @@ git commit -m "feat(opentelemetry): add WebSocket interceptor with trace/metrics
 ## Task 13: Opentelemetry — withOpenTelemetry Option 工厂
 
 **Files:**
+
 - Create: `packages/opentelemetry/src/option.ts`
 - Create: `packages/opentelemetry/src/public_api.ts`
 - Create: `packages/opentelemetry/src/index.ts`
@@ -1910,10 +1886,7 @@ export function withOpenTelemetry(options: OpenTelemetryOptions = {}): ClientOpt
     recordHeaders = false,
     webSocketQueryPropagation = true,
     propagator = new CompositePropagator({
-      propagators: [
-        new W3CTraceContextPropagator(),
-        new W3CBaggagePropagator(),
-      ],
+      propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
     }),
   } = options
 
@@ -1967,7 +1940,7 @@ export function withOpenTelemetry(options: OpenTelemetryOptions = {}): ClientOpt
 
 ```ts
 export function withInterceptors(...interceptors: Interceptor[]): ClientOption {
-  return config => {
+  return (config) => {
     config.interceptors.push(...interceptors)
   }
 }
@@ -2002,6 +1975,7 @@ git commit -m "feat(opentelemetry): add withOpenTelemetry option factory"
 ## Task 14: Opentelemetry — 测试
 
 **Files:**
+
 - Create: `packages/opentelemetry/test-setup.ts`
 - Create: `packages/opentelemetry/vitest.config.node.ts`
 - Create: `packages/opentelemetry/src/option.spec.ts`
@@ -2050,7 +2024,7 @@ describe('withOpenTelemetry', () => {
     return {
       endpoint: 'https://api.example.com',
       interceptors: [],
-      queryParamsSerializer: params => params.toString(),
+      queryParamsSerializer: (params) => params.toString(),
       sse: { fetch: globalThis.fetch.bind(globalThis) },
       webSocket: {},
     }
@@ -2118,6 +2092,7 @@ git commit -m "test(opentelemetry): add option factory tests"
 ## Task 15: Opentelemetry — HTTP Interceptor 测试
 
 **Files:**
+
 - Create: `packages/opentelemetry/src/interceptor/http.spec.ts`
 
 **Context:** 测试 HTTP interceptor 的 trace、propagation 和 metrics 行为。需要 mock OTel API。
@@ -2280,11 +2255,12 @@ git commit -m "test(opentelemetry): add HTTP interceptor tests"
 ## Task 16: Opentelemetry — 构建产物
 
 **Files:**
+
 - Modify: `packages/opentelemetry/README.md`
 
 - [ ] **Step 1: 创建 README.md**
 
-```markdown
+````markdown
 # @defjs/opentelemetry
 
 OpenTelemetry integration for @defjs/core.
@@ -2294,6 +2270,7 @@ OpenTelemetry integration for @defjs/core.
 ```bash
 npm install @defjs/opentelemetry @opentelemetry/api
 ```
+````
 
 ## Usage
 
@@ -2301,31 +2278,29 @@ npm install @defjs/opentelemetry @opentelemetry/api
 import { createClient } from '@defjs/core'
 import { withOpenTelemetry } from '@defjs/opentelemetry'
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withOpenTelemetry({ serviceName: 'my-app' }),
-)
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetry({ serviceName: 'my-app' }))
 ```
 
 ## Configuration
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `serviceName` | `string` | `'unknown-service'` | Service name for telemetry |
-| `http` | `boolean` | `true` | Enable HTTP tracing |
-| `sse` | `boolean` | `true` | Enable SSE tracing |
-| `webSocket` | `boolean` | `true` | Enable WebSocket tracing |
-| `recordBodies` | `boolean` | `false` | Record request/response bodies |
-| `recordHeaders` | `boolean` | `false` | Record full headers |
-| `webSocketQueryPropagation` | `boolean` | `true` | Use query string for WebSocket propagation |
-| `propagator` | `TextMapPropagator` | W3C TraceContext + Baggage | Custom propagator |
-```
+| Option                      | Type                | Default                    | Description                                |
+| --------------------------- | ------------------- | -------------------------- | ------------------------------------------ |
+| `serviceName`               | `string`            | `'unknown-service'`        | Service name for telemetry                 |
+| `http`                      | `boolean`           | `true`                     | Enable HTTP tracing                        |
+| `sse`                       | `boolean`           | `true`                     | Enable SSE tracing                         |
+| `webSocket`                 | `boolean`           | `true`                     | Enable WebSocket tracing                   |
+| `recordBodies`              | `boolean`           | `false`                    | Record request/response bodies             |
+| `recordHeaders`             | `boolean`           | `false`                    | Record full headers                        |
+| `webSocketQueryPropagation` | `boolean`           | `true`                     | Use query string for WebSocket propagation |
+| `propagator`                | `TextMapPropagator` | W3C TraceContext + Baggage | Custom propagator                          |
+
+````
 
 - [ ] **Step 2: 构建并验证产物**
 
 ```bash
 cd packages/opentelemetry && bun scripts/build.ts
-```
+````
 
 Expected: `dist/index.js` 和 `dist/index.d.ts` 生成成功。
 
@@ -2349,6 +2324,7 @@ git commit -m "docs(opentelemetry): add README"
 ## Task 17: 端到端验证
 
 **Files:**
+
 - 无（集成验证）
 
 **Context:** 确认整个链路在 core option 模式 + opentelemetry 包下能正常工作。
@@ -2362,10 +2338,7 @@ import { createClient, withEndpoint, withInterceptors } from '@defjs/core'
 import { withOpenTelemetry } from '@defjs/opentelemetry'
 
 // 验证 option 模式
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withOpenTelemetry({ serviceName: 'test-app' }),
-)
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetry({ serviceName: 'test-app' }))
 
 console.log('Client created successfully')
 console.log('Interceptors:', client[Symbol.for('Client')].interceptors.length)
@@ -2401,22 +2374,22 @@ git commit -m "chore: verify end-to-end integration"
 
 ### Spec Coverage
 
-| 需求 | 实现任务 |
-|---|---|
-| Core option 模式 | Task 1-3 |
-| Angular 适配 | Task 4 |
-| `@defjs/opentelemetry` 独立包 | Task 5 |
-| Propagation carrier (Headers + query string) | Task 6 |
-| Trace span 管理 | Task 7 |
-| Metrics 收集 | Task 8 |
-| Logs 记录 | Task 9 |
-| HTTP interceptor | Task 10 |
-| SSE interceptor | Task 11 |
-| WebSocket interceptor | Task 12 |
-| `withOpenTelemetry` option 工厂 | Task 13 |
-| 测试 | Task 14-15 |
-| 构建产物 | Task 16 |
-| 端到端验证 | Task 17 |
+| 需求                                         | 实现任务   |
+| -------------------------------------------- | ---------- |
+| Core option 模式                             | Task 1-3   |
+| Angular 适配                                 | Task 4     |
+| `@defjs/opentelemetry` 独立包                | Task 5     |
+| Propagation carrier (Headers + query string) | Task 6     |
+| Trace span 管理                              | Task 7     |
+| Metrics 收集                                 | Task 8     |
+| Logs 记录                                    | Task 9     |
+| HTTP interceptor                             | Task 10    |
+| SSE interceptor                              | Task 11    |
+| WebSocket interceptor                        | Task 12    |
+| `withOpenTelemetry` option 工厂              | Task 13    |
+| 测试                                         | Task 14-15 |
+| 构建产物                                     | Task 16    |
+| 端到端验证                                   | Task 17    |
 
 ### Placeholder Scan
 

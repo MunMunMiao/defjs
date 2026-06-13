@@ -22,9 +22,9 @@ export interface OpenTelemetryServerOptions {
   /** Only create outgoing span when an active parent span exists */
   requireParentSpan?: boolean
   /** Hook to customize span before request */
-  requestHook?: (span: Span, req: any) => void
+  requestHook?: (span: Span, req: unknown) => void
   /** Hook to customize span after response */
-  responseHook?: (span: Span, res: any) => void
+  responseHook?: (span: Span, res: unknown) => void
   /** Enable HTTP tracing, default true */
   http?: boolean
   /** Enable SSE tracing, default true */

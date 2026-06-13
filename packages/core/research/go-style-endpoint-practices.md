@@ -40,11 +40,13 @@ const Input = struct.request({
   headers: struct.object({
     traceId: struct.string().tag(tag.header('x-trace-id')),
   }),
-  body: struct.json(struct.object({
-    profile: struct.object({
-      displayName: struct.string().tag(tag.json('display_name')),
+  body: struct.json(
+    struct.object({
+      profile: struct.object({
+        displayName: struct.string().tag(tag.json('display_name')),
+      }),
     }),
-  })),
+  ),
 })
 
 defineRequest({
@@ -56,12 +58,12 @@ defineRequest({
 
 transport 使用规则：
 
-| request section | HTTP | SSE | WebSocket |
-|---|---|---|---|
-| `path` | 使用 | 使用 | 使用 |
-| `query` | 使用 | 使用 | 使用 |
-| `headers` | 使用 | 使用 | 禁止 |
-| `body` | 使用 | 禁止 | 禁止 |
+| request section | HTTP | SSE  | WebSocket |
+| --------------- | ---- | ---- | --------- |
+| `path`          | 使用 | 使用 | 使用      |
+| `query`         | 使用 | 使用 | 使用      |
+| `headers`       | 使用 | 使用 | 禁止      |
+| `body`          | 使用 | 禁止 | 禁止      |
 
 HTTP body wrapper 规则：
 
@@ -140,11 +142,13 @@ const Input = struct.request({
   headers: struct.object({
     traceId: struct.string().tag(tag.header('x-trace-id')),
   }),
-  body: struct.json(struct.object({
-    profile: struct.object({
-      displayName: struct.string().tag(tag.json('display_name')),
+  body: struct.json(
+    struct.object({
+      profile: struct.object({
+        displayName: struct.string().tag(tag.json('display_name')),
+      }),
     }),
-  })),
+  ),
 })
 
 defineRequest({
@@ -198,13 +202,17 @@ array source 可以在 JSON projection 内使用 `map(...)` 重组 item shape。
 
 ```ts
 const Input = struct.request({
-  body: struct.json(struct.object({
-    users: struct.array(struct.object({
-      id: struct.number(),
-      name: struct.string(),
-      password: struct.string(),
-    })),
-  })),
+  body: struct.json(
+    struct.object({
+      users: struct.array(
+        struct.object({
+          id: struct.number(),
+          name: struct.string(),
+          password: struct.string(),
+        }),
+      ),
+    }),
+  ),
 })
 
 defineRequest({
@@ -213,7 +221,7 @@ defineRequest({
   input: Input,
   build(ctx, input) {
     ctx.bindJson({
-      users: input.body.users.map(user => ({
+      users: input.body.users.map((user) => ({
         id: user.id,
         name: user.name,
       })),
@@ -230,10 +238,12 @@ object bound view 可以作为 whole-source。
 
 ```ts
 const Input = struct.request({
-  body: struct.json(struct.object({
-    id: struct.number(),
-    name: struct.string(),
-  })),
+  body: struct.json(
+    struct.object({
+      id: struct.number(),
+      name: struct.string(),
+    }),
+  ),
 })
 
 defineRequest({

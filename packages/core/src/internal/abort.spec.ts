@@ -22,7 +22,7 @@ describe('abort helpers', () => {
     const controller = new AbortController()
     const merged = mergeAbortSignals(controller.signal, [], 20)
 
-    await new Promise(resolve => {
+    await new Promise((resolve) => {
       setTimeout(resolve, 40)
     })
 

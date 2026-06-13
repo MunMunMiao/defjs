@@ -31,10 +31,10 @@ export function readObjectShape(shape: ObjectShape): ObjectShape {
     output[key] = value
   }
 
-  return output as ObjectShape
+  return output as unknown as ObjectShape
 }
 
-export function assertSchema(value: unknown, label: string): asserts value is SchemaLike<any, any, boolean> {
+export function assertSchema(value: unknown, label: string): asserts value is SchemaLike<unknown, unknown, boolean> {
   if (!isStruct(value)) {
     throw new TypeError(`${label} must be a schema`)
   }

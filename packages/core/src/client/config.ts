@@ -2,7 +2,7 @@ import type { Interceptor } from '../interceptor/interceptor'
 
 export type QueryParamsSerializer = (params: URLSearchParams, rawParams?: Record<string, unknown>) => string
 
-export const DEFAULT_QUERY_PARAMS_SERIALIZER: QueryParamsSerializer = params => params.toString()
+export const DEFAULT_QUERY_PARAMS_SERIALIZER: QueryParamsSerializer = (params) => params.toString()
 
 export type WebSocketBeforeConnect = () => void | Promise<void>
 

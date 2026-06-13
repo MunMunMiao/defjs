@@ -62,7 +62,7 @@ export function createTagNamespace<const TName extends string>(name: TName): Tag
 
 export function defineConfig<const TName extends string>(namespace: TagNamespace<TName>) {
   return (key: string, value: TagScalar = true): FieldTagOption =>
-    context => {
+    (context) => {
       assertConfigKey(key, namespace)
 
       const fieldTag = ensureTag(context.tags, namespace)
@@ -92,7 +92,7 @@ export const tag = Object.freeze({
 })
 
 function defineValueTag(namespace: TagNamespace, options: ValueTagOptions = {}): ValueTagFactory {
-  return fieldName => context => {
+  return (fieldName) => (context) => {
     if (options.requireExplicitName && typeof fieldName !== 'string') {
       throw new Error(`tag.${namespace.name}() requires an explicit field name`)
     }

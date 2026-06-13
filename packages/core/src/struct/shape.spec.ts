@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { struct } from './index'
 import { parseStructTuple as parse } from './introspection'
+import type { SchemaLike } from './types'
 
 describe('shape.ts getter-recursive structures', () => {
   test('parses getter-recursive objects without an explicit recursive constructor', () => {
@@ -14,7 +15,7 @@ describe('shape.ts getter-recursive structures', () => {
         return struct.array(category)
       },
       id: struct.string(),
-    })
+    }) as unknown as SchemaLike<unknown, unknown, boolean>
 
     const [err, value] = parse(category, {
       children: [{ children: [], id: 'child' }],
@@ -36,7 +37,7 @@ describe('shape.ts getter-recursive structures', () => {
       get replies() {
         return struct.array(comment)
       },
-    })
+    }) as unknown as SchemaLike<unknown, unknown, boolean>
 
     const [err] = parse(comment, {
       id: 'root',

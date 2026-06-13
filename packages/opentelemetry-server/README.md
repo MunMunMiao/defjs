@@ -20,23 +20,20 @@ import { trace } from '@opentelemetry/api'
 // Create your tracer externally (after initializing OTel SDK)
 const tracer = trace.getTracer('my-service')
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withOpenTelemetryServer({ tracer }),
-)
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer }))
 ```
 
 ## Configuration
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `tracer` | `Tracer` | **required** | External OTel tracer |
-| `meter` | `Meter` | `undefined` | External OTel meter (enables metrics) |
-| `propagator` | `TextMapPropagator` | W3C TraceContext + Baggage | Custom propagator |
-| `requireParentSpan` | `boolean` | `false` | Only trace when an active parent span exists |
-| `requestHook` | `(span, req) => void` | `undefined` | Customize span before request |
-| `responseHook` | `(span, res) => void` | `undefined` | Customize span after response |
-| `http` | `boolean` | `true` | Enable HTTP tracing |
-| `sse` | `boolean` | `true` | Enable SSE tracing |
-| `webSocket` | `boolean` | `true` | Enable WebSocket tracing |
-| `webSocketQueryPropagation` | `boolean` | `true` | Use query string for WebSocket propagation |
+| Option                      | Type                  | Default                    | Description                                  |
+| --------------------------- | --------------------- | -------------------------- | -------------------------------------------- |
+| `tracer`                    | `Tracer`              | **required**               | External OTel tracer                         |
+| `meter`                     | `Meter`               | `undefined`                | External OTel meter (enables metrics)        |
+| `propagator`                | `TextMapPropagator`   | W3C TraceContext + Baggage | Custom propagator                            |
+| `requireParentSpan`         | `boolean`             | `false`                    | Only trace when an active parent span exists |
+| `requestHook`               | `(span, req) => void` | `undefined`                | Customize span before request                |
+| `responseHook`              | `(span, res) => void` | `undefined`                | Customize span after response                |
+| `http`                      | `boolean`             | `true`                     | Enable HTTP tracing                          |
+| `sse`                       | `boolean`             | `true`                     | Enable SSE tracing                           |
+| `webSocket`                 | `boolean`             | `true`                     | Enable WebSocket tracing                     |
+| `webSocketQueryPropagation` | `boolean`             | `true`                     | Use query string for WebSocket propagation   |

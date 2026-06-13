@@ -30,7 +30,7 @@ function createMockPropagator() {
 function createMockTracer() {
   activeSpans = []
 
-  const startSpan = vi.fn((name: string, options?: { kind?: number; attributes?: Record<string, unknown> }, ctx?: Context) => {
+  const startSpan = vi.fn((name: string, options?: { kind?: number; attributes?: Record<string, unknown> }, _ctx?: Context) => {
     const span: MockSpan = {
       name,
       kind: options?.kind ?? 0,
@@ -110,7 +110,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     await interceptor.fn(req, next)
 
     expect(propagator.inject).toHaveBeenCalled()
-    const calls = (next as unknown as { mock: { calls: [any][] } }).mock.calls
+    const calls = (next as unknown as { mock: { calls: [unknown[]][] } }).mock.calls
     expect(calls[0]?.[0].headers?.get('traceparent')).toBe('mock-trace-id')
   })
 
@@ -174,7 +174,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     await interceptor.fn(req, next)
 
     expect(next).toHaveBeenCalledTimes(1)
-    const calls = (next as unknown as { mock: { calls: [any][] } }).mock.calls
+    const calls = (next as unknown as { mock: { calls: [unknown[]][] } }).mock.calls
     expect(calls[0]?.[0].method).toBe('GET')
     expect(calls[0]?.[0].endpoint).toBe('/test')
     expect(calls[0]?.[0].headers).toBeInstanceOf(Headers)

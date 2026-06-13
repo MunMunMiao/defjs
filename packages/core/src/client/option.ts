@@ -4,25 +4,25 @@ import type { ClientConfig, ClientSseOptions, ClientWebSocketOptions, QueryParam
 export type ClientOption = (config: ClientConfig) => void
 
 export function withEndpoint(endpoint: string): ClientOption {
-  return config => {
+  return (config) => {
     config.endpoint = endpoint
   }
 }
 
 export function withInterceptors(...interceptors: Interceptor[]): ClientOption {
-  return config => {
+  return (config) => {
     config.interceptors.push(...interceptors)
   }
 }
 
 export function withQueryParamsSerializer(serializer: QueryParamsSerializer): ClientOption {
-  return config => {
+  return (config) => {
     config.queryParamsSerializer = serializer
   }
 }
 
 export function withSseOptions(options: ClientSseOptions): ClientOption {
-  return config => {
+  return (config) => {
     config.sse = {
       ...config.sse,
       ...options,
@@ -31,7 +31,7 @@ export function withSseOptions(options: ClientSseOptions): ClientOption {
 }
 
 export function withWebSocketOptions(options: ClientWebSocketOptions): ClientOption {
-  return config => {
+  return (config) => {
     config.webSocket = {
       ...config.webSocket,
       protocols: options.protocols ? [...options.protocols] : config.webSocket.protocols,
@@ -52,7 +52,7 @@ export function withWebSocketOptions(options: ClientWebSocketOptions): ClientOpt
 }
 
 export function withCredentials(value: boolean): ClientOption {
-  return config => {
+  return (config) => {
     config.withCredentials = value
   }
 }

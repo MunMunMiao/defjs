@@ -99,7 +99,7 @@ describe('Fetch handler streaming', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1)
       expect(progressEvents.length).toBeGreaterThan(0)
       expect(progressEvents.at(-1)?.loaded).toBeGreaterThan(0)
-      expect(progressEvents.every(event => event.lengthComputable === false && event.total === 0)).toBe(true)
+      expect(progressEvents.every((event) => event.lengthComputable === false && event.total === 0)).toBe(true)
     } finally {
       vi.unstubAllGlobals()
     }

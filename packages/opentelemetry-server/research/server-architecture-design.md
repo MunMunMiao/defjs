@@ -3,6 +3,7 @@
 ## 目标
 
 设计 `@defjs/opentelemetry-server` 的架构，使其：
+
 - 能力对齐 `@elysia/opentelemetry`
 - 框架无关（核心不绑定任何服务端框架）
 - 只依赖 `@opentelemetry/api`（不依赖 SDK）
@@ -56,10 +57,10 @@ interface HandlerResult {
 interface FrameworkAdapter {
   // 从框架请求对象提取标准信息
   getRequest(req: unknown): ServerRequest
-  
+
   // 获取路由模式（如 /users/:id）
   getRoute?(req: unknown): string | undefined
-  
+
   // 在响应发送前执行回调
   onResponse?(req: unknown, callback: () => void): void
 }
@@ -78,10 +79,12 @@ import type { ServerRequest, ServerResponse, FrameworkAdapter } from './adapter'
 export interface ServerInstrumentationOptions {
   serviceName: string
   /** 是否启用 URL 脱敏 */
-  urlRedaction?: {
-    stripCredentials?: boolean
-    sensitiveQueryParams?: string[]
-  } | false
+  urlRedaction?:
+    | {
+        stripCredentials?: boolean
+        sensitiveQueryParams?: string[]
+      }
+    | false
   /** 是否记录 body */
   recordBody?: boolean | { request?: boolean; response?: boolean }
   /** 要记录的 headers */
@@ -105,18 +108,14 @@ export class ServerInstrumentation {
    * 处理一个请求
    * 这是框架无关的核心逻辑
    */
-  async handleRequest<T>(
-    request: ServerRequest,
-    handler: () => Promise<T>,
-    adapter?: FrameworkAdapter
-  ): Promise<T> {
+  async handleRequest<T>(request: ServerRequest, handler: () => Promise<T>, adapter?: FrameworkAdapter): Promise<T> {
     const startTime = performance.now()
 
     // 1. Extract trace context
     const parentContext = propagation.extract(
       otelContext.active(),
       request.headers,
-      headersGetter // 复用 carrier.ts 的 getter
+      headersGetter, // 复用 carrier.ts 的 getter
     )
 
     // 2. 创建 SERVER span
@@ -130,10 +129,7 @@ export class ServerInstrumentation {
       async (span) => {
         try {
           // 3. 在 span context 中执行 handler
-          const result = await otelContext.with(
-            trace.setSpan(otelContext.active(), span),
-            handler
-          )
+          const result = await otelContext.with(trace.setSpan(otelContext.active(), span), handler)
 
           // 4. 记录成功
           this.endSuccess(span, startTime)
@@ -143,7 +139,7 @@ export class ServerInstrumentation {
           this.endError(span, error, startTime)
           throw error
         }
-      }
+      },
     )
   }
 
@@ -210,12 +206,11 @@ export interface ElysiaOpenTelemetryOptions {
 export function opentelemetry(options: ElysiaOpenTelemetryOptions) {
   const instrumentation = new ServerInstrumentation(options)
 
-  return new Elysia({ name: '@defjs/opentelemetry-server' })
-    .onRequest(async ({ request, set }) => {
-      // Elysia 的 onRequest 是进入请求时触发
-      // 但 Elysia 没有直接提供 wrap 整个 handler 的 hook
-      // 需要用 Elysia 的 .derive() 或中间件模式
-    })
+  return new Elysia({ name: '@defjs/opentelemetry-server' }).onRequest(async ({ request, set }) => {
+    // Elysia 的 onRequest 是进入请求时触发
+    // 但 Elysia 没有直接提供 wrap 整个 handler 的 hook
+    // 需要用 Elysia 的 .derive() 或中间件模式
+  })
 }
 ```
 
@@ -268,7 +263,7 @@ export function opentelemetryMiddleware(options: { serviceName: string }) {
           status: c.res.status,
           headers: c.res.headers,
         }
-      }
+      },
     )
   }
 }
@@ -300,7 +295,7 @@ export function opentelemetryMiddleware(options: { serviceName: string }) {
         return {
           status: res.statusCode,
         }
-      }
+      },
     )
   }
 }
@@ -312,13 +307,13 @@ export function opentelemetryMiddleware(options: { serviceName: string }) {
 
 ### 方案对比
 
-| 维度 | A: 依赖 SDK（Elysia 做法） | B: 只依赖 API（推荐） |
-|------|---------------------------|----------------------|
-| 包体积 | 大（+sdk-node + instrumentation） | 小（仅 api + core） |
-| 用户配置 | 零配置 | 需自行配置 SDK |
-| 冲突风险 | 高（与用户 SDK 配置冲突） | 低 |
-| 灵活性 | 低 | 高 |
-| 适用场景 | 快速上手 | 生产环境 |
+| 维度     | A: 依赖 SDK（Elysia 做法）        | B: 只依赖 API（推荐） |
+| -------- | --------------------------------- | --------------------- |
+| 包体积   | 大（+sdk-node + instrumentation） | 小（仅 api + core）   |
+| 用户配置 | 零配置                            | 需自行配置 SDK        |
+| 冲突风险 | 高（与用户 SDK 配置冲突）         | 低                    |
+| 灵活性   | 低                                | 高                    |
+| 适用场景 | 快速上手                          | 生产环境              |
 
 **推荐方案 B**：
 
@@ -382,12 +377,12 @@ packages/opentelemetry-server/
 // 测试核心 instrumentation
 test('should create SERVER span', async () => {
   const instrumentation = new ServerInstrumentation({ serviceName: 'test' })
-  
+
   const result = await instrumentation.handleRequest(
     { method: 'GET', url: 'http://localhost:3000/users', headers: new Headers() },
-    async () => 'hello'
+    async () => 'hello',
   )
-  
+
   // 验证 span 被创建
   // 验证 span kind = SERVER
   // 验证属性
@@ -402,9 +397,7 @@ test('should create SERVER span', async () => {
 // Elysia 集成测试
 import { Elysia } from 'elysia'
 
-const app = new Elysia()
-  .use(opentelemetry({ serviceName: 'test' }))
-  .get('/users', () => 'ok')
+const app = new Elysia().use(opentelemetry({ serviceName: 'test' })).get('/users', () => 'ok')
 
 const response = await app.handle(new Request('http://localhost/users'))
 // 验证 response

@@ -90,6 +90,8 @@ function createMockWebSocketClass(
         this.listeners['error']?.forEach((fn) => fn(new Event('error')))
       }
 
+      // Type boundary: capture the constructed mock instance so tests can trigger events on it.
+      // oxlint-disable-next-line typescript/no-this-alias
       lastMockInstance = this
 
       if (autoOpen) {

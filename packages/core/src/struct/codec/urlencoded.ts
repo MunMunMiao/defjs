@@ -5,7 +5,7 @@ import { assertPlainObject, getWireKey } from './common'
 
 export type SearchParamScalar = boolean | null | number | string
 
-export function encodeUrlencoded(struct: SchemaLike<any, any, boolean>, value: unknown): URLSearchParams {
+export function encodeUrlencoded(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): URLSearchParams {
   if (!isObjectStruct(struct)) {
     throw new TypeError('urlencoded encode expects object struct')
   }

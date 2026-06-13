@@ -34,7 +34,7 @@ describe('request http runtime context', () => {
               headers: nextHeaders,
             })
           }),
-          createHttpInterceptor(async request => {
+          createHttpInterceptor(async (request) => {
             seenHeader = request.headers?.get('x-transaction-id') ?? null
             return makeResponse({
               body: null,

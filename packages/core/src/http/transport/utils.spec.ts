@@ -36,7 +36,7 @@ describe('Handler util', () => {
       }
       const responseBody = { id: 1 }
       const response = Response.json(responseBody)
-      const content = await response.arrayBuffer().then(buffer => new Uint8Array(buffer))
+      const content = await response.arrayBuffer().then((buffer) => new Uint8Array(buffer))
       expect(parseBody({ request, contentType: '', content })).toEqual(responseBody)
     })
 
@@ -48,7 +48,7 @@ describe('Handler util', () => {
       }
       const responseText = 'Hello Word!'
       const response = new Response(responseText)
-      const content = await response.arrayBuffer().then(buffer => new Uint8Array(buffer))
+      const content = await response.arrayBuffer().then((buffer) => new Uint8Array(buffer))
       expect(parseBody({ request, contentType: '', content })).toEqual(responseText)
     })
 
@@ -65,7 +65,7 @@ describe('Handler util', () => {
         },
       })
       const contentType = getContentType(response.headers)
-      const content = await response.arrayBuffer().then(buffer => new Uint8Array(buffer))
+      const content = await response.arrayBuffer().then((buffer) => new Uint8Array(buffer))
       expect(parseBody({ request, contentType, content })).toBeInstanceOf(Blob)
     })
 
@@ -82,7 +82,7 @@ describe('Handler util', () => {
         },
       })
       const contentType = getContentType(response.headers)
-      const content = await response.arrayBuffer().then(buffer => new Uint8Array(buffer))
+      const content = await response.arrayBuffer().then((buffer) => new Uint8Array(buffer))
       expect(parseBody({ request, contentType, content })).toBeInstanceOf(ArrayBuffer)
     })
 

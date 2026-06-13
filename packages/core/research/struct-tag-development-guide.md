@@ -13,18 +13,8 @@ import { struct, tag } from '@defjs/struct'
 import { gorm } from '@defjs/gorm/tag'
 
 const input = struct.object({
-  id: struct.number().tag(
-    tag.json('id'),
-    tag.uri('id'),
-    gorm('column', 'id'),
-    gorm('primaryKey'),
-  ),
-  name: struct.string().tag(
-    tag.json('user_name'),
-    tag.urlencoded('user_name'),
-    gorm('column', 'user_name'),
-    gorm('notNull'),
-  ),
+  id: struct.number().tag(tag.json('id'), tag.uri('id'), gorm('column', 'id'), gorm('primaryKey')),
+  name: struct.string().tag(tag.json('user_name'), tag.urlencoded('user_name'), gorm('column', 'user_name'), gorm('notNull')),
 })
 ```
 
@@ -180,10 +170,7 @@ const tagKind = Object.freeze({
 ### 4.2 ensureTag
 
 ```ts
-function ensureTag(
-  tags: Map<symbol, MutableFieldTag>,
-  namespace: TagNamespace,
-): MutableFieldTag {
+function ensureTag(tags: Map<symbol, MutableFieldTag>, namespace: TagNamespace): MutableFieldTag {
   const existing = tags.get(namespace.kind)
 
   if (existing) {
@@ -204,11 +191,8 @@ function ensureTag(
 ### 4.3 value helper
 
 ```ts
-function defineValueTag(
-  namespace: TagNamespace,
-  options: { requireExplicitName?: boolean } = {},
-): (fieldName?: string) => FieldTagOption {
-  return fieldName => context => {
+function defineValueTag(namespace: TagNamespace, options: { requireExplicitName?: boolean } = {}): (fieldName?: string) => FieldTagOption {
+  return (fieldName) => (context) => {
     if (options.requireExplicitName && typeof fieldName !== 'string') {
       throw new Error(`tag.${namespace.name}() requires an explicit field name`)
     }
@@ -240,7 +224,7 @@ const tag = Object.freeze({
 ```ts
 function defineConfig(namespace: TagNamespace) {
   return (key: string, value: TagScalar = true): FieldTagOption =>
-    context => {
+    (context) => {
       assertConfigKey(key, namespace)
 
       const fieldTag = ensureTag(context.tags, namespace)
@@ -275,11 +259,8 @@ interface StructDefinition {
   readonly tagOptions: readonly FieldTagOption[]
 }
 
-function withTagOptions<T extends StructLike>(
-  field: T,
-  options: readonly FieldTagOption[],
-): T {
-  return cloneStruct(field, definition => ({
+function withTagOptions<T extends StructLike>(field: T, options: readonly FieldTagOption[]): T {
+  return cloneStruct(field, (definition) => ({
     ...definition,
     tagOptions: [...definition.tagOptions, ...options],
   }))
@@ -316,11 +297,14 @@ function freezeFieldTags(tags: Map<symbol, MutableFieldTag>): ReadonlyMap<symbol
   const result = new Map<symbol, FieldTag>()
 
   for (const [kind, tag] of tags) {
-    result.set(kind, Object.freeze({
-      namespace: tag.namespace,
-      value: tag.value,
-      config: new Map(tag.config),
-    }))
+    result.set(
+      kind,
+      Object.freeze({
+        namespace: tag.namespace,
+        value: tag.value,
+        config: new Map(tag.config),
+      }),
+    )
   }
 
   return result
@@ -372,11 +356,7 @@ function createObjectStruct(shape: Record<string, StructLike>): ObjectStruct {
 ### 5.1 encode object by value tag
 
 ```ts
-function encodeObjectByTag(
-  objectStruct: ObjectStruct,
-  value: Record<string, unknown>,
-  namespace: TagNamespace,
-): Record<string, unknown> {
+function encodeObjectByTag(objectStruct: ObjectStruct, value: Record<string, unknown>, namespace: TagNamespace): Record<string, unknown> {
   const output: Record<string, unknown> = {}
 
   for (const field of objectStruct.fields.values()) {
@@ -466,12 +446,7 @@ function encodeUrlencoded(
   return params
 }
 
-function appendSearchParam(
-  params: URLSearchParams,
-  key: string,
-  value: unknown,
-  options?: UrlencodedSerializerOptions,
-): void {
+function appendSearchParam(params: URLSearchParams, key: string, value: unknown, options?: UrlencodedSerializerOptions): void {
   if (typeof value === 'undefined') {
     return
   }
@@ -585,11 +560,7 @@ function encodeQuery(
 ### 6.1 自动构建入口
 
 ```ts
-function buildRequestFromStruct<TInput>(
-  inputStruct: ObjectStruct,
-  input: TInput,
-  options: AutoBuildOptions,
-): RequestBuild {
+function buildRequestFromStruct<TInput>(inputStruct: ObjectStruct, input: TInput, options: AutoBuildOptions): RequestBuild {
   const parsed = struct.validate(inputStruct, input)
   const request = createEmptyRequestBuild()
 
@@ -849,17 +820,23 @@ test('builds path, query, header and json body from request shape', () => {
     headers: struct.object({
       token: struct.string().tag(tag.header('X-Token')),
     }),
-    body: struct.json(struct.object({
-      name: struct.string().tag(tag.json('user_name')),
-    })),
+    body: struct.json(
+      struct.object({
+        name: struct.string().tag(tag.json('user_name')),
+      }),
+    ),
   })
 
-  const built = buildRequest({
-    path: { id: 42 },
-    query: { page: 3 },
-    headers: { token: 'secret' },
-    body: { name: 'Miao' },
-  }, undefined, { input })
+  const built = buildRequest(
+    {
+      path: { id: 42 },
+      query: { page: 3 },
+      headers: { token: 'secret' },
+      body: { name: 'Miao' },
+    },
+    undefined,
+    { input },
+  )
 
   expect(built.params).toEqual({ id: 42 })
   expect(built.query).toEqual({ page: 3 })

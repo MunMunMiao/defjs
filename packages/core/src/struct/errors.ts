@@ -58,7 +58,7 @@ export class StructError extends Error {
       return 'Schema parse failed'
     }
     return this.issues
-      .map(item => {
+      .map((item) => {
         const where = item.path.length === 0 ? '<root>' : formatPath(item.path)
         return `× ${where}: ${item.message}`
       })

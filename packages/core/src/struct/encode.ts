@@ -31,12 +31,12 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
       return definition.encode ? definition.encode(value as never) : value
 
     case 'array':
-      return Array.isArray(value) ? value.map(item => encodeValue(definition.item as RuntimeSchema, item, options)) : value
+      return Array.isArray(value) ? value.map((item) => encodeValue(definition.item as unknown as RuntimeSchema, item, options)) : value
 
     case 'tuple':
       return Array.isArray(value)
         ? value.map((item, index) =>
-            index < definition.items.length ? encodeValue(definition.items[index] as RuntimeSchema, item, options) : item,
+            index < definition.items.length ? encodeValue(definition.items[index] as unknown as RuntimeSchema, item, options) : item,
           )
         : value
 
@@ -46,7 +46,7 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
       }
       const output: Record<string, unknown> = Object.create(null)
       for (const [key, entry] of Object.entries(value)) {
-        output[key] = encodeValue(definition.value as RuntimeSchema, entry, options)
+        output[key] = encodeValue(definition.value as unknown as RuntimeSchema, entry, options)
       }
       return output
     }
@@ -64,7 +64,7 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
         if (!hasOwnKey(value, key)) {
           continue
         }
-        output[key] = encodeValue(fieldSchema as RuntimeSchema, value[key], options)
+        output[key] = encodeValue(fieldSchema as unknown as RuntimeSchema, value[key], options)
       }
       return output
     }
@@ -90,13 +90,13 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
     }
 
     case 'requestBody':
-      return encodeValue(definition.schema as RuntimeSchema, value, options)
+      return encodeValue(definition.schema as unknown as RuntimeSchema, value, options)
 
     case 'or': {
       for (const opt of definition.options) {
-        const optDef = (opt as RuntimeSchema)[DEFINITION]
-        if (matchesDefinition(optDef, value, opt as RuntimeSchema)) {
-          return encodeValue(opt as RuntimeSchema, value, options)
+        const optDef = (opt as unknown as RuntimeSchema)[DEFINITION]
+        if (matchesDefinition(optDef, value, opt as unknown as RuntimeSchema)) {
+          return encodeValue(opt as unknown as RuntimeSchema, value, options)
         }
       }
       return value
@@ -106,14 +106,14 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
       if (isPlainObject(value)) {
         const matched = definition.map.get((value as Record<string, unknown>)[definition.discriminator])
         if (matched) {
-          return encodeValue(matched as RuntimeSchema, value, options)
+          return encodeValue(matched as unknown as RuntimeSchema, value, options)
         }
       }
       return value
     }
 
     case 'intersection':
-      return encodeValue(definition.right as RuntimeSchema, value, options)
+      return encodeValue(definition.right as unknown as RuntimeSchema, value, options)
   }
 }
 
@@ -151,7 +151,7 @@ export function matchesDefinition(definition: SchemaDefinition, value: unknown, 
       if (!Array.isArray(value)) {
         return false
       }
-      const itemSchema = definition.item as RuntimeSchema
+      const itemSchema = definition.item as unknown as RuntimeSchema
       for (const item of value) {
         if (!matchesFieldValue(itemSchema, item)) {
           return false
@@ -164,7 +164,7 @@ export function matchesDefinition(definition: SchemaDefinition, value: unknown, 
         return false
       }
       for (let index = 0; index < definition.items.length; index += 1) {
-        if (!matchesFieldValue(definition.items[index] as RuntimeSchema, value[index])) {
+        if (!matchesFieldValue(definition.items[index] as unknown as RuntimeSchema, value[index])) {
           return false
         }
       }
@@ -182,13 +182,13 @@ export function matchesDefinition(definition: SchemaDefinition, value: unknown, 
       return isPlainObject(value)
 
     case 'requestBody':
-      return matchesFieldValue(definition.schema as RuntimeSchema, value)
+      return matchesFieldValue(definition.schema as unknown as RuntimeSchema, value)
 
     case 'record': {
       if (!isPlainObject(value)) {
         return false
       }
-      const valueSchema = definition.value as RuntimeSchema
+      const valueSchema = definition.value as unknown as RuntimeSchema
       for (const entry of Object.values(value)) {
         if (!matchesFieldValue(valueSchema, entry)) {
           return false
@@ -197,13 +197,15 @@ export function matchesDefinition(definition: SchemaDefinition, value: unknown, 
       return true
     }
     case 'or':
-      return definition.options.some(opt => matchesDefinition((opt as RuntimeSchema)[DEFINITION], value, opt as RuntimeSchema))
+      return definition.options.some((opt) =>
+        matchesDefinition((opt as unknown as RuntimeSchema)[DEFINITION], value, opt as unknown as RuntimeSchema),
+      )
     case 'discriminatedUnion':
       return isPlainObject(value) && definition.map.has((value as Record<string, unknown>)[definition.discriminator])
     case 'intersection':
       return (
-        matchesDefinition((definition.left as RuntimeSchema)[DEFINITION], value, definition.left as RuntimeSchema) &&
-        matchesDefinition((definition.right as RuntimeSchema)[DEFINITION], value, definition.right as RuntimeSchema)
+        matchesDefinition((definition.left as unknown as RuntimeSchema)[DEFINITION], value, definition.left as unknown as RuntimeSchema) &&
+        matchesDefinition((definition.right as unknown as RuntimeSchema)[DEFINITION], value, definition.right as unknown as RuntimeSchema)
       )
   }
 }
@@ -216,7 +218,7 @@ function matchesObjectValue(schema: RuntimeSchema, value: Record<string, unknown
 
   const shape = resolveObjectShape(schema, definition)
   for (const [key, fieldSchema] of Object.entries(shape)) {
-    const fieldDefinition = (fieldSchema as RuntimeSchema)[DEFINITION]
+    const fieldDefinition = (fieldSchema as unknown as RuntimeSchema)[DEFINITION]
     if (!hasOwnKey(value, key)) {
       if (isRequiredField(fieldDefinition)) {
         return false
@@ -231,7 +233,7 @@ function matchesObjectValue(schema: RuntimeSchema, value: Record<string, unknown
     if (fieldDefinition.kind === 'enum' && !fieldDefinition.values.includes(fieldValue as never)) {
       return false
     }
-    if (!matchesFieldValue(fieldSchema as RuntimeSchema, fieldValue)) {
+    if (!matchesFieldValue(fieldSchema as unknown as RuntimeSchema, fieldValue)) {
       return false
     }
   }

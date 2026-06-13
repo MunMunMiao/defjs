@@ -3,7 +3,7 @@ import type { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 
 export function registerXsrfRoutes(app: Hono): void {
-  app.get('/xsrf-token', c => {
+  app.get('/xsrf-token', (c) => {
     const cookieName = c.req.query('cookieName') ?? 'XSRF-TOKEN'
     const token = randomUUID()
 
@@ -16,7 +16,7 @@ export function registerXsrfRoutes(app: Hono): void {
     return c.json({ token })
   })
 
-  app.post('/xsrf-validate', async c => {
+  app.post('/xsrf-validate', async (c) => {
     const cookieName = c.req.query('cookieName') ?? 'XSRF-TOKEN'
     const headerName = c.req.query('headerName') ?? 'X-XSRF-TOKEN'
     const cookieToken = getCookie(c, cookieName)

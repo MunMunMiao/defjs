@@ -10,31 +10,34 @@
 
 ### 1.1 生命周期 Instrumentation
 
-| 生命周期 | Span 名称 | 触发时机 | MVP 必须 | 复杂度 | 框架无关 |
-|---------|----------|---------|---------|--------|---------|
-| `wrap` | `Root` | 请求进入时（最外层） | **是** | 低 | 是 |
-| `onRequest` | `Request` | 请求解析开始 | **是** | 低 | 否（Elysia 特有） |
-| `onParse` | `Parse` | Body 解析阶段 | 否 | 低 | 否 |
-| `onTransform` | `Transform` | 数据转换阶段 | 否 | 低 | 否 |
-| `onBeforeHandle` | `BeforeHandle` | 前置处理阶段 | 否 | 低 | 否 |
-| `onHandle` | `Handle` | 主处理逻辑 | **是** | 低 | 否 |
-| `onAfterHandle` | `AfterHandle` | 后置处理阶段 | 否 | 低 | 否 |
-| `onError` | `Error` | 错误处理阶段 | **是** | 中 | 否 |
-| `onMapResponse` | `MapResponse` | 响应映射阶段 | 否 | 低 | 否 |
-| `onAfterResponse` | `AfterResponse` | 响应发送后 | **是** | 中 | 否 |
+| 生命周期          | Span 名称       | 触发时机             | MVP 必须 | 复杂度 | 框架无关          |
+| ----------------- | --------------- | -------------------- | -------- | ------ | ----------------- |
+| `wrap`            | `Root`          | 请求进入时（最外层） | **是**   | 低     | 是                |
+| `onRequest`       | `Request`       | 请求解析开始         | **是**   | 低     | 否（Elysia 特有） |
+| `onParse`         | `Parse`         | Body 解析阶段        | 否       | 低     | 否                |
+| `onTransform`     | `Transform`     | 数据转换阶段         | 否       | 低     | 否                |
+| `onBeforeHandle`  | `BeforeHandle`  | 前置处理阶段         | 否       | 低     | 否                |
+| `onHandle`        | `Handle`        | 主处理逻辑           | **是**   | 低     | 否                |
+| `onAfterHandle`   | `AfterHandle`   | 后置处理阶段         | 否       | 低     | 否                |
+| `onError`         | `Error`         | 错误处理阶段         | **是**   | 中     | 否                |
+| `onMapResponse`   | `MapResponse`   | 响应映射阶段         | 否       | 低     | 否                |
+| `onAfterResponse` | `AfterResponse` | 响应发送后           | **是**   | 中     | 否                |
 
 ### 1.2 Span 命名与属性
 
 **Root Span**
+
 - 初始名称：`"Root"`
 - 在 `onTransform` 阶段更新为：`"${method} ${route}"`（如 `"GET /users/:id"`）
 - `SpanKind.SERVER`
 
 **生命周期 Span**
+
 - 名称：生命周期名（如 `"Request"`、`"Parse"` 等）
 - `SpanKind`：未显式设置，默认 `INTERNAL`
 
 **子 Span（每个生命周期内的事件）**
+
 - 当 `total > 1`（同一生命周期有多个 hook）时创建子 span
 - 名称：hook 的 `name` 属性
 - 通过 `createContext(rootSpan)` 建立 parent context
@@ -57,6 +60,7 @@ Root (SpanKind.SERVER)
 ```
 
 **实现机制**：
+
 - 使用 `propagation.extract()` 从请求头提取 parent context
 - Root span 通过 `tracer.startActiveSpan()` 创建，传入提取的 context
 - 生命周期 span 使用 `createContext(rootSpan)` 包装一个 fake context，使 `trace.setSpan()` 生效
@@ -64,11 +68,18 @@ Root (SpanKind.SERVER)
 - 使用 `otelContext.with(spanContext, fn)` 执行用户代码
 
 **关键代码**：
+
 ```typescript
 const createContext = (parent: Span) => ({
-  getValue() { return parent },
-  setValue() { return otelContext.active() },
-  deleteValue() { return otelContext.active() }
+  getValue() {
+    return parent
+  },
+  setValue() {
+    return otelContext.active()
+  },
+  deleteValue() {
+    return otelContext.active()
+  },
 })
 ```
 
@@ -80,9 +91,9 @@ const createContext = (parent: Span) => ({
 
 ### 2.1 指标列表
 
-| 指标名称 | 类型 | 单位 | 描述 | MVP 必须 | 复杂度 | 框架无关 |
-|---------|------|------|------|---------|--------|---------|
-| `http.server.request.duration` | Histogram | `s`（秒） | HTTP 服务器请求持续时间 | **是** | 低 | 是 |
+| 指标名称                       | 类型      | 单位      | 描述                    | MVP 必须 | 复杂度 | 框架无关 |
+| ------------------------------ | --------- | --------- | ----------------------- | -------- | ------ | -------- |
+| `http.server.request.duration` | Histogram | `s`（秒） | HTTP 服务器请求持续时间 | **是**   | 低     | 是       |
 
 ### 2.2 Histogram 配置
 
@@ -91,11 +102,8 @@ meter.createHistogram('http.server.request.duration', {
   description: 'Duration of HTTP server requests.',
   unit: 's',
   advice: {
-    explicitBucketBoundaries: [
-      0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
-      1, 2.5, 5, 7.5, 10, 30, 60, 120, 300, 600, 900, 1800
-    ]
-  }
+    explicitBucketBoundaries: [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 30, 60, 120, 300, 600, 900, 1800],
+  },
 })
 ```
 
@@ -126,15 +134,17 @@ meter.createHistogram('http.server.request.duration', {
 ### 3.1 提取（Extract）
 
 **实现**：
+
 ```typescript
 const headers = headerHasToJSON
-  ? request.headers.toJSON()      // Bun 特有优化
+  ? request.headers.toJSON() // Bun 特有优化
   : Object.fromEntries(request.headers.entries())
 
 const ctx = propagation.extract(otelContext.active(), headers)
 ```
 
 **细节**：
+
 - 从 incoming request headers 提取 W3C Trace Context（`traceparent`、`tracestate`）
 - 使用 `@opentelemetry/api` 的 `propagation.extract()`
 - 支持 Bun 的 `Headers.toJSON()` 优化（Bun 特有方法）
@@ -162,16 +172,16 @@ if (!otelContext._getContextManager?.() && contextManager) {
 
 ### 4.1 完整配置表
 
-| 参数 | 类型 | 默认值 | 描述 | MVP 必须 | 复杂度 |
-|------|------|--------|------|---------|--------|
-| `serviceName` | `string` | `"Elysia"` | 服务名称 | **是** | 低 |
-| `instrumentations` | `Instrumentation[]` | `undefined` | OTel instrumentations | 否 | 低 |
-| `contextManager` | `ContextManager` | `undefined` | 自定义 context manager | 否 | 低 |
-| `checkIfShouldTrace` | `(req: Request) => boolean` | `undefined` | 是否追踪该请求 | **是** | 低 |
-| `spanUrlRedaction` | `false \| object` | `{}`（默认脱敏） | URL 脱敏配置 | **是** | 中 |
-| `recordBody` | `boolean \| {request?, response?}` | `false` | 记录请求/响应 body | 否 | 中 |
-| `headersToSpanAttributes` | `{request?: string[], response?: string[]}` | `undefined` | 捕获的 header 白名单 | 否 | 低 |
-| `...options` | `OpenTeleMetryOptions` | - | NodeSDK 的其他配置 | 否 | 低 |
+| 参数                      | 类型                                        | 默认值           | 描述                   | MVP 必须 | 复杂度 |
+| ------------------------- | ------------------------------------------- | ---------------- | ---------------------- | -------- | ------ |
+| `serviceName`             | `string`                                    | `"Elysia"`       | 服务名称               | **是**   | 低     |
+| `instrumentations`        | `Instrumentation[]`                         | `undefined`      | OTel instrumentations  | 否       | 低     |
+| `contextManager`          | `ContextManager`                            | `undefined`      | 自定义 context manager | 否       | 低     |
+| `checkIfShouldTrace`      | `(req: Request) => boolean`                 | `undefined`      | 是否追踪该请求         | **是**   | 低     |
+| `spanUrlRedaction`        | `false \| object`                           | `{}`（默认脱敏） | URL 脱敏配置           | **是**   | 中     |
+| `recordBody`              | `boolean \| {request?, response?}`          | `false`          | 记录请求/响应 body     | 否       | 中     |
+| `headersToSpanAttributes` | `{request?: string[], response?: string[]}` | `undefined`      | 捕获的 header 白名单   | 否       | 低     |
+| `...options`              | `OpenTeleMetryOptions`                      | -                | NodeSDK 的其他配置     | 否       | 低     |
 
 ### 4.2 `spanUrlRedaction` 详细
 
@@ -222,25 +232,24 @@ headersToSpanAttributes?: {
 
 ```typescript
 export const shouldStartNodeSDK = (provider: TracerProvider) => {
-  return (
-    provider instanceof ProxyTracerProvider &&
-    provider.getDelegateTracer('check') === undefined
-  )
+  return provider instanceof ProxyTracerProvider && provider.getDelegateTracer('check') === undefined
 }
 ```
 
 **逻辑**：
+
 - 如果 `trace.getTracerProvider()` 返回的是 `ProxyTracerProvider` 且没有 delegate tracer
 - 说明用户没有预先配置 OTel SDK
 - 此时自动创建并启动 `NodeSDK`
 
 **自动启动代码**：
+
 ```typescript
 if (shouldStartNodeSDK(trace.getTracerProvider())) {
   const sdk = new NodeSDK({
     ...options,
     serviceName,
-    instrumentations
+    instrumentations,
   })
   sdk.start()
   tracer = trace.getTracer(serviceName)
@@ -263,13 +272,23 @@ if (shouldStartNodeSDK(trace.getTracerProvider())) {
 
 ```typescript
 const SENSITIVE_QUERY_KEYS = new Set([
-  'token', 'access_token', 'refresh_token', 'id_token',
-  'password', 'passwd', 'pwd',
-  'secret', 'client_secret',
-  'api_key', 'apikey', 'api-key',
+  'token',
+  'access_token',
+  'refresh_token',
+  'id_token',
+  'password',
+  'passwd',
+  'pwd',
+  'secret',
+  'client_secret',
+  'api_key',
+  'apikey',
+  'api-key',
   'authorization',
-  'credential', 'credentials',
-  'code', 'nonce'
+  'credential',
+  'credentials',
+  'code',
+  'nonce',
 ])
 ```
 
@@ -305,23 +324,23 @@ const redactQueryString = (query: string, keys: Set<string>): string => {
   for (let i = 0; i <= query.length; i++) {
     const ch = i === query.length ? 38 : query.charCodeAt(i)
 
-    if (ch === 61 && keyEnd === -1) {  // '='
+    if (ch === 61 && keyEnd === -1) {
+      // '='
       keyEnd = i
       continue
     }
 
-    if (ch !== 38) continue  // '&'
+    if (ch !== 38) continue // '&'
 
     const rawKey = query.slice(partStart, keyEnd === -1 ? partEnd : keyEnd)
 
-    out += keys.has(rawKey.toLowerCase())
-      ? rawKey + '=[REDACTED]'
-      : query.slice(partStart, partEnd)
+    out += keys.has(rawKey.toLowerCase()) ? rawKey + '=[REDACTED]' : query.slice(partStart, partEnd)
   }
 }
 ```
 
 **特点**：
+
 - 纯字符串操作，无正则，无 URL 解析 API
 - 性能优于 `URLSearchParams` 或正则方案
 - 支持无 `=` 的 flag 参数（如 `?debug`）
@@ -335,9 +354,9 @@ const redactQueryString = (query: string, keys: Set<string>): string => {
 
 ```typescript
 const serializeBody = (body: unknown): { text: string; size: number } => {
-  if (body instanceof Uint8Array)  return { text: '', size: body.length }
+  if (body instanceof Uint8Array) return { text: '', size: body.length }
   if (body instanceof ArrayBuffer) return { text: '', size: body.byteLength }
-  if (body instanceof Blob)        return { text: '', size: body.size }
+  if (body instanceof Blob) return { text: '', size: body.size }
 
   let text: string
   try {
@@ -350,14 +369,14 @@ const serializeBody = (body: unknown): { text: string; size: number } => {
 }
 ```
 
-| Body 类型 | text | size | 说明 |
-|----------|------|------|------|
-| `Uint8Array` | `''` | `length` | 二进制，不记录内容 |
-| `ArrayBuffer` | `''` | `byteLength` | 二进制，不记录内容 |
-| `Blob` | `''` | `size` | 二进制，不记录内容 |
-| `object` | `JSON.stringify` | 字符串长度 | 序列化为 JSON |
-| 其他 | `String()` | 字符串长度 | 转字符串 |
-| 序列化失败 | `'[Unserializable]'` | 18 | 兜底 |
+| Body 类型     | text                 | size         | 说明               |
+| ------------- | -------------------- | ------------ | ------------------ |
+| `Uint8Array`  | `''`                 | `length`     | 二进制，不记录内容 |
+| `ArrayBuffer` | `''`                 | `byteLength` | 二进制，不记录内容 |
+| `Blob`        | `''`                 | `size`       | 二进制，不记录内容 |
+| `object`      | `JSON.stringify`     | 字符串长度   | 序列化为 JSON      |
+| 其他          | `String()`           | 字符串长度   | 转字符串           |
+| 序列化失败    | `'[Unserializable]'` | 18           | 兜底               |
 
 ### 7.2 大小限制
 
@@ -369,7 +388,7 @@ const serializeBody = (body: unknown): { text: string; size: number } => {
 
 ```typescript
 // 请求 body
-attributes['http.request.body'] = text      // 序列化后的内容
+attributes['http.request.body'] = text // 序列化后的内容
 attributes['http.request.body.size'] = size // 字节数
 
 // 响应 body
@@ -379,11 +398,11 @@ attributes['http.response.body.size'] = size
 
 ### 7.4 记录时机
 
-| 时机 | 记录内容 | 触发点 |
-|------|---------|--------|
-| `onParse` | 请求 body | body 解析完成后 |
-| `onMapResponse` | 请求 body + 响应 body | 响应映射阶段 |
-| `onAfterResponse` | 请求 body | 响应发送后 |
+| 时机              | 记录内容              | 触发点          |
+| ----------------- | --------------------- | --------------- |
+| `onParse`         | 请求 body             | body 解析完成后 |
+| `onMapResponse`   | 请求 body + 响应 body | 响应映射阶段    |
+| `onAfterResponse` | 请求 body             | 响应发送后      |
 
 > **注意**：请求 body 在多个阶段重复记录，后面的值会覆盖前面的。
 
@@ -407,6 +426,7 @@ const responseHeaderWildcard = spanResponseHeaderSet.has('*')
 ### 8.2 请求 Header 处理
 
 **数据来源优先级**：
+
 1. `context.headers`（Elysia 解析后的 headers）
 2. `request.headers.toJSON()`（Bun 优化）
 3. `request.headers.entries()`（标准迭代器）
@@ -414,12 +434,14 @@ const responseHeaderWildcard = spanResponseHeaderSet.has('*')
 **属性命名**：`http.request.header.${key}`
 
 **特殊处理**：
+
 - `Set-Cookie` 数组值：`JSON.stringify(value)`
 - `undefined` 值：跳过
 
 ### 8.3 响应 Header 处理
 
 **数据来源**：
+
 1. `context.set.headers instanceof Headers` → `entries()` 或 `toJSON()`
 2. 否则 → `Object.entries(context.set.headers)`
 
@@ -431,8 +453,7 @@ const responseHeaderWildcard = spanResponseHeaderSet.has('*')
 
 ```typescript
 const _cookie = <Record<string, string>>{}
-for (const [key, { value }] of Object.entries(cookie))
-  _cookie[key] = JSON.stringify(value)
+for (const [key, { value }] of Object.entries(cookie)) _cookie[key] = JSON.stringify(value)
 
 attributes['http.request.cookie'] = JSON.stringify(_cookie)
 ```
@@ -450,9 +471,9 @@ attributes['http.request.cookie'] = JSON.stringify(_cookie)
 let status = context.set.status
 
 if (typeof status === 'string') {
-  status = StatusMap[status]           // Elysia 状态码字符串映射
+  status = StatusMap[status] // Elysia 状态码字符串映射
 } else if (typeof status !== 'number' && typeof error?.status === 'number') {
-  status = error.status                 // 从 error 对象提取
+  status = error.status // 从 error 对象提取
 }
 ```
 
@@ -461,14 +482,16 @@ if (typeof status === 'string') {
 ### 9.2 异常记录方式
 
 **生命周期 span 中的错误**：
+
 ```typescript
 span.setAttributes({
   'error.type': error.constructor?.name ?? error.name,
-  'error.stack': error.stack
+  'error.stack': error.stack,
 })
 ```
 
 **Root span 中的错误**：
+
 ```typescript
 // onHandle 阶段
 if (error) {
@@ -483,10 +506,11 @@ if (status >= 500) {
 ```
 
 **Active span 中的错误**（`createActiveSpanHandler`）：
+
 ```typescript
 span.setStatus({
   code: SpanStatusCode.ERROR,
-  message: error instanceof Error ? error.message : JSON.stringify(error ?? 'Unknown error')
+  message: error instanceof Error ? error.message : JSON.stringify(error ?? 'Unknown error'),
 })
 span.recordException(rejectResult)
 ```
@@ -502,7 +526,7 @@ context.request.signal.addEventListener('abort', () => {
 
   rootSpan.setStatus({
     code: SpanStatusCode.ERROR,
-    message: 'Request aborted'
+    message: 'Request aborted',
   })
   recordDuration()
   rootSpan.end()
@@ -521,41 +545,41 @@ context.request.signal.addEventListener('abort', () => {
 
 ### 10.1 请求级属性
 
-| 属性名 | 来源 | 条件 |
-|--------|------|------|
-| `http.request.id` | `context.id` | 始终 |
-| `http.request.method` | `request.method` | 始终 |
-| `url.path` | `context.path` | 始终 |
-| `url.full` | `rawUrl`（脱敏后） | 始终 |
-| `url.query` | `rawUrl.slice(qi + 1)` | 有 query 时 |
-| `url.scheme` | `urlFull` 前缀 | 有协议时 |
-| `http.route` | `context.route` | 有路由时 |
-| `http.request_content_length` | `content-length` header | 可解析为数字时 |
-| `user_agent.original` | `User-Agent` header | 存在时 |
-| `server.port` | `context.server.port` | 有 server 时 |
-| `server.address` | `context.server.url.hostname` | 有 server 时 |
-| `client.address` | `context.ip` / header / `requestIP()` | 存在时 |
-| `http.request.header.${key}` | 请求 headers | 白名单匹配时 |
-| `http.request.cookie` | `context.cookie` | 白名单包含 cookie 时 |
-| `http.request.body` | `serializeBody(context.body)` | `recordBody` 启用时 |
-| `http.request.body.size` | `serializeBody` 返回 | `recordBody` 启用时 |
+| 属性名                        | 来源                                  | 条件                 |
+| ----------------------------- | ------------------------------------- | -------------------- |
+| `http.request.id`             | `context.id`                          | 始终                 |
+| `http.request.method`         | `request.method`                      | 始终                 |
+| `url.path`                    | `context.path`                        | 始终                 |
+| `url.full`                    | `rawUrl`（脱敏后）                    | 始终                 |
+| `url.query`                   | `rawUrl.slice(qi + 1)`                | 有 query 时          |
+| `url.scheme`                  | `urlFull` 前缀                        | 有协议时             |
+| `http.route`                  | `context.route`                       | 有路由时             |
+| `http.request_content_length` | `content-length` header               | 可解析为数字时       |
+| `user_agent.original`         | `User-Agent` header                   | 存在时               |
+| `server.port`                 | `context.server.port`                 | 有 server 时         |
+| `server.address`              | `context.server.url.hostname`         | 有 server 时         |
+| `client.address`              | `context.ip` / header / `requestIP()` | 存在时               |
+| `http.request.header.${key}`  | 请求 headers                          | 白名单匹配时         |
+| `http.request.cookie`         | `context.cookie`                      | 白名单包含 cookie 时 |
+| `http.request.body`           | `serializeBody(context.body)`         | `recordBody` 启用时  |
+| `http.request.body.size`      | `serializeBody` 返回                  | `recordBody` 启用时  |
 
 ### 10.2 响应级属性
 
-| 属性名 | 来源 | 条件 |
-|--------|------|------|
-| `http.response.status_code` | `context.set.status` | 始终 |
-| `http.response.header.${key}` | 响应 headers | 白名单匹配时 |
-| `http.response.body` | `serializeBody(response)` | `recordBody` 启用时 |
-| `http.response.body.size` | `serializeBody` 返回 | `recordBody` 启用时 |
+| 属性名                        | 来源                      | 条件                |
+| ----------------------------- | ------------------------- | ------------------- |
+| `http.response.status_code`   | `context.set.status`      | 始终                |
+| `http.response.header.${key}` | 响应 headers              | 白名单匹配时        |
+| `http.response.body`          | `serializeBody(response)` | `recordBody` 启用时 |
+| `http.response.body.size`     | `serializeBody` 返回      | `recordBody` 启用时 |
 
 ### 10.3 错误属性
 
-| 属性名 | 来源 | 条件 |
-|--------|------|------|
-| `error.type` | `error.constructor.name` | 生命周期 span 出错时 |
-| `error.stack` | `error.stack` | 生命周期 span 出错时 |
-| `error.type` | `String(statusCode)` | metrics 中 status >= 500 时 |
+| 属性名        | 来源                     | 条件                        |
+| ------------- | ------------------------ | --------------------------- |
+| `error.type`  | `error.constructor.name` | 生命周期 span 出错时        |
+| `error.stack` | `error.stack`            | 生命周期 span 出错时        |
+| `error.type`  | `String(statusCode)`     | metrics 中 status >= 500 时 |
 
 ---
 
@@ -592,8 +616,7 @@ const toHeaderNameSet = (names: string[] | undefined): Set<string>
 
 ```typescript
 export const getCurrentSpan = (): Span | undefined => trace.getActiveSpan()
-export const setAttributes = (attributes: Attributes) =>
-  !!getCurrentSpan()?.setAttributes(attributes)
+export const setAttributes = (attributes: Attributes) => !!getCurrentSpan()?.setAttributes(attributes)
 ```
 
 - 便捷函数供用户代码使用

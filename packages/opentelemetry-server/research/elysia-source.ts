@@ -1,5 +1,9 @@
+/* oxlint-disable typescript/ban-ts-comment, typescript/no-explicit-any, typescript/no-non-null-assertion, typescript/no-wrapper-object-types */
 // Source code from @elysia/opentelemetry v1.4.12
 // https://github.com/elysiajs/opentelemetry
+//
+// Type boundary: this file is vendored research code copied verbatim from upstream. The original
+// author uses @ts-ignore, any and non-null assertions; we keep it untouched to ease diffing.
 
 import type { Attributes, Context, ContextManager, Span, SpanOptions, TraceAPI, TracerProvider } from '@opentelemetry/api'
 import { metrics, context as otelContext, ProxyTracerProvider, propagation, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api'

@@ -5,6 +5,7 @@
 本报告对业界主流 HTTP client 库的拦截器/中间件设计进行了深度调研，并结合 `@defjs/core` 现有实现给出扩展建议。
 
 **@defjs/core 现有中间件体系：**
+
 - 洋葱模型链式调用，通过 `reduceRight` 实现
 - 统一输入 `HttpRequest`，统一输出 `HttpResponse<unknown>`
 - 错误模型：handler 永不抛异常，错误通过 `response.status === 0` 和 `response.error` 传递
@@ -22,24 +23,33 @@
 const api = ky.create({
   hooks: {
     beforeRequest: [
-      (request, options) => { /* 可修改 request */ }
+      (request, options) => {
+        /* 可修改 request */
+      },
     ],
     afterResponse: [
-      (request, options, response) => { /* 可返回新 Response 来替换 */ }
+      (request, options, response) => {
+        /* 可返回新 Response 来替换 */
+      },
     ],
     beforeRetry: [
-      ({ request, options, error, retryCount }) => { /* 重试前钩子 */ }
+      ({ request, options, error, retryCount }) => {
+        /* 重试前钩子 */
+      },
     ],
     beforeError: [
-      (error) => { /* 错误转换 */ }
+      (error) => {
+        /* 错误转换 */
+      },
     ],
-  }
+  },
 })
 ```
 
 **调用顺序：** 线性数组遍历，`beforeRequest` 按注册顺序执行，`afterResponse` 按注册顺序执行。
 
 **关键设计：**
+
 - `beforeRequest` 可修改 `request` 对象（ky 内部使用 Request 实例）
 - `afterResponse` 返回新 Response 可短路后续处理
 - `beforeRetry` 接收 `retryCount`，可决定是否继续重试
@@ -54,20 +64,29 @@ const api = ky.create({
 ```typescript
 // 请求拦截器：注册顺序的逆序执行（LIFO）
 axios.interceptors.request.use(
-  (config) => { /* onFulfilled */ return config },
-  (error) => { /* onRejected */ return Promise.reject(error) }
+  (config) => {
+    /* onFulfilled */ return config
+  },
+  (error) => {
+    /* onRejected */ return Promise.reject(error)
+  },
 )
 
 // 响应拦截器：注册顺序的正序执行（FIFO）
 axios.interceptors.response.use(
-  (response) => { /* onFulfilled */ return response },
-  (error) => { /* onRejected */ return Promise.reject(error) }
+  (response) => {
+    /* onFulfilled */ return response
+  },
+  (error) => {
+    /* onRejected */ return Promise.reject(error)
+  },
 )
 ```
 
 **调用顺序：** 请求拦截器 LIFO，响应拦截器 FIFO。这形成了事实上的洋葱模型——请求先经过外层再到内层，响应从内层返回再经过外层。
 
 **关键设计：**
+
 - 请求/响应拦截器分离为两个独立队列
 - 每个拦截器有独立的 `onFulfilled` / `onRejected`
 - 通过 `Promise.reject` 传播错误，错误可被后续拦截器捕获转换
@@ -82,16 +101,25 @@ axios.interceptors.response.use(
 ```typescript
 // ofetch 的 hooks 是扁平回调，不可转换请求/响应
 ofetch('/api', {
-  onRequest({ request, options }) { /* 只读 + 副作用 */ },
-  onRequestError({ request, options, error }) { /* 错误处理 */ },
-  onResponse({ request, options, response }) { /* 只读 + 副作用 */ },
-  onResponseError({ request, options, response, error }) { /* 错误处理 */ },
+  onRequest({ request, options }) {
+    /* 只读 + 副作用 */
+  },
+  onRequestError({ request, options, error }) {
+    /* 错误处理 */
+  },
+  onResponse({ request, options, response }) {
+    /* 只读 + 副作用 */
+  },
+  onResponseError({ request, options, response, error }) {
+    /* 错误处理 */
+  },
 })
 ```
 
 **调用顺序：** 线性执行，每个 hook 独立触发。
 
 **关键设计：**
+
 - hooks 是副作用回调，**不能**修改/替换请求或响应
 - 内置 retry 通过 `retry` 配置项实现，不在 hook 中处理
 - 类型安全通过泛型参数传递
@@ -108,22 +136,31 @@ got('https://api.example.com', {
   hooks: {
     init: [],
     beforeRequest: [
-      (options) => { /* 可修改 options */ }
+      (options) => {
+        /* 可修改 options */
+      },
     ],
     beforeRedirect: [
-      (options, response) => { /* 重定向前，可修改 options */ }
+      (options, response) => {
+        /* 重定向前，可修改 options */
+      },
     ],
     beforeRetry: [
-      (options, error, retryCount) => { /* 重试前 */ }
+      (options, error, retryCount) => {
+        /* 重试前 */
+      },
     ],
     afterResponse: [
-      (response, retryWithMergedOptions) => { /* 可返回新 response 或触发重试 */ }
+      (response, retryWithMergedOptions) => {
+        /* 可返回新 response 或触发重试 */
+      },
     ],
-  }
+  },
 })
 ```
 
 **关键设计：**
+
 - `afterResponse` 接收 `retryWithMergedOptions` 函数，可在响应后触发带新配置的重试（用于 401 token 刷新场景）
 - `beforeRedirect` 专门处理重定向安全（可修改目标 options）
 - 每个 hook 类型是独立数组，内部按顺序执行
@@ -149,6 +186,7 @@ wretch().middlewares([middleware]).get('/api').res()
 **调用顺序：** 洋葱模型。`middlewares` 数组按顺序包装，`next` 向内传递。
 
 **关键设计：**
+
 - 函数柯里化：`next => (url, opts) => Response`
 - builder chain 和 resolver chain 分离，配置在中间件外完成
 - 中间件只处理执行阶段
@@ -161,14 +199,14 @@ wretch().middlewares([middleware]).get('/api').res()
 
 ### 3.1 洋葱模型 vs 线性链
 
-| 维度 | 洋葱模型（@defjs/core） | 线性链（ofetch/ky hooks） |
-|------|------------------------|--------------------------|
-| 请求流向 | 1→2→3→handler | 1→2→3→handler |
-| 响应流向 | handler→3→2→1 | handler→1→2→3 |
-| 实现方式 | `reduceRight` 嵌套闭包 | 数组顺序遍历 |
-| 中间件感知 | 可感知后续中间件执行结果 | 只能感知直接下游 |
-| 错误传播 | 通过返回值（status === 0） | 通过 Promise.reject / throw |
-| 性能 | O(n) 闭包创建，单次遍历 | O(n) 数组遍历 |
+| 维度       | 洋葱模型（@defjs/core）    | 线性链（ofetch/ky hooks）   |
+| ---------- | -------------------------- | --------------------------- |
+| 请求流向   | 1→2→3→handler              | 1→2→3→handler               |
+| 响应流向   | handler→3→2→1              | handler→1→2→3               |
+| 实现方式   | `reduceRight` 嵌套闭包     | 数组顺序遍历                |
+| 中间件感知 | 可感知后续中间件执行结果   | 只能感知直接下游            |
+| 错误传播   | 通过返回值（status === 0） | 通过 Promise.reject / throw |
+| 性能       | O(n) 闭包创建，单次遍历    | O(n) 数组遍历               |
 
 **@defjs/core 的洋葱模型实现：**
 
@@ -176,14 +214,15 @@ wretch().middlewares([middleware]).get('/api').res()
 // src/interceptor/interceptor.ts:78-83
 function makeChain<TFn extends (req: HttpRequest, next: any) => any>(interceptors: TFn[]): TFn {
   return interceptors.reduceRight<TFn>(
-    (fn, interceptor) => ((initReq: HttpRequest, finalHandlerFn: never) =>
-      interceptor(initReq, (req: HttpRequest) => fn(req, finalHandlerFn))) as TFn,
+    (fn, interceptor) =>
+      ((initReq: HttpRequest, finalHandlerFn: never) => interceptor(initReq, (req: HttpRequest) => fn(req, finalHandlerFn))) as TFn,
     ((req: HttpRequest, fn: (req: HttpRequest) => unknown) => fn(req)) as TFn,
   )
 }
 ```
 
 这是经典的洋葱模型实现：
+
 - `reduceRight` 从最后一个 interceptor 开始向内包装
 - 每个 interceptor 接收 `next` 函数，调用 `next(req)` 将控制权交给内层
 - 当最内层的 handler 返回后，控制沿原路返回，每个 interceptor 可在 `await next(req)` 之后处理 response
@@ -220,6 +259,7 @@ if (response.status === 0) {
 ### 4.1 Retry 中间件
 
 **设计要点：**
+
 - 检测 `response.status === 0`（网络错误）或 `!response.ok`（HTTP 错误）
 - 指数退避 + jitter
 - 最大重试次数限制
@@ -270,10 +310,7 @@ function retryInterceptor(config: RetryConfig) {
 }
 
 function computeDelay(config: RetryConfig, attempt: number): number {
-  const exponential = Math.min(
-    config.delayMs * config.factor ** Math.max(0, attempt - 1),
-    config.maxDelayMs,
-  )
+  const exponential = Math.min(config.delayMs * config.factor ** Math.max(0, attempt - 1), config.maxDelayMs)
   if (config.jitter <= 0) {
     return exponential
   }
@@ -288,10 +325,14 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       return
     }
     const timer = setTimeout(resolve, ms)
-    signal.addEventListener('abort', () => {
-      clearTimeout(timer)
-      reject(signal.reason)
-    }, { once: true })
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        reject(signal.reason)
+      },
+      { once: true },
+    )
   })
 }
 ```
@@ -299,6 +340,7 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 **与 @defjs/core WebSocket 重连对比：**
 
 WebSocket 已有内置重连（`src/web_socket/reconnect.ts`）：
+
 - `normalizeReconnectConfig` 统一配置
 - `computeReconnectDelay` 实现指数退避 + jitter
 - `shouldReconnect` 支持自定义条件
@@ -377,13 +419,9 @@ function cacheInterceptor(config: CacheConfig) {
   const cache = new Map<string, { expiresAt: number; response: HttpResponse<unknown> }>()
   const maxEntries = config.maxEntries ?? 100
 
-  const generateKey = config.keyGenerator ?? ((req: HttpRequest) =>
-    `${req.method}:${req.endpoint}:${req.queryString ?? ''}`
-  )
+  const generateKey = config.keyGenerator ?? ((req: HttpRequest) => `${req.method}:${req.endpoint}:${req.queryString ?? ''}`)
 
-  const shouldCache = config.shouldCache ?? ((res: HttpResponse<unknown>) =>
-    res.status >= 200 && res.status < 300 && res.status !== 0
-  )
+  const shouldCache = config.shouldCache ?? ((res: HttpResponse<unknown>) => res.status >= 200 && res.status < 300 && res.status !== 0)
 
   return createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
     // 只缓存 GET 请求
@@ -423,6 +461,7 @@ function cacheInterceptor(config: CacheConfig) {
 ```
 
 **为什么不实现 RFC 9111：**
+
 1. 浏览器环境的 `fetch` 已经内置 HTTP 缓存（通过 Cache-Control 头）
 2. 完整实现需要处理 `ETag`、`Last-Modified`、`Vary`、`Cache-Control` 等复杂语义
 3. 对于 API client 库，轻量级内存缓存覆盖 90% 使用场景
@@ -522,28 +561,29 @@ function csrfInterceptor(tokenProvider: () => string | Promise<string>) {
 // 洋葱模型（@defjs/core）
 const chain = interceptors.reduceRight(
   (fn, interceptor) => (req, final) => interceptor(req, (r) => fn(r, final)),
-  (req, final) => final(req)
+  (req, final) => final(req),
 )
 
 // Promise 链（线性模型）
 const chain = (req, final) => {
   let promise = Promise.resolve(req)
   for (const interceptor of interceptors) {
-    promise = promise.then(r => interceptor(r, final))
+    promise = promise.then((r) => interceptor(r, final))
   }
   return promise
 }
 ```
 
-| 指标 | 洋葱模型 (reduceRight) | Promise 链 |
-|------|----------------------|-----------|
-| 链构建开销 | O(n) 闭包分配 | O(1) |
-| 单次请求开销 | O(n) 函数调用 | O(n) Promise 创建 |
-| 内存占用 | 闭包引用链（长期） | Promise 对象（GC） |
-| 调用栈深度 | n + 1 | 1（扁平） |
-| 错误堆栈 | 较深（闭包嵌套） | 较浅 |
+| 指标         | 洋葱模型 (reduceRight) | Promise 链         |
+| ------------ | ---------------------- | ------------------ |
+| 链构建开销   | O(n) 闭包分配          | O(1)               |
+| 单次请求开销 | O(n) 函数调用          | O(n) Promise 创建  |
+| 内存占用     | 闭包引用链（长期）     | Promise 对象（GC） |
+| 调用栈深度   | n + 1                  | 1（扁平）          |
+| 错误堆栈     | 较深（闭包嵌套）       | 较浅               |
 
 **结论：**
+
 - 洋葱模型的 `reduceRight` 在初始化时一次性分配闭包链，后续每次请求只是沿链调用
 - Promise 链每次请求都创建新的 Promise 对象，GC 压力更大
 - 对于高频请求场景（如 WebSocket 消息），洋葱模型的预构建优势更明显
@@ -552,6 +592,7 @@ const chain = (req, final) => {
 ### 5.2 WebSocket 中间件内存考量
 
 WebSocket interceptor 链与 HTTP 不同：
+
 - HTTP：每次请求创建新链（或复用预构建链）
 - WebSocket：连接建立时构建一次链，之后所有消息复用
 
@@ -565,6 +606,7 @@ const session = await wsChain(request, wsHandler)
 ```
 
 **内存影响：**
+
 - WebSocket 连接通常持续较长时间（分钟到小时）
 - 闭包链一旦建立就持续占用内存直到连接关闭
 - 建议限制 interceptor 数量（< 20），避免深层闭包链
@@ -574,7 +616,7 @@ const session = await wsChain(request, wsHandler)
 ```typescript
 // 当前实现：filter + map 两次遍历
 export function resolveHttpInterceptors(interceptors: Interceptor[]): InterceptorFn[] {
-  return interceptors.filter((i): i is HttpInterceptor => i.kind === 'http').map(i => i.fn)
+  return interceptors.filter((i): i is HttpInterceptor => i.kind === 'http').map((i) => i.fn)
 }
 
 // 优化版本：单次遍历
@@ -601,7 +643,6 @@ export function resolveHttpInterceptors(interceptors: Interceptor[]): Intercepto
 
 ```typescript
 export type InterceptorFn = (req: HttpRequest, next: HttpInterceptorNext) => Promise<HttpResponse<unknown>>
-
 ```
 
 **改进建议：** 允许中间件收窄类型：
@@ -635,6 +676,7 @@ try {
 ```
 
 **中间件与 schema validation 的关系：**
+
 - 中间件在 schema validation **之前**执行
 - 中间件看到的 `response.body` 是原始数据（string/object/ArrayBuffer）
 - 中间件可以修改 `response.body`，但修改后的数据仍需通过 schema validation
@@ -690,7 +732,9 @@ export type WebSocketInterceptorFn = (req: HttpRequest, next: WebSocketHandler) 
 ```typescript
 // 当前流程（web_socket.ts:363-369）
 const prepared = await prepareAttempt()
-if (!prepared.ok) { /* ... */ }
+if (!prepared.ok) {
+  /* ... */
+}
 
 const outcome = await connectOnce(prepared.url, prepared.protocols)
 
@@ -699,7 +743,9 @@ const wsInterceptors = resolveWebSocketInterceptors(clientConfig.interceptors)
 const wsChain = makeWebSocketInterceptorChain(wsInterceptors)
 
 const prepared = await prepareAttempt()
-if (!prepared.ok) { /* ... */ }
+if (!prepared.ok) {
+  /* ... */
+}
 
 const request = createHttpRequest(/* ... prepared.url ... */)
 const session = await wsChain(request, async (req) => {
@@ -732,7 +778,9 @@ function wsLoggingInterceptor() {
     const session = await next(req)
 
     return {
-      get closed() { return session.closed },
+      get closed() {
+        return session.closed
+      },
       get receive() {
         return {
           [Symbol.asyncIterator]: async function* () {
@@ -740,10 +788,12 @@ function wsLoggingInterceptor() {
               console.log('ws:receive', msg)
               yield msg
             }
-          }
+          },
         } as AsyncIterable<unknown>
       },
-      get state() { return session.state },
+      get state() {
+        return session.state
+      },
       close: session.close.bind(session),
       onRuntimeError: session.onRuntimeError.bind(session),
       onStateChange: session.onStateChange.bind(session),
@@ -796,10 +846,7 @@ const client = createClient({
 ### 8.3 条件中间件
 
 ```typescript
-function when(
-  predicate: (req: HttpRequest) => boolean,
-  interceptor: Interceptor,
-): Interceptor {
+function when(predicate: (req: HttpRequest) => boolean, interceptor: Interceptor): Interceptor {
   if (interceptor.kind !== 'http') {
     return interceptor
   }
@@ -813,10 +860,7 @@ function when(
 }
 
 // 使用：只对 /api/admin/* 路径添加 auth
-when(
-  req => req.endpoint.startsWith('/api/admin/'),
-  bearerAuthInterceptor({ getToken: () => token }),
-)
+when((req) => req.endpoint.startsWith('/api/admin/'), bearerAuthInterceptor({ getToken: () => token }))
 ```
 
 ### 8.4 不推荐的 API
@@ -828,16 +872,17 @@ when(
 
 ## 九、总结
 
-| 库 | 模型 | 可修改 | 错误传播 | 类型安全 |
-|----|------|--------|----------|----------|
-| ky | 线性链 | request/response | throw | 良好 |
-| axios | 双队列洋葱 | config/response | Promise.reject | 一般 |
-| ofetch | 扁平回调 | 只读 | throw | 良好 |
-| got | 命名数组 | options/response | throw | 良好 |
-| wretch | 洋葱模型 | request/response | throw | 良好 |
+| 库              | 模型         | 可修改               | 错误传播           | 类型安全 |
+| --------------- | ------------ | -------------------- | ------------------ | -------- |
+| ky              | 线性链       | request/response     | throw              | 良好     |
+| axios           | 双队列洋葱   | config/response      | Promise.reject     | 一般     |
+| ofetch          | 扁平回调     | 只读                 | throw              | 良好     |
+| got             | 命名数组     | options/response     | throw              | 良好     |
+| wretch          | 洋葱模型     | request/response     | throw              | 良好     |
 | **@defjs/core** | **洋葱模型** | **request/response** | **response.error** | **优秀** |
 
 **@defjs/core 的设计优势：**
+
 1. 真正的洋葱模型（`reduceRight` 实现），请求/响应流向清晰
 2. 非抛出错误模型，避免 Promise rejection 的不可控传播
 3. 统一的 `HttpRequest` 输入，三种协议（HTTP/SSE/WebSocket）API 一致
@@ -845,6 +890,7 @@ when(
 5. 与 schema validation 解耦，中间件只处理原始数据
 
 **扩展方向优先级：**
+
 1. P0：提供官方内置中间件库（retry、logging、auth）
 2. P1：WebSocket interceptor 在 `web_socket.ts` 中接入执行链
 3. P2：中间件组合工具（`compose`、`when`）

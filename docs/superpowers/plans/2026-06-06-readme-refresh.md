@@ -13,6 +13,7 @@
 ### Task 1: Rewrite the root README summary section
 
 **Files:**
+
 - Modify: `README.md:16-30`
 
 - [ ] **Step 1: Replace the current feature bullets with only currently supported capabilities**
@@ -60,6 +61,7 @@ Expected: no matches for mini programs or streaming; the documentation badge lin
 ### Task 2: Refresh the README roadmap and documentation pointers
 
 **Files:**
+
 - Modify: `README.md:90-109`
 
 - [ ] **Step 1: Remove the mini programs roadmap item**
@@ -100,6 +102,7 @@ Expected: no matches.
 ### Task 3: Final consistency check
 
 **Files:**
+
 - Modify: `README.md`
 - Verify: `README.md`, `packages/core/design.md`
 

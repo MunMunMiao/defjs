@@ -68,13 +68,13 @@ function readCoverage(): Map<string, CoverageEntry> {
   }
 
   const raw = JSON.parse(readFileSync(coveragePath, 'utf8')) as Record<string, CoverageEntry>
-  return new Map(Object.values(raw).map(entry => [resolve(entry.path), entry]))
+  return new Map(Object.values(raw).map((entry) => [resolve(entry.path), entry]))
 }
 
 function countMap(values: CounterMap): CoverageMetric {
   const counters = Object.values(values)
   return {
-    covered: counters.filter(count => count > 0).length,
+    covered: counters.filter((count) => count > 0).length,
     total: counters.length,
   }
 }
@@ -82,7 +82,7 @@ function countMap(values: CounterMap): CoverageMetric {
 function countBranches(values: BranchCounterMap): CoverageMetric {
   const counters = Object.values(values).flat()
   return {
-    covered: counters.filter(count => count > 0).length,
+    covered: counters.filter((count) => count > 0).length,
     total: counters.length,
   }
 }
@@ -138,7 +138,7 @@ function main(): void {
   }
 
   if (failures.length > 0) {
-    console.error(['struct coverage gate failed:', ...failures.map(item => `- ${item}`)].join('\n'))
+    console.error(['struct coverage gate failed:', ...failures.map((item) => `- ${item}`)].join('\n'))
     process.exitCode = 1
     return
   }

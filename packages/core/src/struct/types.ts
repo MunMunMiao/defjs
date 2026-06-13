@@ -53,6 +53,9 @@ export interface SchemaMethods<I, O, OO extends boolean> {
 export type Schema<Input = unknown, Output = Input, OptionalOut extends boolean = false> = SchemaMethods<Input, Output, OptionalOut> &
   SchemaLike<Input, Output, OptionalOut>
 
+// Type boundary: AnySchema represents the public type returned by struct.any(). The output is intentionally
+// unconstrained because the schema makes no static guarantees about decoded values.
+// oxlint-disable-next-line typescript/no-explicit-any
 export type AnySchema = Schema<any, any, boolean>
 
 type SchemaInput<T> = T extends { readonly _struct: { readonly input: unknown } } ? T['_struct']['input'] : never
@@ -60,8 +63,11 @@ type SchemaOutput<T> = T extends { readonly _struct: { readonly output: unknown 
 
 export type Infer<T> = SchemaOutput<T>
 
+// Type boundary: FieldOutput inspects the generic schema surface; `any` here is a wildcard that lets the
+// conditional type match any SchemaLike without over-constraining callers.
+// oxlint-disable-next-line typescript/no-explicit-any
 export type FieldOutput<S> =
-  S extends SchemaLike<any, any, boolean>
+  S extends SchemaLike<unknown, unknown, boolean>
     ? S extends OptionalOutputSchema
       ? Exclude<S['_struct']['output'], undefined>
       : S['_struct']['output']
@@ -69,6 +75,9 @@ export type FieldOutput<S> =
 
 export type Simplify<T> = { [K in keyof T]: T[K] } & {}
 
+// Type boundary: ObjectShape accepts any field schema type; `any` is the only way to express "a record whose
+// values are arbitrary schema instances" before the caller provides a concrete shape.
+// oxlint-disable-next-line typescript/no-explicit-any
 export type ObjectShape = Record<string, any>
 
 export type ObjectInput<T extends ObjectShape> = Simplify<{
@@ -87,28 +96,43 @@ export type ObjectOutput<T extends ObjectShape> = Simplify<
   }
 >
 
-export type TupleOutput<T extends readonly SchemaLike<any, any, boolean>[]> = {
+export type TupleOutput<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = {
   -readonly [K in keyof T]: SchemaOutput<T[K]>
 }
 
-export type UnionOutput<T extends readonly SchemaLike<any, any, boolean>[]> = {
-  [K in keyof T]: T[K] extends SchemaLike<any, any, boolean> ? SchemaOutput<T[K]> : never
+// Type boundary: UnionOutput ranges over arbitrary schema elements; `any` matches any SchemaLike.
+// oxlint-disable-next-line typescript/no-explicit-any
+export type UnionOutput<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = {
+  // Type boundary: per-element schema output extraction; `any` is required to preserve distributivity over all schemas.
+  // oxlint-disable-next-line typescript/no-explicit-any
+  [K in keyof T]: T[K] extends SchemaLike<unknown, unknown, boolean> ? SchemaOutput<T[K]> : never
 }[number]
 
 export type StringSchema = Schema<string | undefined, string>
 
 export type NumberSchema = Schema<number | undefined, number>
 
-export type ArrayInput<S extends SchemaLike<any, any, boolean>> = SchemaInput<S>[]
-export type ArrayOutput<S extends SchemaLike<any, any, boolean>> = SchemaOutput<S>[]
+// Type boundary: ArrayInput/Output work with any schema element; `any` is the generic placeholder.
+// oxlint-disable-next-line typescript/no-explicit-any
+export type ArrayInput<S extends SchemaLike<unknown, unknown, boolean>> = SchemaInput<S>[]
+// oxlint-disable-next-line typescript/no-explicit-any
+export type ArrayOutput<S extends SchemaLike<unknown, unknown, boolean>> = SchemaOutput<S>[]
 
-export interface ArraySchemaTypes<S extends SchemaLike<any, any, boolean>> extends SchemaTypes<ArrayInput<S>, ArrayOutput<S>, false> {
+// Type boundary: ArraySchemaTypes generalises over any element schema.
+// oxlint-disable-next-line typescript/no-explicit-any
+export interface ArraySchemaTypes<S extends SchemaLike<unknown, unknown, boolean>> extends SchemaTypes<
+  ArrayInput<S>,
+  ArrayOutput<S>,
+  false
+> {
   input: ArrayInput<S>
   optionalOut: undefined
   output: ArrayOutput<S>
 }
 
-export interface ArraySchema<S extends SchemaLike<any, any, boolean>>
+// Type boundary: ArraySchema generalises over any element schema.
+// oxlint-disable-next-line typescript/no-explicit-any
+export interface ArraySchema<S extends SchemaLike<unknown, unknown, boolean>>
   extends SchemaMethods<ArrayInput<S>, ArrayOutput<S>, false>, SchemaLike<ArrayInput<S>, ArrayOutput<S>, false> {
   readonly [TYPES]: ArraySchemaTypes<S>
   readonly _struct: ArraySchemaTypes<S>
@@ -128,7 +152,7 @@ export interface ObjectSchema<T extends ObjectShape>
 
 export type RequestBodyCodec = 'arrayBuffer' | 'blob' | 'formData' | 'json' | 'text' | 'urlencoded'
 
-export interface RequestBodySchemaTypes<C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>> extends SchemaTypes<
+export interface RequestBodySchemaTypes<C extends RequestBodyCodec, S extends SchemaLike<unknown, unknown, boolean>> extends SchemaTypes<
   SchemaInput<S>,
   SchemaOutput<S>,
   false
@@ -139,34 +163,34 @@ export interface RequestBodySchemaTypes<C extends RequestBodyCodec, S extends Sc
   output: SchemaOutput<S>
 }
 
-export interface RequestBodySchema<C extends RequestBodyCodec, S extends SchemaLike<any, any, boolean>>
+export interface RequestBodySchema<C extends RequestBodyCodec, S extends SchemaLike<unknown, unknown, boolean>>
   extends SchemaMethods<SchemaInput<S>, SchemaOutput<S>, false>, SchemaLike<SchemaInput<S>, SchemaOutput<S>, false> {
   readonly [TYPES]: RequestBodySchemaTypes<C, S>
   readonly _struct: RequestBodySchemaTypes<C, S>
 }
 
 export type RequestBinaryBodySchema = Schema<ArrayBuffer | undefined, ArrayBuffer> | Schema<Blob | undefined, Blob>
-export type RequestBodyShapeSchema = RequestBinaryBodySchema | RequestBodySchema<RequestBodyCodec, SchemaLike<any, any, boolean>>
+export type RequestBodyShapeSchema = RequestBinaryBodySchema | RequestBodySchema<RequestBodyCodec, SchemaLike<unknown, unknown, boolean>>
 
 export type RequestShape = {
   body?: RequestBodyShapeSchema
-  headers?: ObjectSchema<any>
-  path?: ObjectSchema<any>
-  query?: ObjectSchema<any>
+  headers?: ObjectSchema<ObjectShape>
+  path?: ObjectSchema<ObjectShape>
+  query?: ObjectSchema<ObjectShape>
 }
 
 export type RequestInput<T extends RequestShape> = Simplify<
-  (T['path'] extends ObjectSchema<any> ? { path?: SchemaInput<T['path']> } : {}) &
-    (T['query'] extends ObjectSchema<any> ? { query?: SchemaInput<T['query']> } : {}) &
-    (T['headers'] extends ObjectSchema<any> ? { headers?: SchemaInput<T['headers']> } : {}) &
-    (T['body'] extends SchemaLike<any, any, boolean> ? { body?: SchemaInput<T['body']> } : {})
+  (T['path'] extends ObjectSchema<ObjectShape> ? { path?: SchemaInput<T['path']> } : {}) &
+    (T['query'] extends ObjectSchema<ObjectShape> ? { query?: SchemaInput<T['query']> } : {}) &
+    (T['headers'] extends ObjectSchema<ObjectShape> ? { headers?: SchemaInput<T['headers']> } : {}) &
+    (T['body'] extends SchemaLike<unknown, unknown, boolean> ? { body?: SchemaInput<T['body']> } : {})
 >
 
 export type RequestOutput<T extends RequestShape> = Simplify<
-  (T['path'] extends ObjectSchema<any> ? { path: SchemaOutput<T['path']> } : {}) &
-    (T['query'] extends ObjectSchema<any> ? { query: SchemaOutput<T['query']> } : {}) &
-    (T['headers'] extends ObjectSchema<any> ? { headers: SchemaOutput<T['headers']> } : {}) &
-    (T['body'] extends SchemaLike<any, any, boolean> ? { body: SchemaOutput<T['body']> } : {})
+  (T['path'] extends ObjectSchema<ObjectShape> ? { path: SchemaOutput<T['path']> } : {}) &
+    (T['query'] extends ObjectSchema<ObjectShape> ? { query: SchemaOutput<T['query']> } : {}) &
+    (T['headers'] extends ObjectSchema<ObjectShape> ? { headers: SchemaOutput<T['headers']> } : {}) &
+    (T['body'] extends SchemaLike<unknown, unknown, boolean> ? { body: SchemaOutput<T['body']> } : {})
 >
 
 export interface RequestSchemaTypes<T extends RequestShape> extends SchemaTypes<RequestInput<T>, RequestOutput<T>, false> {
@@ -181,10 +205,16 @@ export interface RequestSchema<T extends RequestShape>
   readonly _struct: RequestSchemaTypes<T>
 }
 
-export type RecordSchema<S extends SchemaLike<any, any, boolean>> = Schema<Record<string, SchemaInput<S>>, Record<string, FieldOutput<S>>>
-export type TupleSchema<T extends readonly SchemaLike<any, any, boolean>[]> = Schema<TupleOutput<T>, TupleOutput<T>>
-export type UnionSchema<T extends readonly SchemaLike<any, any, boolean>[]> = Schema<unknown, UnionOutput<T>>
-export type DiscriminatedUnionSchema<TOptions extends readonly ObjectSchema<any>[]> = Schema<unknown, SchemaOutput<TOptions[number]>>
+export type RecordSchema<S extends SchemaLike<unknown, unknown, boolean>> = Schema<
+  Record<string, SchemaInput<S>>,
+  Record<string, FieldOutput<S>>
+>
+export type TupleSchema<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = Schema<TupleOutput<T>, TupleOutput<T>>
+export type UnionSchema<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = Schema<unknown, UnionOutput<T>>
+export type DiscriminatedUnionSchema<TOptions extends readonly ObjectSchema<ObjectShape>[]> = Schema<
+  unknown,
+  SchemaOutput<TOptions[number]>
+>
 
 export type SchemaFlags = {
   nullable: boolean
@@ -229,7 +259,7 @@ export type EnumDefinition<T extends number | string> = BaseDefinition & {
 
 export type ArrayDefinition = BaseDefinition & {
   kind: 'array'
-  item: SchemaLike<any, any, boolean>
+  item: SchemaLike<unknown, unknown, boolean>
 }
 
 export type ObjectDefinition = BaseDefinition & {
@@ -241,55 +271,55 @@ export type ObjectDefinition = BaseDefinition & {
 export type RequestBodyDefinition = BaseDefinition & {
   codec: RequestBodyCodec
   kind: 'requestBody'
-  schema: SchemaLike<any, any, boolean>
+  schema: SchemaLike<unknown, unknown, boolean>
 }
 
 export type RequestDefinition = BaseDefinition & {
-  body?: SchemaLike<any, any, boolean>
-  headers?: ObjectSchema<any>
+  body?: SchemaLike<unknown, unknown, boolean>
+  headers?: ObjectSchema<ObjectShape>
   kind: 'request'
-  path?: ObjectSchema<any>
-  query?: ObjectSchema<any>
+  path?: ObjectSchema<ObjectShape>
+  query?: ObjectSchema<ObjectShape>
 }
 
 export type RecordDefinition = BaseDefinition & {
   kind: 'record'
-  value: SchemaLike<any, any, boolean>
+  value: SchemaLike<unknown, unknown, boolean>
 }
 
 export type TupleDefinition = BaseDefinition & {
   kind: 'tuple'
-  items: readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]
+  items: readonly [SchemaLike<unknown, unknown, boolean>, ...SchemaLike<unknown, unknown, boolean>[]]
 }
 
 export type UnionDefinition = BaseDefinition & {
   kind: 'or'
-  options: readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]
+  options: readonly [SchemaLike<unknown, unknown, boolean>, ...SchemaLike<unknown, unknown, boolean>[]]
 }
 
 export type DiscriminatedUnionDefinition = BaseDefinition & {
   kind: 'discriminatedUnion'
   discriminator: string
   expected: string
-  map: Map<unknown, SchemaLike<any, any, boolean>>
-  options: readonly [SchemaLike<any, any, boolean>, ...SchemaLike<any, any, boolean>[]]
+  map: Map<unknown, SchemaLike<unknown, unknown, boolean>>
+  options: readonly [SchemaLike<unknown, unknown, boolean>, ...SchemaLike<unknown, unknown, boolean>[]]
 }
 
 export type IntersectionDefinition = BaseDefinition & {
   kind: 'intersection'
-  left: SchemaLike<any, any, boolean>
-  right: SchemaLike<any, any, boolean>
+  left: SchemaLike<unknown, unknown, boolean>
+  right: SchemaLike<unknown, unknown, boolean>
 }
 
 export type SchemaDefinition =
   | ArrayDefinition
   | AnyDefinition
   | DiscriminatedUnionDefinition
-  | EnumDefinition<any>
+  | EnumDefinition<string | number>
   | IntersectionDefinition
-  | LiteralDefinition<any>
+  | LiteralDefinition<LiteralValue>
   | ObjectDefinition
-  | PrimitiveDefinition<PrimitiveKind, any, any>
+  | PrimitiveDefinition<PrimitiveKind, unknown, unknown>
   | RecordDefinition
   | RequestBodyDefinition
   | RequestDefinition

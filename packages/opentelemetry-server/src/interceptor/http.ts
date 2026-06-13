@@ -10,8 +10,8 @@ export interface HttpInterceptorOptions {
   propagator: TextMapPropagator
   metrics?: RequestMetrics
   requireParentSpan?: boolean
-  requestHook?: (span: Span, req: any) => void
-  responseHook?: (span: Span, res: any) => void
+  requestHook?: (span: Span, req: unknown) => void
+  responseHook?: (span: Span, res: unknown) => void
 }
 
 export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptions): ReturnType<typeof createHttpInterceptor> {

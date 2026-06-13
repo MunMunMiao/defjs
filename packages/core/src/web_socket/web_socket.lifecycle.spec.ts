@@ -85,7 +85,7 @@ describe('web socket runtime lifecycle', () => {
     setGlobalClient(
       createClient(
         withEndpoint(inject('testServerHost')),
-        withQueryParamsSerializer(params => {
+        withQueryParamsSerializer((params) => {
           return `token=${params.get('token') ?? 'missing'}&from=serializer`
         }),
       ),

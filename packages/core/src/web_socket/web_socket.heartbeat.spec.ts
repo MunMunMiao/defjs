@@ -43,7 +43,7 @@ describe('web socket runtime heartbeat', () => {
       },
     })
 
-    ref.onRuntimeError(error => {
+    ref.onRuntimeError((error) => {
       runtimeError = error
     })
 

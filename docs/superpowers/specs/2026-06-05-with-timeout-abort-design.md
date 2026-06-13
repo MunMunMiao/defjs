@@ -88,8 +88,8 @@ interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
   reconnect?: WebSocketReconnectConfig
 }
 
-export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> =
-  UseWebSocketBaseConfig<TIncoming, TOutgoing> & UseCancellationConfig
+export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketBaseConfig<TIncoming, TOutgoing> &
+  UseCancellationConfig
 ```
 
 该设计避免通用 `XOR<T, U>`，让错误和 d.ts 更直接。
@@ -107,10 +107,7 @@ config.abort !== undefined && config.timeout !== undefined
 冲突时返回现有 tuple 风格的配置错误，不在 `.with(...)` 同步 throw：
 
 ```ts
-createDefinitionError(
-  'REQUEST_VALIDATION_FAILED',
-  new Error('with.abort and with.timeout cannot be used together'),
-)
+createDefinitionError('REQUEST_VALIDATION_FAILED', new Error('with.abort and with.timeout cannot be used together'))
 ```
 
 HTTP 与 SSE 使用 definition error。WebSocket 也应使用同一错误语义；如果现有执行函数分支使用 `createTransportError` 或其他 helper，应增加局部处理，保证冲突属于配置错误而不是网络错误。
@@ -141,10 +138,7 @@ mergeAbortSignals(controller.signal, [config.abort], config.timeout)
 如果用户需要“外部 signal + timeout”，迁移为：
 
 ```ts
-const signal = AbortSignal.any([
-  externalSignal,
-  AbortSignal.timeout(10_000),
-])
+const signal = AbortSignal.any([externalSignal, AbortSignal.timeout(10_000)])
 
 request.with({ abort: signal })
 ```
@@ -202,7 +196,7 @@ ref.with({ abort: new AbortController().signal, timeout: 100 })
 2. `satisfies UseRequestConfig` / `satisfies UseEventStreamConfig` / `satisfies UseWebSocketConfig<...>` 的合法单字段配置应通过。
 3. `UseEventStreamConfig` 不再接受 `fetch`，`stream.with({ fetch })` 应 `@ts-expect-error`；动态 fetch 切换应通过 `stream.with({ client })`。
 4. WebSocket heartbeat 的 `message` / `isAck` 泛型推断不能退化。
-4. 显式 `timeout: undefined` 的边界行为应由测试固定；若 TypeScript 在当前 tsconfig 下允许，应在运行时按字段级冲突处理显式非 `undefined` 的情况。
+5. 显式 `timeout: undefined` 的边界行为应由测试固定；若 TypeScript 在当前 tsconfig 下允许，应在运行时按字段级冲突处理显式非 `undefined` 的情况。
 
 ### 运行时测试
 

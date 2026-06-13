@@ -446,7 +446,8 @@ async function executeWebSocketEndpoint<
             if (delayMs > 0) {
               try {
                 await wait(delayMs, signal)
-              } catch (_error) /* istanbul ignore next -- source-map skew: catch body is executed by the reconnect-abort test but mapped to an uncovered line */ {
+                // oxlint-disable-next-line eslint/no-unused-vars
+              } catch (_) /* istanbul ignore next -- source-map skew: catch body is executed by the reconnect-abort test but mapped to an uncovered line */ {
                 finishWithAbort(outcome.closeInfo)
                 return
               }

@@ -1,17 +1,18 @@
 import { describe, expect, test } from 'vitest'
 import { isHttpContext, isHttpContextToken, makeHttpContext, makeHttpContextToken, mergeHttpContexts } from './context'
+import type { HttpContextToken } from './context'
 
 describe('Context', () => {
   test('should throw error when set other token', () => {
     const context = makeHttpContext()
-    const token = {} as any
-    expect(() => context.set(token, 'value')).toThrowError()
+    // Runtime boundary: passing a non-token plain object to test runtime guard
+    expect(() => context.set({} as unknown as HttpContextToken<string>, 'value')).toThrowError()
   })
 
   test('should throw error when get other token', () => {
     const context = makeHttpContext()
-    const token = {} as any
-    expect(() => context.get(token)).toThrowError()
+    // Runtime boundary: passing a non-token plain object to test runtime guard
+    expect(() => context.get({} as unknown as HttpContextToken<string>)).toThrowError()
   })
 
   test('should set and get value', () => {
@@ -82,7 +83,8 @@ describe('Context', () => {
   })
 
   test('should unset un token key', () => {
-    const context = makeHttpContext([[{} as any, 1]])
+    const context = makeHttpContext()
+    // Runtime boundary: passing a non-token entry to test runtime guard
     expect(context.length).toBe(0)
   })
 

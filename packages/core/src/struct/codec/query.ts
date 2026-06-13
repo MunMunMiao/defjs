@@ -13,23 +13,23 @@ export interface QueryCodecOptions {
 }
 
 export function encodeQueryParams(
-  struct: SchemaLike<any, any, boolean>,
+  struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   options: QueryCodecOptions = {},
 ): Record<string, RequestBuildValue> {
   return encodeTaggedRecord(struct, value, QueryTag, 'query', options)
 }
 
-export function encodePathParams(struct: SchemaLike<any, any, boolean>, value: unknown): Record<string, RequestBuildValue> {
+export function encodePathParams(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): Record<string, RequestBuildValue> {
   return encodeTaggedRecord(struct, value, UriTag, 'uri', { scalarOnly: true })
 }
 
-export function encodeHeaders(struct: SchemaLike<any, any, boolean>, value: unknown): Record<string, RequestBuildValue> {
+export function encodeHeaders(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): Record<string, RequestBuildValue> {
   return encodeTaggedRecord(struct, value, HeaderTag, 'header')
 }
 
 function encodeTaggedRecord(
-  struct: SchemaLike<any, any, boolean>,
+  struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
   label: string,
@@ -62,7 +62,7 @@ function normalizeRecordValue(label: string, key: string, value: unknown, option
   }
 
   if (options.allowComplex && typeof value === 'object' && value !== null) {
-    return value as Record<string, unknown>
+    return value as unknown as Record<string, unknown>
   }
 
   return normalizeScalarRecordValue(label, key, value)

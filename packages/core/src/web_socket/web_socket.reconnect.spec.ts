@@ -52,7 +52,7 @@ describe('web socket runtime reconnect', () => {
         }
       | undefined
 
-    ref.onStateChange(state => {
+    ref.onStateChange((state) => {
       states.push(state)
       if (state === 'reconnecting' && session) {
         session.send({

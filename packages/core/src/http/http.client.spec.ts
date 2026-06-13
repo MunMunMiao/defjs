@@ -22,7 +22,7 @@ describe('request http runtime with client config', () => {
       createClient(
         withEndpoint('https://example.com'),
         withInterceptors(
-          createHttpInterceptor(async request => {
+          createHttpInterceptor(async (request) => {
             capturedRequestUrl = `${request.endpoint}?${request.queryString ?? ''}`
             return makeResponse({
               body: null,
@@ -30,7 +30,7 @@ describe('request http runtime with client config', () => {
             })
           }),
         ),
-        withQueryParamsSerializer(params => {
+        withQueryParamsSerializer((params) => {
           return Array.from(params.entries())
             .sort(([left], [right]) => left.localeCompare(right))
             .map(([key, value]) => `${key.toUpperCase()}=${value}`)
@@ -60,7 +60,7 @@ describe('request http runtime with client config', () => {
     const localClient = createClient(
       withEndpoint('https://example.com/api'),
       withInterceptors(
-        createHttpInterceptor(async request =>
+        createHttpInterceptor(async (request) =>
           makeResponse({
             body: {
               endpoint: request.baseEndpoint,

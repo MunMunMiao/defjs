@@ -84,10 +84,10 @@ describe('Fetch handler responses', () => {
       responseType: 'blob',
     }
 
-    await expect(fetchHandler(jsonRequest).then(response => response.body)).resolves.toEqual({ id: 1 })
-    await expect(fetchHandler(textRequest).then(response => response.body)).resolves.toEqual(JSON.stringify({ id: 1 }))
-    await expect(fetchHandler(arrayBufferRequest).then(response => response.body)).resolves.toBeInstanceOf(ArrayBuffer)
-    await expect(fetchHandler(blobRequest).then(response => response.body)).resolves.toBeInstanceOf(Blob)
+    await expect(fetchHandler(jsonRequest).then((response) => response.body)).resolves.toEqual({ id: 1 })
+    await expect(fetchHandler(textRequest).then((response) => response.body)).resolves.toEqual(JSON.stringify({ id: 1 }))
+    await expect(fetchHandler(arrayBufferRequest).then((response) => response.body)).resolves.toBeInstanceOf(ArrayBuffer)
+    await expect(fetchHandler(blobRequest).then((response) => response.body)).resolves.toBeInstanceOf(Blob)
   })
 
   test('should expose http errors when status is not ok', async () => {

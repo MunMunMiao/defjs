@@ -22,16 +22,10 @@ import { provideClient, provideGlobalClient, withHost, withInterceptors } from '
 const app = createApp(App)
 
 // 方式 1：provideClient（不设置全局）
-app.use(provideClient(
-  withHost('https://api.example.com'),
-  withInterceptors(authInterceptor, loggingInterceptor)
-))
+app.use(provideClient(withHost('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 
 // 方式 2：provideGlobalClient（设置全局）
-app.use(provideGlobalClient(
-  withHost('https://api.example.com'),
-  withInterceptors(authInterceptor, loggingInterceptor)
-))
+app.use(provideGlobalClient(withHost('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 ```
 
 ```typescript

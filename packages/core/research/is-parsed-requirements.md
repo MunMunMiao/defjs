@@ -61,13 +61,13 @@ The method must be named `isParsed`, not `is`.
 
 Related names and their intended meanings:
 
-| Name | Meaning | In scope |
-| --- | --- | --- |
-| `accepts(input)` | Input-side check before parsing | No |
-| `matches(value)` | Structural output check | No |
-| `is(value)` | Ambiguous structural/provenance check | No |
-| `isDecoded(value)` | Parsed by a codec/transport | No |
-| `isParsed(value)` | Parsed-output recognition and type guard | Yes |
+| Name               | Meaning                                  | In scope |
+| ------------------ | ---------------------------------------- | -------- |
+| `accepts(input)`   | Input-side check before parsing          | No       |
+| `matches(value)`   | Structural output check                  | No       |
+| `is(value)`        | Ambiguous structural/provenance check    | No       |
+| `isDecoded(value)` | Parsed by a codec/transport              | No       |
+| `isParsed(value)`  | Parsed-output recognition and type guard | Yes      |
 
 ## Semantics
 
@@ -152,42 +152,42 @@ struct.urlencoded
 
 ### Primitive and scalar schemas
 
-| Schema | `isParsed` implementation |
-| --- | --- |
-| `struct.string()` | `typeof value === 'string'` |
-| `struct.number()` | `typeof value === 'number' && !Number.isNaN(value)` |
-| `struct.boolean()` | `typeof value === 'boolean'` |
-| `struct.null()` | `value === null` |
-| `struct.bigint()` | `typeof value === 'bigint'` |
-| `struct.date()` | `value instanceof Date && !Number.isNaN(value.getTime())` |
-| `struct.blob()` | `value instanceof Blob` |
-| `struct.file()` | `value instanceof File` |
-| `struct.arrayBuffer()` | `value instanceof ArrayBuffer` |
-| `struct.literal(x)` | `Object.is(value, x)` |
-| `struct.enum([...])` | `definition.values.includes(value)` |
-| `struct.enum(object)` | same as enum array; constructor normalizes to `enum` kind |
-| `struct.any()` | always `true`; narrows to `any` |
-| `struct.unknown()` | always `true`; output type remains `unknown` |
+| Schema                 | `isParsed` implementation                                 |
+| ---------------------- | --------------------------------------------------------- |
+| `struct.string()`      | `typeof value === 'string'`                               |
+| `struct.number()`      | `typeof value === 'number' && !Number.isNaN(value)`       |
+| `struct.boolean()`     | `typeof value === 'boolean'`                              |
+| `struct.null()`        | `value === null`                                          |
+| `struct.bigint()`      | `typeof value === 'bigint'`                               |
+| `struct.date()`        | `value instanceof Date && !Number.isNaN(value.getTime())` |
+| `struct.blob()`        | `value instanceof Blob`                                   |
+| `struct.file()`        | `value instanceof File`                                   |
+| `struct.arrayBuffer()` | `value instanceof ArrayBuffer`                            |
+| `struct.literal(x)`    | `Object.is(value, x)`                                     |
+| `struct.enum([...])`   | `definition.values.includes(value)`                       |
+| `struct.enum(object)`  | same as enum array; constructor normalizes to `enum` kind |
+| `struct.any()`         | always `true`; narrows to `any`                           |
+| `struct.unknown()`     | always `true`; output type remains `unknown`              |
 
 ### Object-like schemas
 
-| Schema | `isParsed` implementation |
-| --- | --- |
-| `struct.object(shape)` | `hasParsedBrand(schema, value)` |
-| `struct.array(item)` | `hasParsedBrand(schema, value)` on the array output |
-| `struct.record(value)` | `hasParsedBrand(schema, value)` on the object output |
-| `struct.tuple(items)` | `hasParsedBrand(schema, value)` on the tuple array output |
+| Schema                  | `isParsed` implementation                                    |
+| ----------------------- | ------------------------------------------------------------ |
+| `struct.object(shape)`  | `hasParsedBrand(schema, value)`                              |
+| `struct.array(item)`    | `hasParsedBrand(schema, value)` on the array output          |
+| `struct.record(value)`  | `hasParsedBrand(schema, value)` on the object output         |
+| `struct.tuple(items)`   | `hasParsedBrand(schema, value)` on the tuple array output    |
 | `struct.request(shape)` | `hasParsedBrand(schema, value)` on the parsed request output |
 
 Object-like outputs should be marked when parse succeeds. Current object parsing creates a fresh `Object.create(null)` output, so marking the parsed output is compatible with existing parse behavior.
 
 ### Composition schemas
 
-| Schema | `isParsed` implementation |
-| --- | --- |
-| `struct.or(a, b)` | `hasParsedBrand(schema, value) || options.some(option => option.isParsed(value))` |
-| `struct.discriminatedUnion(key, options)` | `hasParsedBrand(schema, value) || option selected by discriminator calls option.isParsed(value)` |
-| `struct.intersection(a, b)` | Prefer `hasParsedBrand(schema, value)`; fallback may be `a.isParsed(value) && b.isParsed(value)` |
+| Schema                                    | `isParsed` implementation                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------ | --- | -------------------------------------------------------------- |
+| `struct.or(a, b)`                         | `hasParsedBrand(schema, value)                                                                   |     | options.some(option => option.isParsed(value))`                |
+| `struct.discriminatedUnion(key, options)` | `hasParsedBrand(schema, value)                                                                   |     | option selected by discriminator calls option.isParsed(value)` |
+| `struct.intersection(a, b)`               | Prefer `hasParsedBrand(schema, value)`; fallback may be `a.isParsed(value) && b.isParsed(value)` |
 
 Intersection parsing can merge object outputs into a new final object. The final merged value must be marked with the intersection schema brand if provenance checking is used.
 
@@ -197,21 +197,21 @@ Union and discriminated union parsing should mark the final value with the union
 
 Request body schemas wrap an inner schema. They are primarily endpoint input contracts, but `isParsed` should still be defined consistently.
 
-| Schema | `isParsed` implementation |
-| --- | --- |
-| `struct.json(schema)` | delegate to inner `schema.isParsed(value)` or check wrapper brand |
-| `struct.urlencoded(shape)` | delegate to the internal object schema |
-| `struct.formData(shape)` | delegate to the internal object schema |
-| `struct.text()` | delegate to the internal string schema |
+| Schema                     | `isParsed` implementation                                         |
+| -------------------------- | ----------------------------------------------------------------- |
+| `struct.json(schema)`      | delegate to inner `schema.isParsed(value)` or check wrapper brand |
+| `struct.urlencoded(shape)` | delegate to the internal object schema                            |
+| `struct.formData(shape)`   | delegate to the internal object schema                            |
+| `struct.text()`            | delegate to the internal string schema                            |
 
 ### Modifiers
 
-| Modifier | `isParsed` implementation |
-| --- | --- |
-| `.optional()` | `value === undefined || base.isParsed(value)` |
-| `.null()` | `value === null || base.isParsed(value)` |
-| `.nullish()` | `value === null || value === undefined || base.isParsed(value)` |
-| `.tag(...)` | Does not change output type. If brands are schema-instance specific, values parsed by the tagged schema should carry the tagged schema brand. |
+| Modifier      | `isParsed` implementation                                                                                                                     |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --- | --------------------- | --- | --------------------- |
+| `.optional()` | `value === undefined                                                                                                                          |     | base.isParsed(value)` |
+| `.null()`     | `value === null                                                                                                                               |     | base.isParsed(value)` |
+| `.nullish()`  | `value === null                                                                                                                               |     | value === undefined   |     | base.isParsed(value)` |
+| `.tag(...)`   | Does not change output type. If brands are schema-instance specific, values parsed by the tagged schema should carry the tagged schema brand. |
 
 ## Type Behavior
 

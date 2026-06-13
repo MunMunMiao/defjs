@@ -4,6 +4,8 @@ import { createApp } from 'vue'
 import { injectClient, provideClient, provideGlobalClient, withHost, withInterceptors } from '../src'
 import { startHonoServer } from './server'
 
+type TestServer = Awaited<ReturnType<typeof startHonoServer>>
+
 describe('withHost', () => {
   it('should return a ClientOption function', () => {
     const option = withHost('https://api.example.com')
@@ -11,7 +13,7 @@ describe('withHost', () => {
   })
 
   it('should set endpoint in config', () => {
-    const config = {} as any
+    const config = {} as Record<string, unknown>
     const option = withHost('https://api.example.com')
     option(config)
     expect(config.endpoint).toBe('https://api.example.com')
@@ -25,7 +27,7 @@ describe('withInterceptors', () => {
   })
 
   it('should set interceptors in config', () => {
-    const config = {} as any
+    const config = {} as Record<string, unknown>
     const interceptor = (() => ({})) as unknown as Parameters<typeof withInterceptors>[0]
     const option = withInterceptors(interceptor)
     option(config)
@@ -47,7 +49,7 @@ describe('injectClient', () => {
 })
 
 describe('provideClient', () => {
-  let server: any
+  let server: TestServer
 
   beforeAll(async () => {
     server = await startHonoServer()
@@ -88,7 +90,7 @@ describe('provideClient', () => {
 })
 
 describe('provideGlobalClient', () => {
-  let server: any
+  let server: TestServer
 
   beforeAll(async () => {
     server = await startHonoServer()

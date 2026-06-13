@@ -35,6 +35,7 @@ packages/vue/
 ### Task 1: 创建项目结构和配置文件
 
 **Files:**
+
 - Create: `packages/vue/package.json`
 - Create: `packages/vue/tsconfig.json`
 - Create: `packages/vue/tsconfig.build.json`
@@ -140,7 +141,7 @@ node_modules
 
 - [ ] **Step 6: 创建 README.md**
 
-```markdown
+````markdown
 # @defjs/vue
 
 Vue 3 包装器，为 Vue 3 应用提供与 @defjs/angular 相同的功能。
@@ -154,6 +155,7 @@ yarn add @defjs/vue
 # 或
 pnpm add @defjs/vue
 ```
+````
 
 ## 使用
 
@@ -165,16 +167,10 @@ import { provideClient, provideGlobalClient, withHost, withInterceptors } from '
 const app = createApp(App)
 
 // 方式 1：provideClient（不设置全局）
-app.use(provideClient(
-  withHost('https://api.example.com'),
-  withInterceptors(authInterceptor, loggingInterceptor)
-))
+app.use(provideClient(withHost('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 
 // 方式 2：provideGlobalClient（设置全局）
-app.use(provideGlobalClient(
-  withHost('https://api.example.com'),
-  withInterceptors(authInterceptor, loggingInterceptor)
-))
+app.use(provideGlobalClient(withHost('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 ```
 
 ```typescript
@@ -209,7 +205,8 @@ const client = injectClient() // 返回 Client 实例
 ## 许可证
 
 MIT
-```
+
+````
 
 - [ ] **Step 7: 提交配置文件**
 
@@ -217,13 +214,14 @@ MIT
 cd packages/vue
 git add package.json tsconfig.json tsconfig.build.json biome.json .gitignore README.md
 git commit -m "feat(vue): add project structure and configuration files"
-```
+````
 
 ---
 
 ### Task 2: 创建 Hono 测试服务器
 
 **Files:**
+
 - Create: `packages/vue/test/server.ts`
 
 - [ ] **Step 1: 创建 test/server.ts**
@@ -278,6 +276,7 @@ git commit -m "feat(vue): add Hono test server"
 ### Task 3: 实现 withHost 函数（TDD）
 
 **Files:**
+
 - Create: `packages/vue/test/core.spec.ts`
 - Create: `packages/vue/src/core.ts`
 - Create: `packages/vue/src/index.ts`
@@ -379,6 +378,7 @@ git commit -m "feat(vue): implement withHost function"
 ### Task 4: 实现 withInterceptors 函数（TDD）
 
 **Files:**
+
 - Modify: `packages/vue/test/core.spec.ts`
 - Modify: `packages/vue/src/core.ts`
 - Modify: `packages/vue/src/index.ts`
@@ -467,7 +467,7 @@ export function withHost(host: string): ClientOption {
 // withInterceptors 实现
 export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
   return (config: ClientConfig) => {
-    config.interceptors = fns.map(fn => fn())
+    config.interceptors = fns.map((fn) => fn())
   }
 }
 ```
@@ -502,6 +502,7 @@ git commit -m "feat(vue): implement withInterceptors function"
 ### Task 5: 实现 provideClient 函数（TDD）
 
 **Files:**
+
 - Modify: `packages/vue/test/core.spec.ts`
 - Modify: `packages/vue/src/core.ts`
 - Modify: `packages/vue/src/index.ts`
@@ -558,7 +559,7 @@ describe('provideClient', () => {
   it('should create a Plugin', () => {
     const plugin = provideClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
+      withInterceptors(() => ({})),
     )
     expect(plugin).toHaveProperty('install')
   })
@@ -569,13 +570,15 @@ describe('provideClient', () => {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
 
-    app.use(provideClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
+    app.use(
+      provideClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
 
     // 测试 client 已被提供
     // 注意：这里需要在真实浏览器环境中测试
@@ -630,7 +633,7 @@ export function withHost(host: string): ClientOption {
 // withInterceptors 实现
 export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
   return (config: ClientConfig) => {
-    config.interceptors = fns.map(fn => fn())
+    config.interceptors = fns.map((fn) => fn())
   }
 }
 
@@ -640,17 +643,14 @@ export function provideClient(...feature: ClientOption[]): Plugin {
     install(app: App) {
       // 执行 ClientOption 函数，配置 config
       const config: ClientConfig = {}
-      feature.forEach(option => option(config))
+      feature.forEach((option) => option(config))
 
       // 创建 Client 实例
-      const client = createClient(
-        withEndpoint(config.host || ''),
-        withClientInterceptors(...(config.interceptors || []))
-      )
+      const client = createClient(withEndpoint(config.host || ''), withClientInterceptors(...(config.interceptors || [])))
 
       // 提供 Client 实例
       app.provide(HTTP_CLIENT, client)
-    }
+    },
   }
 }
 ```
@@ -685,6 +685,7 @@ git commit -m "feat(vue): implement provideClient function"
 ### Task 6: 实现 provideGlobalClient 函数（TDD）
 
 **Files:**
+
 - Modify: `packages/vue/test/core.spec.ts`
 - Modify: `packages/vue/src/core.ts`
 - Modify: `packages/vue/src/index.ts`
@@ -741,7 +742,7 @@ describe('provideClient', () => {
   it('should create a Plugin', () => {
     const plugin = provideClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
+      withInterceptors(() => ({})),
     )
     expect(plugin).toHaveProperty('install')
   })
@@ -752,13 +753,15 @@ describe('provideClient', () => {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
 
-    app.use(provideClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
+    app.use(
+      provideClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
 
     // 测试 client 已被提供
   })
@@ -778,7 +781,7 @@ describe('provideGlobalClient', () => {
   it('should create a Plugin', () => {
     const plugin = provideGlobalClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
+      withInterceptors(() => ({})),
     )
     expect(plugin).toHaveProperty('install')
   })
@@ -789,13 +792,15 @@ describe('provideGlobalClient', () => {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
 
-    app.use(provideGlobalClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
+    app.use(
+      provideGlobalClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
 
     // 测试全局 client 已被设置
   })
@@ -849,7 +854,7 @@ export function withHost(host: string): ClientOption {
 // withInterceptors 实现
 export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
   return (config: ClientConfig) => {
-    config.interceptors = fns.map(fn => fn())
+    config.interceptors = fns.map((fn) => fn())
   }
 }
 
@@ -859,17 +864,14 @@ export function provideClient(...feature: ClientOption[]): Plugin {
     install(app: App) {
       // 执行 ClientOption 函数，配置 config
       const config: ClientConfig = {}
-      feature.forEach(option => option(config))
+      feature.forEach((option) => option(config))
 
       // 创建 Client 实例
-      const client = createClient(
-        withEndpoint(config.host || ''),
-        withClientInterceptors(...(config.interceptors || []))
-      )
+      const client = createClient(withEndpoint(config.host || ''), withClientInterceptors(...(config.interceptors || [])))
 
       // 提供 Client 实例
       app.provide(HTTP_CLIENT, client)
-    }
+    },
   }
 }
 
@@ -879,20 +881,17 @@ export function provideGlobalClient(...feature: ClientOption[]): Plugin {
     install(app: App) {
       // 执行 ClientOption 函数，配置 config
       const config: ClientConfig = {}
-      feature.forEach(option => option(config))
+      feature.forEach((option) => option(config))
 
       // 创建 Client 实例
-      const client = createClient(
-        withEndpoint(config.host || ''),
-        withClientInterceptors(...(config.interceptors || []))
-      )
+      const client = createClient(withEndpoint(config.host || ''), withClientInterceptors(...(config.interceptors || [])))
 
       // 提供 Client 实例
       app.provide(HTTP_CLIENT, client)
 
       // 设置全局 Client 实例
       setGlobalClient(client)
-    }
+    },
   }
 }
 ```
@@ -927,6 +926,7 @@ git commit -m "feat(vue): implement provideGlobalClient function"
 ### Task 7: 实现 injectClient 函数（TDD）
 
 **Files:**
+
 - Modify: `packages/vue/test/core.spec.ts`
 - Modify: `packages/vue/src/core.ts`
 - Modify: `packages/vue/src/index.ts`
@@ -983,7 +983,7 @@ describe('provideClient', () => {
   it('should create a Plugin', () => {
     const plugin = provideClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
+      withInterceptors(() => ({})),
     )
     expect(plugin).toHaveProperty('install')
   })
@@ -994,13 +994,15 @@ describe('provideClient', () => {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
 
-    app.use(provideClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
+    app.use(
+      provideClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
 
     // 测试 client 已被提供
   })
@@ -1020,7 +1022,7 @@ describe('provideGlobalClient', () => {
   it('should create a Plugin', () => {
     const plugin = provideGlobalClient(
       withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
+      withInterceptors(() => ({})),
     )
     expect(plugin).toHaveProperty('install')
   })
@@ -1031,13 +1033,15 @@ describe('provideGlobalClient', () => {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
 
-    app.use(provideGlobalClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
+    app.use(
+      provideGlobalClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
 
     // 测试全局 client 已被设置
   })
@@ -1060,13 +1064,15 @@ describe('injectClient', () => {
         const client = injectClient()
         return { client }
       },
-      template: '<div></div>'
+      template: '<div></div>',
     })
 
-    app.use(provideClient(
-      withHost(`http://localhost:${server.port}`),
-      withInterceptors(() => ({}))
-    ))
+    app.use(
+      provideClient(
+        withHost(`http://localhost:${server.port}`),
+        withInterceptors(() => ({})),
+      ),
+    )
 
     // 测试 client 已被返回
   })
@@ -1125,7 +1131,7 @@ export function withHost(host: string): ClientOption {
 // withInterceptors 实现
 export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
   return (config: ClientConfig) => {
-    config.interceptors = fns.map(fn => fn())
+    config.interceptors = fns.map((fn) => fn())
   }
 }
 
@@ -1135,17 +1141,14 @@ export function provideClient(...feature: ClientOption[]): Plugin {
     install(app: App) {
       // 执行 ClientOption 函数，配置 config
       const config: ClientConfig = {}
-      feature.forEach(option => option(config))
+      feature.forEach((option) => option(config))
 
       // 创建 Client 实例
-      const client = createClient(
-        withEndpoint(config.host || ''),
-        withClientInterceptors(...(config.interceptors || []))
-      )
+      const client = createClient(withEndpoint(config.host || ''), withClientInterceptors(...(config.interceptors || [])))
 
       // 提供 Client 实例
       app.provide(HTTP_CLIENT, client)
-    }
+    },
   }
 }
 
@@ -1155,20 +1158,17 @@ export function provideGlobalClient(...feature: ClientOption[]): Plugin {
     install(app: App) {
       // 执行 ClientOption 函数，配置 config
       const config: ClientConfig = {}
-      feature.forEach(option => option(config))
+      feature.forEach((option) => option(config))
 
       // 创建 Client 实例
-      const client = createClient(
-        withEndpoint(config.host || ''),
-        withClientInterceptors(...(config.interceptors || []))
-      )
+      const client = createClient(withEndpoint(config.host || ''), withClientInterceptors(...(config.interceptors || [])))
 
       // 提供 Client 实例
       app.provide(HTTP_CLIENT, client)
 
       // 设置全局 Client 实例
       setGlobalClient(client)
-    }
+    },
   }
 }
 
@@ -1214,6 +1214,7 @@ git commit -m "feat(vue): implement injectClient function"
 ### Task 8: 创建构建脚本
 
 **Files:**
+
 - Create: `packages/vue/scripts/build.ts`
 
 - [ ] **Step 1: 创建构建脚本**
@@ -1285,6 +1286,7 @@ git commit -m "feat(vue): add build script"
 ### Task 9: 验证构建
 
 **Files:**
+
 - None
 
 - [ ] **Step 1: 运行构建**
@@ -1318,6 +1320,7 @@ git commit -m "chore(vue): verify build output"
 ### Task 10: 完成实现
 
 **Files:**
+
 - None
 
 - [ ] **Step 1: 运行所有测试**
@@ -1351,6 +1354,7 @@ git commit -m "feat(vue): complete @defjs/vue wrapper implementation"
 ## 自我审查
 
 ### 1. 规格覆盖
+
 - ✅ 所有 5 个函数都已实现（withHost, withInterceptors, provideClient, provideGlobalClient, injectClient）
 - ✅ 函数式选项模式已实现
 - ✅ 测试设计已实现
@@ -1358,10 +1362,12 @@ git commit -m "feat(vue): complete @defjs/vue wrapper implementation"
 - ✅ 文件结构已实现
 
 ### 2. 占位符扫描
+
 - ✅ 没有发现 "TBD"、"TODO" 或不完整的部分
 - ✅ 所有步骤都有完整的代码
 
 ### 3. 类型一致性
+
 - ✅ 所有类型定义一致
 - ✅ 所有函数签名一致
 - ✅ 所有导出名称一致

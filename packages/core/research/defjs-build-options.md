@@ -144,11 +144,13 @@ const Input = struct.request({
   headers: struct.object({
     traceId: struct.string().tag(tag.header('x-trace-id')),
   }),
-  body: struct.json(struct.object({
-    profile: struct.object({
-      displayName: struct.string().tag(tag.json('display_name')),
+  body: struct.json(
+    struct.object({
+      profile: struct.object({
+        displayName: struct.string().tag(tag.json('display_name')),
+      }),
     }),
-  })),
+  ),
 })
 
 const updateUser = defineRequest({
@@ -205,13 +207,17 @@ array bound view 支持 JSON-only `map(...)` projection。`map` callback 不读�
 
 ```ts
 const Input = struct.request({
-  body: struct.json(struct.object({
-    users: struct.array(struct.object({
-      id: struct.number(),
-      name: struct.string(),
-      password: struct.string(),
-    })),
-  })),
+  body: struct.json(
+    struct.object({
+      users: struct.array(
+        struct.object({
+          id: struct.number(),
+          name: struct.string(),
+          password: struct.string(),
+        }),
+      ),
+    }),
+  ),
 })
 
 defineRequest({
@@ -220,7 +226,7 @@ defineRequest({
   input: Input,
   build(ctx, input) {
     ctx.bindJson({
-      users: input.body.users.map(user => ({
+      users: input.body.users.map((user) => ({
         id: user.id,
         name: user.name,
       })),
@@ -263,10 +269,12 @@ object bound view 本身也是 source。
 
 ```ts
 const Input = struct.request({
-  body: struct.json(struct.object({
-    id: struct.number(),
-    name: struct.string(),
-  })),
+  body: struct.json(
+    struct.object({
+      id: struct.number(),
+      name: struct.string(),
+    }),
+  ),
 })
 
 defineRequest({
@@ -290,15 +298,15 @@ defineRequest({
 
 direct object source 的能力由目标 helper 决定：
 
-| helper | direct object source |
-|---|---|
-| `ctx.bindJson(input)` | 允许被 struct JSON codec 接受的 object / array。 |
-| `ctx.bindPathParams(input)` | 允许被 struct path codec 接受的 flat object；字段不能 optional。 |
-| `ctx.bindQueryParams(input)` | 允许被 struct query codec 接受的 flat object。 |
-| `ctx.bindHeaders(input)` | 允许被 struct header codec 接受的 flat object。 |
-| `ctx.bindFormUrlEncoded(input)` | 允许被 struct urlencoded codec 接受的 flat object。 |
-| `ctx.bindFormData(input)` | 允许被 struct multipart codec 接受的 flat object。 |
-| `ctx.bindArrayBuffer(input)` / `ctx.bindBlob(input)` / `ctx.bindText(input)` / `ctx.bindHtml(input)` | 不接受 object source，只接受 single bound source。 |
+| helper                                                                                               | direct object source                                             |
+| ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `ctx.bindJson(input)`                                                                                | 允许被 struct JSON codec 接受的 object / array。                 |
+| `ctx.bindPathParams(input)`                                                                          | 允许被 struct path codec 接受的 flat object；字段不能 optional。 |
+| `ctx.bindQueryParams(input)`                                                                         | 允许被 struct query codec 接受的 flat object。                   |
+| `ctx.bindHeaders(input)`                                                                             | 允许被 struct header codec 接受的 flat object。                  |
+| `ctx.bindFormUrlEncoded(input)`                                                                      | 允许被 struct urlencoded codec 接受的 flat object。              |
+| `ctx.bindFormData(input)`                                                                            | 允许被 struct multipart codec 接受的 flat object。               |
+| `ctx.bindArrayBuffer(input)` / `ctx.bindBlob(input)` / `ctx.bindText(input)` / `ctx.bindHtml(input)` | 不接受 object source，只接受 single bound source。               |
 
 ## Type Contract
 
@@ -354,15 +362,15 @@ type BoundArray<S extends ArraySchema<infer TItem>, Root> = BoundRef<S, Root> & 
 }
 
 type BuildInput<S, Root = S> =
-  S extends ObjectSchema<infer TShape> ? BoundObject<S, TShape, Root> :
-  S extends ArraySchema<any> ? BoundArray<S, Root> :
-  S extends SchemaLike<any, any, any> ? BoundRef<S, Root> :
-  never
+  S extends ObjectSchema<infer TShape>
+    ? BoundObject<S, TShape, Root>
+    : S extends ArraySchema<any>
+      ? BoundArray<S, Root>
+      : S extends SchemaLike<any, any, any>
+        ? BoundRef<S, Root>
+        : never
 
-type JsonProjection<Root> =
-  | BoundFor<'jsonBody', Root>
-  | ArrayProjection<Root>
-  | { readonly [targetKey: string]: JsonProjection<Root> }
+type JsonProjection<Root> = BoundFor<'jsonBody', Root> | ArrayProjection<Root> | { readonly [targetKey: string]: JsonProjection<Root> }
 
 type KeyValueProjection<TTarget extends 'header' | 'pathParam' | 'searchParam' | 'urlencoded', Root> =
   | Record<string, BoundFor<TTarget, Root>>
@@ -370,9 +378,7 @@ type KeyValueProjection<TTarget extends 'header' | 'pathParam' | 'searchParam' |
 
 type PathParamsProjection<Root> = KeyValueProjection<'pathParam', Root>
 
-type FormDataProjection<Root> =
-  | Record<string, BoundFor<'multipartField', Root>>
-  | ObjectSourceFor<'multipartField', Root>
+type FormDataProjection<Root> = Record<string, BoundFor<'multipartField', Root>> | ObjectSourceFor<'multipartField', Root>
 
 type RequestBodyOptions = {
   contentType?: string | null
@@ -429,9 +435,7 @@ type BindingMeta = {
   children?: readonly BindingMeta[]
 }
 
-type BindingScope =
-  | { kind: 'root' }
-  | { array: BindingMeta; id: object; kind: 'arrayItem'; parent: BindingScope }
+type BindingScope = { kind: 'root' } | { array: BindingMeta; id: object; kind: 'arrayItem'; parent: BindingScope }
 
 type ArrayProjectionMeta = {
   owner: object
@@ -485,7 +489,7 @@ function createStructBoundView(struct, registry, path, stack, scope) {
 
   if (isArrayStruct(struct)) {
     const view = createOpaqueBoundRef(struct)
-    view.map = project => {
+    view.map = (project) => {
       const itemScope = { array: meta, id: {}, kind: 'arrayItem', parent: meta.scope }
       const itemStruct = getArrayItemStruct(struct)
       const itemInput = createStructBoundView(itemStruct, registry, [], new Set(), itemScope)
@@ -729,7 +733,7 @@ function materializeJsonProjection(projection, parsedInput, scopeValues = new Ma
     if (!Array.isArray(items)) {
       throw new DefinitionError('array projection source must resolve to an array')
     }
-    return items.map(item => {
+    return items.map((item) => {
       const nextScopeValues = new Map(scopeValues)
       nextScopeValues.set(projection.itemScope.id, item)
       return materializeJsonProjection(projection.projection, parsedInput, nextScopeValues)
@@ -772,10 +776,7 @@ function materializeWholeSource(source, parsedInput, target, scopeValues = new M
 }
 
 function materializeSource(source, parsedInput, scopeValues = new Map()) {
-  const base =
-    source.scope?.kind === 'arrayItem'
-      ? scopeValues.get(source.scope.id)
-      : parsedInput
+  const base = source.scope?.kind === 'arrayItem' ? scopeValues.get(source.scope.id) : parsedInput
   const value = getByPath(base, source.path)
   if (typeof value === 'undefined') {
     return source.optional ? SKIP : undefined
@@ -792,12 +793,12 @@ function resolveWireKey(source, target) {
 
 默认 request materialization 按 transport 裁剪 `struct.request(...)` sections。
 
-| request section | HTTP | SSE | WebSocket |
-|---|---|---|---|
-| `path` | 使用 | 使用 | 使用 |
-| `query` | 使用 | 使用 | 使用 |
-| `headers` | 使用 | 使用 | 禁止 |
-| `body` | 使用 | 禁止 | 禁止 |
+| request section | HTTP | SSE  | WebSocket |
+| --------------- | ---- | ---- | --------- |
+| `path`          | 使用 | 使用 | 使用      |
+| `query`         | 使用 | 使用 | 使用      |
+| `headers`       | 使用 | 使用 | 禁止      |
+| `body`          | 使用 | 禁止 | 禁止      |
 
 body codec 由 `body` wrapper 决定：
 
@@ -815,16 +816,16 @@ struct.arrayBuffer() -> ArrayBuffer body
 
 ## Transport Context
 
-| ctx 方法 | HTTP | SSE | WebSocket |
-|---|---|---|---|
-| `bindPathParams(projection)` | 合法 | 合法 | 合法 |
-| `bindQueryParams(projection)` | 合法 | 合法 | 合法 |
-| `bindHeaders(projection)` | 合法 | 合法 | 非法 |
-| `bindJson(projection)` | 合法 | 非法 | 非法 |
-| `bindFormUrlEncoded(projection)` | 合法 | 非法 | 非法 |
-| `bindFormData(projection)` | 合法 | 非法 | 非法 |
-| `bindArrayBuffer(ref)` / `bindBlob(ref)` | 合法 | 非法 | 非法 |
-| `bindText(ref)` / `bindHtml(ref)` | 合法 | 非法 | 非法 |
+| ctx 方法                                 | HTTP | SSE  | WebSocket |
+| ---------------------------------------- | ---- | ---- | --------- |
+| `bindPathParams(projection)`             | 合法 | 合法 | 合法      |
+| `bindQueryParams(projection)`            | 合法 | 合法 | 合法      |
+| `bindHeaders(projection)`                | 合法 | 合法 | 非法      |
+| `bindJson(projection)`                   | 合法 | 非法 | 非法      |
+| `bindFormUrlEncoded(projection)`         | 合法 | 非法 | 非法      |
+| `bindFormData(projection)`               | 合法 | 非法 | 非法      |
+| `bindArrayBuffer(ref)` / `bindBlob(ref)` | 合法 | 非法 | 非法      |
+| `bindText(ref)` / `bindHtml(ref)`        | 合法 | 非法 | 非法      |
 
 `ctx` 不暴露 `setXXX`、`context`、`withCredentials`、`bindBody`、`bindXml`。WebSocket 不支持 browser API 不存在的 custom handshake headers 或 request body。
 

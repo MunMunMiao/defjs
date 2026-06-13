@@ -30,6 +30,7 @@ Defjs is a TypeScript library for defining typed request APIs and executing them
 ## Quick Start
 
 > Install with a package manager
+
 ```shell
 npm install @defjs/core
 // or
@@ -47,7 +48,7 @@ bun install @defjs/core
 ```javascript
 import {
   createGlobalClient,
-  defineRequest, 
+  defineRequest,
   field
 } from 'https://unpkg.com/@defjs/core/index.min.js';
 
@@ -90,10 +91,10 @@ Visit [defjs.org](https://defjs.org) to get started.
 
 ## Packages
 
-| Package                      | Version                                                                                      |
-|------------------------------|:---------------------------------------------------------------------------------------------|
-| [@defjs/core](packages/core) | ![core version](https://img.shields.io/npm/v/%40defjs%2Fcore?color=%23000&style=flat-square) |
-| [@defjs/angular](packages/angular) | ![core version](https://img.shields.io/npm/v/%40defjs%2Fangular?color=%23000&style=flat-square)     |
+| Package                            | Version                                                                                         |
+| ---------------------------------- | :---------------------------------------------------------------------------------------------- |
+| [@defjs/core](packages/core)       | ![core version](https://img.shields.io/npm/v/%40defjs%2Fcore?color=%23000&style=flat-square)    |
+| [@defjs/angular](packages/angular) | ![core version](https://img.shields.io/npm/v/%40defjs%2Fangular?color=%23000&style=flat-square) |
 
 ## Roadmap
 

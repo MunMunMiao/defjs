@@ -30,7 +30,7 @@ function createMockPropagator() {
 function createMockTracer() {
   activeSpans = []
 
-  const startSpan = vi.fn((name: string, options?: { kind?: number; attributes?: Record<string, unknown> }, ctx?: Context) => {
+  const startSpan = vi.fn((name: string, options?: { kind?: number; attributes?: Record<string, unknown> }, _ctx?: Context) => {
     const span: MockSpan = {
       name,
       kind: options?.kind ?? 0,
@@ -104,7 +104,7 @@ describe('createOpenTelemetrySseInterceptor', () => {
     await interceptor.fn(req, next)
 
     expect(propagator.inject).toHaveBeenCalled()
-    const calls = (next as unknown as { mock: { calls: [any][] } }).mock.calls
+    const calls = (next as unknown as { mock: { calls: [unknown[]][] } }).mock.calls
     expect(calls[0]?.[0].headers?.get('traceparent')).toBe('mock-trace-id')
   })
 
@@ -147,7 +147,7 @@ describe('createOpenTelemetrySseInterceptor', () => {
     await interceptor.fn(makeRequest(), async () => makeMockStream())
 
     // Wait for the closed promise to resolve
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(activeSpans[0]?.ended).toBe(true)
   })
@@ -160,7 +160,7 @@ describe('createOpenTelemetrySseInterceptor', () => {
     await interceptor.fn(makeRequest(), async () => makeMockStream('error', new Error('stream broken')))
 
     // Wait for the closed promise to resolve
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(activeSpans[0]?.recordException).toHaveBeenCalled()
     expect(activeSpans[0]?.ended).toBe(true)
@@ -174,7 +174,7 @@ describe('createOpenTelemetrySseInterceptor', () => {
     await interceptor.fn(makeRequest(), async () => makeMockStreamError(new Error('rejected')))
 
     // Wait for the closed promise to reject
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(activeSpans[0]?.recordException).toHaveBeenCalled()
     expect(activeSpans[0]?.ended).toBe(true)

@@ -77,22 +77,22 @@ endpoint 定义层只接受 `@defjs/core` 自带 `struct` schema，不接收第�
 
 Go 区分**值类型**和**指针类型** —— 前者缺字段填零值，后者缺字段为 `nil`、可接受显式 `null`。struct 通过 **`.nullish()`**（同时开 `optional + nullable`）精确对偶 Go 指针；`.optional()` 是更严的子集（只允许缺字段，拒绝显式 `null`）。
 
-| Go 字段 | struct 写法 | 合法输入 | 非法输入 | 缺失输入 | `null` 输入 | wire 序列化 |
-|---|---|---|---|---|---|---|
-| `string` | `struct.string()` | `"x"` → `"x"` | `123` → throw | `""` | throw | `"x"` → `"x"` |
-| `*string` | `struct.string().nullish()` | `"x"` → `"x"` | `123` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
-| `int` | `struct.number()` | `42` → `42` | `"x"` → throw | `0` | throw | `42` → `42` |
-| `*int` | `struct.number().nullish()` | `42` → `42` | `"x"` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
-| `int64`（`json:",string"`）| `struct.bigint()` | `42n` / `"42"` → `42n` | `42`(number) → throw § | `0n` | throw | `42n` → `"42"` § |
-| `*int64`（`json:",string"`）| `struct.bigint().nullish()` | `42n` / `"42"` → `42n` | `42`(number) → throw § | `undefined` | `null` | `undefined` → ⌀ ‡ |
-| `bool` | `struct.boolean()` | `true` → `true` | `1` → throw | `false` | throw | `true` → `true` |
-| `*bool` | `struct.boolean().nullish()` | `true` → `true` | `1` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
-| `time.Time` | `struct.date()` | `Date` / `"2026-05-12T10:00:00Z"` / `1747036800000` → `Date` † | `"not-a-date"` → throw | `new Date(0)` (epoch) | throw | `Date` → ISO 字符串 † |
-| `*time.Time` | `struct.date().nullish()` | `Date` / ISO 字符串 / 数字 → `Date` † | `"not-a-date"` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
-| `struct{...}` | `struct.object({...})` | `{...}` → 解析后值 | `"x"` → throw | 全字段递归零值 | throw | `{...}` → 按 wire key 输出 |
-| `*struct{...}` | `struct.object({...}).nullish()` | `{...}` → 解析后值 | `"x"` → throw | `undefined` | `null` | `undefined` → ⌀ ‡ |
-| `[]T` slice | `struct.array(T)` | `[a, b]` → 递归解析 | `"x"` → throw | `[]` | throw ※ | `[...]` → 递归序列化 |
-| `map[K]V` | `struct.record(V)` | `{k: v}` → 递归解析 | `"x"` → throw | `{}` | throw ※ | `{...}` → 递归序列化 |
+| Go 字段                      | struct 写法                      | 合法输入                                                       | 非法输入               | 缺失输入              | `null` 输入 | wire 序列化                |
+| ---------------------------- | -------------------------------- | -------------------------------------------------------------- | ---------------------- | --------------------- | ----------- | -------------------------- |
+| `string`                     | `struct.string()`                | `"x"` → `"x"`                                                  | `123` → throw          | `""`                  | throw       | `"x"` → `"x"`              |
+| `*string`                    | `struct.string().nullish()`      | `"x"` → `"x"`                                                  | `123` → throw          | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
+| `int`                        | `struct.number()`                | `42` → `42`                                                    | `"x"` → throw          | `0`                   | throw       | `42` → `42`                |
+| `*int`                       | `struct.number().nullish()`      | `42` → `42`                                                    | `"x"` → throw          | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
+| `int64`（`json:",string"`）  | `struct.bigint()`                | `42n` / `"42"` → `42n`                                         | `42`(number) → throw § | `0n`                  | throw       | `42n` → `"42"` §           |
+| `*int64`（`json:",string"`） | `struct.bigint().nullish()`      | `42n` / `"42"` → `42n`                                         | `42`(number) → throw § | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
+| `bool`                       | `struct.boolean()`               | `true` → `true`                                                | `1` → throw            | `false`               | throw       | `true` → `true`            |
+| `*bool`                      | `struct.boolean().nullish()`     | `true` → `true`                                                | `1` → throw            | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
+| `time.Time`                  | `struct.date()`                  | `Date` / `"2026-05-12T10:00:00Z"` / `1747036800000` → `Date` † | `"not-a-date"` → throw | `new Date(0)` (epoch) | throw       | `Date` → ISO 字符串 †      |
+| `*time.Time`                 | `struct.date().nullish()`        | `Date` / ISO 字符串 / 数字 → `Date` †                          | `"not-a-date"` → throw | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
+| `struct{...}`                | `struct.object({...})`           | `{...}` → 解析后值                                             | `"x"` → throw          | 全字段递归零值        | throw       | `{...}` → 按 wire key 输出 |
+| `*struct{...}`               | `struct.object({...}).nullish()` | `{...}` → 解析后值                                             | `"x"` → throw          | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
+| `[]T` slice                  | `struct.array(T)`                | `[a, b]` → 递归解析                                            | `"x"` → throw          | `[]`                  | throw ※     | `[...]` → 递归序列化       |
+| `map[K]V`                    | `struct.record(V)`               | `{k: v}` → 递归解析                                            | `"x"` → throw          | `{}`                  | throw ※     | `{...}` → 递归序列化       |
 
 - `†` `struct.date()` 内置 wire 桥接：边界解析接受任何 `new Date()` 可解析的输入（`Date` 实例 / ISO 字符串 / epoch 数字 / 任意），Invalid Date 抛 `invalid_type`；wire 序列化输出 ISO 字符串。等价于 Go `time.Time` 的 `MarshalJSON` / `UnmarshalJSON`。**注意 footgun**：`boolean` 输入也会被 `new Date()` 接受 —— `new Date(true)` = `1970-01-01T00:00:00.001Z`（epoch + 1ms，Valid Date），**不抛错**。这是"直接交给 `new Date`"的语义边界。
 - `‡` `⌀` 表示在 object 字段位置序列化时：value 中不含该 key → **整字段跳过**；显式带 `key: undefined` → 保留 `undefined`，后续 `JSON.stringify` 才丢字段 —— 整体效果与 Go `omitempty` 等价。
@@ -103,12 +103,12 @@ Go 区分**值类型**和**指针类型** —— 前者缺字段填零值，后�
 
 #### 修饰行为对偶
 
-| Go 行为 | `@defjs/core/struct` |
-|---|---|
-| `json:"field_name"` tag 重命名 | `.tag(tag.json('field_name'))` |
-| `omitempty` Output 字段可省 | `.optional()` |
-| `json.Marshal` 反向序列化 | 由 endpoint runtime / request build 内部执行，struct 实例不暴露反向序列化方法 |
-| 未知字段 | 始终忽略，不提供额外严格模式 |
+| Go 行为                        | `@defjs/core/struct`                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| `json:"field_name"` tag 重命名 | `.tag(tag.json('field_name'))`                                                |
+| `omitempty` Output 字段可省    | `.optional()`                                                                 |
+| `json.Marshal` 反向序列化      | 由 endpoint runtime / request build 内部执行，struct 实例不暴露反向序列化方法 |
+| 未知字段                       | 始终忽略，不提供额外严格模式                                                  |
 
 零值兜底是**设计意图**而非 bug：缺字段时拿到 Go 风格零值；struct 不提供额外严格校验入口。
 
@@ -204,10 +204,10 @@ struct 不提供验证 DSL 或 object utility DSL；字符串长度、数字范�
 **StructError 与全局错误**
 
 ```ts
-error.format()      // { _errors: [], [key]: subtree }
-error.flatten()     // { formErrors: [], fieldErrors: {} }
-error.prettify()    // 多行可读字符串
-setErrorMap(map)    // 全局拦截 issue.message，i18n 友好
+error.format() // { _errors: [], [key]: subtree }
+error.flatten() // { formErrors: [], fieldErrors: {} }
+error.prettify() // 多行可读字符串
+setErrorMap(map) // 全局拦截 issue.message，i18n 友好
 ```
 
 ## Build 设计方案
@@ -480,13 +480,13 @@ build(ctx, input) {
 
 ### Transport 差异
 
-| ctx 方法 | HTTP | SSE | WebSocket |
-|---|---|---|---|
-| `setPathParams` | 合法 | 合法 | 合法 |
-| `setQueryParams` | 合法 | 合法 | 合法 |
-| `setHeaders` | 合法 | 合法 | 非法 |
-| `setJson` / `setFormUrlEncoded` / `setFormData` | 合法 | 非法 | 非法 |
-| `setArrayBuffer` / `setBlob` / `setText` / `setHtml` | 合法 | 非法 | 非法 |
+| ctx 方法                                             | HTTP | SSE  | WebSocket |
+| ---------------------------------------------------- | ---- | ---- | --------- |
+| `setPathParams`                                      | 合法 | 合法 | 合法      |
+| `setQueryParams`                                     | 合法 | 合法 | 合法      |
+| `setHeaders`                                         | 合法 | 合法 | 非法      |
+| `setJson` / `setFormUrlEncoded` / `setFormData`      | 合法 | 非法 | 非法      |
+| `setArrayBuffer` / `setBlob` / `setText` / `setHtml` | 合法 | 非法 | 非法      |
 
 ## HTTP
 
@@ -604,7 +604,7 @@ const [error, data, response] = await getUserInfo({
 HTTP 固定返回：
 
 ```ts
-[error, result, response]
+;[error, result, response]
 ```
 
 语义：
@@ -736,7 +736,7 @@ const [error, stream, open] = await watchUserInfo({
 SSE 固定返回：
 
 ```ts
-[error, stream, open]
+;[error, stream, open]
 ```
 
 其中：
@@ -841,7 +841,7 @@ const [error, socket, connection] = await chatSocket({
 WebSocket 固定返回：
 
 ```ts
-[error, socket, connection]
+;[error, socket, connection]
 ```
 
 其中：

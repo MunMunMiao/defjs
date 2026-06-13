@@ -44,6 +44,7 @@
 ### Task 1: 扩展现有 abort helper
 
 **Files:**
+
 - Modify: `packages/core/src/internal/abort.ts`
 - Modify: `packages/core/src/internal/abort.spec.ts`
 
@@ -52,36 +53,32 @@
 Modify the import in `packages/core/src/internal/abort.spec.ts`:
 
 ```ts
-import {
-  createAbortTimeoutConflictError,
-  hasAbortTimeoutConflict,
-  mergeAbortSignals,
-} from './abort'
+import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals } from './abort'
 ```
 
 Add these tests inside `describe('abort helpers', () => { ... })`, after the existing timeout merge test:
 
 ```ts
-  test('should detect abort and timeout field conflict', () => {
-    const signal = new AbortController().signal
+test('should detect abort and timeout field conflict', () => {
+  const signal = new AbortController().signal
 
-    expect(hasAbortTimeoutConflict(undefined)).toBe(false)
-    expect(hasAbortTimeoutConflict({})).toBe(false)
-    expect(hasAbortTimeoutConflict({ abort: signal })).toBe(false)
-    expect(hasAbortTimeoutConflict({ timeout: 100 })).toBe(false)
-    expect(hasAbortTimeoutConflict({ abort: signal, timeout: 100 })).toBe(true)
-    expect(hasAbortTimeoutConflict({ abort: signal, timeout: 0 })).toBe(true)
-    expect(hasAbortTimeoutConflict({ abort: signal, timeout: undefined })).toBe(false)
-  })
+  expect(hasAbortTimeoutConflict(undefined)).toBe(false)
+  expect(hasAbortTimeoutConflict({})).toBe(false)
+  expect(hasAbortTimeoutConflict({ abort: signal })).toBe(false)
+  expect(hasAbortTimeoutConflict({ timeout: 100 })).toBe(false)
+  expect(hasAbortTimeoutConflict({ abort: signal, timeout: 100 })).toBe(true)
+  expect(hasAbortTimeoutConflict({ abort: signal, timeout: 0 })).toBe(true)
+  expect(hasAbortTimeoutConflict({ abort: signal, timeout: undefined })).toBe(false)
+})
 
-  test('should create a request validation definition error for abort timeout conflict', () => {
-    const error = createAbortTimeoutConflictError()
+test('should create a request validation definition error for abort timeout conflict', () => {
+  const error = createAbortTimeoutConflictError()
 
-    expect(error.kind).toBe('definition')
-    expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error.message).toBe('with.abort and with.timeout cannot be used together')
-    expect(error.cause).toBeInstanceOf(Error)
-  })
+  expect(error.kind).toBe('definition')
+  expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
+  expect(error.message).toBe('with.abort and with.timeout cannot be used together')
+  expect(error.cause).toBeInstanceOf(Error)
+})
 ```
 
 - [ ] **Step 2: Run helper test and verify it fails**
@@ -154,6 +151,7 @@ Expected: diff only adds the helper types/functions/tests; `mergeAbortSignals(..
 ### Task 2: 实现 public config 类型互斥并补 type tests
 
 **Files:**
+
 - Modify: `packages/core/src/http/http.ts:18-25`
 - Modify: `packages/core/src/sse/sse.ts:17-23`
 - Modify: `packages/core/src/web_socket/web_socket.ts:118-127`
@@ -277,7 +275,7 @@ socketRef.with({ abort: AbortSignal.timeout(100) })
 socketRef.with({
   heartbeat: {
     intervalMs: 1000,
-    isAck: message => message.type === 'joined',
+    isAck: (message) => message.type === 'joined',
     message: () => ({ text: 'hello', type: 'message' }),
   },
 })
@@ -377,8 +375,8 @@ interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
   reconnect?: WebSocketReconnectConfig
 }
 
-export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> =
-  UseWebSocketBaseConfig<TIncoming, TOutgoing> & UseCancellationConfig
+export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketBaseConfig<TIncoming, TOutgoing> &
+  UseCancellationConfig
 ```
 
 - [ ] **Step 8: Convert the existing SSE request-level fetch runtime spec to client-level fetch**
@@ -386,28 +384,28 @@ export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> =
 In `packages/core/src/sse/sse.spec.ts`, replace the `.with({ fetch: ... })` setup in `should decode event payloads with struct key aliases` with this client-level setup:
 
 ```ts
-    const client = createClient({
-      endpoint: 'https://api.example.com',
-      sse: {
-        fetch: (async () =>
-          new Response(
-            new ReadableStream<Uint8Array>({
-              start(controller) {
-                controller.enqueue(new TextEncoder().encode('event: profile\ndata: {"display_name":"Miao"}\n\n'))
-                controller.close()
-              },
-            }),
-            {
-              headers: {
-                'content-type': 'text/event-stream',
-              },
-              status: 200,
-            },
-          )) as unknown as typeof fetch,
-      },
-    })
+const client = createClient({
+  endpoint: 'https://api.example.com',
+  sse: {
+    fetch: (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('event: profile\ndata: {"display_name":"Miao"}\n\n'))
+            controller.close()
+          },
+        }),
+        {
+          headers: {
+            'content-type': 'text/event-stream',
+          },
+          status: 200,
+        },
+      )) as unknown as typeof fetch,
+  },
+})
 
-    const [error, stream] = await useAliasStream().with({ client })
+const [error, stream] = await useAliasStream().with({ client })
 ```
 
 - [ ] **Step 9: Run typecheck and verify it passes**
@@ -442,6 +440,7 @@ Expected: diff only changes `Use*Config` shapes, type tests, and the existing SS
 ### Task 3: HTTP runtime 早失败
 
 **Files:**
+
 - Modify: `packages/core/src/http/http.error.spec.ts`
 - Modify: `packages/core/src/http/http.ts:154-170`
 
@@ -450,51 +449,51 @@ Expected: diff only changes `Use*Config` shapes, type tests, and the existing SS
 Add these tests after `should return aborted error when signal is already aborted` in `packages/core/src/http/http.error.spec.ts`:
 
 ```ts
-  test('should reject with.abort and with.timeout before parsing HTTP input', async () => {
-    const controller = new AbortController()
-    const useRequest = defineRequest({
-      input: struct.object({
-        id: struct.string(),
-      }),
-      method: 'GET',
-      output: {
-        200: struct.null(),
-      },
-      path: '/null',
-    })
-
-    const ref = useRequest({ id: 1 } as never).with({ abort: controller.signal, timeout: 1 } as never)
-    const [error, result, response] = await ref
-
-    expect(result).toBeUndefined()
-    expect(response).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
-    expect(ref.status).toBe('error')
+test('should reject with.abort and with.timeout before parsing HTTP input', async () => {
+  const controller = new AbortController()
+  const useRequest = defineRequest({
+    input: struct.object({
+      id: struct.string(),
+    }),
+    method: 'GET',
+    output: {
+      200: struct.null(),
+    },
+    path: '/null',
   })
 
-  test('should prefer HTTP cancellation config conflict over an already aborted signal', async () => {
-    const controller = new AbortController()
-    controller.abort(ERR_ABORTED)
-    const useRequest = defineRequest({
-      method: 'GET',
-      output: {
-        200: struct.null(),
-      },
-      path: '/null',
-    })
+  const ref = useRequest({ id: 1 } as never).with({ abort: controller.signal, timeout: 1 } as never)
+  const [error, result, response] = await ref
 
-    const ref = useRequest().with({ abort: controller.signal, timeout: 1 } as never)
-    const [error, result, response] = await ref
+  expect(result).toBeUndefined()
+  expect(response).toBeUndefined()
+  expect(error?.kind).toBe('definition')
+  expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+  expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+  expect(ref.status).toBe('error')
+})
 
-    expect(result).toBeUndefined()
-    expect(response).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
-    expect(ref.status).toBe('error')
+test('should prefer HTTP cancellation config conflict over an already aborted signal', async () => {
+  const controller = new AbortController()
+  controller.abort(ERR_ABORTED)
+  const useRequest = defineRequest({
+    method: 'GET',
+    output: {
+      200: struct.null(),
+    },
+    path: '/null',
   })
+
+  const ref = useRequest().with({ abort: controller.signal, timeout: 1 } as never)
+  const [error, result, response] = await ref
+
+  expect(result).toBeUndefined()
+  expect(response).toBeUndefined()
+  expect(error?.kind).toBe('definition')
+  expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+  expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+  expect(ref.status).toBe('error')
+})
 ```
 
 - [ ] **Step 2: Run HTTP runtime tests and verify they fail**
@@ -512,23 +511,18 @@ Expected: FAIL. The conflict case currently proceeds to input parsing or abort h
 Modify the abort import in `packages/core/src/http/http.ts`:
 
 ```ts
-import {
-  createAbortTimeoutConflictError,
-  hasAbortTimeoutConflict,
-  mergeAbortSignals,
-  type UseCancellationConfig,
-} from '../internal/abort'
+import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals, type UseCancellationConfig } from '../internal/abort'
 ```
 
 Add this block immediately after `state.status = 'pending'` in `executeHttpEndpoint(...)`, before the `requestAbort` fast path:
 
 ```ts
-  if (hasAbortTimeoutConflict(config)) {
-    const definitionError = createAbortTimeoutConflictError()
-    state.error = definitionError as RequestError<RequestErrorData<TOutput>>
-    state.status = 'error'
-    return [definitionError as RequestError<RequestErrorData<TOutput>>, undefined, undefined]
-  }
+if (hasAbortTimeoutConflict(config)) {
+  const definitionError = createAbortTimeoutConflictError()
+  state.error = definitionError as RequestError<RequestErrorData<TOutput>>
+  state.status = 'error'
+  return [definitionError as RequestError<RequestErrorData<TOutput>>, undefined, undefined]
+}
 ```
 
 - [ ] **Step 4: Run HTTP runtime tests and verify they pass**
@@ -556,6 +550,7 @@ Expected: diff only adds the early conflict check and the two runtime tests.
 ### Task 4: SSE runtime 早失败并移除 request-level fetch 执行路径
 
 **Files:**
+
 - Modify: `packages/core/src/sse/sse.spec.ts`
 - Modify: `packages/core/src/sse/sse.ts:157-224`
 
@@ -574,57 +569,57 @@ import { defineEventStream } from './index'
 Add these tests after `should allow closing stream refs before startup`:
 
 ```ts
-  test('should reject with.abort and with.timeout before starting SSE transport', async () => {
-    const controller = new AbortController()
-    let interceptorCalls = 0
-    const client = createClient({
-      endpoint: inject('testServerHost'),
-      interceptors: [
-        createSSEInterceptor(async (req, next) => {
-          interceptorCalls += 1
-          return await next(req)
-        }),
-      ],
-    })
-    const useStream = defineEventStream({
-      events: {
-        message: struct.string(),
-      },
-      path: '/sse/basic',
-    })
-
-    const ref = useStream().with({ client, abort: controller.signal, timeout: 1 } as never)
-    const [error, stream, open] = await ref
-
-    expect(stream).toBeUndefined()
-    expect(open).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
-    expect(ref.status).toBe('error')
-    expect(interceptorCalls).toBe(0)
+test('should reject with.abort and with.timeout before starting SSE transport', async () => {
+  const controller = new AbortController()
+  let interceptorCalls = 0
+  const client = createClient({
+    endpoint: inject('testServerHost'),
+    interceptors: [
+      createSSEInterceptor(async (req, next) => {
+        interceptorCalls += 1
+        return await next(req)
+      }),
+    ],
+  })
+  const useStream = defineEventStream({
+    events: {
+      message: struct.string(),
+    },
+    path: '/sse/basic',
   })
 
-  test('should prefer SSE cancellation config conflict over an already aborted signal', async () => {
-    const controller = new AbortController()
-    controller.abort(ERR_ABORTED)
-    const useStream = defineEventStream({
-      events: {
-        message: struct.string(),
-      },
-      path: '/sse/basic',
-    })
+  const ref = useStream().with({ client, abort: controller.signal, timeout: 1 } as never)
+  const [error, stream, open] = await ref
 
-    const ref = useStream().with({ abort: controller.signal, timeout: 1 } as never)
-    const [error, stream, open] = await ref
+  expect(stream).toBeUndefined()
+  expect(open).toBeUndefined()
+  expect(error?.kind).toBe('definition')
+  expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+  expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+  expect(ref.status).toBe('error')
+  expect(interceptorCalls).toBe(0)
+})
 
-    expect(stream).toBeUndefined()
-    expect(open).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
-    expect(ref.status).toBe('error')
+test('should prefer SSE cancellation config conflict over an already aborted signal', async () => {
+  const controller = new AbortController()
+  controller.abort(ERR_ABORTED)
+  const useStream = defineEventStream({
+    events: {
+      message: struct.string(),
+    },
+    path: '/sse/basic',
   })
+
+  const ref = useStream().with({ abort: controller.signal, timeout: 1 } as never)
+  const [error, stream, open] = await ref
+
+  expect(stream).toBeUndefined()
+  expect(open).toBeUndefined()
+  expect(error?.kind).toBe('definition')
+  expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+  expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+  expect(ref.status).toBe('error')
+})
 ```
 
 - [ ] **Step 2: Run SSE tests and verify they fail**
@@ -642,35 +637,30 @@ Expected: FAIL because the conflict cases currently proceed into existing abort/
 Modify the abort import in `packages/core/src/sse/sse.ts`:
 
 ```ts
-import {
-  createAbortTimeoutConflictError,
-  hasAbortTimeoutConflict,
-  mergeAbortSignals,
-  type UseCancellationConfig,
-} from '../internal/abort'
+import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals, type UseCancellationConfig } from '../internal/abort'
 ```
 
 Add this block immediately after `state.status = 'connecting'` in `executeEventStreamEndpoint(...)`, before `config.abort?.aborted`:
 
 ```ts
-  if (hasAbortTimeoutConflict(config)) {
-    const definitionError = createAbortTimeoutConflictError()
-    state.error = definitionError
-    state.status = 'error'
-    return [definitionError, undefined, undefined]
-  }
+if (hasAbortTimeoutConflict(config)) {
+  const definitionError = createAbortTimeoutConflictError()
+  state.error = definitionError
+  state.status = 'error'
+  return [definitionError, undefined, undefined]
+}
 ```
 
 Replace the SSE handler fetch option so it no longer reads `config.fetch`:
 
 ```ts
-    const sseHandler: SSEHandler = req =>
-      fetchEventStream(req, {
-        fetch: clientConfig.sse.fetch,
-        async transformMessage(message) {
-          return await transformStreamMessage(endpoint.events, message)
-        },
-      }) as Promise<EventStreamHandle<unknown>>
+const sseHandler: SSEHandler = (req) =>
+  fetchEventStream(req, {
+    fetch: clientConfig.sse.fetch,
+    async transformMessage(message) {
+      return await transformStreamMessage(endpoint.events, message)
+    },
+  }) as Promise<EventStreamHandle<unknown>>
 ```
 
 - [ ] **Step 4: Run SSE tests and verify they pass**
@@ -698,6 +688,7 @@ Expected: diff only adds the early conflict check, removes request-level fetch u
 ### Task 5: WebSocket runtime 早失败
 
 **Files:**
+
 - Modify: `packages/core/src/web_socket/web_socket.spec.ts`
 - Modify: `packages/core/src/web_socket/web_socket.ts:266-318`
 
@@ -706,50 +697,50 @@ Expected: diff only adds the early conflict check, removes request-level fetch u
 Add these tests after `should return transport error with invalid client` in `packages/core/src/web_socket/web_socket.spec.ts`:
 
 ```ts
-  test('should reject with.abort and with.timeout before starting websocket transport', async () => {
-    const controller = new AbortController()
-    let beforeConnectCalls = 0
-    const useSocket = defineWebSocket({
-      incoming: {},
-      path: '/ws/basic',
-    })
-
-    const ref = useSocket().with({
-      abort: controller.signal,
-      beforeConnect: () => {
-        beforeConnectCalls += 1
-      },
-      timeout: 1,
-    } as never)
-    const [error, socket, connection] = await ref
-
-    expect(socket).toBeUndefined()
-    expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
-    expect(ref.status).toBe('error')
-    expect(beforeConnectCalls).toBe(0)
+test('should reject with.abort and with.timeout before starting websocket transport', async () => {
+  const controller = new AbortController()
+  let beforeConnectCalls = 0
+  const useSocket = defineWebSocket({
+    incoming: {},
+    path: '/ws/basic',
   })
 
-  test('should prefer websocket cancellation config conflict over an already aborted signal', async () => {
-    const controller = new AbortController()
-    controller.abort(ERR_ABORTED)
-    const useSocket = defineWebSocket({
-      incoming: {},
-      path: '/ws/basic',
-    })
+  const ref = useSocket().with({
+    abort: controller.signal,
+    beforeConnect: () => {
+      beforeConnectCalls += 1
+    },
+    timeout: 1,
+  } as never)
+  const [error, socket, connection] = await ref
 
-    const ref = useSocket().with({ abort: controller.signal, timeout: 1 } as never)
-    const [error, socket, connection] = await ref
+  expect(socket).toBeUndefined()
+  expect(connection).toBeUndefined()
+  expect(error?.kind).toBe('definition')
+  expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+  expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+  expect(ref.status).toBe('error')
+  expect(beforeConnectCalls).toBe(0)
+})
 
-    expect(socket).toBeUndefined()
-    expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
-    expect(ref.status).toBe('error')
+test('should prefer websocket cancellation config conflict over an already aborted signal', async () => {
+  const controller = new AbortController()
+  controller.abort(ERR_ABORTED)
+  const useSocket = defineWebSocket({
+    incoming: {},
+    path: '/ws/basic',
   })
+
+  const ref = useSocket().with({ abort: controller.signal, timeout: 1 } as never)
+  const [error, socket, connection] = await ref
+
+  expect(socket).toBeUndefined()
+  expect(connection).toBeUndefined()
+  expect(error?.kind).toBe('definition')
+  expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+  expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+  expect(ref.status).toBe('error')
+})
 ```
 
 - [ ] **Step 2: Run WebSocket tests and verify they fail**
@@ -767,23 +758,18 @@ Expected: FAIL because the runtime still merges `config?.abort` and `config?.tim
 Modify the abort import in `packages/core/src/web_socket/web_socket.ts`:
 
 ```ts
-import {
-  createAbortTimeoutConflictError,
-  hasAbortTimeoutConflict,
-  mergeAbortSignals,
-  type UseCancellationConfig,
-} from '../internal/abort'
+import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals, type UseCancellationConfig } from '../internal/abort'
 ```
 
 Add this block immediately after `setSocketState(state, 'connecting')` in `executeWebSocketEndpoint(...)`, before `parseEndpointInput(...)`:
 
 ```ts
-  if (hasAbortTimeoutConflict(config)) {
-    const definitionError = createAbortTimeoutConflictError()
-    state.error = definitionError
-    setSocketState(state, 'error')
-    return [definitionError, undefined, undefined]
-  }
+if (hasAbortTimeoutConflict(config)) {
+  const definitionError = createAbortTimeoutConflictError()
+  state.error = definitionError
+  setSocketState(state, 'error')
+  return [definitionError, undefined, undefined]
+}
 ```
 
 - [ ] **Step 4: Run WebSocket tests and verify they pass**
@@ -811,6 +797,7 @@ Expected: diff only adds the early conflict check and the two runtime tests.
 ### Task 6: 更新设计文档
 
 **Files:**
+
 - Modify: `packages/core/design.md:576-599`
 - Modify: `packages/core/design.md:711-732`
 - Modify: `packages/core/design.md:801-836`
@@ -944,6 +931,7 @@ Expected: diff only updates HTTP/SSE/WebSocket `with` examples/config lists and 
 ### Task 7: Full verification
 
 **Files:**
+
 - Verify changed files from Tasks 1-6.
 
 - [ ] **Step 1: Run typecheck**
@@ -1003,10 +991,11 @@ Report:
 ```md
 实现完成。
 验证：
+
 - typecheck: PASS
 - focused node specs: PASS
 - package node specs: PASS
-未提交 commit：用户未授权提交。
+  未提交 commit：用户未授权提交。
 ```
 
 If any command fails, report the failing command and exact failing test names instead of marking the task complete.

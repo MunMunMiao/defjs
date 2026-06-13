@@ -27,12 +27,12 @@ Go 生态里最稳定的共同形状是：
 
 这里的“主流”不按单一 GitHub star 或公司背书排序，而按**生态代表性 + 设计覆盖面**取样：
 
-| 分层 | 框架/库 | 为什么纳入 |
-|---|---|---|
-| 标准库基线 | `net/http` | Go Web request parsing 的底座，提供手动解析与 ServeMux path value |
+| 分层               | 框架/库                                          | 为什么纳入                                                                                      |
+| ------------------ | ------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| 标准库基线         | `net/http`                                       | Go Web request parsing 的底座，提供手动解析与 ServeMux path value                               |
 | 经典 struct binder | Gin、Echo、Fiber、Beego、GoFrame、Hertz、Buffalo | 覆盖 Content-Type 推断、source-specific binder、多来源覆盖顺序、form/json/header/path/query tag |
-| 极简 router | Chi | 代表“小内核 + 标准库 + 可选 render”的路线，提醒我们不要把 binder 做成强制大抽象 |
-| typed API 校准样本 | Huma | 不是传统 router 的同类竞品，但对“一整个 input struct 表示整份 request”最有参考价值 |
+| 极简 router        | Chi                                              | 代表“小内核 + 标准库 + 可选 render”的路线，提醒我们不要把 binder 做成强制大抽象                 |
+| typed API 校准样本 | Huma                                             | 不是传统 router 的同类竞品，但对“一整个 input struct 表示整份 request”最有参考价值              |
 
 所以本文不会说“所有 Go 框架都只有同一种绑定方式”。更准确的结论是：
 
@@ -275,31 +275,31 @@ Huma 更接近 typed API framework，而不是传统 router。它把整个 reque
 
 ## 跨框架发现
 
-| 发现 | 代表框架 | 对本库的设计后果 |
-|---|---|---|
-| 在 struct binder 中，struct tag 是主流 wire mapping 机制 | Gin、Echo、Fiber、GoFrame、Hertz、Buffalo、Huma | 保留显式 wire mapping；本库默认构建用 request sections + `tag.*(...)` |
-| Source-specific binder 很常见 | Gin、Echo、Fiber、Beego、Hertz | 保留显式 `build` 和 codec helpers |
-| All-source binding 必须定义优先级 | Echo、Fiber、Hertz、net/http form parsing | 不默认做隐式 merge |
-| Body codec 由 content type 或显式方法决定 | Gin、Fiber、Beego、Buffalo | body wrapper 显式决定 codec |
-| Header binding 经常是特殊来源 | Echo 默认不绑 header；浏览器 WebSocket 不支持自定义握手 header | 保持 transport-specific builder |
-| Validation 相邻但不等同 | Gin `binding`、Hertz `BindAndValidate`、GoFrame validation tags | 不把 `struct` transport tag 扩成业务 validation DSL |
-| DTO 安全边界重要 | Echo security warning | 鼓励 dedicated input struct |
-| 极简 router 不强推 binder | net/http、Chi | 保留低层逃生舱 |
+| 发现                                                     | 代表框架                                                        | 对本库的设计后果                                                      |
+| -------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------- |
+| 在 struct binder 中，struct tag 是主流 wire mapping 机制 | Gin、Echo、Fiber、GoFrame、Hertz、Buffalo、Huma                 | 保留显式 wire mapping；本库默认构建用 request sections + `tag.*(...)` |
+| Source-specific binder 很常见                            | Gin、Echo、Fiber、Beego、Hertz                                  | 保留显式 `build` 和 codec helpers                                     |
+| All-source binding 必须定义优先级                        | Echo、Fiber、Hertz、net/http form parsing                       | 不默认做隐式 merge                                                    |
+| Body codec 由 content type 或显式方法决定                | Gin、Fiber、Beego、Buffalo                                      | body wrapper 显式决定 codec                                           |
+| Header binding 经常是特殊来源                            | Echo 默认不绑 header；浏览器 WebSocket 不支持自定义握手 header  | 保持 transport-specific builder                                       |
+| Validation 相邻但不等同                                  | Gin `binding`、Hertz `BindAndValidate`、GoFrame validation tags | 不把 `struct` transport tag 扩成业务 validation DSL                   |
+| DTO 安全边界重要                                         | Echo security warning                                           | 鼓励 dedicated input struct                                           |
+| 极简 router 不强推 binder                                | net/http、Chi                                                   | 保留低层逃生舱                                                        |
 
 ## 框架矩阵
 
-| 框架/库 | 定位 | 自动/聚合入口 | 指定来源入口 | 主要 tag | 覆盖顺序 | Header 是否默认 | Body codec 选择 | 对本库结论 |
-|---|---|---|---|---|---|---|---|---|
-| `net/http` | 标准库基线 | 无 struct binder | `ParseForm` / `PostFormValue` / `PathValue` 等手动 API | 无框架 tag | `Request.Form` 中 form body 覆盖 query | 手动读取 | 手动读取 / form parser | 保留低层逃生舱，不默认混源 |
-| Gin | 经典 binder | `Bind` / `ShouldBind` | `ShouldBindQuery` / URI / header / JSON 等 | `json` / `form` / `uri` / `header` / `binding` | 由具体 binder 或 Content-Type 决定 | 可显式绑定 header | `ShouldBind` 可按 Content-Type 推断 | source-specific helper 是 Go-style |
-| Echo | 经典 binder | `Context#Bind` | `BindBody` / `BindQueryParams` / `BindPathValues` / `BindHeaders` | `param` / `query` / `header` / `json` / `xml` / `form` | path -> query(GET/DELETE) -> body，后者覆盖前者 | 否，必须 `BindHeaders` | 按 Content-Type | 不默认 multi-source merge，header 要显式 |
-| Fiber | 经典 binder | `c.Bind().All` | `Body` / `JSON` / `Form` / `Header` / `Query` / `URI` | `uri` / `query` / `header` / `cookie` / `json` / `form` / `xml` | URI -> Body -> Query -> Header -> Cookie | `All` 包含，也可单独绑定 | body 非空且 Content-Type 非空才参与 | All-bind 必须有优先级；本库不默认 All |
-| Chi | 极简 router | 无 core binder | `chi.URLParam`；可选 `render.Bind` body pattern | render payload 自定义 | 无通用顺序 | 手动读取 | `render.Bind` decode body | build 逃生舱符合 Go 小内核路线 |
-| Beego | 经典 binder | `Bind` 按 Content-Type | `BindJSON` / `BindForm` / `BindXML` / `Get*` | `json` / form 相关 | `Get*` 中 form 覆盖 query | 手动/框架方法 | 官方偏好显式格式方法 | endpoint body codec 显式更稳 |
-| GoFrame | 经典 binder / 全栈 | `Request.Parse` | `Get*Struct` | `p` / `param` / `params` / `json` 等 | 默认 fuzzy matching | 取决于提交参数类型 | `Parse` 聚合并可校验 | 不采用 fuzzy matching，保留显式 request shape |
-| Hertz | 经典 binder / 高性能 | `Bind` / `BindAndValidate` | `BindQuery` / direct accessor | `path` / `form` / `query` / `cookie` / `header` / `json` / `raw_body` / `default` | path -> form -> query -> cookie -> header -> json -> raw_body | 参与聚合但优先级靠后 | JSON/Form 等按请求内容 | 多来源可以存在，但必须显式优先级 |
-| Buffalo | 经典 binder / 全栈 | `Context.Bind` | 自定义 binder registry | `form` / `json` / `xml` | 由 binder 决定 | 非核心重点 | 按 Content-Type / Accept 找 binder | 自定义 binder 映射到 `build` |
-| Huma | typed API 校准 | typed input struct | path/query/header/cookie tags + `Body`/`RawBody` | `path` / `query` / `header` / `cookie` / `Body` field | 明确区分参数与 body | input struct 可声明 header | `Body` 字段 + contentType | 证明“整份 request = input struct”方向成立 |
+| 框架/库    | 定位                 | 自动/聚合入口              | 指定来源入口                                                      | 主要 tag                                                                          | 覆盖顺序                                                      | Header 是否默认            | Body codec 选择                     | 对本库结论                                    |
+| ---------- | -------------------- | -------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------- | ----------------------------------- | --------------------------------------------- |
+| `net/http` | 标准库基线           | 无 struct binder           | `ParseForm` / `PostFormValue` / `PathValue` 等手动 API            | 无框架 tag                                                                        | `Request.Form` 中 form body 覆盖 query                        | 手动读取                   | 手动读取 / form parser              | 保留低层逃生舱，不默认混源                    |
+| Gin        | 经典 binder          | `Bind` / `ShouldBind`      | `ShouldBindQuery` / URI / header / JSON 等                        | `json` / `form` / `uri` / `header` / `binding`                                    | 由具体 binder 或 Content-Type 决定                            | 可显式绑定 header          | `ShouldBind` 可按 Content-Type 推断 | source-specific helper 是 Go-style            |
+| Echo       | 经典 binder          | `Context#Bind`             | `BindBody` / `BindQueryParams` / `BindPathValues` / `BindHeaders` | `param` / `query` / `header` / `json` / `xml` / `form`                            | path -> query(GET/DELETE) -> body，后者覆盖前者               | 否，必须 `BindHeaders`     | 按 Content-Type                     | 不默认 multi-source merge，header 要显式      |
+| Fiber      | 经典 binder          | `c.Bind().All`             | `Body` / `JSON` / `Form` / `Header` / `Query` / `URI`             | `uri` / `query` / `header` / `cookie` / `json` / `form` / `xml`                   | URI -> Body -> Query -> Header -> Cookie                      | `All` 包含，也可单独绑定   | body 非空且 Content-Type 非空才参与 | All-bind 必须有优先级；本库不默认 All         |
+| Chi        | 极简 router          | 无 core binder             | `chi.URLParam`；可选 `render.Bind` body pattern                   | render payload 自定义                                                             | 无通用顺序                                                    | 手动读取                   | `render.Bind` decode body           | build 逃生舱符合 Go 小内核路线                |
+| Beego      | 经典 binder          | `Bind` 按 Content-Type     | `BindJSON` / `BindForm` / `BindXML` / `Get*`                      | `json` / form 相关                                                                | `Get*` 中 form 覆盖 query                                     | 手动/框架方法              | 官方偏好显式格式方法                | endpoint body codec 显式更稳                  |
+| GoFrame    | 经典 binder / 全栈   | `Request.Parse`            | `Get*Struct`                                                      | `p` / `param` / `params` / `json` 等                                              | 默认 fuzzy matching                                           | 取决于提交参数类型         | `Parse` 聚合并可校验                | 不采用 fuzzy matching，保留显式 request shape |
+| Hertz      | 经典 binder / 高性能 | `Bind` / `BindAndValidate` | `BindQuery` / direct accessor                                     | `path` / `form` / `query` / `cookie` / `header` / `json` / `raw_body` / `default` | path -> form -> query -> cookie -> header -> json -> raw_body | 参与聚合但优先级靠后       | JSON/Form 等按请求内容              | 多来源可以存在，但必须显式优先级              |
+| Buffalo    | 经典 binder / 全栈   | `Context.Bind`             | 自定义 binder registry                                            | `form` / `json` / `xml`                                                           | 由 binder 决定                                                | 非核心重点                 | 按 Content-Type / Accept 找 binder  | 自定义 binder 映射到 `build`                  |
+| Huma       | typed API 校准       | typed input struct         | path/query/header/cookie tags + `Body`/`RawBody`                  | `path` / `query` / `header` / `cookie` / `Body` field                             | 明确区分参数与 body                                           | input struct 可声明 header | `Body` 字段 + contentType           | 证明“整份 request = input struct”方向成立     |
 
 ## 推荐的 `@defjs/core` 校准
 

@@ -13,7 +13,7 @@ export type TagObjectOptions = {
 }
 
 export function encodeObjectByTag(
-  struct: SchemaLike<any, any, boolean>,
+  struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
   options: TagObjectOptions = {},
@@ -47,7 +47,7 @@ export function encodeObjectByTag(
 }
 
 export function decodeObjectByTag(
-  struct: SchemaLike<any, any, boolean>,
+  struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
   options: TagObjectOptions = {},
@@ -60,7 +60,7 @@ export function decodeObjectByTag(
 }
 
 function normalizeObjectByTag(
-  struct: SchemaLike<any, any, boolean>,
+  struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
   options: TagObjectOptions,
@@ -101,7 +101,7 @@ export function assertPlainObject(value: unknown, message: string): asserts valu
 }
 
 function encodeTaggedField(
-  struct: SchemaLike<any, any, boolean>,
+  struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
   options: TagObjectOptions,
@@ -110,7 +110,7 @@ function encodeTaggedField(
     return encodeObjectByTag(struct, value, namespace, options)
   }
 
-  return encodeValue(struct as RuntimeSchema, value, {
+  return encodeValue(struct as unknown as RuntimeSchema, value, {
     encodeObject: (objectStruct, objectValue, encodeChild) => {
       const output: TaggedObject = Object.create(null)
       for (const field of getStructFields(objectStruct)) {
@@ -128,7 +128,7 @@ function encodeTaggedField(
           continue
         }
 
-        output[getWireKey(field.key, fieldTag)] = encodeChild(field.struct as RuntimeSchema, fieldValue)
+        output[getWireKey(field.key, fieldTag)] = encodeChild(field.struct as unknown as RuntimeSchema, fieldValue)
       }
       return output
     },
@@ -136,13 +136,13 @@ function encodeTaggedField(
 }
 
 function decodeTaggedField(
-  struct: SchemaLike<any, any, boolean>,
+  struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
   options: TagObjectOptions,
   path: Path,
 ): unknown {
-  const runtime = resolveRuntimeSchema(struct as RuntimeSchema)
+  const runtime = resolveRuntimeSchema(struct as unknown as RuntimeSchema)
   const definition = runtime[DEFINITION]
 
   switch (definition.kind) {
@@ -179,7 +179,7 @@ function decodeTaggedField(
         if (!decoded.ok) {
           continue
         }
-        const optionRuntime = resolveRuntimeSchema(option as RuntimeSchema)
+        const optionRuntime = resolveRuntimeSchema(option as unknown as RuntimeSchema)
         if (matchesDefinition(optionRuntime[DEFINITION], decoded.value, optionRuntime)) {
           return decoded.value
         }
@@ -204,7 +204,7 @@ function decodeTaggedField(
 }
 
 function tryDecodeTaggedField(
-  struct: SchemaLike<any, any, boolean>,
+  struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
   options: TagObjectOptions,

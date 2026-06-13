@@ -49,7 +49,7 @@ export function expectedType(definition: SchemaDefinition): string {
       return 'object'
 
     case 'or':
-      return definition.options.map(option => expectedType((option as RuntimeSchema)[DEFINITION])).join(' | ')
+      return definition.options.map((option) => expectedType((option as RuntimeSchema)[DEFINITION])).join(' | ')
 
     case 'discriminatedUnion':
       return definition.expected
@@ -111,7 +111,7 @@ export function cloneValue<T>(value: T): T {
   }
 
   if (Array.isArray(value)) {
-    return value.map(item => cloneValue(item)) as T
+    return value.map((item) => cloneValue(item)) as T
   }
 
   if (value instanceof Date) {

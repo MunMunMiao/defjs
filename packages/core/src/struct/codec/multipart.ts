@@ -4,7 +4,7 @@ import type { SchemaLike } from '../types'
 import { assertPlainObject, getWireKey } from './common'
 import { isSearchParamScalar, stringifySearchParamScalar } from './urlencoded'
 
-export function encodeMultipart(struct: SchemaLike<any, any, boolean>, value: unknown): FormData {
+export function encodeMultipart(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): FormData {
   if (!isObjectStruct(struct)) {
     throw new TypeError('multipart encode expects object struct')
   }

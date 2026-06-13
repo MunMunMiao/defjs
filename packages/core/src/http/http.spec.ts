@@ -106,7 +106,7 @@ describe('request http runtime', () => {
     const client = createClient(
       withEndpoint('https://example.com/api'),
       withInterceptors(
-        createHttpInterceptor(async request => {
+        createHttpInterceptor(async (request) => {
           callCount += 1
           capturedRequest = request as typeof capturedRequest
           return makeResponse({
@@ -192,7 +192,7 @@ describe('request http runtime', () => {
       createClient(
         withEndpoint('https://example.com'),
         withInterceptors(
-          createHttpInterceptor(async request =>
+          createHttpInterceptor(async (request) =>
             makeResponse({
               body: {
                 ok: request.queryParams?.get('value'),

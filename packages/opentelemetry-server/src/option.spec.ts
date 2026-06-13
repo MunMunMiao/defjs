@@ -7,25 +7,25 @@ function makeConfig(): ClientConfig {
   return {
     endpoint: 'https://api.example.com',
     interceptors: [],
-    queryParamsSerializer: params => params.toString(),
+    queryParamsSerializer: (params) => params.toString(),
     sse: { fetch: globalThis.fetch.bind(globalThis) },
     webSocket: {},
   }
 }
 
 function createMockTracer(): Tracer {
-  const spans: any[] = []
-  const startSpan = vi.fn((name: string, options?: any, ctx?: any) => {
+  const spans: Array<Record<string, unknown>> = []
+  const startSpan = vi.fn((name: string, options?: Record<string, unknown>, _ctx?: unknown) => {
     const span = {
       name,
-      kind: options?.kind ?? 0,
-      attributes: { ...(options?.attributes ?? {}) },
+      kind: (options?.kind as number) ?? 0,
+      attributes: { ...((options?.attributes as Record<string, unknown>) ?? {}) },
       ended: false,
       addEvent: vi.fn(),
       setAttribute: vi.fn((k: string, v: unknown) => {
         span.attributes[k] = v
       }),
-      setStatus: vi.fn((s: any) => {
+      setStatus: vi.fn((s: unknown) => {
         span.status = s
       }),
       recordException: vi.fn(),
@@ -88,7 +88,7 @@ describe('withOpenTelemetryServer', () => {
   test('should accept custom propagator', () => {
     const propagator = {
       inject: vi.fn(),
-      extract: vi.fn((ctx: any) => ctx),
+      extract: vi.fn((ctx: unknown) => ctx),
       fields: vi.fn(() => ['traceparent']),
     } as unknown as TextMapPropagator
 

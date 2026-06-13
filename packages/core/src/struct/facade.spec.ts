@@ -69,13 +69,13 @@ describe('facade.ts', () => {
     const booleanSchema = struct.boolean() as unknown as Record<symbol, unknown>
     const nullSchema = struct.null() as unknown as Record<symbol, unknown>
     const booleanDefinition = Object.getOwnPropertySymbols(booleanSchema)
-      .map(symbol => booleanSchema[symbol])
-      .find(value => typeof value === 'object' && value !== null && 'kind' in (value as object)) as {
+      .map((symbol) => booleanSchema[symbol])
+      .find((value) => typeof value === 'object' && value !== null && 'kind' in (value as object)) as {
       is: (value: unknown) => boolean
     }
     const nullDefinition = Object.getOwnPropertySymbols(nullSchema)
-      .map(symbol => nullSchema[symbol])
-      .find(value => typeof value === 'object' && value !== null && 'kind' in (value as object)) as {
+      .map((symbol) => nullSchema[symbol])
+      .find((value) => typeof value === 'object' && value !== null && 'kind' in (value as object)) as {
       is: (value: unknown) => boolean
       zero: () => null
     }

@@ -79,7 +79,7 @@ assertUserId(id)
 
 ## Tag
 
-`tag` 对齐 Go struct tag 的心智模型：它是字段上的外部表示声明，类似 Go 的 ``json:"user_name"``、``query:"include_profile"`` 或 ``header:"x-trace-id"``。它只改名，不改变 TypeScript 字段名，也不决定字段属于哪个 request section。
+`tag` 对齐 Go struct tag 的心智模型：它是字段上的外部表示声明，类似 Go 的 `json:"user_name"`、`query:"include_profile"` 或 `header:"x-trace-id"`。它只改名，不改变 TypeScript 字段名，也不决定字段属于哪个 request section。
 
 ```ts
 const Query = struct.object({
@@ -104,9 +104,11 @@ const Input = struct.request({
   headers: struct.object({
     traceId: struct.string().tag(tag.header('x-trace-id')),
   }),
-  body: struct.json(struct.object({
-    name: struct.string().tag(tag.json('display_name')),
-  })),
+  body: struct.json(
+    struct.object({
+      name: struct.string().tag(tag.json('display_name')),
+    }),
+  ),
 })
 ```
 
@@ -131,11 +133,13 @@ const Input = struct.request({
   headers: struct.object({
     traceId: struct.string().tag(tag.header('x-trace-id')),
   }),
-  body: struct.json(struct.object({
-    profile: struct.object({
-      displayName: struct.string().tag(tag.json('display_name')),
+  body: struct.json(
+    struct.object({
+      profile: struct.object({
+        displayName: struct.string().tag(tag.json('display_name')),
+      }),
     }),
-  })),
+  ),
 })
 
 const updateUser = defineRequest({
@@ -198,13 +202,17 @@ build plan 的规则：
 
 ```ts
 const BulkInput = struct.request({
-  body: struct.json(struct.object({
-    users: struct.array(struct.object({
-      id: struct.number(),
-      name: struct.string(),
-      password: struct.string(),
-    })),
-  })),
+  body: struct.json(
+    struct.object({
+      users: struct.array(
+        struct.object({
+          id: struct.number(),
+          name: struct.string(),
+          password: struct.string(),
+        }),
+      ),
+    }),
+  ),
 })
 
 defineRequest({
@@ -213,7 +221,7 @@ defineRequest({
   input: BulkInput,
   build(ctx, input) {
     ctx.setJson({
-      users: input.body.users.map(user => ({
+      users: input.body.users.map((user) => ({
         id: user.id,
         name: user.name,
       })),

@@ -56,7 +56,7 @@ describe('fetchEventStream', () => {
       messages.push(event)
     }
 
-    expect(messages.map(event => event.data)).toEqual(['first', 'second'])
+    expect(messages.map((event) => event.data)).toEqual(['first', 'second'])
     expect(stream.open.response.headers.get('x-request-id')).toBe('trace-sse-retry-2')
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
   })

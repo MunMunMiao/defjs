@@ -46,5 +46,5 @@ export function mergeAbortSignals(controller: AbortSignal, signals: (AbortSignal
   }
 
   /* istanbul ignore next -- unreachable: fast path above already handles length===1 */
-  return merged.length === 1 ? (merged[0] as AbortSignal) : AbortSignal.any(merged)
+  return merged.length === 1 ? (merged[0] as unknown as AbortSignal) : AbortSignal.any(merged)
 }
