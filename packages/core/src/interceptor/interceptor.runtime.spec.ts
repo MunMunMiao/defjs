@@ -29,13 +29,13 @@ describe('SSE interceptor chain', () => {
     ]
 
     let capturedRequest: HttpRequest | undefined
-    const fakeSseHandler = async (req: HttpRequest) => {
+    const fakeSSEHandler = async (req: HttpRequest) => {
       capturedRequest = req
       return {} as EventStreamHandle<unknown>
     }
 
     const chain = makeSSEInterceptorChain(interceptors)
-    await chain(baseRequest, fakeSseHandler)
+    await chain(baseRequest, fakeSSEHandler)
 
     expect(callOrder).toEqual(['first', 'second'])
     expect(capturedRequest?.headers?.get('x-first')).toBe('1')

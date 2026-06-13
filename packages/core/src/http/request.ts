@@ -1,8 +1,8 @@
-import type { QueryParamsSerializer } from '../client/config'
+import type { ClientXSRFConfig, QueryParamsSerializer } from '../client/config'
 import { DEFAULT_QUERY_PARAMS_SERIALIZER } from '../client/config'
 import type { HttpContext } from '../internal/context'
 import type { HttpProgressFn, HttpRequest, HttpResponseType } from '../internal/http_request'
-import type { RequestBuilder } from '../internal/request_builder'
+import type { RequestBuildHandler } from '../internal/request_builder'
 import { buildRequest } from '../internal/request_builder'
 import { appendRecordToHeaders, createSearchParams, fillUrl } from '../internal/url'
 import type { AnyStruct } from '../struct'
@@ -15,25 +15,26 @@ export type ResponseGroupItem<S extends number = number, B extends AnyStruct = A
 
 export type RequestOutputShape = Record<number, AnyStruct> | readonly ResponseGroupItem[]
 
-export function createHttpRequest<TInput>(
+export function createHttpRequest<TInput extends AnyStruct | undefined>(
   method: string,
   path: string,
-  input: TInput,
-  build: ((request: RequestBuilder, input: TInput) => void) | undefined,
+  input: unknown,
+  build: RequestBuildHandler<TInput> | undefined,
   options: {
     abort: AbortSignal
     baseEndpoint: string
     context?: HttpContext
     downloadProgress?: HttpProgressFn
-    input?: AnyStruct
+    input?: TInput
     queryParamsSerializer: QueryParamsSerializer
     responseType?: HttpResponseType
     timeout?: number
     uploadProgress?: HttpProgressFn
     withCredentials?: boolean
+    xsrf?: ClientXSRFConfig
   },
 ): HttpRequest {
-  const built = buildRequest(input, build as ((request: RequestBuilder, input: unknown) => void) | undefined, {
+  const built = buildRequest(input, build, {
     input: options.input,
     transport: 'http',
   })
@@ -59,7 +60,8 @@ export function createHttpRequest<TInput>(
     responseType: options.responseType,
     timeout: options.timeout,
     uploadProgress: options.uploadProgress,
-    withCredentials: built.withCredentials ?? options.withCredentials ?? false,
+    withCredentials: options.withCredentials ?? false,
+    xsrf: options.xsrf,
   }
 
   applyRequestContentType(request, headers)
@@ -85,10 +87,10 @@ export function normalizeOutputShape(output: RequestOutputShape): Map<number, An
   const map = new Map<number, AnyStruct>()
 
   if (Array.isArray(output)) {
-    for (const item of output) {
-      const statuses = Array.isArray(item.status) ? item.status : [item.status]
-      for (const status of statuses) {
-        map.set(status, item.body)
+    for (const { status, body } of output) {
+      const statuses = Array.isArray(status) ? status : [status]
+      for (const code of statuses) {
+        map.set(code, body)
       }
     }
     return map

@@ -1,21 +1,27 @@
 import type { HttpRequest } from '../../internal/http_request'
 
+const textDecoder = new TextDecoder()
+
 export function getContentLength(headers: Headers): number {
   const value = headers.get('Content-Length')
   if (!value) {
     return 0
   }
 
-  const num = Number(value)
-  if (isNaN(num)) {
-    return 0
-  }
-
-  return num
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
 }
 
 export function getContentType(headers: Headers): string {
   return headers.get('Content-Type') || ''
+}
+
+function toArrayBuffer(content: Uint8Array): ArrayBuffer {
+  const { buffer, byteLength, byteOffset } = content
+  if (buffer instanceof ArrayBuffer && byteOffset === 0 && byteLength === buffer.byteLength) {
+    return buffer
+  }
+  return buffer.slice(byteOffset, byteOffset + byteLength) as ArrayBuffer
 }
 
 export function parseBody(params: {
@@ -28,19 +34,19 @@ export function parseBody(params: {
 
   switch (responseType) {
     case 'json': {
-      const text = new TextDecoder().decode(content)
+      const text = textDecoder.decode(content)
       if (text === '') {
         return null
       }
       return JSON.parse(text) as object
     }
     case 'text':
-      return new TextDecoder().decode(content)
+      return textDecoder.decode(content)
     case 'blob': {
-      return new Blob([Uint8Array.from(content)], { type: contentType })
+      return new Blob([toArrayBuffer(content)], { type: contentType })
     }
     case 'arraybuffer':
-      return Uint8Array.from(content).buffer
+      return toArrayBuffer(content)
     default:
       return null
   }

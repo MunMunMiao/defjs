@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from 'vitest'
-import { ERR_NOT_FOUND_GLOBAL_CLIENT } from '../error'
 import { createClient, resolveClientConfig } from './client'
 import { resetGlobalClient, setGlobalClient } from './global'
 import { withEndpoint } from './index'
@@ -20,6 +19,6 @@ describe('client resolve helpers', () => {
   })
 
   test('should throw when resolving client config without explicit or global client', () => {
-    expect(() => resolveClientConfig()).toThrowError(ERR_NOT_FOUND_GLOBAL_CLIENT)
+    expect(() => resolveClientConfig()).toThrowError('Global client has not been set')
   })
 })

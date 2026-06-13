@@ -1,4 +1,4 @@
-import { describe, expect, inject, test } from 'vitest'
+import { describe, expect, inject, test, vi } from 'vitest'
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
 import type { HttpRequest } from '../../http'
 import { fetchHandler } from './fetch'
@@ -47,7 +47,7 @@ describe('Fetch handler responses', () => {
     expect(error).toBe(ERR_TIMEOUT)
   })
 
-  test('should throw error when get request set body', async () => {
+  test('should return error when get request set body', async () => {
     const requestConfig: HttpRequest = {
       baseEndpoint: inject('testServerHost'),
       endpoint: '/delay',
@@ -55,7 +55,8 @@ describe('Fetch handler responses', () => {
       body: 'Hello World!',
     }
 
-    await expect(fetchHandler(requestConfig)).rejects.toBeInstanceOf(Error)
+    const { error } = await fetchHandler(requestConfig)
+    expect(error).toBeInstanceOf(Error)
   })
 
   test('should parse json text arraybuffer and blob bodies', async () => {
@@ -88,6 +89,28 @@ describe('Fetch handler responses', () => {
     await expect(fetchHandler(textRequest).then((response) => response.body)).resolves.toEqual(JSON.stringify({ id: 1 }))
     await expect(fetchHandler(arrayBufferRequest).then((response) => response.body)).resolves.toBeInstanceOf(ArrayBuffer)
     await expect(fetchHandler(blobRequest).then((response) => response.body)).resolves.toBeInstanceOf(Blob)
+  })
+
+  test('should use native response methods when download progress is not requested', async () => {
+    const response = new Response(JSON.stringify({ id: 1 }), {
+      headers: { 'content-type': 'application/json' },
+      status: 200,
+    })
+    const text = vi.spyOn(response, 'text')
+    const fetchMock = vi.fn(async () => response)
+
+    const result = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        endpoint: '/json',
+        method: 'GET',
+        responseType: 'json',
+      },
+      fetchMock as unknown as typeof fetch,
+    )
+
+    expect(result.body).toEqual({ id: 1 })
+    expect(text).toHaveBeenCalledTimes(1)
   })
 
   test('should expose http errors when status is not ok', async () => {

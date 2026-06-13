@@ -80,4 +80,32 @@ describe('web socket send queue', () => {
 
     expect(queue.shift()).toBeUndefined()
   })
+
+  test('should drop oldest with maxSize 1', () => {
+    const queue = createSendQueue({ maxSize: 1 })
+    queue.enqueue('a')
+    queue.enqueue('b')
+    queue.enqueue('c')
+    expect(queue.shift()).toBe('c')
+    expect(queue.shift()).toBeUndefined()
+  })
+
+  test('should handle enqueue after clear with drop-oldest', () => {
+    const queue = createSendQueue({ maxSize: 2 })
+    queue.enqueue('a')
+    queue.clear()
+    queue.enqueue('b')
+    expect(queue.shift()).toBe('b')
+    expect(queue.shift()).toBeUndefined()
+  })
+
+  test('should handle maxSize 0 with drop-oldest', () => {
+    const queue = createSendQueue({ maxSize: 0 })
+    queue.enqueue('a')
+    expect(queue.shift()).toBe('a')
+    queue.enqueue('b')
+    queue.enqueue('c')
+    expect(queue.shift()).toBe('c')
+    expect(queue.shift()).toBeUndefined()
+  })
 })

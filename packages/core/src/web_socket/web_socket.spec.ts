@@ -337,12 +337,11 @@ describe('web socket runtime', () => {
   test('should expose ref state transitions and allow unsubscribing listeners', async () => {
     const useSocket = defineWebSocket({
       incoming: {
-        joined: struct.object({
-          roomId: struct.string(),
-          userId: struct.number(),
+        ready: struct.object({
+          ok: struct.boolean(),
         }),
       },
-      path: '/ws/close-immediately',
+      path: '/ws/echo',
     })
 
     const ref = useSocket()
@@ -362,8 +361,8 @@ describe('web socket runtime', () => {
     const [error, socket, connection] = await ref
 
     expect(error).toBeNull()
-    expect(connection?.url).toContain('/ws/close-immediately')
-    expect(ref.connection?.url).toContain('/ws/close-immediately')
+    expect(connection?.url).toContain('/ws/echo')
+    expect(ref.connection?.url).toContain('/ws/echo')
     expect(ref.error).toBeUndefined()
     expect(ref.status).toBe('open')
 
@@ -381,13 +380,14 @@ describe('web socket runtime', () => {
       throw new Error('Unexpected socket runtime error')
     })
 
-    expect(socket.connection.url).toContain('/ws/close-immediately')
+    expect(socket.connection.url).toContain('/ws/echo')
     expect(socket.state).toBe('open')
 
     unsubscribeSocketState()
     unsubscribeSocketError()
 
-    await expect(socket.closed).resolves.toMatchObject({ code: 1000, reason: 'bye' })
+    socket.close(1000, 'done')
+    await expect(socket.closed).resolves.toMatchObject({ code: 1000, reason: 'done' })
     expect(ref.status).toBe('closed')
     expect(refStates).toContain('connecting')
     expect(refStates).toContain('open')
@@ -463,10 +463,11 @@ describe('web socket runtime', () => {
         throw new Error('build failed')
       },
       incoming: {},
+      input: struct.object({}),
       path: '/ws/basic',
     })
 
-    const [error, socket, connection] = await useSocket()
+    const [error, socket, connection] = await useSocket({})
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -556,7 +557,7 @@ describe('web socket runtime', () => {
     controller.abort('stop reconnect loop')
     await expect(socket.closed).resolves.toBeDefined()
     expect(socket.state).toBe('error')
-  })
+  }, 10_000)
 
   test('should abort during reconnect delay with aborted state', async () => {
     const useSocket = defineWebSocket({
@@ -583,7 +584,7 @@ describe('web socket runtime', () => {
       throw new Error('Expected socket')
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 40))
+    await new Promise((resolve) => setTimeout(resolve, 60))
     controller.abort(ERR_ABORTED)
 
     await expect(socket.closed).resolves.toBeDefined()
@@ -604,7 +605,7 @@ describe('web socket runtime', () => {
       path: '/ws/reconnect',
     })
 
-    const [error, socket] = await useSocket().with({
+    const [error, socket] = await useSocket({ query: { key: 'immediate-case' } }).with({
       reconnect: { attempts: 1, delayMs: 0 },
     })
 

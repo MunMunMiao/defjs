@@ -1,7 +1,8 @@
 import { resolveClientConfig } from '../client/client'
+import type { SSEInvalidEventHandler } from '../client/config'
 import type { Client } from '../client/resolve'
 import type { RequestError } from '../error'
-import { createDefinitionError, createRequestRuntimeError, ERR_ABORTED } from '../error'
+import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { SSEHandler } from '../interceptor/interceptor'
 import { makeSSEInterceptorChain, resolveSSEInterceptors } from '../interceptor/interceptor'
 import type { UseCancellationConfig } from '../internal/abort'
@@ -10,7 +11,7 @@ import type { HttpContext } from '../internal/context'
 import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
 import { parseEndpointInput } from '../internal/endpoint_input'
 import type { SettledResponse } from '../internal/http_response'
-import type { RequestBuilder, RequestBuildHandler } from '../internal/request_builder'
+import type { RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct, Infer } from '../struct'
 import { decodeJson } from '../struct/codec/json'
 import { createEventStreamRequest } from './request'
@@ -54,13 +55,31 @@ type DefaultEventUnion<TEvents extends EventSchemas> = 'default' extends keyof T
 
 export type EventStreamData<TEvents extends EventSchemas> = KnownEventUnion<TEvents> | DefaultEventUnion<TEvents>
 
-export interface EventStreamDefinition<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas> {
-  build?: RequestBuildHandler<TInput, 'sse'>
+interface EventStreamDefinitionBase<TEvents extends EventSchemas = EventSchemas> {
   events: TEvents
-  input?: TInput
   method?: string
   path: string
 }
+
+type EventStreamDefinitionWithoutBuild<
+  TInput extends AnyStruct | undefined = undefined,
+  TEvents extends EventSchemas = EventSchemas,
+> = EventStreamDefinitionBase<TEvents> & {
+  build?: never
+  input?: TInput
+}
+
+type EventStreamDefinitionWithBuild<
+  TInput extends AnyStruct,
+  TEvents extends EventSchemas = EventSchemas,
+> = EventStreamDefinitionBase<TEvents> & {
+  build: RequestBuildHandler<TInput, 'sse'>
+  input: TInput
+}
+
+export type EventStreamDefinition<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas> =
+  | EventStreamDefinitionWithoutBuild<TInput, TEvents>
+  | (TInput extends AnyStruct ? EventStreamDefinitionWithBuild<TInput, TEvents> : never)
 
 export interface StreamOpenInfo {
   response?: SettledResponse<null>
@@ -90,10 +109,10 @@ export type UseEventStreamEndpointFn<TInput extends AnyStruct | undefined, TEven
     ? (input?: EndpointInput<TInput>) => EventStreamRef<EventStreamData<TEvents>>
     : (input: EndpointInput<TInput>) => EventStreamRef<EventStreamData<TEvents>>
 
-interface EventStreamEndpoint<
+type EventStreamEndpoint<
   TInput extends AnyStruct | undefined = undefined,
   TEvents extends EventSchemas = EventSchemas,
-> extends EventStreamDefinition<TInput, TEvents> {
+> = EventStreamDefinition<TInput, TEvents> & {
   readonly kind: 'event-stream'
   readonly method: string
 }
@@ -117,6 +136,12 @@ function castParsedEventStreamInput<TInput extends AnyStruct | undefined>(value:
   return value as ParsedInput<TInput>
 }
 
+export function defineEventStream<TInput extends AnyStruct, TEvents extends EventSchemas = EventSchemas>(
+  definition: EventStreamDefinitionWithBuild<TInput, TEvents>,
+): UseEventStreamEndpointFn<TInput, TEvents>
+export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
+  definition: EventStreamDefinitionWithoutBuild<TInput, TEvents>,
+): UseEventStreamEndpointFn<TInput, TEvents>
 export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
   definition: EventStreamDefinition<TInput, TEvents>,
 ): UseEventStreamEndpointFn<TInput, TEvents> {
@@ -189,7 +214,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
   // Fast path: caller already aborted before we did any schema work.
   if (config.abort?.aborted) {
     /* istanbul ignore next -- unreachable: AbortController always sets a default reason */
-    const transportError = createRequestRuntimeError(config.abort.reason ?? ERR_ABORTED)
+    const transportError = createTransportError(config.abort.reason ?? ERR_ABORTED)
     state.error = transportError
     state.status = 'aborted'
     return [transportError, undefined, undefined]
@@ -209,7 +234,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
   try {
     clientConfig = resolveClientConfig(config.client)
   } catch (error) {
-    const transportError = createRequestRuntimeError(error)
+    const transportError = createTransportError(error)
     state.error = transportError
     /* istanbul ignore next -- unreachable: resolveClientConfig never throws ERR_ABORTED */
     state.status = transportError.kind === 'transport' && transportError.code === 'ABORTED' ? 'aborted' : 'error'
@@ -218,21 +243,14 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
 
   let request
   try {
-    request = createEventStreamRequest(
-      endpoint.method,
-      endpoint.path,
-      parsedInput,
-      // Type boundary: build signature is transport-specific; the generic handler accepts unknown.
-      endpoint.build as ((request: RequestBuilder, input: unknown) => void) | undefined,
-      {
-        abort: mergeAbortSignals(controller.signal, [config.abort], config.timeout),
-        baseEndpoint: clientConfig.endpoint,
-        context: config.context,
-        input: endpoint.input,
-        queryParamsSerializer: clientConfig.queryParamsSerializer,
-        withCredentials: clientConfig.withCredentials,
-      },
-    )
+    request = createEventStreamRequest(endpoint.method, endpoint.path, parsedInput, endpoint.build, {
+      abort: mergeAbortSignals(controller.signal, [config.abort], config.timeout),
+      baseEndpoint: clientConfig.endpoint,
+      context: config.context,
+      input: endpoint.input,
+      queryParamsSerializer: clientConfig.queryParamsSerializer,
+      withCredentials: clientConfig.withCredentials,
+    })
   } catch (error) {
     const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
     state.error = definitionError
@@ -247,8 +265,11 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
       fetchEventStream(req, {
         fetch: clientConfig.sse.fetch,
         async transformMessage(message) {
-          return await transformStreamMessage(endpoint.events, message)
+          return await transformStreamMessage(endpoint.events, message, clientConfig.sse.onInvalidEvent)
         },
+        reconnect: clientConfig.sse.reconnect,
+        queue: clientConfig.sse.queue,
+        maxBufferSize: clientConfig.sse.maxBufferSize,
       }) as Promise<EventStreamHandle<unknown>>
     const sseChain = makeSSEInterceptorChain(sseInterceptors)
     // Type boundary: interceptor chain returns EventStreamHandle<unknown>; runtime message transform narrows it to the endpoint's event types.
@@ -263,7 +284,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
         state.status = 'aborted'
         /* istanbul ignore next -- unreachable: state.error is never set before stream resolves */
         if (!state.error) {
-          state.error = createRequestRuntimeError(closeInfo.cause ?? ERR_ABORTED)
+          state.error = createTransportError(closeInfo.cause ?? ERR_ABORTED)
         }
         return
       }
@@ -271,7 +292,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
       if (closeInfo.code === 'error') {
         state.status = 'error'
         if (!state.error) {
-          state.error = createRequestRuntimeError(closeInfo.cause, state.open?.response)
+          state.error = createEventStreamRuntimeError(closeInfo.cause, state.open?.response)
         }
         return
       }
@@ -282,7 +303,7 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
     return [null, stream, state.open as StreamOpenInfo]
   } catch (error) {
     const openInfo = normalizeOpenInfo(extractOpenInfo(error))
-    const normalizedError = createRequestRuntimeError(error, openInfo?.response)
+    const normalizedError = createEventStreamRuntimeError(error, openInfo?.response)
     state.error = normalizedError
     state.open = openInfo
     state.status = normalizedError.kind === 'transport' && normalizedError.code === 'ABORTED' ? 'aborted' : 'error'
@@ -293,12 +314,22 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
 async function transformStreamMessage<TEvents extends EventSchemas>(
   events: TEvents,
   message: EventStreamMessage,
+  onInvalidEvent?: SSEInvalidEventHandler,
 ): Promise<EventStreamData<TEvents> | undefined> {
   const eventName = message.event || 'message'
   const eventSchema = resolveEventSchema(events, eventName)
   const rawData = decodeEventData(message.data)
 
   if (!eventSchema) {
+    await notifyInvalidEvent(onInvalidEvent, {
+      reason: 'missing-schema',
+      message: {
+        id: message.id || '',
+        event: eventName,
+        data: message.data,
+        retry: message.retry,
+      },
+    })
     return undefined
   }
 
@@ -310,8 +341,33 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
       retry: message.retry,
       // Type boundary: parseEventData validates against the resolved event schema; the shape matches EventStreamData<TEvents>.
     } as EventStreamData<TEvents>
-  } catch {
+  } catch (error) {
+    await notifyInvalidEvent(onInvalidEvent, {
+      reason: 'validation-failed',
+      message: {
+        id: message.id || '',
+        event: eventName,
+        data: message.data,
+        retry: message.retry,
+      },
+      cause: error,
+    })
     return undefined
+  }
+}
+
+async function notifyInvalidEvent(
+  onInvalidEvent: SSEInvalidEventHandler | undefined,
+  context: Parameters<SSEInvalidEventHandler>[0],
+): Promise<void> {
+  if (!onInvalidEvent) {
+    return
+  }
+
+  try {
+    await onInvalidEvent(context)
+  } catch {
+    // onInvalidEvent is an observer; observer failures must not tear down the stream.
   }
 }
 
@@ -329,7 +385,7 @@ function resolveEventSchema<TEvents extends EventSchemas>(events: TEvents, event
   return undefined
 }
 
-async function parseEventData(schema: AnyStruct, data: unknown): Promise<unknown> {
+function parseEventData(schema: AnyStruct, data: unknown): unknown {
   return decodeJson(schema, data)
 }
 
@@ -365,4 +421,37 @@ function normalizeOpenInfo(open?: {
 
 function extractOpenInfo(error: unknown): EventStreamOpenInfo | undefined {
   return getErrorOpenInfo(error)
+}
+
+function createEventStreamRuntimeError(cause: unknown, response?: SettledResponse<unknown>): RequestError<unknown> {
+  if (response && !response.ok) {
+    return {
+      code: 'HTTP_STATUS',
+      data: undefined,
+      kind: 'http',
+      message: getHttpStatusErrorMessage(response),
+      response,
+      status: response.status,
+    }
+  }
+
+  if (isEventStreamResponseValidationError(cause)) {
+    return createDefinitionError('RESPONSE_VALIDATION_FAILED', cause, response)
+  }
+
+  return createTransportError(cause)
+}
+
+function getHttpStatusErrorMessage(response: SettledResponse<unknown>): string {
+  /* istanbul ignore else -- makeResponse assigns Error for non-ok responses without an explicit error */
+  if (response.error instanceof Error) {
+    return response.error.message
+  }
+
+  /* istanbul ignore next */
+  return String(response.error)
+}
+
+function isEventStreamResponseValidationError(cause: unknown): boolean {
+  return cause instanceof Error && (cause.name === 'StructError' || /Expected content-type/.test(cause.message))
 }

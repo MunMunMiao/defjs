@@ -1,6 +1,12 @@
-import type { Context } from '@opentelemetry/api'
+import type { Attributes, Context } from '@opentelemetry/api'
 import type { Span, Tracer } from '@opentelemetry/api'
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api'
+
+const spanStatusSet = new WeakMap<Span, boolean>()
+
+function markSpanStatusSet(span: Span): void {
+  spanStatusSet.set(span, true)
+}
 
 export function createHttpSpan(tracer: Tracer, method: string, url: string, parentCtx: Context): Span {
   return tracer.startSpan(
@@ -16,9 +22,9 @@ export function createHttpSpan(tracer: Tracer, method: string, url: string, pare
   )
 }
 
-export function createSseSpan(tracer: Tracer, url: string, parentCtx: Context): Span {
+export function createSSESpan(tracer: Tracer, url: string, parentCtx: Context): Span {
   return tracer.startSpan(
-    'SSE connect',
+    'SSE',
     {
       kind: SpanKind.CLIENT,
       attributes: { 'url.full': url },
@@ -29,7 +35,7 @@ export function createSseSpan(tracer: Tracer, url: string, parentCtx: Context): 
 
 export function createWebSocketSpan(tracer: Tracer, url: string, parentCtx: Context): Span {
   return tracer.startSpan(
-    'WebSocket connect',
+    'WebSocket',
     {
       kind: SpanKind.CLIENT,
       attributes: { 'url.full': url },
@@ -40,18 +46,58 @@ export function createWebSocketSpan(tracer: Tracer, url: string, parentCtx: Cont
 
 export function setSpanHttpResponse(span: Span, status: number): void {
   span.setAttribute('http.response.status_code', status)
-  span.setStatus({ code: status >= 200 && status < 300 ? SpanStatusCode.OK : SpanStatusCode.ERROR })
+  span.setStatus({ code: status >= 500 ? SpanStatusCode.ERROR : SpanStatusCode.OK })
+  markSpanStatusSet(span)
   span.end()
 }
 
 export function setSpanError(span: Span, error: unknown): void {
-  const err = error instanceof Error ? error : new Error(String(error))
-  span.recordException(err)
+  span.recordException(toError(error))
   span.setStatus({ code: SpanStatusCode.ERROR })
+  markSpanStatusSet(span)
   span.end()
 }
 
 export function endSpan(span: Span): void {
-  span.setStatus({ code: SpanStatusCode.OK })
+  if (!spanStatusSet.has(span)) {
+    span.setStatus({ code: SpanStatusCode.OK })
+  }
   span.end()
+}
+
+export function runSpanHook(span: Span, hookName: string, hook: (() => void) | undefined): void {
+  if (!hook) {
+    return
+  }
+  try {
+    hook()
+  } catch (error) {
+    span.addEvent('defjs.otel.hook.error', {
+      'hook.name': hookName,
+      'error.type': getErrorType(error),
+    })
+    span.recordException(toError(error))
+  }
+}
+
+export function addSpanEvent(span: Span, eventName: string, attributes?: Attributes): void {
+  if (attributes) {
+    span.addEvent(eventName, attributes)
+    return
+  }
+  span.addEvent(eventName)
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
+}
+
+function getErrorType(error: unknown): string {
+  if (error instanceof Error) {
+    return error.name || 'Error'
+  }
+  if (typeof error === 'string') {
+    return error
+  }
+  return typeof error
 }

@@ -44,7 +44,7 @@ describe('web socket runtime lifecycle', () => {
     expect(connection).toBeUndefined()
     expect(error?.kind).toBe('transport')
 
-    if (!error || error.kind !== 'transport') {
+    if (error?.kind !== 'transport') {
       throw new Error('Expected transport error')
     }
 
@@ -108,7 +108,7 @@ describe('web socket runtime lifecycle', () => {
 
     let callCount = 0
 
-    const [error, socket, connection] = await useBeforeConnectSocket().with({
+    const [error, socket, connection] = await useBeforeConnectSocket({ query: { token: 'secret-0' } }).with({
       beforeConnect: async () => {
         callCount += 1
       },

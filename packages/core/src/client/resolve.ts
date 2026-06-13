@@ -1,4 +1,3 @@
-import { ERR_INVALID_CLIENT } from '../error'
 import type { ClientConfig } from './config'
 
 export const CLIENT = Symbol('Client')
@@ -13,7 +12,7 @@ export function isClient(value: unknown): value is Client {
 
 export function getClientConfig(client: Client): ClientConfig {
   if (!isClient(client)) {
-    throw ERR_INVALID_CLIENT
+    throw new TypeError('Value is not a valid Client instance')
   }
 
   return client[CLIENT]

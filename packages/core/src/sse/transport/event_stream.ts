@@ -30,6 +30,25 @@ export interface EventStreamHandle<TEvent = EventStreamMessage> extends AsyncIte
   close(reason?: unknown): void
 }
 
+export interface SSEReconnectOptions {
+  attempts?: number
+  delayMs?: number
+  factor?: number
+  jitter?: number
+  maxDelayMs?: number
+  shouldReconnect?: (context: {
+    attempt: number
+    cause?: unknown
+    lastEventId: string
+    open?: EventStreamOpenInfo
+  }) => boolean | Promise<boolean>
+}
+
+export interface SSEQueueOptions {
+  maxSize?: number
+  overflow?: 'drop-newest' | 'drop-oldest' | 'error'
+}
+
 export interface FetchEventStreamOptions<TEvent = EventStreamMessage> {
   fetch?: typeof fetch
   onopen?: (open: EventStreamOpenInfo) => void | Promise<void>
@@ -39,6 +58,9 @@ export interface FetchEventStreamOptions<TEvent = EventStreamMessage> {
   transformMessage?: (message: EventStreamMessage) => Promise<TEvent | undefined> | TEvent | undefined
   retryInterval?: number
   requireContentType?: boolean
+  reconnect?: SSEReconnectOptions
+  queue?: SSEQueueOptions
+  maxBufferSize?: number
 }
 
 export interface FetchEventStreamErrorContext {
@@ -71,7 +93,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
   request: HttpRequest,
   options: FetchEventStreamOptions<TEvent> = {},
 ): Promise<EventStreamHandle<TEvent>> {
-  const queue = new AsyncQueue<TEvent>()
+  const queue = new AsyncQueue<TEvent>(options.queue)
   const closedDeferred = createDeferred<EventStreamCloseInfo>()
   const openDeferred = createDeferred<EventStreamHandle<TEvent>>()
   const closeController = new AbortController()
@@ -84,7 +106,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
 
   let settledClosed = false
   let settledOpen = false
-  let retryInterval = options.retryInterval ?? DEFAULT_RETRY_INTERVAL
+  let retryInterval = options.retryInterval ?? options.reconnect?.delayMs ?? DEFAULT_RETRY_INTERVAL
   let retryCount = 0
   let lastEventId = ''
   let latestOpen: EventStreamOpenInfo | undefined
@@ -141,7 +163,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
           throw new Error('Missing response body for event stream')
         }
 
-        await consumeEventStream(response.body)
+        await consumeEventStream(response.body, attemptAbort)
         await options.onclose?.(open)
 
         queue.close()
@@ -204,7 +226,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
     }
   }
 
-  async function consumeEventStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+  async function consumeEventStream(stream: ReadableStream<Uint8Array>, abort?: AbortSignal): Promise<void> {
     await readStreamBytes(
       stream,
       createLineParser(
@@ -233,12 +255,16 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
             }
           },
         ),
+        { maxBufferSize: options.maxBufferSize },
       ),
+      abort,
     )
   }
 
   async function resolveRetryDelay(error: unknown): Promise<number | null> {
     retryCount += 1
+
+    // 1. Respect existing onerror callback first
     const next = await options.onerror?.(error, {
       lastEventId,
       retryCount,
@@ -250,15 +276,51 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       return null
     }
 
-    if (typeof next === 'number') {
-      return next
+    // 2. Check shouldReconnect
+    if (options.reconnect?.shouldReconnect) {
+      const should = await options.reconnect.shouldReconnect({
+        attempt: retryCount,
+        cause: error,
+        lastEventId,
+        open: latestOpen,
+      })
+      if (!should) {
+        return null
+      }
+    }
+
+    // 3. Check attempts limit
+    if (options.reconnect?.attempts !== undefined) {
+      if (retryCount > options.reconnect.attempts) {
+        return null
+      }
+    }
+
+    // 4. Determine base delay
+    let baseDelay = typeof next === 'number' ? next : retryInterval
+
+    // 5. Apply exponential backoff / jitter / cap
+    const { reconnect } = options
+    if (reconnect) {
+      const factor = reconnect.factor ?? 1
+      if (factor > 1 && retryCount > 1) {
+        baseDelay *= Math.pow(factor, retryCount - 1)
+      }
+
+      if (reconnect.maxDelayMs !== undefined && baseDelay > reconnect.maxDelayMs) {
+        baseDelay = reconnect.maxDelayMs
+      }
+
+      if (reconnect.jitter !== undefined && reconnect.jitter > 0) {
+        baseDelay += Math.random() * reconnect.jitter
+      }
     }
 
     if (!options.onerror && error instanceof EventStreamFatalError) {
       return null
     }
 
-    return retryInterval
+    return baseDelay
   }
 
   function settleClosed(info: EventStreamCloseInfo): void {
@@ -394,7 +456,7 @@ async function wait(ms: number, signal: AbortSignal): Promise<void> {
       reject(normalizeAbortReason(signal))
     }
 
-    /* istanbul ignore else -- defensive: signal is rarely already aborted before listener is attached */
+    /* istanbul ignore next -- defensive: micro-race where signal aborts before listener is attached */
     if (signal.aborted) {
       onAbort()
     } else {

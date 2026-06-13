@@ -1,13 +1,295 @@
-import { describe, expect, test, vi } from 'vitest'
-import { ERR_INVALID_CLIENT_ENDPOINT } from '../../error'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { HttpRequest } from '../../http'
 import {
+  __resetStreamingRequestBodySupportForTests,
   createFetchRequest,
   createFetchRequestInit,
   ERR_STREAMING_REQUEST_UNSUPPORTED,
   fetchHandler,
   supportsStreamingRequestBody,
 } from './fetch'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  __resetStreamingRequestBodySupportForTests()
+})
+
+function stubXsrfBrowserEnvironment(origin: string, cookieValue: string) {
+  const cookieGetter = vi.fn(() => cookieValue)
+  const documentStub = {} as Record<string, unknown>
+
+  vi.stubGlobal('location', { origin })
+  vi.stubGlobal('document', documentStub)
+
+  Object.defineProperty(documentStub, 'cookie', {
+    configurable: true,
+    get: cookieGetter,
+  })
+
+  return { cookieGetter }
+}
+
+function createXsrfConfig(tokenProvider?: NonNullable<HttpRequest['xsrf']>['tokenProvider']): NonNullable<HttpRequest['xsrf']> {
+  return {
+    cookieName: 'XSRF-TOKEN',
+    headerName: 'X-XSRF-TOKEN',
+    tokenProvider,
+  }
+}
+
+describe('Fetch handler XSRF injection', () => {
+  test('should inject xsrf header for mutating same-origin requests from cookie', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).get('X-XSRF-TOKEN')).toBe('cookie-token')
+    expect(cookieGetter).toHaveBeenCalledTimes(1)
+  })
+
+  test('should inject xsrf header when same-origin request uses withCredentials', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      withCredentials: true,
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect(init.credentials).toBe('include')
+    expect((init.headers as Headers).get('X-XSRF-TOKEN')).toBe('cookie-token')
+    expect(cookieGetter).toHaveBeenCalledTimes(1)
+  })
+
+  test.each(['GET', 'HEAD'] as const)('should not inject xsrf header for %s requests', (method) => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method,
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+    expect(cookieGetter).not.toHaveBeenCalled()
+  })
+
+  test('should not inject xsrf header for cross-origin requests', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://api.example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      withCredentials: true,
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+    expect(cookieGetter).not.toHaveBeenCalled()
+  })
+
+  test('should not inject xsrf header when browser cookie is empty', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', '')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+    expect(cookieGetter).toHaveBeenCalledTimes(1)
+  })
+
+  test('should not inject xsrf header when browser cookie name does not match', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'OTHER-TOKEN=other-token')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+    expect(cookieGetter).toHaveBeenCalledTimes(1)
+  })
+
+  test('should not inject xsrf header when baseEndpoint is missing', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const requestConfig: HttpRequest = {
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+    expect(cookieGetter).not.toHaveBeenCalled()
+  })
+
+  test('should not inject xsrf header when tokenProvider returns null', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const tokenProvider = vi.fn(() => null)
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(tokenProvider),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+    expect(tokenProvider).toHaveBeenCalledWith({ request: requestConfig })
+    expect(cookieGetter).not.toHaveBeenCalled()
+  })
+
+  test('should not inject xsrf header when tokenProvider returns empty string', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const tokenProvider = vi.fn(() => '')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(tokenProvider),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+    expect(tokenProvider).toHaveBeenCalledWith({ request: requestConfig })
+    expect(cookieGetter).not.toHaveBeenCalled()
+  })
+
+  test('should not inject xsrf header when browser cookie value is empty', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+    expect(cookieGetter).toHaveBeenCalledTimes(1)
+  })
+
+  test('should not inject xsrf header when browser cookie access throws', () => {
+    const cookieGetter = vi.fn(() => {
+      throw new Error('cookie unavailable')
+    })
+    const documentStub = {} as Record<string, unknown>
+
+    vi.stubGlobal('location', { origin: 'https://example.com' })
+    vi.stubGlobal('document', documentStub)
+
+    Object.defineProperty(documentStub, 'cookie', {
+      configurable: true,
+      get: cookieGetter,
+    })
+
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+    expect(cookieGetter).toHaveBeenCalledTimes(1)
+  })
+
+  test('should prefer tokenProvider over cookie', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const tokenProvider = vi.fn(() => 'provider-token')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(tokenProvider),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).get('X-XSRF-TOKEN')).toBe('provider-token')
+    expect(tokenProvider).toHaveBeenCalledWith({ request: requestConfig })
+    expect(cookieGetter).not.toHaveBeenCalled()
+  })
+
+  test('should not override an existing xsrf header', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const tokenProvider = vi.fn(() => 'provider-token')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      headers: new Headers([['X-XSRF-TOKEN', 'existing-token']]),
+      method: 'POST',
+      xsrf: createXsrfConfig(tokenProvider),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).get('X-XSRF-TOKEN')).toBe('existing-token')
+    expect(tokenProvider).not.toHaveBeenCalled()
+    expect(cookieGetter).not.toHaveBeenCalled()
+  })
+
+  test('should not inject xsrf header in non-browser runtime without provider', () => {
+    vi.stubGlobal('location', undefined)
+    vi.stubGlobal('document', undefined)
+
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
+  })
+
+  test('should inject xsrf header in non-browser runtime with provider', () => {
+    vi.stubGlobal('location', undefined)
+    vi.stubGlobal('document', undefined)
+
+    const tokenProvider = vi.fn(() => 'provider-token')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      method: 'POST',
+      xsrf: createXsrfConfig(tokenProvider),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).get('X-XSRF-TOKEN')).toBe('provider-token')
+    expect(tokenProvider).toHaveBeenCalledWith({ request: requestConfig })
+  })
+})
 
 describe('Fetch handler request creation', () => {
   test('should create a request', async () => {
@@ -126,7 +408,7 @@ describe('Fetch handler request creation', () => {
       method: 'GET',
     }
 
-    expect(() => createFetchRequest(requestConfig)).toThrowError(ERR_INVALID_CLIENT_ENDPOINT)
+    expect(() => createFetchRequest(requestConfig)).toThrowError('Client endpoint is required')
   })
 
   test('should reject requests with invalid baseEndpoint', () => {
@@ -136,7 +418,7 @@ describe('Fetch handler request creation', () => {
       method: 'GET',
     }
 
-    expect(() => createFetchRequest(requestConfig)).toThrowError(ERR_INVALID_CLIENT_ENDPOINT)
+    expect(() => createFetchRequest(requestConfig)).toThrowError('Client endpoint must be a valid URL')
   })
 
   test('should auto set duplex half for ReadableStream body', () => {
@@ -187,7 +469,6 @@ describe('Fetch handler request creation', () => {
   test('should return false when ReadableStream is undefined', () => {
     vi.stubGlobal('ReadableStream', undefined)
     expect(supportsStreamingRequestBody()).toBe(false)
-    vi.unstubAllGlobals()
   })
 
   test('should return zero for invalid Content-Length', () => {
@@ -331,5 +612,32 @@ describe('Fetch handler request creation', () => {
 
     // Cancel the stream
     await reader.cancel('test-cancel')
+  })
+
+  test('should propagate upload progress stream read errors', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const error = new Error('source failed')
+    const stream = new ReadableStream<Uint8Array>({
+      pull() {
+        throw error
+      },
+    })
+
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/upload',
+      method: 'POST',
+      body: stream,
+      uploadProgress: vi.fn(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+    const wrappedStream = init.body as ReadableStream<Uint8Array>
+    const reader = wrappedStream.getReader()
+
+    await expect(reader.read()).rejects.toThrow('source failed')
   })
 })

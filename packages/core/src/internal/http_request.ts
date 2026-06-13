@@ -1,3 +1,4 @@
+import type { ClientXSRFConfig } from '../client/config'
 import type { HttpContext } from './context'
 
 export type HttpResponseType = 'arraybuffer' | 'blob' | 'json' | 'text'
@@ -28,4 +29,5 @@ export interface HttpRequest {
   timeout?: number
   uploadProgress?: HttpProgressFn
   withCredentials?: boolean
+  xsrf?: ClientXSRFConfig
 }

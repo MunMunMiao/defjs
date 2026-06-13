@@ -6,7 +6,7 @@ export type HttpResponse<R> = {
   readonly statusText: string
   readonly headers: Headers
   readonly body: R | null
-  readonly error?: Error | string | unknown
+  readonly error?: unknown
 }
 
 export type MakeResponseOptions<R> = {
@@ -15,7 +15,7 @@ export type MakeResponseOptions<R> = {
   url?: string
   headers?: Headers
   body?: R | null
-  error?: Error | string | unknown
+  error?: unknown
 }
 
 export type SettledResponse<TBody = unknown> = HttpResponse<TBody> & {

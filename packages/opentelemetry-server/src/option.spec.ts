@@ -1,106 +1,222 @@
-import type { ClientConfig } from '@defjs/core'
-import type { Meter, TextMapPropagator, Tracer } from '@opentelemetry/api'
+import type { ClientConfig, HttpInterceptor, SSEInterceptor, WebSocketInterceptor } from '@defjs/core'
+import type { Context, Meter, TextMapPropagator } from '@opentelemetry/api'
 import { describe, expect, test, vi } from 'vitest'
 import { withOpenTelemetryServer } from './option'
+import {
+  createMockTracer,
+  makeHttpRequest,
+  makeHttpResponse,
+  makeSSERequest,
+  makeSSEStream,
+  makeWsRequest,
+  makeWsSession,
+} from './test-utils'
 
 function makeConfig(): ClientConfig {
+  const sharedFetch = globalThis.fetch.bind(globalThis) as typeof fetch
+
   return {
     endpoint: 'https://api.example.com',
+    http: { fetch: sharedFetch },
     interceptors: [],
     queryParamsSerializer: (params) => params.toString(),
-    sse: { fetch: globalThis.fetch.bind(globalThis) },
-    webSocket: {},
+    sse: { fetch: sharedFetch },
+    webSocket: { WebSocket: globalThis.WebSocket },
   }
 }
 
-function createMockTracer(): Tracer {
-  const spans: Array<Record<string, unknown>> = []
-  const startSpan = vi.fn((name: string, options?: Record<string, unknown>, _ctx?: unknown) => {
-    const span = {
-      name,
-      kind: (options?.kind as number) ?? 0,
-      attributes: { ...((options?.attributes as Record<string, unknown>) ?? {}) },
-      ended: false,
-      addEvent: vi.fn(),
-      setAttribute: vi.fn((k: string, v: unknown) => {
-        span.attributes[k] = v
-      }),
-      setStatus: vi.fn((s: unknown) => {
-        span.status = s
-      }),
-      recordException: vi.fn(),
-      end: vi.fn(() => {
-        span.ended = true
-      }),
-    }
-    spans.push(span)
-    return span
-  })
+function makeMeter(): Meter {
   return {
-    startSpan,
-    startActiveSpan: vi.fn(),
-  } as unknown as Tracer
+    createCounter: vi.fn(() => ({ add: vi.fn() })),
+    createHistogram: vi.fn(() => ({ record: vi.fn() })),
+    createGauge: vi.fn(() => ({ record: vi.fn() })),
+    createUpDownCounter: vi.fn(() => ({ add: vi.fn() })),
+    createObservableCounter: vi.fn(() => ({ addCallback: vi.fn(), removeCallback: vi.fn() })),
+    createObservableGauge: vi.fn(() => ({ addCallback: vi.fn(), removeCallback: vi.fn() })),
+    createObservableUpDownCounter: vi.fn(() => ({ addCallback: vi.fn(), removeCallback: vi.fn() })),
+    addBatchObservableCallback: vi.fn(),
+    removeBatchObservableCallback: vi.fn(),
+  }
+}
+
+function makePropagator(): TextMapPropagator {
+  return {
+    inject: vi.fn(),
+    extract: vi.fn((ctx: Context, _carrier?: unknown, _getter?: unknown) => ctx),
+    fields: vi.fn(() => ['traceparent']),
+  }
+}
+
+function httpInterceptor(config: ClientConfig): HttpInterceptor {
+  const interceptor = config.interceptors.find((item) => item.kind === 'http')
+  if (interceptor?.kind !== 'http') {
+    throw new Error('Expected HTTP interceptor')
+  }
+  return interceptor
+}
+
+function sseInterceptor(config: ClientConfig): SSEInterceptor {
+  const interceptor = config.interceptors.find((item) => item.kind === 'sse')
+  if (interceptor?.kind !== 'sse') {
+    throw new Error('Expected SSE interceptor')
+  }
+  return interceptor
+}
+
+function webSocketInterceptor(config: ClientConfig): WebSocketInterceptor {
+  const interceptor = config.interceptors.find((item) => item.kind === 'web-socket')
+  if (interceptor?.kind !== 'web-socket') {
+    throw new Error('Expected WebSocket interceptor')
+  }
+  return interceptor
 }
 
 describe('withOpenTelemetryServer', () => {
   test('should create interceptors for all transports by default', () => {
     const config = makeConfig()
-    const option = withOpenTelemetryServer({ tracer: createMockTracer() })
+    const option = withOpenTelemetryServer({ tracer: createMockTracer().tracer })
+    option(config)
+
+    expect(config.interceptors.map((interceptor) => interceptor.kind)).toEqual(['http', 'sse', 'web-socket'])
+  })
+
+  test('should disable HTTP interceptor when http.enabled is false', () => {
+    const config = makeConfig()
+    const option = withOpenTelemetryServer({ tracer: createMockTracer().tracer, http: { enabled: false } })
+    option(config)
+
+    expect(config.interceptors.map((interceptor) => interceptor.kind)).toEqual(['sse', 'web-socket'])
+  })
+
+  test('should disable SSE interceptor when sse.enabled is false', () => {
+    const config = makeConfig()
+    const option = withOpenTelemetryServer({ tracer: createMockTracer().tracer, sse: { enabled: false } })
+    option(config)
+
+    expect(config.interceptors.map((interceptor) => interceptor.kind)).toEqual(['http', 'web-socket'])
+  })
+
+  test('should disable WebSocket interceptor when webSocket.enabled is false', () => {
+    const config = makeConfig()
+    const option = withOpenTelemetryServer({ tracer: createMockTracer().tracer, webSocket: { enabled: false } })
+    option(config)
+
+    expect(config.interceptors.map((interceptor) => interceptor.kind)).toEqual(['http', 'sse'])
+  })
+
+  test('should enable transport when transport option object is empty', () => {
+    const config = makeConfig()
+    const option = withOpenTelemetryServer({
+      tracer: createMockTracer().tracer,
+      http: {},
+      sse: {},
+      webSocket: {},
+    })
     option(config)
 
     expect(config.interceptors).toHaveLength(3)
+    expect(config.http.fetch).toBe(config.sse.fetch)
   })
 
-  test('should disable HTTP interceptor when http is false', () => {
+  test('should disable all interceptors when all transports are disabled', () => {
     const config = makeConfig()
-    const option = withOpenTelemetryServer({ tracer: createMockTracer(), http: false })
+    const option = withOpenTelemetryServer({
+      tracer: createMockTracer().tracer,
+      http: { enabled: false },
+      sse: { enabled: false },
+      webSocket: { enabled: false },
+    })
     option(config)
 
-    expect(config.interceptors).toHaveLength(2)
+    expect(config.interceptors).toHaveLength(0)
   })
 
-  test('should disable SSE interceptor when sse is false', () => {
-    const config = makeConfig()
-    const option = withOpenTelemetryServer({ tracer: createMockTracer(), sse: false })
-    option(config)
+  test('should reject removed top-level and boolean transport options at runtime', () => {
+    const { tracer } = createMockTracer()
 
-    expect(config.interceptors).toHaveLength(2)
-  })
-
-  test('should disable WebSocket interceptor when webSocket is false', () => {
-    const config = makeConfig()
-    const option = withOpenTelemetryServer({ tracer: createMockTracer(), webSocket: false })
-    option(config)
-
-    expect(config.interceptors).toHaveLength(2)
+    expect(() => withOpenTelemetryServer({ tracer, http: false as never })).toThrow('http: false has been removed')
+    expect(() => withOpenTelemetryServer({ tracer, sse: false as never })).toThrow('sse: false has been removed')
+    expect(() => withOpenTelemetryServer({ tracer, webSocket: false as never })).toThrow('webSocket: false has been removed')
+    expect(() => withOpenTelemetryServer({ tracer, requestHook: vi.fn() } as never)).toThrow('requestHook has been moved')
+    expect(() => withOpenTelemetryServer({ tracer, responseHook: vi.fn() } as never)).toThrow('responseHook has been moved')
+    expect(() => withOpenTelemetryServer({ tracer, webSocketQueryPropagation: false } as never)).toThrow(
+      'webSocketQueryPropagation has been moved',
+    )
   })
 
   test('should accept external meter', () => {
-    const meter = {
-      createCounter: vi.fn(() => ({ add: vi.fn() })),
-      createHistogram: vi.fn(() => ({ record: vi.fn() })),
-    } as unknown as Meter
+    const meter = makeMeter()
 
-    const option = withOpenTelemetryServer({ tracer: createMockTracer(), meter })
+    const option = withOpenTelemetryServer({ tracer: createMockTracer().tracer, meter })
     expect(typeof option).toBe('function')
   })
 
   test('should accept custom propagator', () => {
-    const propagator = {
-      inject: vi.fn(),
-      extract: vi.fn((ctx: unknown) => ctx),
-      fields: vi.fn(() => ['traceparent']),
-    } as unknown as TextMapPropagator
+    const propagator = makePropagator()
 
-    const option = withOpenTelemetryServer({ tracer: createMockTracer(), propagator })
+    const option = withOpenTelemetryServer({ tracer: createMockTracer().tracer, propagator })
     expect(typeof option).toBe('function')
   })
 
-  test('should accept requestHook and responseHook', () => {
-    const tracer = createMockTracer()
+  test('should pass HTTP hooks only to HTTP interceptor', async () => {
+    const { tracer } = createMockTracer()
     const requestHook = vi.fn()
     const responseHook = vi.fn()
-    const option = withOpenTelemetryServer({ tracer, requestHook, responseHook })
-    expect(typeof option).toBe('function')
+    const config = makeConfig()
+
+    withOpenTelemetryServer({
+      tracer,
+      sse: { enabled: false },
+      webSocket: { enabled: false },
+      http: { requestHook, responseHook },
+    })(config)
+
+    const res = makeHttpResponse()
+    await httpInterceptor(config).fn(makeHttpRequest(), async () => res)
+
+    expect(requestHook).toHaveBeenCalledTimes(1)
+    expect(responseHook).toHaveBeenCalledTimes(1)
+  })
+
+  test('should pass SSE hooks only to SSE interceptor', async () => {
+    const { tracer } = createMockTracer()
+    const requestHook = vi.fn()
+    const responseHook = vi.fn()
+    const config = makeConfig()
+
+    withOpenTelemetryServer({
+      tracer,
+      http: { enabled: false },
+      webSocket: { enabled: false },
+      sse: { requestHook, responseHook },
+    })(config)
+
+    const stream = makeSSEStream()
+    await sseInterceptor(config).fn(makeSSERequest(), async () => stream)
+
+    expect(requestHook).toHaveBeenCalledTimes(1)
+    expect(responseHook).toHaveBeenCalledTimes(1)
+  })
+
+  test('should pass WebSocket hooks and queryPropagation to WebSocket interceptor', async () => {
+    const { tracer } = createMockTracer()
+    const requestHook = vi.fn()
+    const responseHook = vi.fn()
+    const propagator = makePropagator()
+    const config = makeConfig()
+
+    withOpenTelemetryServer({
+      tracer,
+      propagator,
+      http: { enabled: false },
+      sse: { enabled: false },
+      webSocket: { queryPropagation: false, requestHook, responseHook },
+    })(config)
+
+    await webSocketInterceptor(config).fn(makeWsRequest(), async () => makeWsSession())
+
+    expect(requestHook).toHaveBeenCalledTimes(1)
+    expect(responseHook).toHaveBeenCalledTimes(1)
+    expect(propagator.inject).not.toHaveBeenCalled()
   })
 })

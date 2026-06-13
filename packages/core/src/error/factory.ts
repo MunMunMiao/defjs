@@ -1,49 +1,24 @@
-import {
-  CODE_ABORTED,
-  CODE_INVALID_CLIENT,
-  CODE_INVALID_CLIENT_ENDPOINT,
-  CODE_INVALID_HTTP_CONTEXT_TOKEN,
-  CODE_NETWORK,
-  CODE_NOT_FOUND_GLOBAL_CLIENT,
-  CODE_NOT_FOUND_HANDLER,
-  CODE_OBSERVE,
-  CODE_TIMEOUT,
-  CODE_UNKNOWN,
-  CODE_UNSUPPORTED_FIELD_TYPE,
-} from './codes'
-import { hasErrorCode } from './normalize'
-import { unwrapErrorCause } from './protocol'
-import type { DefinitionError, RequestError, SettledResponseLike, TransportError } from './types'
-import { DefjsError } from './types'
+import type { DefinitionError, HttpStatusError, SettledResponseLike, TransportError } from './types'
 
-export const ERR_ABORTED = new DefjsError(CODE_ABORTED)
-export const ERR_TIMEOUT = new DefjsError(CODE_TIMEOUT)
-export const ERR_NETWORK = new DefjsError(CODE_NETWORK)
-export const ERR_NOT_FOUND_HANDLER = new DefjsError(CODE_NOT_FOUND_HANDLER)
-export const ERR_OBSERVE = new DefjsError(CODE_OBSERVE)
-export const ERR_UNSUPPORTED_FIELD_TYPE = new DefjsError(CODE_UNSUPPORTED_FIELD_TYPE)
-export const ERR_INVALID_CLIENT = new DefjsError(CODE_INVALID_CLIENT)
-export const ERR_INVALID_CLIENT_ENDPOINT = new DefjsError(CODE_INVALID_CLIENT_ENDPOINT)
-export const ERR_NOT_FOUND_GLOBAL_CLIENT = new DefjsError(CODE_NOT_FOUND_GLOBAL_CLIENT)
-export const ERR_INVALID_HTTP_CONTEXT_TOKEN = new DefjsError(CODE_INVALID_HTTP_CONTEXT_TOKEN)
-export const ERR_UNKNOWN = new DefjsError(CODE_UNKNOWN)
+export const ERR_ABORTED = new Error('Request was aborted')
+export const ERR_TIMEOUT = new Error('Request timed out')
 
 export function createTransportError(cause: unknown): TransportError {
-  if (hasErrorCode(cause, CODE_ABORTED)) {
+  if (isAbortCause(cause)) {
     return {
       cause,
       code: 'ABORTED',
       kind: 'transport',
-      message: CODE_ABORTED,
+      message: ERR_ABORTED.message,
     }
   }
 
-  if (hasErrorCode(cause, CODE_TIMEOUT)) {
+  if (isTimeoutCause(cause)) {
     return {
       cause,
       code: 'TIMEOUT',
       kind: 'transport',
-      message: CODE_TIMEOUT,
+      message: cause instanceof Error && cause.message ? cause.message : ERR_TIMEOUT.message,
     }
   }
 
@@ -51,7 +26,7 @@ export function createTransportError(cause: unknown): TransportError {
     cause,
     code: 'NETWORK_ERROR',
     kind: 'transport',
-    message: cause instanceof Error ? cause.message : CODE_NETWORK,
+    message: cause instanceof Error ? cause.message : 'Network error',
   }
 }
 
@@ -69,35 +44,30 @@ export function createDefinitionError(
   }
 }
 
-function isSchemaErrorLike(value: unknown): value is Error & { issues: readonly unknown[] } {
-  return value instanceof Error && value.name === 'StructError' && Array.isArray((value as { issues?: unknown[] }).issues)
+export function createHttpStatusError<TErrorData = unknown>(
+  status: number,
+  message: string,
+  response: SettledResponseLike<unknown>,
+  data?: TErrorData,
+): HttpStatusError<TErrorData> {
+  return {
+    code: 'HTTP_STATUS',
+    data: data as TErrorData,
+    kind: 'http',
+    message,
+    response,
+    status,
+  }
 }
 
-export function createRequestRuntimeError(cause: unknown, response?: SettledResponseLike<unknown>): RequestError<unknown> {
-  const rootCause = unwrapErrorCause(cause)
+function isAbortCause(cause: unknown): boolean {
+  return cause === ERR_ABORTED || (cause instanceof DOMException && cause.name === 'AbortError')
+}
 
-  if (response && !response.ok) {
-    return {
-      code: 'HTTP_STATUS',
-      data: undefined,
-      kind: 'http',
-      message:
-        response.error instanceof Error
-          ? response.error.message
-          : /* istanbul ignore next -- unreachable: fetchHandler always sets response.error to an Error */
-            String(response.error ?? `HTTP ${response.status}`),
-      response,
-      status: response.status,
-    }
-  }
-
-  if (isSchemaErrorLike(rootCause)) {
-    return createDefinitionError('RESPONSE_VALIDATION_FAILED', rootCause, response)
-  }
-
-  if (rootCause instanceof Error && /Expected content-type/.test(rootCause.message)) {
-    return createDefinitionError('RESPONSE_VALIDATION_FAILED', rootCause, response)
-  }
-
-  return createTransportError(rootCause)
+function isTimeoutCause(cause: unknown): boolean {
+  return (
+    cause === ERR_TIMEOUT ||
+    (cause instanceof DOMException && cause.name === 'TimeoutError') ||
+    (cause instanceof Error && cause.name === 'TimeoutError')
+  )
 }

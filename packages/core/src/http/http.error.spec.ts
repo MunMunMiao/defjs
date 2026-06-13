@@ -34,7 +34,7 @@ describe('request http runtime errors', () => {
     expect(response?.status).toBe(404)
     expect(error?.kind).toBe('http')
 
-    if (!error || error.kind !== 'http') {
+    if (error?.kind !== 'http') {
       throw new Error('Expected http error')
     }
 
@@ -63,7 +63,7 @@ describe('request http runtime errors', () => {
     expect(response).toBeUndefined()
     expect(error?.kind).toBe('definition')
 
-    if (!error || error.kind !== 'definition') {
+    if (error?.kind !== 'definition') {
       throw new Error('Expected definition error')
     }
 
@@ -87,7 +87,7 @@ describe('request http runtime errors', () => {
     expect(response?.status).toBe(200)
     expect(error?.kind).toBe('definition')
 
-    if (!error || error.kind !== 'definition') {
+    if (error?.kind !== 'definition') {
       throw new Error('Expected definition error')
     }
 
@@ -109,7 +109,7 @@ describe('request http runtime errors', () => {
     expect(response?.status).toBe(500)
     expect(error?.kind).toBe('definition')
 
-    if (!error || error.kind !== 'definition') {
+    if (error?.kind !== 'definition') {
       throw new Error('Expected definition error')
     }
 
@@ -121,17 +121,18 @@ describe('request http runtime errors', () => {
       build: () => {
         throw new Error('build failed')
       },
+      input: struct.object({}),
       method: 'GET',
       path: '/test',
     })
 
-    const [error, result, response] = await useBadBuild()
+    const [error, result, response] = await useBadBuild({})
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
     expect(error?.kind).toBe('definition')
 
-    if (!error || error.kind !== 'definition') {
+    if (error?.kind !== 'definition') {
       throw new Error('Expected definition error')
     }
 
@@ -159,7 +160,7 @@ describe('request http runtime errors', () => {
     expect(response).toBeUndefined()
     expect(error?.kind).toBe('transport')
 
-    if (!error || error.kind !== 'transport') {
+    if (error?.kind !== 'transport') {
       throw new Error('Expected transport error')
     }
 
@@ -603,7 +604,7 @@ describe('request http runtime errors', () => {
     expect(response).toBeUndefined()
     expect(error?.kind).toBe('transport')
 
-    if (!error || error.kind !== 'transport') {
+    if (error?.kind !== 'transport') {
       throw new Error('Expected transport error')
     }
 

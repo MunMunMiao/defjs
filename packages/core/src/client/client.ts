@@ -1,5 +1,5 @@
 import type { ClientConfig } from './config'
-import { DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
+import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import { getGlobalClient } from './global'
 import type { ClientOption } from './option'
 import type { Client } from './resolve'
@@ -8,10 +8,19 @@ import { CLIENT, getClientConfig } from './resolve'
 export function createClient(...options: ClientOption[]): Client {
   const conf: ClientConfig = {
     endpoint: '',
+    http: { ...DEFAULT_HTTP_OPTIONS },
     interceptors: [],
     queryParamsSerializer: DEFAULT_QUERY_PARAMS_SERIALIZER,
     sse: { ...DEFAULT_SSE_OPTIONS },
-    webSocket: {},
+    webSocket: {
+      WebSocket: globalThis.WebSocket,
+      beforeConnect: undefined,
+      heartbeat: undefined,
+      protocols: undefined,
+      queue: undefined,
+      reconnect: undefined,
+    },
+    xsrf: undefined,
   }
 
   for (const option of options) {
@@ -26,14 +35,32 @@ export function cloneClient(client: Client, ...options: ClientOption[]): Client 
 
   const conf: ClientConfig = {
     endpoint: prev.endpoint,
+    http: { ...prev.http },
     interceptors: [...prev.interceptors],
     queryParamsSerializer: prev.queryParamsSerializer,
     sse: { ...prev.sse },
     webSocket: {
       ...prev.webSocket,
-      protocols: prev.webSocket.protocols ? [...prev.webSocket.protocols] : undefined,
     },
+    xsrf: prev.xsrf
+      ? {
+          ...prev.xsrf,
+        }
+      : undefined,
     withCredentials: prev.withCredentials,
+  }
+
+  if (prev.webSocket.protocols) {
+    conf.webSocket.protocols = [...prev.webSocket.protocols]
+  }
+  if (prev.webSocket.heartbeat) {
+    conf.webSocket.heartbeat = { ...prev.webSocket.heartbeat }
+  }
+  if (prev.webSocket.reconnect) {
+    conf.webSocket.reconnect = { ...prev.webSocket.reconnect }
+  }
+  if (prev.webSocket.queue) {
+    conf.webSocket.queue = { ...prev.webSocket.queue }
   }
 
   for (const option of options) {

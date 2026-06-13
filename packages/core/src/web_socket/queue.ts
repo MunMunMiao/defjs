@@ -29,11 +29,11 @@ export function createSendQueue(config?: WebSocketQueueConfig): SendQueue {
     enqueue(serialized) {
       if (size < maxSize) {
         const node: QueueNode = { value: serialized }
-        if (!tail) {
-          head = tail = node
-        } else {
+        if (tail) {
           tail.next = node
           tail = node
+        } else {
+          head = tail = node
         }
         size++
         return
@@ -51,11 +51,11 @@ export function createSendQueue(config?: WebSocketQueueConfig): SendQueue {
             size--
           }
           const node: QueueNode = { value: serialized }
-          if (!tail) {
-            head = tail = node
-          } else {
+          if (tail) {
             tail.next = node
             tail = node
+          } else {
+            head = tail = node
           }
           size++
           return

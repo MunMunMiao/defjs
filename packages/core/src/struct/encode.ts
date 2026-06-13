@@ -120,7 +120,7 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
 // Best-effort runtime type guard used by encode() to route union / intersection / discriminatedUnion to the right branch.
 // Use strict native type checks instead of `definition.is`: some primitive predicates accept wire forms
 // such as string dates or bigint strings, while encode() receives parsed runtime values.
-export function matchesDefinition(definition: SchemaDefinition, value: unknown, schema?: RuntimeSchema): boolean {
+export function matchesDefinition(definition: SchemaDefinition, value: unknown, schema: RuntimeSchema): boolean {
   switch (definition.kind) {
     case 'any':
     case 'unknown':
@@ -172,9 +172,6 @@ export function matchesDefinition(definition: SchemaDefinition, value: unknown, 
     case 'object':
       if (!isPlainObject(value)) {
         return false
-      }
-      if (!schema) {
-        return true
       }
       return matchesObjectValue(schema, value)
 

@@ -1,17 +1,17 @@
 import type { QueryParamsSerializer } from '../client/config'
 import type { HttpRequest } from '../internal/http_request'
-import type { RequestBuild, RequestBuilder } from '../internal/request_builder'
+import type { RequestBuild, RequestBuildHandler } from '../internal/request_builder'
 import { buildRequest } from '../internal/request_builder'
 import type { RequestBuildValue } from '../internal/request_values'
-import { createResolvedRequestUrl, resolveRequestUrl } from '../internal/url'
+import { createResolvedRequestUrl, fillUrl, resolveRequestUrl } from '../internal/url'
 import type { AnyStruct } from '../struct'
 
-export function createWebSocketBuild<TInput>(
-  input: TInput,
-  build: ((request: RequestBuilder, input: TInput) => void) | undefined,
-  inputSchema?: AnyStruct,
+export function createWebSocketBuild<TInput extends AnyStruct | undefined>(
+  input: unknown,
+  build: RequestBuildHandler<TInput, 'webSocket'> | undefined,
+  inputSchema?: TInput,
 ): RequestBuild {
-  return buildRequest(input, build as ((request: RequestBuilder, input: unknown) => void) | undefined, {
+  return buildRequest(input, build, {
     input: inputSchema,
     transport: 'webSocket',
   })
@@ -40,7 +40,11 @@ export function createWebSocketRequest(params: {
 
 export function createWebSocketUrlFromRequest(request: HttpRequest): string {
   const url = resolveRequestUrl(request)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : url.protocol === 'http:' ? 'ws:' : url.protocol
+  if (url.protocol === 'https:') {
+    url.protocol = 'wss:'
+  } else if (url.protocol === 'http:') {
+    url.protocol = 'ws:'
+  }
   return url.toString()
 }
 
@@ -52,32 +56,16 @@ export function createWebSocketUrl(
   queryParamsSerializer: QueryParamsSerializer,
 ): string {
   const url = createResolvedRequestUrl(baseEndpoint, fillUrl(path, params), queryParamsSerializer(createSearchParams(query)))
-  url.protocol = url.protocol === 'https:' ? 'wss:' : url.protocol === 'http:' ? 'ws:' : url.protocol
+  if (url.protocol === 'https:') {
+    url.protocol = 'wss:'
+  } else if (url.protocol === 'http:') {
+    url.protocol = 'ws:'
+  }
   return url.toString()
 }
 
-function fillUrl(path: string, params?: Record<string, RequestBuildValue>): string {
-  const paramMap = new Map<string, string>()
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (typeof value === 'undefined') {
-        continue
-      }
-
-      if (Array.isArray(value)) {
-        if (value.length > 0) {
-          paramMap.set(key, serializeValue(value[0]))
-        }
-        continue
-      }
-
-      paramMap.set(key, serializeValue(value))
-    }
-  }
-
-  return path.replace(/:([^/]+)/g, (_, part) => paramMap.get(part) ?? 'undefined')
-}
-
+// WebSocket-specific search params builder that serializes complex values (objects → JSON, bigint → string).
+// Differs from internal/url's createSearchParams which silently skips non-scalar values.
 function createSearchParams(query?: Record<string, RequestBuildValue>): URLSearchParams {
   const searchParams = new URLSearchParams()
   if (!query) {

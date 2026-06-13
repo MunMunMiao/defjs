@@ -79,7 +79,6 @@ describe('struct coverage boundary cases', () => {
     })
     expect(matchesDefinition(definition(requiredObject), {}, runtime(requiredObject))).toBe(false)
     expect(matchesDefinition(definition(requiredObject), { id: 'u_1' }, runtime(requiredObject))).toBe(true)
-    expect(matchesDefinition(definition(requiredObject), {}, undefined)).toBe(true)
     expect(matchesDefinition(definition(requiredObject), { id: 'u_1' }, runtime(struct.string()))).toBe(true)
 
     const literalObject = struct.object({ type: struct.literal('message') })
@@ -88,8 +87,10 @@ describe('struct coverage boundary cases', () => {
     const enumObject = struct.object({ status: struct.enum(['draft', 'published']) })
     expect(matchesDefinition(definition(enumObject), { status: 'archived' }, runtime(enumObject))).toBe(false)
 
-    expect(matchesDefinition(definition(struct.record(struct.string())), [])).toBe(false)
-    expect(matchesDefinition(definition(struct.enum(['draft', 'published'])), 'draft')).toBe(true)
+    expect(matchesDefinition(definition(struct.record(struct.string())), [], runtime(struct.record(struct.string())))).toBe(false)
+    expect(matchesDefinition(definition(struct.enum(['draft', 'published'])), 'draft', runtime(struct.enum(['draft', 'published'])))).toBe(
+      true,
+    )
 
     const request = struct.request({
       body: struct.json(struct.object({ name: struct.string() })),
@@ -109,8 +110,8 @@ describe('struct coverage boundary cases', () => {
     expect(encodeValue(runtime(request), {})).toEqual({})
     expect(encodeValue(runtime(struct.request({})), {})).toEqual({})
     expect(encodeValue(runtime(struct.json(struct.string())), 'hello')).toBe('hello')
-    expect(matchesDefinition(definition(request), requestValue)).toBe(true)
-    expect(matchesDefinition(definition(struct.json(struct.string())), 'hello')).toBe(true)
+    expect(matchesDefinition(definition(request), requestValue, runtime(request))).toBe(true)
+    expect(matchesDefinition(definition(struct.json(struct.string())), 'hello', runtime(struct.json(struct.string())))).toBe(true)
   })
 
   test('error formatting reuses existing tree nodes and root prettify paths', () => {
@@ -183,6 +184,16 @@ describe('struct coverage boundary cases', () => {
       query: {},
     })
     expect(buildZeroValue(runtime(struct.json(struct.string())), [])).toBe('')
+
+    // intersection zero value: both sides are plain objects → merged
+    expect(
+      buildZeroValue(runtime(struct.intersection(struct.object({ a: struct.string() }), struct.object({ b: struct.number() }))), []),
+    ).toEqual({
+      a: '',
+      b: 0,
+    })
+    // intersection zero value: one side is not plain object → right side wins
+    expect(buildZeroValue(runtime(struct.intersection(struct.string(), struct.number())), [])).toBe(0)
 
     const [err, value] = parse(struct.intersection(struct.any(), struct.string()), 'plain')
     if (err) {

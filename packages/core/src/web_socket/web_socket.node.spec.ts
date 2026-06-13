@@ -36,6 +36,7 @@ function createMockWebSocketClass(
     url: string
     protocol: string
     extensions: string
+    binaryType: string
     close: MockWebSocketInstance['close']
     send: MockWebSocketInstance['send']
     addEventListener: MockWebSocketInstance['addEventListener']

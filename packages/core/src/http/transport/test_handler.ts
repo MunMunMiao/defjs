@@ -26,10 +26,10 @@ export function makeFakeHandler(init?: {
 
       const resp = makeResponse({
         url: url.toString(),
-        status: status || 0,
-        statusText: statusText || '',
-        headers: headers || new Headers(),
-        body: body || undefined,
+        status: status ?? 0,
+        statusText: statusText ?? '',
+        headers: headers ?? new Headers(),
+        body: body ?? undefined,
       })
 
       onRequestAfter?.(resp)

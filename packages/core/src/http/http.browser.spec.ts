@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, inject, test, vi } from 'vitest'
 
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withHTTPHandle, withXSRF } from '../client'
 import { struct } from '../struct'
 import { defineRequest } from './index'
 
@@ -11,6 +11,7 @@ describe('http browser runtime', () => {
 
   afterEach(() => {
     resetGlobalClient()
+    document.cookie = 'XSRF-TOKEN=; Max-Age=0; path=/'
   })
 
   test('should resolve request tuples in real browsers', async () => {
@@ -43,7 +44,7 @@ describe('http browser runtime', () => {
       path: '/',
     })
 
-    const ref = useCreateAccount().with({
+    const ref = useCreateAccount({ body: new Uint8Array(32 * 1024).buffer }).with({
       onDownloadProgress(event) {
         downloadLoaded.push(event.loaded)
       },
@@ -67,7 +68,7 @@ describe('http browser runtime', () => {
       path: '/delay',
     })
 
-    const [error, result, response] = await useDelay().with({
+    const [error, result, response] = await useDelay({ query: { ms: 1000 } }).with({
       timeout: 100,
     })
 
@@ -75,10 +76,79 @@ describe('http browser runtime', () => {
     expect(response).toBeUndefined()
     expect(error?.kind).toBe('transport')
 
-    if (!error || error.kind !== 'transport') {
+    if (error?.kind !== 'transport') {
       throw new Error('Expected transport error')
     }
 
     expect(error.code).toBe('TIMEOUT')
+  })
+
+  test('should inject xsrf header from document.cookie on same-origin mutating requests', async () => {
+    document.cookie = 'XSRF-TOKEN=browser-cookie; path=/'
+
+    const fetchMock = vi.fn(async (request: Request) => {
+      expect(request.url).toBe(`${window.location.origin}/xsrf`)
+      expect(request.headers.get('X-XSRF-TOKEN')).toBe('browser-cookie')
+      return new Response(null, { status: 200 })
+    }) as unknown as typeof fetch
+
+    setGlobalClient(createClient(withEndpoint(window.location.origin), withHTTPHandle(fetchMock), withXSRF()))
+
+    const useXsrf = defineRequest({
+      method: 'POST',
+      path: '/xsrf',
+    })
+
+    const [error, result, response] = await useXsrf()
+
+    expect(error).toBeNull()
+    expect(result).toBeUndefined()
+    expect(response?.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  test('should validate xsrf token through real server round-trip', async () => {
+    const tokenResponse = await fetch('/xsrf-token')
+    await (tokenResponse.json() as Promise<{ token: string }>)
+
+    setGlobalClient(createClient(withEndpoint(window.location.origin), withXSRF()))
+
+    const useValidate = defineRequest({
+      method: 'POST',
+      output: {
+        200: struct.object({ ok: struct.boolean() }),
+        403: struct.object({ ok: struct.boolean(), reason: struct.string() }),
+      },
+      path: '/xsrf-validate',
+    })
+
+    const [error, result, response] = await useValidate()
+
+    expect(error).toBeNull()
+    expect(result).toEqual({ ok: true })
+    expect(response?.ok).toBe(true)
+    expect(response?.status).toBe(200)
+  })
+
+  test('should be rejected by server when xsrf header is missing', async () => {
+    await fetch('/xsrf-token')
+
+    setGlobalClient(createClient(withEndpoint(window.location.origin)))
+
+    const useValidate = defineRequest({
+      method: 'POST',
+      output: {
+        200: struct.object({ ok: struct.boolean() }),
+        403: struct.object({ ok: struct.boolean(), reason: struct.string() }),
+      },
+      path: '/xsrf-validate',
+    })
+
+    const [error, result, response] = await useValidate()
+
+    expect(error).not.toBeNull()
+    expect(result).toBeUndefined()
+    expect(response?.ok).toBe(false)
+    expect(response?.status).toBe(403)
   })
 })

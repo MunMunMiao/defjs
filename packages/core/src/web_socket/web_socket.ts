@@ -11,7 +11,7 @@ import { AsyncQueue } from '../internal/async_queue'
 import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
 import { parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpRequest } from '../internal/http_request'
-import type { RequestBuild, RequestBuilder, RequestBuildHandler } from '../internal/request_builder'
+import type { RequestBuild, RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct, Infer } from '../struct'
 import { createWebSocketBuild, createWebSocketRequest, createWebSocketUrlFromRequest } from './build'
 import {
@@ -81,18 +81,41 @@ export type WebSocketOutgoingData<TOutgoing extends SocketSchemas | undefined> =
     : KnownOutgoingSocketUnion<TOutgoing>
   : never
 
-export interface WebSocketDefinition<
-  TInput extends AnyStruct | undefined = undefined,
+interface WebSocketDefinitionBase<
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
 > {
-  build?: RequestBuildHandler<TInput, 'webSocket'>
   incoming: TIncoming
-  input?: TInput
   outgoing?: TOutgoing
   path: string
   protocols?: readonly string[]
 }
+
+type WebSocketDefinitionWithoutBuild<
+  TInput extends AnyStruct | undefined = undefined,
+  TIncoming extends SocketSchemas = SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined = undefined,
+> = WebSocketDefinitionBase<TIncoming, TOutgoing> & {
+  build?: never
+  input?: TInput
+}
+
+type WebSocketDefinitionWithBuild<
+  TInput extends AnyStruct,
+  TIncoming extends SocketSchemas = SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined = undefined,
+> = WebSocketDefinitionBase<TIncoming, TOutgoing> & {
+  build: RequestBuildHandler<TInput, 'webSocket'>
+  input: TInput
+}
+
+export type WebSocketDefinition<
+  TInput extends AnyStruct | undefined = undefined,
+  TIncoming extends SocketSchemas = SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined = undefined,
+> =
+  | WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>
+  | (TInput extends AnyStruct ? WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing> : never)
 
 export interface WebSocketConnectionInfo {
   extensions?: string
@@ -211,6 +234,16 @@ function castParsedWebSocketInput<TInput extends AnyStruct | undefined>(value: u
 }
 
 export function defineWebSocket<
+  TInput extends AnyStruct,
+  TIncoming extends SocketSchemas = SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined = undefined,
+>(definition: WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing>): UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing>
+export function defineWebSocket<
+  TInput extends AnyStruct | undefined = undefined,
+  TIncoming extends SocketSchemas = SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined = undefined,
+>(definition: WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>): UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing>
+export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
@@ -260,8 +293,10 @@ function createWebSocketRef<
       return state.status
     },
     close(code?: number, reason?: string) {
-      controller.abort({ code, kind: 'manual-web-socket-close', reason } satisfies ManualSocketCloseReason)
       state.socket?.close(code, reason)
+      if (!controller.signal.aborted) {
+        controller.abort({ code, kind: 'manual-web-socket-close', reason } satisfies ManualSocketCloseReason)
+      }
     },
     onRuntimeError(listener) {
       state.listeners.runtimeError.add(listener)
@@ -316,12 +351,7 @@ async function executeWebSocketEndpoint<
 
   let built: RequestBuild
   try {
-    built = createWebSocketBuild(
-      parsedInput,
-      // Type boundary: build signature is transport-specific; the generic handler accepts unknown.
-      endpoint.build as ((request: RequestBuilder, input: unknown) => void) | undefined,
-      endpoint.input,
-    )
+    built = createWebSocketBuild(parsedInput, endpoint.build, endpoint.input)
   } catch (error) {
     const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
     state.error = definitionError
@@ -379,14 +409,14 @@ async function executeWebSocketEndpoint<
       const sessionController = {
         currentSocket: undefined as WebSocket | undefined,
         heartbeat: undefined as HeartbeatRuntime<WebSocketIncomingData<TIncoming>> | undefined,
-        // Type boundary: lastRuntimeError is written by the error handler and read only inside the closure; unknown is the narrowest safe type.
-        lastRuntimeError: undefined as unknown,
+        lastRuntimeError: undefined,
       }
       const sendQueue = createSendQueue(config?.queue ?? clientConfig.webSocket.queue)
       const session = createWebSocketSession(
         endpoint.outgoing,
         incomingQueue,
         closedDeferred.promise,
+        controller,
         state,
         sessionController,
         sendQueue,
@@ -546,7 +576,13 @@ async function executeWebSocketEndpoint<
             }
             try {
               setSocketState(state, 'closing')
-              socket.close()
+              const closeReason = signal.reason
+              /* istanbul ignore if -- unreachable: ref.close()/session.close() close socket before aborting, so handleAbort sees CLOSING state */
+              if (isManualSocketCloseReason(closeReason)) {
+                socket.close(closeReason.code, closeReason.reason)
+              } else {
+                socket.close()
+              }
             } catch {
               // istanbul ignore next -- defensive: native WebSocket.close() never throws
             }
@@ -644,11 +680,25 @@ async function executeWebSocketEndpoint<
           return
         }
 
+        const abortReason = signal.reason
+        if (isManualSocketCloseReason(abortReason)) {
+          /* istanbul ignore next -- closeInfo always has code/reason when from connectOnce */
+          const closeCode = closeInfo?.code ?? abortReason.code
+          /* istanbul ignore next -- closeInfo always has code/reason when from connectOnce */
+          const closeReasonText = closeInfo?.reason || abortReason.reason
+          finalizeClosed({
+            ...closeInfo,
+            code: closeCode,
+            reason: closeReasonText,
+          })
+          return
+        }
+
         finalizeClosed(
           /* istanbul ignore next -- closeInfo is always present from connectOnce */
           closeInfo ?? {
-            cause: signal.reason,
-            reason: signal.reason instanceof Error ? signal.reason.message : undefined,
+            cause: abortReason,
+            reason: abortReason instanceof Error ? abortReason.message : undefined,
           },
         )
       }
@@ -726,11 +776,11 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | und
   outgoing: TOutgoing,
   queue: AsyncQueue<TIncoming>,
   closed: Promise<WebSocketCloseInfo>,
+  controller: AbortController,
   state: SocketRefState<TIncoming, WebSocketOutgoingData<TOutgoing>>,
   sessionController: {
     currentSocket: WebSocket | undefined
     heartbeat: HeartbeatRuntime<TIncoming> | undefined
-    lastRuntimeError: unknown
   },
   sendQueue: SendQueue,
   openState: number,
@@ -743,6 +793,9 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | und
     closed,
     close(code?: number, reason?: string) {
       sessionController.currentSocket?.close(code, reason)
+      if (!controller.signal.aborted) {
+        controller.abort({ code, kind: 'manual-web-socket-close', reason } satisfies ManualSocketCloseReason)
+      }
     },
     get state() {
       return state.status

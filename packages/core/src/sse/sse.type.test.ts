@@ -1,4 +1,4 @@
-import { createClient, withEndpoint, withSseOptions } from '../client'
+import { createClient, withEndpoint, withSSEHandle } from '../client'
 import { struct } from '../struct'
 import type { EventStreamData, EventStreamRef, StreamAwaitResult, UseEventStreamConfig } from './index'
 import { defineEventStream } from './index'
@@ -54,6 +54,15 @@ const requestInputStream = defineEventStream({
   path: '/events/:id',
 })
 
+defineEventStream({
+  build(request: unknown, input: unknown) {
+    void request
+    void input
+  },
+  events,
+  path: '/events',
+} as never)
+
 type ExpectedEvent =
   | {
       data: {
@@ -87,12 +96,7 @@ type AwaitCases = Expect<Equal<Awaited<ReturnType<typeof useRequiredStream>>, St
 type InputCases = Expect<Equal<Parameters<typeof useRequiredStream>, [({ roomId?: string | undefined } | undefined)?]>>
 
 const streamRef = useRequiredStream({ roomId: 'room-1' })
-const streamClient = createClient(
-  withEndpoint('https://api.example.com'),
-  withSseOptions({
-    fetch: globalThis.fetch,
-  }),
-)
+const streamClient = createClient(withEndpoint('https://api.example.com'), withSSEHandle(globalThis.fetch))
 
 streamRef.with({ timeout: 100 })
 streamRef.with({ abort: new AbortController().signal })

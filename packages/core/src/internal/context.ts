@@ -1,5 +1,3 @@
-import { ERR_INVALID_HTTP_CONTEXT_TOKEN } from '../error'
-
 const contextTokenRegistry = new WeakSet<Function>()
 
 declare const HTTP_CONTEXT_TOKEN_BRAND: unique symbol
@@ -60,14 +58,14 @@ export function makeHttpContext(entries?: readonly (readonly [HttpContextToken<u
   return {
     set<T>(token: HttpContextToken<T>, value: T) {
       if (!isHttpContextToken(token)) {
-        throw ERR_INVALID_HTTP_CONTEXT_TOKEN
+        throw new TypeError('Value is not a valid HTTP context token')
       }
       ctx.set(token, value)
       return this
     },
     get<T>(token: HttpContextToken<T>) {
       if (!isHttpContextToken(token)) {
-        throw ERR_INVALID_HTTP_CONTEXT_TOKEN
+        throw new TypeError('Value is not a valid HTTP context token')
       }
       return ctx.has(token) ? (ctx.get(token) as T) : token()
     },
@@ -90,13 +88,8 @@ export function makeHttpContext(entries?: readonly (readonly [HttpContextToken<u
 }
 
 export function mergeHttpContexts(primary?: HttpContext, secondary?: HttpContext): HttpContext {
-  if (!primary && !secondary) {
-    return makeHttpContext()
-  }
-
   if (!primary) {
-    /* istanbul ignore next -- unreachable: covered by (!primary && !secondary) above */
-    return secondary ? makeHttpContext(secondary) : makeHttpContext()
+    return makeHttpContext(secondary)
   }
 
   if (!secondary) {

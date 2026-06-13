@@ -251,6 +251,38 @@ describe('fetchEventStream advanced', () => {
     await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
   })
 
+  test('should cancel active response body when stream is closed', async () => {
+    const cancel = vi.fn()
+    const mockFetch = vi.fn(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: first\n\n'))
+        },
+        cancel,
+      })
+
+      return new Response(body, {
+        headers: { 'content-type': 'text/event-stream' },
+        status: 200,
+      })
+    }) as unknown as typeof fetch
+
+    const stream = await fetchEventStream(createRequest('/sse/basic'), { fetch: mockFetch })
+    const iterator = stream[Symbol.asyncIterator]()
+
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { data: 'first', event: '', id: '', retry: undefined },
+    })
+
+    stream.close('stop')
+
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledWith('stop')
+    })
+    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+  })
+
   test('should retry with default interval when fetch throws network error', async () => {
     const mockFetch = vi
       .fn()
@@ -298,5 +330,226 @@ describe('fetchEventStream advanced', () => {
       events.push(event as EventStreamMessage)
     }
     expect(events.length).toBeGreaterThan(0)
+  })
+
+  test('should not retry when reconnect.attempts = 0', async () => {
+    let fetchCount = 0
+    const mockFetch = vi.fn(async () => {
+      fetchCount += 1
+      return new Response(null, { status: 503 })
+    }) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/fail', method: 'GET' }
+
+    await expect(
+      fetchEventStream(request, {
+        fetch: mockFetch,
+        reconnect: { attempts: 0 },
+      }),
+    ).rejects.toThrow()
+    expect(fetchCount).toBe(1)
+  })
+
+  test('should retry up to reconnect.attempts limit', async () => {
+    let fetchCount = 0
+    const mockFetch = vi.fn(async () => {
+      fetchCount += 1
+      // Throw a network error (not EventStreamFatalError) to trigger retry path
+      throw new Error('network error')
+    }) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/fail', method: 'GET' }
+
+    await expect(
+      fetchEventStream(request, {
+        fetch: mockFetch,
+        reconnect: { attempts: 2, delayMs: 0 },
+      }),
+    ).rejects.toThrow()
+    expect(fetchCount).toBe(3) // initial + 2 retries
+  })
+
+  test('should succeed when retry eventually works', async () => {
+    let fetchCount = 0
+    const mockFetch = vi.fn(async () => {
+      fetchCount += 1
+      if (fetchCount < 3) {
+        // Throw network error to trigger retry path
+        throw new Error('network error')
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: ok\n\n'))
+            controller.close()
+          },
+        }),
+        {
+          headers: { 'content-type': 'text/event-stream' },
+          status: 200,
+        },
+      )
+    }) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/flaky', method: 'GET' }
+
+    const stream = await fetchEventStream(request, {
+      fetch: mockFetch,
+      reconnect: { attempts: 5, delayMs: 0 },
+    })
+
+    expect(fetchCount).toBe(3)
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+    expect(events.length).toBe(1)
+  })
+
+  test('should stop retry when shouldReconnect returns false', async () => {
+    let fetchCount = 0
+    const mockFetch = vi.fn(async () => {
+      fetchCount += 1
+      // Throw network error so we reach the shouldReconnect check
+      throw new Error('network error')
+    }) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/fail', method: 'GET' }
+
+    await expect(
+      fetchEventStream(request, {
+        fetch: mockFetch,
+        reconnect: { shouldReconnect: async () => false, delayMs: 0 },
+      }),
+    ).rejects.toThrow()
+    expect(fetchCount).toBe(1)
+  })
+
+  test('should continue retry when shouldReconnect returns true', async () => {
+    let fetchCount = 0
+    const mockFetch = vi.fn(async () => {
+      fetchCount += 1
+      if (fetchCount < 2) {
+        throw new Error('network error')
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: ok\n\n'))
+            controller.close()
+          },
+        }),
+        {
+          headers: { 'content-type': 'text/event-stream' },
+          status: 200,
+        },
+      )
+    }) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/flaky', method: 'GET' }
+
+    const stream = await fetchEventStream(request, {
+      fetch: mockFetch,
+      reconnect: { shouldReconnect: async () => true, delayMs: 0 },
+    })
+
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+    expect(events.length).toBe(1)
+    expect(fetchCount).toBe(2)
+  })
+
+  test('should use exponential backoff with factor', async () => {
+    let fetchCount = 0
+    const mockFetch = vi.fn(async () => {
+      fetchCount += 1
+      throw new Error('network error')
+    }) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/fail', method: 'GET' }
+
+    // Use a short delay so the test completes quickly; we verify attempts work
+    await expect(
+      fetchEventStream(request, {
+        fetch: mockFetch,
+        reconnect: { attempts: 2, delayMs: 1, factor: 2 },
+      }),
+    ).rejects.toThrow()
+
+    expect(fetchCount).toBe(3)
+  })
+
+  test('should cap delay with maxDelayMs', async () => {
+    let fetchCount = 0
+    const mockFetch = vi.fn(async () => {
+      fetchCount += 1
+      throw new Error('network error')
+    }) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/fail', method: 'GET' }
+
+    await expect(
+      fetchEventStream(request, {
+        fetch: mockFetch,
+        reconnect: { attempts: 2, delayMs: 1, factor: 10, maxDelayMs: 5 },
+      }),
+    ).rejects.toThrow()
+
+    expect(fetchCount).toBe(3)
+  })
+
+  test('should apply jitter to retry delay', async () => {
+    let fetchCount = 0
+    const mockFetch = vi.fn(async () => {
+      fetchCount += 1
+      throw new Error('network error')
+    }) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/fail', method: 'GET' }
+
+    await expect(
+      fetchEventStream(request, {
+        fetch: mockFetch,
+        reconnect: { attempts: 1, delayMs: 1, jitter: 10 },
+      }),
+    ).rejects.toThrow()
+
+    expect(fetchCount).toBe(2)
+  })
+
+  test('should enforce maxBufferSize in parser', async () => {
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              // Send a very long partial line without newline to exceed buffer
+              controller.enqueue(new TextEncoder().encode(`data: ${'x'.repeat(100)}`))
+              controller.enqueue(new TextEncoder().encode(`data: ${'y'.repeat(100)}`))
+              controller.close()
+            },
+          }),
+          {
+            headers: { 'content-type': 'text/event-stream' },
+            status: 200,
+          },
+        ),
+    ) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/huge', method: 'GET' }
+
+    // maxBufferSize error happens after stream is open (200 response),
+    // so fetchEventStream resolves the handle. The error propagates
+    // through the async iterator.
+    const stream = await fetchEventStream(request, {
+      fetch: mockFetch,
+      maxBufferSize: 50,
+      onerror: () => null,
+    })
+
+    const iter = stream[Symbol.asyncIterator]()
+    await expect(iter.next()).rejects.toThrow('SSE parser buffer exceeded maxBufferSize')
   })
 })

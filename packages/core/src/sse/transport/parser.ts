@@ -20,21 +20,61 @@ const enum ControlChar {
 export async function readStreamBytes(
   stream: ReadableStream<Uint8Array>,
   onChunk: (chunk: Uint8Array) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
   const reader = stream.getReader()
+  let rejectAbort: ((reason?: unknown) => void) | undefined
+  const abortPromise = signal
+    ? new Promise<never>((_, reject) => {
+        rejectAbort = reject
+      })
+    : undefined
+  abortPromise?.catch(() => {
+    // The read loop observes aborts through Promise.race; consume standalone aborts.
+  })
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      return
+  const onAbort = () => {
+    /* istanbul ignore next -- AbortController.abort() always provides a reason in standard runtimes */
+    const reason = signal?.reason ?? new Error('The operation was aborted')
+    void reader.cancel(reason).catch(() => {
+      // Reader cancellation is best effort; the caller still observes the abort.
+    })
+    rejectAbort?.(reason)
+  }
+
+  try {
+    /* istanbul ignore next -- runtime-dependent: reader.read() after cancel resolves immediately in this runtime */
+    if (signal?.aborted) {
+      onAbort()
+    } else {
+      signal?.addEventListener('abort', onAbort, { once: true })
     }
 
-    await onChunk(value)
+    while (true) {
+      const readPromise = reader.read()
+      readPromise.catch(() => {
+        // The abort race rejects through abortPromise; consume the loser.
+      })
+      const { done, value } = abortPromise ? await Promise.race([readPromise, abortPromise]) : await readPromise
+      if (done) {
+        return
+      }
+
+      await onChunk(value)
+    }
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
+    reader.releaseLock()
   }
+}
+
+export interface LineParserOptions {
+  maxBufferSize?: number
 }
 
 export function createLineParser(
   onLine: (line: Uint8Array, fieldLength: number) => void | Promise<void>,
+  options?: LineParserOptions,
 ): (chunk: Uint8Array) => Promise<void> {
   let buffer: Uint8Array | undefined
   let position = 0
@@ -94,6 +134,10 @@ export function createLineParser(
     } else if (lineStart !== 0) {
       buffer = buffer.subarray(lineStart)
       position -= lineStart
+    }
+
+    if (options?.maxBufferSize && buffer && buffer.length > options.maxBufferSize) {
+      throw new Error('SSE parser buffer exceeded maxBufferSize')
     }
   }
 }

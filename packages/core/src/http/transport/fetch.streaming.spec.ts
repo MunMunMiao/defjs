@@ -1,6 +1,17 @@
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { HttpRequest } from '../../http'
-import { createFetchRequest, ERR_STREAMING_REQUEST_UNSUPPORTED, fetchHandler, supportsStreamingRequestBody } from './fetch'
+import {
+  __resetStreamingRequestBodySupportForTests,
+  createFetchRequest,
+  ERR_STREAMING_REQUEST_UNSUPPORTED,
+  fetchHandler,
+  supportsStreamingRequestBody,
+} from './fetch'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  __resetStreamingRequestBodySupportForTests()
+})
 
 describe('Fetch handler streaming', () => {
   test('should throw when runtime does not support streaming request bodies', () => {
@@ -30,8 +41,6 @@ describe('Fetch handler streaming', () => {
     }
 
     expect(() => createFetchRequest(requestConfig)).toThrow(ERR_STREAMING_REQUEST_UNSUPPORTED)
-
-    vi.unstubAllGlobals()
   })
 
   test('should call uploadProgress for ReadableStream body', async () => {
@@ -100,6 +109,8 @@ describe('Fetch handler streaming', () => {
       expect(progressEvents.length).toBeGreaterThan(0)
       expect(progressEvents.at(-1)?.loaded).toBeGreaterThan(0)
       expect(progressEvents.every((event) => event.lengthComputable === false && event.total === 0)).toBe(true)
+      expect(progressEvents.map((event) => event.loaded)).toEqual([2, 5])
+      expect(progressEvents.at(-1)?.total).toBe(0)
     } finally {
       vi.unstubAllGlobals()
     }

@@ -105,4 +105,57 @@ describe('AsyncQueue', () => {
     await expect(p1).resolves.toEqual({ done: true, value: undefined })
     await expect(p2).resolves.toEqual({ done: true, value: undefined })
   })
+
+  test('maxSize with error overflow throws on push', () => {
+    const queue = new AsyncQueue<number>({ maxSize: 2 })
+    queue.push(1)
+    queue.push(2)
+    expect(() => queue.push(3)).toThrow('AsyncQueue overflow')
+  })
+
+  test('maxSize with drop-oldest discards oldest value', async () => {
+    const queue = new AsyncQueue<number>({ maxSize: 2, overflow: 'drop-oldest' })
+    queue.push(1)
+    queue.push(2)
+    queue.push(3)
+    queue.close()
+
+    const results: number[] = []
+    for await (const value of queue) {
+      results.push(value)
+    }
+    expect(results).toEqual([2, 3])
+  })
+
+  test('maxSize with drop-newest ignores new value', async () => {
+    const queue = new AsyncQueue<number>({ maxSize: 2, overflow: 'drop-newest' })
+    queue.push(1)
+    queue.push(2)
+    queue.push(3)
+    queue.close()
+
+    const results: number[] = []
+    for await (const value of queue) {
+      results.push(value)
+    }
+    expect(results).toEqual([1, 2])
+  })
+
+  test('maxSize does not affect waiting consumers', async () => {
+    const queue = new AsyncQueue<number>({ maxSize: 1, overflow: 'error' })
+    const iter = queue[Symbol.asyncIterator]()
+    const promise = iter.next()
+    // waiting consumer should still receive value even though buffer is "full"
+    queue.push(1)
+    await expect(promise).resolves.toEqual({ done: false, value: 1 })
+  })
+
+  test('maxSize error does not affect subsequent pushes after draining', async () => {
+    const queue = new AsyncQueue<number>({ maxSize: 1, overflow: 'error' })
+    queue.push(1)
+    const iter = queue[Symbol.asyncIterator]()
+    await iter.next() // drain
+    queue.push(2)
+    await expect(iter.next()).resolves.toEqual({ done: false, value: 2 })
+  })
 })

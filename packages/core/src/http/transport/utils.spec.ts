@@ -86,6 +86,21 @@ describe('Handler util', () => {
       expect(parseBody({ request, contentType, content })).toBeInstanceOf(ArrayBuffer)
     })
 
+    test('should return exact arraybuffer range for typed array views', () => {
+      const request: HttpRequest = {
+        endpoint: '/v1/user',
+        method: 'GET',
+        responseType: 'arraybuffer',
+      }
+      const backing = new Uint8Array([0, 1, 2, 3, 4])
+      const content = backing.subarray(1, 4)
+
+      const result = parseBody({ request, contentType: '', content })
+
+      expect(result).toBeInstanceOf(ArrayBuffer)
+      expect(Array.from(new Uint8Array(result as ArrayBuffer))).toEqual([1, 2, 3])
+    })
+
     test('should be null when content and response type set', async () => {
       const request: HttpRequest = {
         endpoint: '/v1/user',
@@ -111,6 +126,15 @@ describe('Handler util', () => {
 
     header.set('Content-Length', '3')
     expect(getContentLength(header)).toEqual(3)
+
+    header.set('Content-Length', '-5')
+    expect(getContentLength(header)).toEqual(0)
+
+    header.set('Content-Length', '0')
+    expect(getContentLength(header)).toEqual(0)
+
+    header.set('Content-Length', 'Infinity')
+    expect(getContentLength(header)).toEqual(0)
   })
 
   test('should get content type', () => {

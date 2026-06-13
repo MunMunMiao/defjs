@@ -10,7 +10,7 @@ describe('url helpers', () => {
   })
 
   test('should reject invalid endpoint paths', () => {
-    expect(() => createResolvedRequestUrl('/api', '/user/info')).toThrowError('ERR_INVALID_CLIENT_ENDPOINT')
+    expect(() => createResolvedRequestUrl('/api', '/user/info')).toThrowError('Client endpoint must be a valid URL')
     expect(() => createResolvedRequestUrl('https://api.example.com/v1', 'https://other.example.com/user')).toThrowError(
       'Endpoint path must not be an absolute URL',
     )
@@ -37,8 +37,24 @@ describe('url helpers', () => {
     ).toBe('/user/undefined')
 
     expect(() =>
+      fillUrl('/user/:id', {
+        id: { value: 1 },
+      }),
+    ).toThrow('path value for "id" requires a scalar value')
+    expect(() =>
+      fillUrl('/user/:id', {
+        id: [{ value: 1 }] as never,
+      }),
+    ).toThrow('path value for "id" requires a scalar value')
+
+    expect(() =>
       createSearchParams({
         filters: { active: true },
+      }),
+    ).toThrow('query value for "filters" requires queryParamsSerializer or a scalar value')
+    expect(() =>
+      createSearchParams({
+        filters: [{ active: true }] as never,
       }),
     ).toThrow('query value for "filters" requires queryParamsSerializer or a scalar value')
 
@@ -48,7 +64,7 @@ describe('url helpers', () => {
         include: true,
         page: 1,
         skip: undefined,
-        tags: ['a', 'b'],
+        tags: ['a', 'b', { active: true } as never],
       },
       { allowComplex: true },
     )
@@ -90,5 +106,12 @@ describe('url helpers', () => {
     expect(fromRecord.get('x-number')).toBe('1')
     expect(fromRecord.get('x-roles')).toBe('admin, user')
     expect(fromRecord.has('x-skip')).toBe(false)
+
+    expect(() => appendRecordToHeaders(new Headers(), { 'x-object': { nested: true } })).toThrow(
+      'header value for "x-object" requires a scalar value',
+    )
+    expect(() => appendRecordToHeaders(new Headers(), { 'x-object': [{ nested: true }] as never })).toThrow(
+      'header value for "x-object" requires a scalar value',
+    )
   })
 })

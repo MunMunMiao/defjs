@@ -68,7 +68,7 @@ async function decodeWebSocketData(raw: unknown): Promise<unknown> {
   }
 
   if (ArrayBuffer.isView(raw)) {
-    return decodeWebSocketText(new TextDecoder().decode(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)))
+    return decodeWebSocketText(new TextDecoder().decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)))
   }
 
   if (typeof Blob !== 'undefined' && raw instanceof Blob) {

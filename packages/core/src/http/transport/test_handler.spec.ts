@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'vitest'
-import { ERR_INVALID_CLIENT_ENDPOINT } from '../../error'
 import type { HttpRequest } from '../../http'
 import { makeFakeHandler } from './test_handler'
 
@@ -31,6 +30,29 @@ describe('Test handler', () => {
     expect(response.body).toEqual(body)
   })
 
+  test('should preserve falsy response body values', async () => {
+    for (const body of [0, false, ''] as const) {
+      const handler = makeFakeHandler({
+        response: {
+          status: 200,
+          statusText: '',
+          headers: new Headers(),
+          body,
+        },
+      })
+
+      const response = await handler({
+        baseEndpoint: 'https://example.com',
+        endpoint: '/v1/user',
+        method: 'GET',
+      })
+
+      expect(response.status).toBe(200)
+      expect(response.statusText).toBe('')
+      expect(response.body).toBe(body)
+    }
+  })
+
   test('should make empty response', async () => {
     const handler = makeFakeHandler()
     const hq: HttpRequest = {
@@ -52,6 +74,6 @@ describe('Test handler', () => {
         endpoint: '/v1/user',
         method: 'GET',
       }),
-    ).rejects.toBe(ERR_INVALID_CLIENT_ENDPOINT)
+    ).rejects.toThrowError('Client endpoint is required')
   })
 })

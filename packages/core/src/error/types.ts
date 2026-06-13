@@ -1,13 +1,3 @@
-import type { DefjsErrorCode } from './codes'
-
-export class DefjsError extends Error {
-  readonly code: DefjsErrorCode
-  constructor(code: DefjsErrorCode) {
-    super(code)
-    this.code = code
-  }
-}
-
 export interface SettledResponseLike<TBody = unknown> {
   body: TBody | null
   error?: unknown

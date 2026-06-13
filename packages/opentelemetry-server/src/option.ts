@@ -1,15 +1,39 @@
-import type { ClientOption, Interceptor } from '@defjs/core'
+import type { ClientOption, EventStreamHandle, HttpRequest, HttpResponse, Interceptor, WebSocketSessionLike } from '@defjs/core'
 import { withInterceptors } from '@defjs/core'
 import type { Meter, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
 import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
 import { createOpenTelemetryHttpInterceptor } from './interceptor/http'
-import { createOpenTelemetrySseInterceptor } from './interceptor/sse'
+import { createOpenTelemetrySSEInterceptor } from './interceptor/sse'
 import { createOpenTelemetryWebSocketInterceptor } from './interceptor/web_socket'
+import { createHttpClientMetrics, createSSEClientMetrics, createWebSocketClientMetrics } from './telemetry/metrics'
 
-export interface RequestMetrics {
-  requestCounter: ReturnType<Meter['createCounter']>
-  errorCounter: ReturnType<Meter['createCounter']>
-  durationHistogram: ReturnType<Meter['createHistogram']>
+export interface OpenTelemetryServerHttpOptions {
+  /** Enable HTTP tracing, default true */
+  enabled?: boolean
+  /** Hook to customize HTTP span before request */
+  requestHook?: (span: Span, req: HttpRequest) => void
+  /** Hook to customize HTTP span after response */
+  responseHook?: (span: Span, res: HttpResponse<unknown>) => void
+}
+
+export interface OpenTelemetryServerSSEOptions {
+  /** Enable SSE tracing, default true */
+  enabled?: boolean
+  /** Hook to customize SSE span before request */
+  requestHook?: (span: Span, req: HttpRequest) => void
+  /** Hook to customize SSE span after stream is returned */
+  responseHook?: (span: Span, stream: EventStreamHandle<unknown>) => void
+}
+
+export interface OpenTelemetryServerWebSocketOptions {
+  /** Enable WebSocket tracing, default true */
+  enabled?: boolean
+  /** WebSocket query string propagation, default true */
+  queryPropagation?: boolean
+  /** Hook to customize WebSocket span before connect */
+  requestHook?: (span: Span, req: HttpRequest) => void
+  /** Hook to customize WebSocket span after session is returned */
+  responseHook?: (span: Span, session: WebSocketSessionLike) => void
 }
 
 export interface OpenTelemetryServerOptions {
@@ -21,91 +45,103 @@ export interface OpenTelemetryServerOptions {
   propagator?: TextMapPropagator
   /** Only create outgoing span when an active parent span exists */
   requireParentSpan?: boolean
-  /** Hook to customize span before request */
-  requestHook?: (span: Span, req: unknown) => void
-  /** Hook to customize span after response */
-  responseHook?: (span: Span, res: unknown) => void
-  /** Enable HTTP tracing, default true */
-  http?: boolean
-  /** Enable SSE tracing, default true */
-  sse?: boolean
-  /** Enable WebSocket tracing, default true */
-  webSocket?: boolean
-  /** WebSocket query string propagation, default true */
-  webSocketQueryPropagation?: boolean
+  /** HTTP tracing options */
+  http?: OpenTelemetryServerHttpOptions
+  /** SSE tracing options */
+  sse?: OpenTelemetryServerSSEOptions
+  /** WebSocket tracing options */
+  webSocket?: OpenTelemetryServerWebSocketOptions
+}
+
+interface TransportSwitch {
+  enabled?: boolean
 }
 
 export function withOpenTelemetryServer(options: OpenTelemetryServerOptions): ClientOption {
+  assertNoRemovedOptions(options)
+
   const {
     tracer,
     meter,
-    http = true,
-    sse = true,
-    webSocket = true,
-    webSocketQueryPropagation = true,
     propagator = new CompositePropagator({
       propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
     }),
     requireParentSpan = false,
-    requestHook,
-    responseHook,
   } = options
-
-  const metrics = meter
-    ? {
-        requestCounter: meter.createCounter('http.client.request', {
-          description: 'Number of HTTP client requests',
-        }),
-        errorCounter: meter.createCounter('http.client.request.error', {
-          description: 'Number of HTTP client request errors',
-        }),
-        durationHistogram: meter.createHistogram('http.client.request.duration', {
-          description: 'HTTP client request duration',
-          unit: 's',
-          advice: {
-            explicitBucketBoundaries: [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10],
-          },
-        }),
-      }
-    : undefined
 
   const interceptors: Interceptor[] = []
 
-  if (http) {
+  if (isTransportEnabled(options.http)) {
     interceptors.push(
       createOpenTelemetryHttpInterceptor({
         tracer,
         propagator,
-        metrics,
+        metrics: meter ? createHttpClientMetrics(meter) : undefined,
         requireParentSpan,
-        requestHook,
-        responseHook,
+        requestHook: options.http?.requestHook,
+        responseHook: options.http?.responseHook,
       }),
     )
   }
 
-  if (sse) {
+  if (isTransportEnabled(options.sse)) {
     interceptors.push(
-      createOpenTelemetrySseInterceptor({
+      createOpenTelemetrySSEInterceptor({
         tracer,
         propagator,
-        metrics,
+        metrics: meter ? createSSEClientMetrics(meter) : undefined,
         requireParentSpan,
+        requestHook: options.sse?.requestHook,
+        responseHook: options.sse?.responseHook,
       }),
     )
   }
 
-  if (webSocket) {
+  if (isTransportEnabled(options.webSocket)) {
     interceptors.push(
       createOpenTelemetryWebSocketInterceptor({
         tracer,
         propagator,
-        metrics,
+        metrics: meter ? createWebSocketClientMetrics(meter) : undefined,
         requireParentSpan,
-        queryPropagation: webSocketQueryPropagation,
+        queryPropagation: options.webSocket?.queryPropagation,
+        requestHook: options.webSocket?.requestHook,
+        responseHook: options.webSocket?.responseHook,
       }),
     )
   }
 
   return withInterceptors(...interceptors)
+}
+
+function isTransportEnabled(option: TransportSwitch | undefined): boolean {
+  return option?.enabled !== false
+}
+
+function assertNoRemovedOptions(options: OpenTelemetryServerOptions): void {
+  const unsafeOptions = options as OpenTelemetryServerOptions & {
+    requestHook?: unknown
+    responseHook?: unknown
+    webSocketQueryPropagation?: unknown
+  }
+
+  assertTransportOptionObject('http', options.http)
+  assertTransportOptionObject('sse', options.sse)
+  assertTransportOptionObject('webSocket', options.webSocket)
+
+  if ('requestHook' in unsafeOptions) {
+    throw new TypeError('requestHook has been moved to http.requestHook, sse.requestHook, or webSocket.requestHook.')
+  }
+  if ('responseHook' in unsafeOptions) {
+    throw new TypeError('responseHook has been moved to http.responseHook, sse.responseHook, or webSocket.responseHook.')
+  }
+  if ('webSocketQueryPropagation' in unsafeOptions) {
+    throw new TypeError('webSocketQueryPropagation has been moved to webSocket.queryPropagation.')
+  }
+}
+
+function assertTransportOptionObject(name: 'http' | 'sse' | 'webSocket', option: unknown): void {
+  if (typeof option === 'boolean') {
+    throw new TypeError(`${name}: ${option} has been removed; use ${name}: { enabled: ${option} }.`)
+  }
 }

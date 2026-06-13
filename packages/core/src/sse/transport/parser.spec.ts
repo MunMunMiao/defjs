@@ -28,6 +28,60 @@ describe('sse parser', () => {
     expect(seen).toEqual(['first', 'second', 'third'])
   })
 
+  test('should release reader lock on error', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('ok'))
+        controller.close()
+      },
+    })
+
+    await expect(
+      readStreamBytes(stream, () => {
+        throw new Error('fail')
+      }),
+    ).rejects.toThrow('fail')
+
+    // stream should be unlocked so we can get a new reader
+    expect(() => stream.getReader()).not.toThrow()
+  })
+
+  test('should release reader lock after normal completion', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('ok'))
+        controller.close()
+      },
+    })
+
+    await readStreamBytes(stream, noop)
+
+    expect(() => stream.getReader()).not.toThrow()
+  })
+
+  test('should handle abort without reason gracefully', async () => {
+    let enqueueTimeout: ReturnType<typeof setTimeout> | undefined
+    let closeTimeout: ReturnType<typeof setTimeout> | undefined
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        enqueueTimeout = setTimeout(() => controller.enqueue(encoder.encode('ok')), 50)
+        closeTimeout = setTimeout(() => controller.close(), 100)
+      },
+      cancel() {
+        clearTimeout(enqueueTimeout)
+        clearTimeout(closeTimeout)
+      },
+    })
+
+    const abortController = new AbortController()
+    setTimeout(() => abortController.abort(), 10)
+
+    await readStreamBytes(stream, noop, abortController.signal)
+
+    expect(() => stream.getReader()).not.toThrow()
+  })
+
   test('should parse split lines and crlf correctly', async () => {
     const lines: Array<{ fieldLength: number; line: string }> = []
     const parseLine = createLineParser(async (line, fieldLength) => {
@@ -228,5 +282,53 @@ describe('sse parser', () => {
       { fieldLength: 2, line: 'id: 1' },
       { fieldLength: -1, line: '' },
     ])
+  })
+
+  test('should enforce maxBufferSize on unterminated line', async () => {
+    const parseLine = createLineParser(noop, { maxBufferSize: 10 })
+
+    // First chunk fits within limit
+    await parseLine(encoder.encode('data: a'))
+    // Second chunk concatenates and exceeds maxBufferSize
+    await expect(parseLine(encoder.encode('b c d e f g h i j k l m'))).rejects.toThrow('SSE parser buffer exceeded maxBufferSize')
+  })
+
+  test('should not enforce maxBufferSize when not set', async () => {
+    const parseLine = createLineParser(noop)
+
+    // Large unterminated line without limit should not throw
+    await parseLine(encoder.encode('data: '))
+    await parseLine(encoder.encode('a'.repeat(10000)))
+  })
+
+  test('should not throw maxBufferSize for short messages', async () => {
+    const messages: EventStreamMessage[] = []
+    const parseMessage = createMessageParser(noop, noop, async (message) => {
+      messages.push(message)
+    })
+    const parseLine = createLineParser(parseMessage, { maxBufferSize: 100 })
+
+    await parseLine(encoder.encode('data: hello\n\n'))
+
+    expect(messages).toEqual([
+      {
+        id: '',
+        event: '',
+        data: 'hello',
+        retry: undefined,
+      },
+    ])
+  })
+
+  test('should allow one chunk with multiple short messages over maxBufferSize', async () => {
+    const messages: EventStreamMessage[] = []
+    const parseMessage = createMessageParser(noop, noop, async (message) => {
+      messages.push(message)
+    })
+    const parseLine = createLineParser(parseMessage, { maxBufferSize: 20 })
+
+    await parseLine(encoder.encode('data: one\n\ndata: two\n\n'))
+
+    expect(messages.map((message) => message.data)).toEqual(['one', 'two'])
   })
 })

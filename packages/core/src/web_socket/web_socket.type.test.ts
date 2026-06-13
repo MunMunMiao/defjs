@@ -54,6 +54,15 @@ const requestInputSocket = defineWebSocket({
   path: '/ws/:roomId',
 })
 
+defineWebSocket({
+  build(request: unknown, input: unknown) {
+    void request
+    void input
+  },
+  incoming: incomingSchemas,
+  path: '/ws',
+} as never)
+
 type ExpectedIncoming =
   | {
       roomId: string

@@ -54,7 +54,8 @@ describe('http utils', () => {
     expect(detectHttpContentType(blob)).toBe(blob.type)
     expect(detectHttpContentType(new Blob(['hello']))).toBe('application/octet-stream')
     if (typeof File !== 'undefined') {
-      expect(detectHttpContentType(new File(['hello'], 'hello.txt', { type: 'text/plain' }))).toBe('text/plain')
+      const textFile = new File(['hello'], 'hello.txt', { type: 'text/plain' })
+      expect(detectHttpContentType(textFile)).toBe(textFile.type)
       expect(detectHttpContentType(new File(['hello'], 'hello.bin'))).toBe('application/octet-stream')
     }
     expect(detectHttpContentType(searchParams)).toBe('application/x-www-form-urlencoded;charset=UTF-8')
@@ -105,6 +106,13 @@ describe('http utils', () => {
   test('should remove explicit content type for FormData bodies', () => {
     const headers = new Headers({ 'Content-Type': 'multipart/form-data' })
     applyRequestContentType(makeRequest({ body: new FormData() }), headers)
+
+    expect(headers.has('content-type')).toBe(false)
+  })
+
+  test('should skip content type header when body has no detectable type', () => {
+    const headers = new Headers()
+    applyRequestContentType(makeRequest({ body: (() => 'noop') as never }), headers)
 
     expect(headers.has('content-type')).toBe(false)
   })

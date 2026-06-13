@@ -12,13 +12,22 @@ type RequestInitWithDuplex = RequestInit & {
 
 export const ERR_STREAMING_REQUEST_UNSUPPORTED = new Error('ERR_STREAMING_REQUEST_UNSUPPORTED')
 
+const XSRF_MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
 export function isReadableStreamBody(body: HttpRequest['body'] | ReturnType<typeof serializeHttpBody>): body is ReadableStream<Uint8Array> {
   return typeof ReadableStream !== 'undefined' && body instanceof ReadableStream
 }
 
+let streamingRequestBodySupport: boolean | undefined
+
 export function supportsStreamingRequestBody(): boolean {
+  if (streamingRequestBodySupport !== undefined) {
+    return streamingRequestBodySupport
+  }
+
   if (typeof Request !== 'function' || typeof ReadableStream === 'undefined') {
-    return false
+    streamingRequestBodySupport = false
+    return streamingRequestBodySupport
   }
 
   try {
@@ -33,20 +42,102 @@ export function supportsStreamingRequestBody(): boolean {
       method: 'POST',
     } as RequestInitWithDuplex)
 
-    return request.body !== null
+    streamingRequestBodySupport = request.body !== null
+    return streamingRequestBodySupport
   } catch {
-    return false
+    streamingRequestBodySupport = false
+    return streamingRequestBodySupport
   }
 }
 
-function parseContentLength(headers: Headers): number {
-  const value = headers.get('Content-Length')
-  if (!value) {
-    return 0
+export function __resetStreamingRequestBodySupportForTests(): void {
+  streamingRequestBodySupport = undefined
+}
+
+function isMutatingMethod(method: string): boolean {
+  return XSRF_MUTATING_METHODS.has(method.toUpperCase())
+}
+
+function isBrowserRuntime(): boolean {
+  return typeof document !== 'undefined' && typeof location !== 'undefined'
+}
+
+function readBrowserXSRFCookie(name: string): string | undefined {
+  try {
+    const cookie = document.cookie
+    if (cookie === '') {
+      return undefined
+    }
+
+    for (const part of cookie.split(';')) {
+      const [rawName, ...rawValue] = part.trim().split('=')
+      if (rawName === name) {
+        return decodeURIComponent(rawValue.join('='))
+      }
+    }
+  } catch {
+    return undefined
   }
 
-  const parsed = Number.parseInt(value, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+  return undefined
+}
+
+function isSameOriginRequest(request: HttpRequest): boolean {
+  if (!request.baseEndpoint) {
+    return false
+  }
+
+  if (!isBrowserRuntime()) {
+    return true
+  }
+
+  return resolveRequestUrl(request).origin === location.origin
+}
+
+function normalizeXSRFToken(token: string | null | undefined): string | undefined {
+  if (typeof token !== 'string' || token === '') {
+    return undefined
+  }
+
+  return token
+}
+
+function resolveXSRFToken(request: HttpRequest, xsrf: NonNullable<HttpRequest['xsrf']>): string | undefined {
+  if (xsrf.tokenProvider) {
+    return normalizeXSRFToken(xsrf.tokenProvider({ request }))
+  }
+
+  if (!isBrowserRuntime()) {
+    return undefined
+  }
+
+  return normalizeXSRFToken(readBrowserXSRFCookie(xsrf.cookieName))
+}
+
+function applyXSRFHeaderIfNeeded(request: HttpRequest, headers: Headers): void {
+  const xsrf = request.xsrf
+  if (!xsrf) {
+    return
+  }
+
+  if (!isMutatingMethod(request.method)) {
+    return
+  }
+
+  if (headers.has(xsrf.headerName)) {
+    return
+  }
+
+  if (!isSameOriginRequest(request)) {
+    return
+  }
+
+  const token = resolveXSRFToken(request, xsrf)
+  if (token === undefined) {
+    return
+  }
+
+  headers.set(xsrf.headerName, token)
 }
 
 function wrapUploadProgressStream(
@@ -58,24 +149,28 @@ function wrapUploadProgressStream(
   let loaded = 0
 
   return new ReadableStream<Uint8Array>({
-    async cancel(reason) {
-      await reader.cancel(reason)
+    cancel(reason) {
+      return reader.cancel(reason)
     },
     async pull(controller) {
-      const { done, value } = await reader.read()
+      try {
+        const { done, value } = await reader.read()
 
-      if (done) {
-        controller.close()
-        return
+        if (done) {
+          controller.close()
+          return
+        }
+
+        loaded += value.byteLength
+        onProgress({
+          lengthComputable: total > 0,
+          loaded,
+          total,
+        })
+        controller.enqueue(value)
+      } catch (error) {
+        controller.error(error)
       }
-
-      loaded += value.byteLength
-      onProgress({
-        lengthComputable: total > 0,
-        loaded,
-        total,
-      })
-      controller.enqueue(value)
     },
   })
 }
@@ -83,6 +178,7 @@ function wrapUploadProgressStream(
 export function createFetchRequestInit(request: HttpRequest): RequestInitWithDuplex {
   const headers = new Headers(request.headers)
   applyRequestContentType(request, headers)
+  applyXSRFHeaderIfNeeded(request, headers)
 
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/json, text/plain, */*')
@@ -104,7 +200,7 @@ export function createFetchRequestInit(request: HttpRequest): RequestInitWithDup
     }
 
     if (request.uploadProgress) {
-      body = wrapUploadProgressStream(body, request.uploadProgress, parseContentLength(headers))
+      body = wrapUploadProgressStream(body, request.uploadProgress, getContentLength(headers))
       init.body = body
     }
 
@@ -119,14 +215,34 @@ export function createFetchRequest(request: HttpRequest): Request {
   return new Request(url, createFetchRequestInit(request))
 }
 
-export async function fetchHandler(httpRequest: HttpRequest): Promise<HttpResponse<unknown>> {
+async function parseNativeResponseBody(response: Response, responseType: HttpRequest['responseType']): Promise<HttpResponseBody> {
+  switch (responseType) {
+    case 'json': {
+      const text = await response.text()
+      return text === '' ? null : (JSON.parse(text) as object)
+    }
+    case 'text':
+      return await response.text()
+    case 'blob':
+      return await response.blob()
+    case 'arraybuffer':
+      return await response.arrayBuffer()
+    default:
+      return null
+  }
+}
+
+export async function fetchHandler(
+  httpRequest: HttpRequest,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis) as typeof fetch,
+): Promise<HttpResponse<unknown>> {
   const downloadProgress = httpRequest.downloadProgress
-  const request = createFetchRequest(httpRequest)
   const abortSignal = httpRequest.abort
   let response: Response
 
   try {
-    response = await globalThis.fetch(request)
+    const request = createFetchRequest(httpRequest)
+    response = await fetchImpl(request)
   } catch (error) {
     // Because Safari throws an AbortError instead of a TimeoutError when using AbortSignal.timeout.
     // So when handling an `AbortError`, one needs to determine whether the reason for the abort is a `TimeoutError` or another `AbortError`.
@@ -149,43 +265,57 @@ export async function fetchHandler(httpRequest: HttpRequest): Promise<HttpRespon
 
   /* istanbul ignore if -- @preserve */
   if (response.body) {
-    const chunks: Uint8Array[] = []
-    const reader = response.body.getReader()
-    let receivedLength = 0
+    if (downloadProgress) {
+      const chunks: Uint8Array[] = []
+      const reader = response.body.getReader()
+      let receivedLength = 0
 
-    while (true) {
-      const { done, value } = await reader.read()
+      while (true) {
+        const { done, value } = await reader.read()
 
-      if (done) {
-        break
+        if (done) {
+          break
+        }
+
+        chunks.push(value)
+        receivedLength += value.byteLength
+
+        downloadProgress({
+          lengthComputable: contentLength > 0,
+          loaded: receivedLength,
+          total: contentLength,
+        })
       }
 
-      chunks.push(value)
-      receivedLength += value.length
+      const chunksAll = concatChunks(chunks, receivedLength)
 
-      downloadProgress?.({
-        lengthComputable: contentLength > 0,
-        loaded: receivedLength,
-        total: contentLength,
-      })
-    }
-
-    const chunksAll = concatChunks(chunks, receivedLength)
-
-    try {
-      body = parseBody({
-        request: httpRequest,
-        content: chunksAll,
-        contentType,
-      })
-    } catch (error) {
-      return makeResponse({
-        error,
-        status,
-        statusText,
-        headers,
-        url,
-      })
+      try {
+        body = parseBody({
+          request: httpRequest,
+          content: chunksAll,
+          contentType,
+        })
+      } catch (error) {
+        return makeResponse({
+          error,
+          status,
+          statusText,
+          headers,
+          url,
+        })
+      }
+    } else {
+      try {
+        body = await parseNativeResponseBody(response, httpRequest.responseType)
+      } catch (error) {
+        return makeResponse({
+          error,
+          status,
+          statusText,
+          headers,
+          url,
+        })
+      }
     }
   }
 

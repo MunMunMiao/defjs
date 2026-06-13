@@ -8,11 +8,23 @@ type PendingNext<T> = {
 
 const NO_ERROR = Symbol('NO_ERROR')
 
+export interface AsyncQueueOptions {
+  maxSize?: number
+  overflow?: 'drop-newest' | 'drop-oldest' | 'error'
+}
+
 export class AsyncQueue<T> implements AsyncIterable<T> {
   private readonly values: T[] = []
   private readonly waiting: PendingNext<T>[] = []
+  private readonly maxSize: number | undefined
+  private readonly overflow: 'drop-newest' | 'drop-oldest' | 'error'
   private done = false
   private error: unknown = NO_ERROR
+
+  constructor(options?: AsyncQueueOptions) {
+    this.maxSize = options?.maxSize
+    this.overflow = options?.overflow ?? 'error'
+  }
 
   push(value: T): void {
     if (this.done) {
@@ -23,6 +35,20 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     if (waiting) {
       waiting.resolve({ done: false, value })
       return
+    }
+
+    if (this.maxSize !== undefined && this.values.length >= this.maxSize) {
+      switch (this.overflow) {
+        case 'drop-newest':
+          return
+        case 'drop-oldest': {
+          this.values.shift()
+          break
+        }
+        case 'error': {
+          throw new Error('AsyncQueue overflow')
+        }
+      }
     }
 
     this.values.push(value)

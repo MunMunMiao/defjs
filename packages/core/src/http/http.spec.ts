@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors } from '../client'
+import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors, withXSRF } from '../client'
 import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
 import { struct, tag } from '../struct'
@@ -56,7 +56,7 @@ describe('request http runtime', () => {
     expect(response?.status).toBe(404)
     expect(error?.kind).toBe('http')
 
-    if (!error || error.kind !== 'http') {
+    if (error?.kind !== 'http') {
       throw new Error('Expected http error')
     }
 
@@ -185,45 +185,68 @@ describe('request http runtime', () => {
     expect(capturedRequest?.body).toBe('{"nickname":"Miao"}')
   })
 
-  test('should pass raw input to build when input schema is omitted', async () => {
-    let capturedInput: unknown
+  test('should expose xsrf client config on the final HttpRequest', async () => {
+    const tokenProvider = () => 'xsrf-token'
+    let capturedRequest: HttpRequest | undefined
 
     setGlobalClient(
       createClient(
-        withEndpoint('https://example.com'),
+        withEndpoint('https://example.com/api'),
+        withXSRF({
+          cookieName: 'CUSTOM-XSRF-TOKEN',
+          headerName: 'X-CUSTOM-XSRF-TOKEN',
+          tokenProvider,
+        }),
         withInterceptors(
-          createHttpInterceptor(async (request) =>
-            makeResponse({
+          createHttpInterceptor(async (request) => {
+            capturedRequest = request as typeof capturedRequest
+            return makeResponse({
               body: {
-                ok: request.queryParams?.get('value'),
+                ok: true,
               },
               status: 200,
-            }),
-          ),
+            })
+          }),
         ),
       ),
     )
 
-    const useRawInput = defineRequest({
-      build: (request, input) => {
-        capturedInput = input
-        request.setQueryParams({
-          value: input.query.value,
-        })
-      },
-      input: struct.request({ query: struct.object({ value: struct.string() }) }),
+    const useInspectXsrf = defineRequest({
       method: 'GET',
-      path: '/raw-input',
+      output: {
+        200: struct.object({
+          ok: struct.boolean(),
+        }),
+      },
+      path: '/xsrf',
     })
 
-    const rawInput = { query: { value: 'kept-as-is' } }
-    const [error, result, response] = await useRawInput(rawInput)
+    const [error, result] = await useInspectXsrf()
 
     expect(error).toBeNull()
-    expect(capturedInput).toBe(rawInput)
+    expect(result).toEqual({ ok: true })
+    expect(capturedRequest?.xsrf).toEqual({
+      cookieName: 'CUSTOM-XSRF-TOKEN',
+      headerName: 'X-CUSTOM-XSRF-TOKEN',
+      tokenProvider,
+    })
+  })
+
+  test('should return definition error when build is provided without input schema', async () => {
+    const useRawInput = defineRequest({
+      build: () => {
+        return undefined
+      },
+      method: 'GET',
+      path: '/raw-input',
+    } as never)
+
+    const [error, result, response] = await useRawInput()
+
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
     expect(result).toBeUndefined()
-    expect(response?.status).toBe(200)
-    expect(response?.body).toBeNull()
+    expect(response).toBeUndefined()
   })
 
   test('should ignore response body when output is omitted', async () => {

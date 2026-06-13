@@ -10,6 +10,15 @@ const noInputEndpoint = defineRequest<undefined, undefined>({
   path: '/health',
 })
 
+defineRequest({
+  build(request: unknown, input: unknown) {
+    void request
+    void input
+  },
+  method: 'GET',
+  path: '/users',
+} as never)
+
 const requiredInputSchema = struct.request({
   body: struct.json(
     struct.object({

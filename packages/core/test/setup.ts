@@ -1,9 +1,9 @@
-import type { Context } from 'hono'
 import type { Socket } from 'node:net'
 import type { ServerType } from '@hono/node-server'
 import { createAdaptorServer } from '@hono/node-server'
 import type { NodeWebSocket } from '@hono/node-ws'
 import { createNodeWebSocket } from '@hono/node-ws'
+import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
@@ -135,7 +135,7 @@ export async function setup({ provide }: TestProject) {
   app.get('/sse/basic', basicSSEHandler)
   app.post('/sse/basic', basicSSEHandler)
 
-  app.get('/sse/retry', (c: Context) => {
+  app.get('/sse/retry', (c) => {
     const lastEventId = c.req.header('last-event-id')
 
     if (lastEventId === '1') {
@@ -160,14 +160,14 @@ export async function setup({ provide }: TestProject) {
     })
   })
 
-  app.get('/sse/slow', async (c: Context) => {
+  app.get('/sse/slow', async (c) => {
     await delay(500, c.req.raw.signal)
     return c.body(null, 500)
   })
 
   const sseRetryAttempts = new Map<string, number>()
 
-  app.get('/sse/500-once', (c: Context) => {
+  app.get('/sse/500-once', (c) => {
     const key = c.req.query('key') ?? 'default'
     const attempt = (sseRetryAttempts.get(key) ?? 0) + 1
     sseRetryAttempts.set(key, attempt)
@@ -181,9 +181,9 @@ export async function setup({ provide }: TestProject) {
     })
   })
 
-  app.get('/sse/500-always', (c: Context) => c.body(null, 500))
+  app.get('/sse/500-always', (c) => c.body(null, 500))
 
-  app.get('/sse/no-id', (c: Context) => {
+  app.get('/sse/no-id', (c) => {
     return streamSSE(c, async (stream) => {
       await stream.writeSSE({
         data: 'no-id-message',
@@ -192,7 +192,7 @@ export async function setup({ provide }: TestProject) {
     })
   })
 
-  app.get('/sse/empty-id', (c: Context) => {
+  app.get('/sse/empty-id', (c) => {
     c.header('content-type', 'text/event-stream')
     return streamSSE(c, async (stream) => {
       const encoder = new TextEncoder()
@@ -200,32 +200,32 @@ export async function setup({ provide }: TestProject) {
     })
   })
 
-  app.get('/sse/mixed', (c: Context) => {
+  app.get('/sse/mixed', (c) => {
     return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: JSON.stringify({ uid: 1 }), event: 'userconnect', id: '1' })
       await stream.writeSSE({ data: JSON.stringify({ note: 'fallback' }), event: 'something-else', id: '2' })
     })
   })
 
-  app.get('/sse/unknown-event', (c: Context) => {
+  app.get('/sse/unknown-event', (c) => {
     return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: 'hello', event: 'unknown', id: '1' })
     })
   })
 
-  app.get('/sse/empty-data', (c: Context) => {
+  app.get('/sse/empty-data', (c) => {
     return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: '', event: 'message', id: '1' })
     })
   })
 
-  app.get('/sse/no-event-name', (c: Context) => {
+  app.get('/sse/no-event-name', (c) => {
     return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: 'hello', id: '1' })
     })
   })
 
-  app.get('/sse/infinite', (c: Context) => {
+  app.get('/sse/infinite', (c) => {
     c.header('x-request-id', 'trace-sse-infinite')
     const requestSignal = c.req.raw.signal
     return streamSSE(c, async (stream) => {
@@ -375,7 +375,7 @@ export async function setup({ provide }: TestProject) {
     upgradeWebSocket(() => ({
       onMessage(event, ws) {
         try {
-          const decoded = JSON.parse(typeof event.data === 'string' ? event.data : String(event.data)) as unknown as { type?: string }
+          const decoded = JSON.parse(typeof event.data === 'string' ? event.data : String(event.data)) as { type?: string }
           if (decoded.type === 'ping') {
             ws.send(createSocketMessage('pong', { ok: true }))
             ws.close(1000, 'heartbeat-ok')
@@ -510,7 +510,7 @@ export async function teardown() {
   }
 
   if (!isDenoRuntime) {
-    const serverWithCleanup = testServer as unknown as ServerType & ServerConnectionCleanup
+    const serverWithCleanup = testServer as ServerType & ServerConnectionCleanup
     serverWithCleanup.closeIdleConnections?.()
     serverWithCleanup.closeAllConnections?.()
   }
@@ -523,7 +523,7 @@ export async function teardown() {
   await new Promise<void>((resolve, reject) => {
     testServer?.close((error) => {
       if (error) {
-        if ((error as unknown as NodeJS.ErrnoException).code === 'ERR_SERVER_NOT_RUNNING') {
+        if ((error as NodeJS.ErrnoException).code === 'ERR_SERVER_NOT_RUNNING') {
           resolve()
           return
         }

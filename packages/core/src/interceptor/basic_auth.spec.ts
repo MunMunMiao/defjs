@@ -69,12 +69,12 @@ describe('Basic Auth Interceptor', () => {
     const chain = makeSSEInterceptorChain([interceptor.fn])
 
     let capturedRequest: HttpRequest | undefined
-    const fakeSseHandler = async (req: HttpRequest) => {
+    const fakeSSEHandler = async (req: HttpRequest) => {
       capturedRequest = req
       return {} as EventStreamHandle<unknown>
     }
 
-    await chain(hq, fakeSseHandler)
+    await chain(hq, fakeSSEHandler)
 
     expect(capturedRequest).toBeDefined()
     expect(capturedRequest?.headers?.get('Authorization')).toEqual(`Basic ${btoa(`${credential.username}:${credential.password}`)}`)

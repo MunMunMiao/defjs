@@ -1,3 +1,4 @@
+import type { ClientConfig } from '@defjs/core'
 import { getGlobalClient, resetGlobalClient } from '@defjs/core'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from 'vue'
@@ -13,7 +14,7 @@ describe('withHost', () => {
   })
 
   it('should set endpoint in config', () => {
-    const config = {} as Record<string, unknown>
+    const config = {} as ClientConfig
     const option = withHost('https://api.example.com')
     option(config)
     expect(config.endpoint).toBe('https://api.example.com')
@@ -27,7 +28,7 @@ describe('withInterceptors', () => {
   })
 
   it('should set interceptors in config', () => {
-    const config = {} as Record<string, unknown>
+    const config = {} as ClientConfig
     const interceptor = (() => ({})) as unknown as Parameters<typeof withInterceptors>[0]
     const option = withInterceptors(interceptor)
     option(config)

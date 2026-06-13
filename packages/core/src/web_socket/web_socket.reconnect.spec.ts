@@ -113,4 +113,37 @@ describe('web socket runtime reconnect', () => {
     expect(error?.kind).toBe('transport')
     expect(attempts).toEqual([1, 2])
   })
+
+  test('should not consider manual session close for reconnect', async () => {
+    const useSocket = defineWebSocket({
+      incoming: {
+        ready: struct.object({
+          ok: struct.boolean(),
+        }),
+      },
+      path: '/ws/echo',
+    })
+
+    const attempts: number[] = []
+    const [error, socket] = await useSocket().with({
+      reconnect: {
+        attempts: 1,
+        delayMs: 0,
+        shouldReconnect(context) {
+          attempts.push(context.attempt)
+          return false
+        },
+      },
+    })
+
+    expect(error).toBeNull()
+    if (!socket) {
+      throw new Error('Expected socket session')
+    }
+
+    socket.close(1000, 'manual')
+
+    await expect(socket.closed).resolves.toMatchObject({ code: 1000, reason: 'manual' })
+    expect(attempts).toEqual([])
+  })
 })

@@ -1,4 +1,3 @@
-import { ERR_INVALID_CLIENT_ENDPOINT } from '../error'
 import type { HttpRequest } from './http_request'
 import type { RequestBuildValue } from './request_values'
 
@@ -103,7 +102,7 @@ export function createResolvedRequestUrl(baseEndpoint: string, path: string, que
 // Replaces the near-identical `createRequestUrl` helpers previously duplicated in fetch/sse/test_handler.
 export function resolveRequestUrl(request: HttpRequest): URL {
   if (!request.baseEndpoint) {
-    throw ERR_INVALID_CLIENT_ENDPOINT
+    throw new TypeError('Client endpoint is required')
   }
   const queryString =
     typeof request.queryString === 'string' ? request.queryString : request.queryParams ? request.queryParams.toString() : ''
@@ -156,7 +155,7 @@ function createEndpointDirectoryBase(baseEndpoint: string): URL {
   try {
     base = new URL(baseEndpoint)
   } catch {
-    throw ERR_INVALID_CLIENT_ENDPOINT
+    throw new TypeError('Client endpoint must be a valid URL')
   }
 
   base.search = ''

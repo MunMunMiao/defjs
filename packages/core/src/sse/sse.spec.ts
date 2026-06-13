@@ -6,8 +6,10 @@ import {
   setGlobalClient,
   withCredentials,
   withEndpoint,
+  withHTTPHandle,
   withInterceptors,
-  withSseOptions,
+  withSSEHandle,
+  withSSEOptions,
 } from '../client'
 import { ERR_ABORTED } from '../error'
 import { createSSEInterceptor } from '../interceptor'
@@ -178,8 +180,8 @@ describe('request event stream runtime', () => {
 
     const client = createClient(
       withEndpoint('https://api.example.com'),
-      withSseOptions({
-        fetch: (async () =>
+      withSSEHandle(
+        (async () =>
           new Response(
             new ReadableStream<Uint8Array>({
               start(controller) {
@@ -194,7 +196,7 @@ describe('request event stream runtime', () => {
               status: 200,
             },
           )) as unknown as typeof fetch,
-      }),
+      ),
     )
 
     const [error, stream] = await useAliasStream().with({ client })
@@ -236,7 +238,7 @@ describe('request event stream runtime', () => {
     expect(open).toBeUndefined()
     expect(error?.kind).toBe('transport')
 
-    if (!error || error.kind !== 'transport') {
+    if (error?.kind !== 'transport') {
       throw new Error('Expected transport error')
     }
 
@@ -248,6 +250,7 @@ describe('request event stream runtime', () => {
     let interceptorCalls = 0
     const client = createClient(
       withEndpoint(inject('testServerHost')),
+      withHTTPHandle(globalThis.fetch),
       withInterceptors(
         createSSEInterceptor(async (req, next) => {
           interceptorCalls += 1
@@ -342,7 +345,7 @@ describe('request event stream runtime', () => {
     expect(open?.response?.status).toBe(200)
     expect(error?.kind).toBe('definition')
 
-    if (!error || error.kind !== 'definition') {
+    if (error?.kind !== 'definition') {
       throw new Error('Expected definition error')
     }
 
@@ -499,10 +502,11 @@ describe('request event stream runtime', () => {
       events: {
         message: struct.string(),
       },
+      input: struct.object({}),
       path: '/sse/basic',
     })
 
-    const [error, stream, open] = await useStream()
+    const [error, stream, open] = await useStream({})
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
@@ -570,6 +574,335 @@ describe('request event stream runtime', () => {
     expect(open?.response?.status).toBe(500)
     expect(error?.kind).toBe('http')
     expect(error?.code).toBe('HTTP_STATUS')
+  })
+
+  test('should use normalized HTTP status error message when SSE response has no error payload', async () => {
+    const useStream = defineEventStream({
+      events: {
+        message: struct.string(),
+      },
+      path: '/500-empty',
+    })
+    const client = createClient(
+      withEndpoint('https://api.example.com'),
+      withSSEHandle((async () => new Response(null, { status: 503 })) as unknown as typeof fetch),
+    )
+
+    const [error, stream, open] = await useStream().with({ client })
+
+    expect(stream).toBeUndefined()
+    expect(open?.response?.status).toBe(503)
+    expect(error?.kind).toBe('http')
+    expect(error?.message).toBe('Http failure response for (unknown url): 503')
+  })
+
+  test('should invoke onInvalidEvent for unknown event types', async () => {
+    const invalidEvents: Array<{ reason: string; event: string }> = []
+
+    const client = createClient(
+      withEndpoint(inject('testServerHost')),
+      withSSEOptions({
+        onInvalidEvent: async (context) => {
+          invalidEvents.push({
+            reason: context.reason,
+            event: context.message.event,
+          })
+        },
+      }),
+    )
+
+    const useStream = defineEventStream({
+      events: {
+        message: struct.string(),
+      },
+      path: '/sse/unknown-event',
+    })
+
+    const [error, stream] = await useStream().with({ client })
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+
+    expect(events).toEqual([])
+    expect(invalidEvents.length).toBeGreaterThan(0)
+    const firstInvalidEvent = invalidEvents[0]
+    if (!firstInvalidEvent) {
+      throw new Error('Expected invalid event')
+    }
+    expect(firstInvalidEvent.reason).toBe('missing-schema')
+  })
+
+  test('should invoke onInvalidEvent for schema validation failures', async () => {
+    const invalidEvents: Array<{ reason: string; event: string; hasCause: boolean }> = []
+
+    const client = createClient(
+      withEndpoint(inject('testServerHost')),
+      withSSEOptions({
+        onInvalidEvent: async (context) => {
+          invalidEvents.push({
+            reason: context.reason,
+            event: context.message.event,
+            hasCause: context.cause !== undefined,
+          })
+        },
+      }),
+    )
+
+    const useStream = defineEventStream({
+      events: {
+        message: struct.number(),
+      },
+      path: '/sse/basic',
+    })
+
+    const [error, stream] = await useStream().with({ client })
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+
+    expect(events).toEqual([])
+    expect(invalidEvents.length).toBeGreaterThan(0)
+    const firstInvalidEvent = invalidEvents[0]
+    if (!firstInvalidEvent) {
+      throw new Error('Expected invalid event')
+    }
+    expect(firstInvalidEvent.reason).toBe('validation-failed')
+    expect(firstInvalidEvent.hasCause).toBe(true)
+  })
+
+  test('should include message id in onInvalidEvent for missing-schema', async () => {
+    const captured: Array<{ id: string; reason: string }> = []
+
+    const client = createClient(
+      withEndpoint('https://api.example.com'),
+      withSSEHandle(
+        (async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('id: 42\nevent: unknown\ndata: hello\n\n'))
+                controller.close()
+              },
+            }),
+            {
+              headers: { 'content-type': 'text/event-stream' },
+              status: 200,
+            },
+          )) as unknown as typeof fetch,
+      ),
+      withSSEOptions({
+        onInvalidEvent: async (context) => {
+          captured.push({ id: context.message.id, reason: context.reason })
+        },
+      }),
+    )
+
+    const useStream = defineEventStream({
+      events: {
+        message: struct.string(),
+      },
+      path: '/stream',
+    })
+
+    const [error, stream] = await useStream().with({ client })
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    for await (const _ of stream) {
+      // no events should be yielded
+    }
+
+    expect(captured).toEqual([{ id: '42', reason: 'missing-schema' }])
+  })
+
+  test('should include empty id in onInvalidEvent for missing-schema', async () => {
+    const captured: Array<{ id: string; reason: string }> = []
+
+    const client = createClient(
+      withEndpoint('https://api.example.com'),
+      withSSEHandle(
+        (async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                // No id field — message.id will be empty string
+                controller.enqueue(new TextEncoder().encode('event: unknown\ndata: hello\n\n'))
+                controller.close()
+              },
+            }),
+            {
+              headers: { 'content-type': 'text/event-stream' },
+              status: 200,
+            },
+          )) as unknown as typeof fetch,
+      ),
+      withSSEOptions({
+        onInvalidEvent: async (context) => {
+          captured.push({ id: context.message.id, reason: context.reason })
+        },
+      }),
+    )
+
+    const useStream = defineEventStream({
+      events: {
+        message: struct.string(),
+      },
+      path: '/stream',
+    })
+
+    const [error, stream] = await useStream().with({ client })
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    for await (const _ of stream) {
+      // no events should be yielded
+    }
+
+    expect(captured).toEqual([{ id: '', reason: 'missing-schema' }])
+  })
+
+  test('should include empty id in onInvalidEvent for validation-failed', async () => {
+    const captured: Array<{ id: string; reason: string }> = []
+
+    const client = createClient(
+      withEndpoint('https://api.example.com'),
+      withSSEHandle(
+        (async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                // No id field — message.id will be empty string
+                controller.enqueue(new TextEncoder().encode('event: message\ndata: not-a-number\n\n'))
+                controller.close()
+              },
+            }),
+            {
+              headers: { 'content-type': 'text/event-stream' },
+              status: 200,
+            },
+          )) as unknown as typeof fetch,
+      ),
+      withSSEOptions({
+        onInvalidEvent: async (context) => {
+          captured.push({ id: context.message.id, reason: context.reason })
+        },
+      }),
+    )
+
+    const useStream = defineEventStream({
+      events: {
+        message: struct.number(),
+      },
+      path: '/stream',
+    })
+
+    const [error, stream] = await useStream().with({ client })
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    for await (const _ of stream) {
+      // no events should be yielded
+    }
+
+    expect(captured).toEqual([{ id: '', reason: 'validation-failed' }])
+  })
+
+  test('should skip unexpected stream messages without onInvalidEvent', async () => {
+    const useStream = defineEventStream({
+      events: {
+        message: struct.number(),
+      },
+      path: '/sse/basic',
+    })
+    const ref = useStream()
+
+    const [error, stream] = await ref
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+
+    expect(events).toEqual([])
+    await expect(stream.closed).resolves.toMatchObject({ code: 'eof' })
+    expect(ref.status).toBe('closed')
+    expect(ref.error).toBeUndefined()
+  })
+
+  test('should keep stream alive when onInvalidEvent throws', async () => {
+    const client = createClient(
+      withEndpoint('https://api.example.com'),
+      withSSEHandle(
+        (async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('event: unknown\ndata: ignored\n\n'))
+                controller.close()
+              },
+            }),
+            {
+              headers: { 'content-type': 'text/event-stream' },
+              status: 200,
+            },
+          )) as unknown as typeof fetch,
+      ),
+      withSSEOptions({
+        onInvalidEvent: async () => {
+          throw new Error('observer failed')
+        },
+      }),
+    )
+
+    const useStream = defineEventStream({
+      events: {
+        message: struct.string(),
+      },
+      path: '/stream',
+    })
+
+    const [error, stream] = await useStream().with({ client })
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+
+    const events: unknown[] = []
+    for await (const event of stream) {
+      events.push(event)
+    }
+
+    expect(events).toEqual([])
+    await expect(stream.closed).resolves.toMatchObject({ code: 'eof' })
   })
 
   test('should handle request validation failure on invalid input', async () => {
