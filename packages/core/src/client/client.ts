@@ -1,9 +1,19 @@
 import type { ClientConfig } from './config'
 import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
+import type { Command } from './command'
 import { getGlobalClient } from './global'
 import type { ClientOption } from './option'
 import type { Client } from './resolve'
 import { CLIENT, getClientConfig } from './resolve'
+
+function createClientFromConfig(config: ClientConfig): Client {
+  return {
+    [CLIENT]: config,
+    execute(command: Command, options?: { signal?: AbortSignal }): Promise<unknown> {
+      return Promise.reject(new Error(`Unsupported command kind: ${command.kind}`))
+    },
+  }
+}
 
 export function createClient(...options: ClientOption[]): Client {
   const conf: ClientConfig = {
@@ -27,7 +37,7 @@ export function createClient(...options: ClientOption[]): Client {
     option(conf)
   }
 
-  return { [CLIENT]: conf }
+  return createClientFromConfig(conf)
 }
 
 export function cloneClient(client: Client, ...options: ClientOption[]): Client {
@@ -38,7 +48,11 @@ export function cloneClient(client: Client, ...options: ClientOption[]): Client 
     http: { ...prev.http },
     interceptors: [...prev.interceptors],
     queryParamsSerializer: prev.queryParamsSerializer,
-    sse: { ...prev.sse },
+    sse: {
+      ...prev.sse,
+      reconnect: prev.sse.reconnect ? { ...prev.sse.reconnect } : undefined,
+      queue: prev.sse.queue ? { ...prev.sse.queue } : undefined,
+    },
     webSocket: {
       ...prev.webSocket,
     },
@@ -67,7 +81,7 @@ export function cloneClient(client: Client, ...options: ClientOption[]): Client 
     option(conf)
   }
 
-  return { [CLIENT]: conf }
+  return createClientFromConfig(conf)
 }
 
 export function resolveClientConfig(client?: Client): ClientConfig {

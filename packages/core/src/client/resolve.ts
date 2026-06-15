@@ -1,9 +1,12 @@
+import type { Command } from './command'
 import type { ClientConfig } from './config'
 
 export const CLIENT = Symbol('Client')
 
 export type Client = {
   readonly [CLIENT]: ClientConfig
+
+  execute(command: Command, options?: { signal?: AbortSignal }): Promise<unknown>
 }
 
 export function isClient(value: unknown): value is Client {
