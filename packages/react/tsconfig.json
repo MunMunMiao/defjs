@@ -15,6 +15,6 @@
       "@defjs/core": ["../core/src"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
