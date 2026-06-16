@@ -5,31 +5,43 @@ import { getGlobalClient } from './global'
 import type { ClientOption } from './option'
 import type { Client } from './resolve'
 import { CLIENT, getClientConfig } from './resolve'
+import type { AnyStruct } from '../struct'
+import type { RequestOutputShape } from '../http/request'
+import type { HttpAwaitResult, HttpCommand, RequestErrorData, RequestSuccessData } from '../http/http'
 import { executeHttpCommand } from '../http/http'
-import type { HttpCommand } from '../http/http'
+import type { EventSchemas, EventStreamCommand, EventStreamData, StreamAwaitResult } from '../sse/sse'
 import { executeEventStreamCommand } from '../sse/sse'
-import type { EventStreamCommand } from '../sse/sse'
-
+import type {
+  SocketAwaitResult,
+  SocketSchemas,
+  WebSocketCommand,
+  WebSocketIncomingData,
+  WebSocketOutgoingData,
+} from '../web_socket/web_socket'
 import { executeWebSocketCommand } from '../web_socket/web_socket'
-import type { WebSocketCommand } from '../web_socket/web_socket'
+
+function dispatchCommand(
+  config: ClientConfig,
+  command: Command,
+  options?: { signal?: AbortSignal },
+): Promise<unknown> {
+  switch (command.kind) {
+    case 'http':
+      return executeHttpCommand(config, command as HttpCommand<any, any>, options)
+    case 'event-stream':
+      return executeEventStreamCommand(config, command as EventStreamCommand<any, any>, options) as Promise<unknown>
+    case 'web-socket':
+      return executeWebSocketCommand(config, command as WebSocketCommand<any, any, any>, options) as Promise<unknown>
+  }
+  return Promise.reject(new Error(`Unsupported command kind: ${command.kind}`))
+}
 
 function createClientFromConfig(config: ClientConfig): Client {
-  const client: Client = {
+  return {
     [CLIENT]: config,
-    execute(command: Command, options?: { signal?: AbortSignal }): Promise<unknown> {
-      switch (command.kind) {
-        case 'http':
-          return executeHttpCommand(config, command as HttpCommand<any, any>, options)
-        case 'event-stream':
-          return executeEventStreamCommand(config, command as EventStreamCommand<any, any>, options) as Promise<unknown>
-        case 'web-socket':
-          return executeWebSocketCommand(config, command as WebSocketCommand<any, any, any>, options) as Promise<unknown>
-      }
-      return Promise.reject(new Error(`Unsupported command kind: ${command.kind}`))
-    },
+    execute: ((command: Command, options?: { signal?: AbortSignal }) =>
+      dispatchCommand(config, command, options)) as Client['execute'],
   }
-
-  return client
 }
 
 export function createClient(...options: ClientOption[]): Client {
@@ -57,50 +69,26 @@ export function createClient(...options: ClientOption[]): Client {
   return createClientFromConfig(conf)
 }
 
-export function cloneClient(client: Client, ...options: ClientOption[]): Client {
-  const prev = getClientConfig(client)
-
-  const conf: ClientConfig = {
-    endpoint: prev.endpoint,
-    http: { ...prev.http },
-    interceptors: [...prev.interceptors],
-    queryParamsSerializer: prev.queryParamsSerializer,
-    sse: {
-      ...prev.sse,
-      reconnect: prev.sse.reconnect ? { ...prev.sse.reconnect } : undefined,
-      queue: prev.sse.queue ? { ...prev.sse.queue } : undefined,
-    },
-    webSocket: {
-      ...prev.webSocket,
-    },
-    xsrf: prev.xsrf
-      ? {
-          ...prev.xsrf,
-        }
-      : undefined,
-    withCredentials: prev.withCredentials,
-  }
-
-  if (prev.webSocket.protocols) {
-    conf.webSocket.protocols = [...prev.webSocket.protocols]
-  }
-  if (prev.webSocket.heartbeat) {
-    conf.webSocket.heartbeat = { ...prev.webSocket.heartbeat }
-  }
-  if (prev.webSocket.reconnect) {
-    conf.webSocket.reconnect = { ...prev.webSocket.reconnect }
-  }
-  if (prev.webSocket.queue) {
-    conf.webSocket.queue = { ...prev.webSocket.queue }
-  }
-
-  for (const option of options) {
-    option(conf)
-  }
-
-  return createClientFromConfig(conf)
-}
-
 export function resolveClientConfig(client?: Client): ClientConfig {
   return getClientConfig(client ?? getGlobalClient())
+}
+
+export function execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
+  command: HttpCommand<TInput, TOutput>,
+  options: { client: Client; signal?: AbortSignal },
+): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>>
+export function execute<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+  command: EventStreamCommand<TInput, TEvents>,
+  options: { client: Client; signal?: AbortSignal },
+): Promise<StreamAwaitResult<EventStreamData<TEvents>>>
+export function execute<
+  TInput extends AnyStruct | undefined,
+  TIncoming extends SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined,
+>(
+  command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
+  options: { client: Client; signal?: AbortSignal },
+): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
+export function execute(command: Command, options: { client: Client; signal?: AbortSignal }): Promise<unknown> {
+  return options.client.execute(command, options)
 }

@@ -9,7 +9,6 @@ import type {
   XSRFTokenProviderContext,
 } from './index'
 import {
-  cloneClient,
   createClient,
   setGlobalClient,
   withCredentials,
@@ -87,10 +86,6 @@ const client = createClient(
 )
 
 type ClientCases = Expect<Equal<typeof client, Client>>
-
-const cloned = cloneClient(client, withCredentials(true))
-
-type ClonedClientCases = Expect<Equal<typeof cloned, Client>>
 
 const options = {
   endpoint: 'https://api.example.com',
@@ -177,7 +172,6 @@ createClient(withEndpoint('https://api.example.com'), withXSRF({ tokenProvider: 
 
 export type Cases =
   | ClientCases
-  | ClonedClientCases
   | OptionsCases
   | SerializerCases
   | XsrfTokenProviderCases
