@@ -1,9 +1,6 @@
-import { afterEach, beforeEach, describe, expect, inject, test, vi } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import {
   createClient,
-  getGlobalClient,
-  resetGlobalClient,
-  setGlobalClient,
   withEndpoint,
   withHTTPHandle,
   withInterceptors,
@@ -15,14 +12,6 @@ import { struct } from '../struct'
 import { defineRequest } from './index'
 
 describe('request http runtime with client config', () => {
-  beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
-  })
-
-  afterEach(() => {
-    resetGlobalClient()
-  })
-
   test('should support queryParamsSerializer from client config', async () => {
     let capturedRequestUrl = ''
 
@@ -100,49 +89,5 @@ describe('request http runtime with client config', () => {
     expect(error).toBeNull()
     expect(interceptorCalls).toBe(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-  })
-
-  test('should resolve client from config first and then from global client', async () => {
-    resetGlobalClient()
-
-    const localClient = createClient(
-      withEndpoint('https://example.com/api'),
-      withInterceptors(
-        createHttpInterceptor(async (request) =>
-          makeResponse({
-            body: {
-              endpoint: request.baseEndpoint,
-            },
-            status: 200,
-          }),
-        ),
-      ),
-    )
-
-    const useGetInfo = defineRequest({
-      method: 'GET',
-      output: {
-        200: struct.object({
-          endpoint: struct.string(),
-        }),
-      },
-      path: '/info',
-    })
-
-    const [localError, localResult] = (await localClient.execute(useGetInfo())) as any
-
-    expect(localError).toBeNull()
-    expect(localResult).toEqual({
-      endpoint: 'https://example.com/api',
-    })
-
-    let missingClientError: Error | undefined
-    try {
-      await getGlobalClient().execute(useGetInfo())
-    } catch (e) {
-      missingClientError = e as Error
-    }
-
-    expect(missingClientError?.message).toContain('Global client has not been set')
   })
 })

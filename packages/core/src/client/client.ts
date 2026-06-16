@@ -1,10 +1,9 @@
 import type { ClientConfig } from './config'
 import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import type { Command } from './command'
-import { getGlobalClient } from './global'
 import type { ClientOption } from './option'
 import type { Client } from './resolve'
-import { CLIENT, getClientConfig } from './resolve'
+import { CLIENT } from './resolve'
 import type { AnyStruct } from '../struct'
 import type { RequestOutputShape } from '../http/request'
 import type { HttpAwaitResult, HttpCommand, RequestErrorData, RequestSuccessData } from '../http/http'
@@ -67,10 +66,6 @@ export function createClient(...options: ClientOption[]): Client {
   }
 
   return createClientFromConfig(conf)
-}
-
-export function resolveClientConfig(client?: Client): ClientConfig {
-  return getClientConfig(client ?? getGlobalClient())
 }
 
 export function execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(

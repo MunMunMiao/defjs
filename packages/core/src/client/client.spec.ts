@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createHttpInterceptor } from '../interceptor'
 import { createClient } from './client'
 import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
-import { getGlobalClient, resetGlobalClient, setGlobalClient } from './global'
 import {
   withCredentials,
   withEndpoint,
@@ -30,7 +29,6 @@ describe('Client', () => {
   let baseClient: Client
 
   beforeEach(() => {
-    resetGlobalClient()
     baseClient = createClient(withEndpoint('https://example.com/v1'))
   })
 
@@ -63,21 +61,6 @@ describe('Client', () => {
 
   test('should getClientConfig throw for non-client', () => {
     expect(() => getClientConfig({} as never)).toThrowError()
-  })
-
-  test('should setGlobalClient set global client', () => {
-    setGlobalClient(createClient(withEndpoint('https://example.com/v1')))
-
-    const client = getGlobalClient()
-    expect(isClient(client)).toBe(true)
-
-    resetGlobalClient()
-    expect(() => getGlobalClient()).toThrowError('Global client has not been set')
-  })
-
-  test('should setGlobalClient set global client', () => {
-    setGlobalClient(baseClient)
-    expect(getGlobalClient()).toBe(baseClient)
   })
 
   test('DEFAULT_HTTP_OPTIONS.fetch and DEFAULT_SSE_OPTIONS.fetch are bound to globalThis(detachable without losing this)', async () => {

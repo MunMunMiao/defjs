@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, getGlobalClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors, withXSRF } from '../client'
+import { beforeEach, describe, expect, inject, test } from 'vitest'
+import { createClient, withEndpoint, withInterceptors, withXSRF } from '../client'
+import type { Client } from '../client'
 import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
 import { struct, tag } from '../struct'
@@ -7,12 +8,10 @@ import type { HttpRequest } from './index'
 import { defineRequest } from './index'
 
 describe('request http runtime', () => {
-  beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
-  })
+  let client: Client
 
-  afterEach(() => {
-    resetGlobalClient()
+  beforeEach(() => {
+    client = createClient(withEndpoint(inject('testServerHost')))
   })
 
   test('should resolve success tuple for object-style request endpoints', async () => {
@@ -27,7 +26,7 @@ describe('request http runtime', () => {
       path: '/account',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useCreateAccount())) as any
+    const [error, result, response] = (await client.execute(useCreateAccount())) as any
 
     expect(error).toBeNull()
     expect(result).toEqual({ id: 1, name: 'Jack' })
@@ -50,7 +49,7 @@ describe('request http runtime', () => {
       path: '/account/not-found',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useMissingAccount())) as any
+    const [error, result, response] = (await client.execute(useMissingAccount())) as any
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(404)
@@ -238,7 +237,7 @@ describe('request http runtime', () => {
       path: '/raw-input',
     } as never)
 
-    const [error, result, response] = (await getGlobalClient().execute(useRawInput())) as any
+    const [error, result, response] = (await client.execute(useRawInput())) as any
 
     expect(error?.kind).toBe('definition')
     expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')

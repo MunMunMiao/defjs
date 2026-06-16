@@ -1,19 +1,11 @@
-import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors } from '../client'
+import { describe, expect, test } from 'vitest'
+import { createClient, withEndpoint, withInterceptors } from '../client'
 import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
 import { struct } from '../struct'
 import { defineRequest } from './index'
 
 describe('request http response type declarations', () => {
-  beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
-  })
-
-  afterEach(() => {
-    resetGlobalClient()
-  })
-
   test('should support explicit responseType declarations', async () => {
     const client = createClient(
       withEndpoint('https://example.com'),

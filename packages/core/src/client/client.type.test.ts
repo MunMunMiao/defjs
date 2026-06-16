@@ -10,7 +10,6 @@ import type {
 } from './index'
 import {
   createClient,
-  setGlobalClient,
   withCredentials,
   withEndpoint,
   withHTTPHandle,
@@ -127,9 +126,6 @@ type OptionsCases = Expect<Equal<typeof options.endpoint, string>>
 type XsrfOptionsCases = Expect<Equal<ClientXSRFOptions, { cookieName?: string; headerName?: string; tokenProvider?: XSRFTokenProvider }>>
 type XsrfConfigCases = Expect<Equal<ClientXSRFConfig, { cookieName: string; headerName: string; tokenProvider?: XSRFTokenProvider }>>
 type ClientConfigXsrfCases = Expect<Equal<ClientConfig['xsrf'], ClientXSRFConfig | undefined>>
-
-setGlobalClient(createClient(withEndpoint('https://global.example.com')))
-setGlobalClient(client)
 
 // @ts-expect-error withEndpoint expects a string
 createClient(withEndpoint(1))

@@ -22,7 +22,6 @@ export type {
   XSRFTokenProvider,
   XSRFTokenProviderContext,
 } from './config'
-export { getGlobalClient, resetGlobalClient, setGlobalClient } from './global'
 export type { ClientOption } from './option'
 export {
   withCredentials,

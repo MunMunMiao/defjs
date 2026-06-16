@@ -1,4 +1,4 @@
-import { createClient, defineEventStream, defineRequest, defineWebSocket, setGlobalClient, struct, withEndpoint } from '@defjs/core'
+import { createClient, defineEventStream, defineRequest, defineWebSocket, execute, struct, withEndpoint } from '@defjs/core'
 import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
 import { describe, expect, inject, test } from 'vitest'
 import { withOpenTelemetryServer } from './src/option'
@@ -58,7 +58,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
       },
     })
 
-    const [error, result] = await useEchoHeaders({}).with({ client })
+    const [error, result] = await execute(useEchoHeaders({}), { client })
 
     expect(error).toBeNull()
     expect(result).toBeDefined()
@@ -87,7 +87,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
       path: '/500',
     })
 
-    const [error] = await useFail(undefined).with({ client })
+    const [error] = await execute(useFail(undefined), { client })
 
     expect(error).not.toBeNull()
     const span = onlySpan(spans)
@@ -103,8 +103,6 @@ describe('e2e: opentelemetry-server with real test server', () => {
 
     const client = createClient(withEndpoint(host), withOpenTelemetryServer({ tracer, propagator }))
 
-    setGlobalClient(client)
-
     const useStream = defineEventStream({
       events: {
         traceparent: struct.string(),
@@ -112,7 +110,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
       path: '/sse',
     })
 
-    const [error, stream, open] = await useStream()
+    const [error, stream, open] = await client.execute(useStream())
 
     expect(error).toBeNull()
     expect(open?.response?.ok).toBe(true)
@@ -142,8 +140,6 @@ describe('e2e: opentelemetry-server with real test server', () => {
 
     const client = createClient(withEndpoint(host), withOpenTelemetryServer({ tracer, propagator }))
 
-    setGlobalClient(client)
-
     const useStream = defineEventStream({
       events: {
         traceparent: struct.string(),
@@ -151,7 +147,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
       path: '/sse/500',
     })
 
-    const [error] = await useStream()
+    const [error] = await client.execute(useStream())
 
     expect(error).not.toBeNull()
     const span = onlySpan(spans)
@@ -170,8 +166,6 @@ describe('e2e: opentelemetry-server with real test server', () => {
 
     const client = createClient(withEndpoint(wsHost), withOpenTelemetryServer({ tracer, propagator }))
 
-    setGlobalClient(client)
-
     const useSocket = defineWebSocket({
       incoming: {
         traceparent: struct.object({
@@ -181,7 +175,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
       path: '/ws',
     })
 
-    const [error, socket, connection] = await useSocket()
+    const [error, socket, connection] = await client.execute(useSocket())
 
     expect(error).toBeNull()
     expect(socket).toBeDefined()
@@ -225,8 +219,6 @@ describe('e2e: opentelemetry-server with real test server', () => {
       }),
     )
 
-    setGlobalClient(client)
-
     const useSocket = defineWebSocket({
       incoming: {
         traceparent: struct.object({
@@ -236,7 +228,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
       path: '/ws',
     })
 
-    const [error, socket, connection] = await useSocket()
+    const [error, socket, connection] = await client.execute(useSocket())
 
     expect(error).toBeNull()
     if (!socket) {

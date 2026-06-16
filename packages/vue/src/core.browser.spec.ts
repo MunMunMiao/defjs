@@ -1,5 +1,5 @@
-import { createHttpInterceptor, defineRequest, execute, resetGlobalClient, struct, type Client } from '@defjs/core'
-import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
+import { createHttpInterceptor, defineRequest, execute, struct, type Client } from '@defjs/core'
+import { beforeEach, describe, expect, inject, test } from 'vitest'
 import { createApp } from 'vue'
 import { injectClient, provideClient, withEndpoint, withInterceptors } from './index'
 
@@ -10,11 +10,6 @@ describe('vue browser runtime', () => {
 
   beforeEach(() => {
     testServerHost = inject('testServerHost')
-    resetGlobalClient()
-  })
-
-  afterEach(() => {
-    resetGlobalClient()
   })
 
   test('should create a Plugin with provideClient', () => {
@@ -101,7 +96,6 @@ describe('vue browser runtime', () => {
     appOnlyHost.mount(document.createElement('div'))
     expect(injectedClient).toBeDefined()
 
-    resetGlobalClient()
     injectedClient = undefined
 
     const appOnlyInterceptors = createApp({
@@ -115,7 +109,6 @@ describe('vue browser runtime', () => {
     appOnlyInterceptors.mount(document.createElement('div'))
     expect(injectedClient).toBeDefined()
 
-    resetGlobalClient()
     injectedClient = undefined
 
     const appNoOptions = createApp({

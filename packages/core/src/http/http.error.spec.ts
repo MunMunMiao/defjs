@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, getGlobalClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors } from '../client'
+import { beforeEach, describe, expect, inject, test } from 'vitest'
+import { createClient, withEndpoint, withInterceptors } from '../client'
+import type { Client } from '../client'
 import { ERR_ABORTED } from '../error'
 import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
@@ -7,12 +8,10 @@ import { struct } from '../struct'
 import { defineRequest } from './index'
 
 describe('request http runtime errors', () => {
-  beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
-  })
+  let client: Client
 
-  afterEach(() => {
-    resetGlobalClient()
+  beforeEach(() => {
+    client = createClient(withEndpoint(inject('testServerHost')))
   })
 
   test('should resolve non-2xx responses as http errors with typed data', async () => {
@@ -27,7 +26,7 @@ describe('request http runtime errors', () => {
       path: '/account/not-found',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useMissingAccount())) as any
+    const [error, result, response] = (await client.execute(useMissingAccount())) as any
 
     expect(result).toBeUndefined()
     expect(response?.ok).toBe(false)
@@ -57,7 +56,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useValidatedRequest({ id: 'oops' } as never))) as any
+    const [error, result, response] = (await client.execute(useValidatedRequest({ id: 'oops' } as never))) as any
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -81,7 +80,7 @@ describe('request http runtime errors', () => {
       path: '/json',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useBadResponse())) as any
+    const [error, result, response] = (await client.execute(useBadResponse())) as any
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(200)
@@ -103,7 +102,7 @@ describe('request http runtime errors', () => {
       path: '/500',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useUndeclaredStatus())) as any
+    const [error, result, response] = (await client.execute(useUndeclaredStatus())) as any
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
@@ -126,7 +125,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useBadBuild({}))) as any
+    const [error, result, response] = (await client.execute(useBadBuild({}))) as any
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -179,7 +178,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useRequest(), { signal: controller.signal })) as any
+    const [error, result, response] = (await client.execute(useRequest(), { signal: controller.signal })) as any
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -200,7 +199,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(
+    const [error, result, response] = (await client.execute(
       useRequest({ id: 1 } as never, { abort: controller.signal, timeout: 1 } as never),
     )) as any
 
@@ -222,7 +221,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(
+    const [error, result, response] = (await client.execute(
       useRequest(undefined, { abort: controller.signal, timeout: 1 } as never),
     )) as any
 
@@ -244,7 +243,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useRequest(undefined, { abort: signal }))) as any
+    const [error, result, response] = (await client.execute(useRequest(undefined, { abort: signal }))) as any
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -329,7 +328,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error] = (await getGlobalClient().execute(useBadRequest({ id: 'invalid' } as never))) as any
+    const [error] = (await client.execute(useBadRequest({ id: 'invalid' } as never))) as any
 
     expect(error?.kind).toBe('definition')
   })
@@ -355,7 +354,7 @@ describe('request http runtime errors', () => {
 
     const controller = new AbortController()
     const command = useDelay({ query: { ms: 5000 } })
-    const promise = getGlobalClient().execute(command, { signal: controller.signal })
+    const promise = client.execute(command, { signal: controller.signal })
     controller.abort()
 
     const [error] = (await promise) as any
@@ -573,7 +572,7 @@ describe('request http runtime errors', () => {
       path: '/delay',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(
+    const [error, result, response] = (await client.execute(
       useDelay({ query: { ms: 100 } }, { timeout: 10 }),
     )) as any
 

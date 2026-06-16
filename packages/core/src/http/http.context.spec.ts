@@ -1,19 +1,11 @@
-import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors } from '../client'
+import { describe, expect, test } from 'vitest'
+import { createClient, withEndpoint, withInterceptors } from '../client'
 import { createHttpInterceptor } from '../interceptor/interceptor'
 import { makeHttpContext, makeHttpContextToken } from '../internal/context'
 import { makeResponse } from '../internal/http_response'
 import { defineRequest } from './index'
 
 describe('request http runtime context', () => {
-  beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
-  })
-
-  afterEach(() => {
-    resetGlobalClient()
-  })
-
   test('should use context and interceptors for request-scoped transaction data', async () => {
     const transactionToken = makeHttpContextToken(() => '')
     let seenHeader: string | null = null

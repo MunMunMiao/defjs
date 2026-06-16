@@ -1,10 +1,7 @@
-import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
+import { beforeEach, describe, expect, inject, test } from 'vitest'
 
 import {
   createClient,
-  getGlobalClient,
-  resetGlobalClient,
-  setGlobalClient,
   withCredentials,
   withEndpoint,
   withHTTPHandle,
@@ -12,18 +9,17 @@ import {
   withSSEHandle,
   withSSEOptions,
 } from '../client'
+import type { Client } from '../client'
 import { ERR_ABORTED } from '../error'
 import { createSSEInterceptor } from '../interceptor'
 import { struct, tag } from '../struct'
 import { defineEventStream } from './index'
 
 describe('request event stream runtime', () => {
-  beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
-  })
+  let baseClient: Client
 
-  afterEach(() => {
-    resetGlobalClient()
+  beforeEach(() => {
+    baseClient = createClient(withEndpoint(inject('testServerHost')))
   })
 
   test('should resolve event streams through thenable refs', async () => {
@@ -34,7 +30,7 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream, open] = (await getGlobalClient().execute(useBasicStream())) as any
+    const [error, stream, open] = (await baseClient.execute(useBasicStream())) as any
 
     expect(error).toBeNull()
     expect(open?.response?.ok).toBe(true)
@@ -88,7 +84,7 @@ describe('request event stream runtime', () => {
       path: '/sse/no-id',
     })
 
-    const [error, stream] = (await getGlobalClient().execute(useNoIdStream())) as any
+    const [error, stream] = (await baseClient.execute(useNoIdStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {
@@ -112,7 +108,7 @@ describe('request event stream runtime', () => {
       path: '/sse/empty-id',
     })
 
-    const [error, stream] = (await getGlobalClient().execute(useEmptyIdStream())) as any
+    const [error, stream] = (await baseClient.execute(useEmptyIdStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {
@@ -141,7 +137,7 @@ describe('request event stream runtime', () => {
       path: '/sse/mixed',
     })
 
-    const [error, stream] = (await getGlobalClient().execute(useMixedStream())) as any
+    const [error, stream] = (await baseClient.execute(useMixedStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {
@@ -233,7 +229,7 @@ describe('request event stream runtime', () => {
     const command = useStream()
     controller.abort('stop')
 
-    const [error, stream, open] = (await getGlobalClient().execute(command, { signal: controller.signal })) as any
+    const [error, stream, open] = (await baseClient.execute(command, { signal: controller.signal })) as any
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
@@ -296,7 +292,7 @@ describe('request event stream runtime', () => {
       // @ts-expect-error testing runtime defensive behavior with invalid config combination
       { abort: controller.signal, timeout: 1 },
     )
-    const [error, stream, open] = (await getGlobalClient().execute(command)) as any
+    const [error, stream, open] = (await baseClient.execute(command)) as any
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
@@ -313,7 +309,7 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream] = (await getGlobalClient().execute(useStream())) as any
+    const [error, stream] = (await baseClient.execute(useStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {
@@ -332,7 +328,7 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream] = (await getGlobalClient().execute(useStream())) as any
+    const [error, stream] = (await baseClient.execute(useStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {
@@ -356,7 +352,7 @@ describe('request event stream runtime', () => {
       path: '/json',
     })
 
-    const [error, stream, open] = (await getGlobalClient().execute(useInvalidStream())) as any
+    const [error, stream, open] = (await baseClient.execute(useInvalidStream())) as any
 
     expect(stream).toBeUndefined()
     expect(open?.response?.status).toBe(200)
@@ -381,7 +377,7 @@ describe('request event stream runtime', () => {
     })
 
     const command = useStream({}, { abort: controller.signal })
-    const [error, stream, open] = (await getGlobalClient().execute(command)) as any
+    const [error, stream, open] = (await baseClient.execute(command)) as any
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
@@ -399,7 +395,7 @@ describe('request event stream runtime', () => {
     })
 
     const command = useStream({}, { abort: controller.signal })
-    const [error, stream] = (await getGlobalClient().execute(command)) as any
+    const [error, stream] = (await baseClient.execute(command)) as any
 
     expect(error).toBeNull()
     expect(stream).toBeDefined()
@@ -413,7 +409,7 @@ describe('request event stream runtime', () => {
       path: '/500',
     })
 
-    const [error, stream, open] = (await getGlobalClient().execute(useStream())) as any
+    const [error, stream, open] = (await baseClient.execute(useStream())) as any
 
     expect(stream).toBeUndefined()
     expect(open?.response?.status).toBe(500)
@@ -429,7 +425,7 @@ describe('request event stream runtime', () => {
       path: '/sse/unknown-event',
     })
 
-    const [error, stream] = (await getGlobalClient().execute(useStream())) as any
+    const [error, stream] = (await baseClient.execute(useStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {
@@ -451,7 +447,7 @@ describe('request event stream runtime', () => {
       path: '/sse/empty-data',
     })
 
-    const [error, stream] = (await getGlobalClient().execute(useStream())) as any
+    const [error, stream] = (await baseClient.execute(useStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {
@@ -474,7 +470,7 @@ describe('request event stream runtime', () => {
       path: '/sse/no-event-name',
     })
 
-    const [error, stream] = (await getGlobalClient().execute(useStream())) as any
+    const [error, stream] = (await baseClient.execute(useStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {
@@ -500,7 +496,7 @@ describe('request event stream runtime', () => {
     })
 
     const command = useStream({}, { abort: controller.signal })
-    const [error, stream, open] = (await getGlobalClient().execute(command)) as any
+    const [error, stream, open] = (await baseClient.execute(command)) as any
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
@@ -520,7 +516,7 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream, open] = (await getGlobalClient().execute(useStream({}))) as any
+    const [error, stream, open] = (await baseClient.execute(useStream({}))) as any
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
@@ -536,7 +532,7 @@ describe('request event stream runtime', () => {
       path: '/500',
     })
 
-    const [error, stream, open] = (await getGlobalClient().execute(useStream())) as any
+    const [error, stream, open] = (await baseClient.execute(useStream())) as any
 
     expect(stream).toBeUndefined()
     expect(open?.response?.status).toBe(500)
@@ -806,7 +802,7 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream] = (await getGlobalClient().execute(useStream())) as any
+    const [error, stream] = (await baseClient.execute(useStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {
@@ -881,7 +877,7 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream, open] = (await getGlobalClient().execute(
+    const [error, stream, open] = (await baseClient.execute(
       useStream(
         // @ts-expect-error testing runtime defensive behavior with invalid input type
         { id: 'invalid' },

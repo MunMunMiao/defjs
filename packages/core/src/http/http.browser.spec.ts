@@ -1,16 +1,18 @@
 import { afterEach, beforeEach, describe, expect, inject, test, vi } from 'vitest'
 
-import { createClient, getGlobalClient, resetGlobalClient, setGlobalClient, withEndpoint, withHTTPHandle, withXSRF } from '../client'
+import { createClient, withEndpoint, withHTTPHandle, withXSRF } from '../client'
+import type { Client } from '../client'
 import { struct } from '../struct'
 import { defineRequest } from './index'
 
 describe('http browser runtime', () => {
+  let baseClient: Client
+
   beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
+    baseClient = createClient(withEndpoint(inject('testServerHost')))
   })
 
   afterEach(() => {
-    resetGlobalClient()
     document.cookie = 'XSRF-TOKEN=; Max-Age=0; path=/'
   })
 
@@ -25,7 +27,7 @@ describe('http browser runtime', () => {
       path: '/json',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useGetAccount())) as any
+    const [error, result, response] = (await baseClient.execute(useGetAccount())) as any
 
     expect(error).toBeNull()
     expect(result).toEqual({ id: 1 })
@@ -44,7 +46,7 @@ describe('http browser runtime', () => {
       path: '/',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(
+    const [error, result, response] = (await baseClient.execute(
       useCreateAccount({ body: new Uint8Array(32 * 1024).buffer }, {
         onDownloadProgress(event) {
           downloadLoaded.push(event.loaded)
@@ -68,7 +70,7 @@ describe('http browser runtime', () => {
       path: '/delay',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(
+    const [error, result, response] = (await baseClient.execute(
       useDelay({ query: { ms: 1000 } }, { timeout: 100 }),
     )) as any
 
@@ -92,14 +94,14 @@ describe('http browser runtime', () => {
       return new Response(null, { status: 200 })
     }) as unknown as typeof fetch
 
-    setGlobalClient(createClient(withEndpoint(window.location.origin), withHTTPHandle(fetchMock), withXSRF()))
+    const client = createClient(withEndpoint(window.location.origin), withHTTPHandle(fetchMock), withXSRF())
 
     const useXsrf = defineRequest({
       method: 'POST',
       path: '/xsrf',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useXsrf())) as any
+    const [error, result, response] = (await client.execute(useXsrf())) as any
 
     expect(error).toBeNull()
     expect(result).toBeUndefined()
@@ -108,10 +110,9 @@ describe('http browser runtime', () => {
   })
 
   test('should validate xsrf token through real server round-trip', async () => {
-    const tokenResponse = await fetch('/xsrf-token')
-    await (tokenResponse.json() as Promise<{ token: string }>)
+    await fetch('/xsrf-token')
 
-    setGlobalClient(createClient(withEndpoint(window.location.origin), withXSRF()))
+    const client = createClient(withEndpoint(window.location.origin), withXSRF())
 
     const useValidate = defineRequest({
       method: 'POST',
@@ -122,7 +123,7 @@ describe('http browser runtime', () => {
       path: '/xsrf-validate',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useValidate())) as any
+    const [error, result, response] = (await client.execute(useValidate())) as any
 
     expect(error).toBeNull()
     expect(result).toEqual({ ok: true })
@@ -133,7 +134,7 @@ describe('http browser runtime', () => {
   test('should be rejected by server when xsrf header is missing', async () => {
     await fetch('/xsrf-token')
 
-    setGlobalClient(createClient(withEndpoint(window.location.origin)))
+    const client = createClient(withEndpoint(window.location.origin))
 
     const useValidate = defineRequest({
       method: 'POST',
@@ -144,7 +145,7 @@ describe('http browser runtime', () => {
       path: '/xsrf-validate',
     })
 
-    const [error, result, response] = (await getGlobalClient().execute(useValidate())) as any
+    const [error, result, response] = (await client.execute(useValidate())) as any
 
     expect(error).not.toBeNull()
     expect(result).toBeUndefined()
