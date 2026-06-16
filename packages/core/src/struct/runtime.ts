@@ -1,9 +1,10 @@
+import type { OmitKeys } from '../internal/utility_types'
 import { DEFINITION, TYPES } from './symbols'
 import type { FieldTagOption } from './tag'
 import type { PrimitiveDefinition, PrimitiveKind, RuntimeSchema, Schema, SchemaDefinition, SchemaFlags, SchemaLike } from './types'
 
 export function createPrimitiveSchema<TInput, TOutput = TInput>(
-  definition: Omit<PrimitiveDefinition<PrimitiveKind, TInput, TOutput>, 'flags'>,
+  definition: OmitKeys<PrimitiveDefinition<PrimitiveKind, TInput, TOutput>, 'flags'>,
 ): Schema<TInput | undefined, TOutput> {
   return castSchema<Schema<TInput | undefined, TOutput>>(
     makeSchema({

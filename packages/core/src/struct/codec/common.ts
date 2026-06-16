@@ -6,7 +6,7 @@ import type { FieldTag, TagNamespace } from '../tag'
 import type { Path, RuntimeSchema, SchemaLike } from '../types'
 import { hasOwnKey, isPlainObject } from '../utils'
 
-export type TaggedObject = Record<string, unknown>
+export type TaggedObject = { [key: string]: unknown }
 
 export type TagObjectOptions = {
   requireTag?: boolean

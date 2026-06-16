@@ -88,6 +88,17 @@ describe('Context', () => {
     expect(context.length).toBe(0)
   })
 
+  test('should ignore non-token entries when constructing from array', () => {
+    const token = makeHttpContextToken(() => 'default')
+    const context = makeHttpContext([
+      // Runtime boundary: first entry is not a valid token and must be skipped.
+      [{} as unknown as HttpContextToken<string>, 'ignored'],
+      [token, 'kept'],
+    ])
+    expect(context.length).toBe(1)
+    expect(context.get(token)).toBe('kept')
+  })
+
   test('ctx.get does not mutate the underlying map(no miss-then-cache)', () => {
     const token = makeHttpContextToken(() => 'default-value')
     const ctx = makeHttpContext()

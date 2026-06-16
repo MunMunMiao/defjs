@@ -415,6 +415,42 @@ describe('Client', () => {
     expect(getClientConfig(withProtocols).webSocket.protocols).toEqual(['proto1'])
   })
 
+  test('should cloneClient copy existing sse timing options', () => {
+    const sourceClient = createClient(
+      withEndpoint('https://example.com'),
+      withSSEReconnect({ attempts: 3, delayMs: 1000 }),
+      withSSEQueue({ maxSize: 8, overflow: 'drop-oldest' }),
+    )
+
+    const nextClient = cloneClient(sourceClient)
+    const config = getClientConfig(nextClient).sse
+
+    expect(config.reconnect).toEqual({ attempts: 3, delayMs: 1000 })
+    expect(config.queue).toEqual({ maxSize: 8, overflow: 'drop-oldest' })
+  })
+
+  test('should cloneClient override sse reconnect with spread', () => {
+    const withReconnect = cloneClient(baseClient, withSSEReconnect({ attempts: 3, delayMs: 1000 }))
+    const nextClient = cloneClient(withReconnect, withSSEReconnect({ attempts: 5, delayMs: 2000 }))
+
+    expect(getClientConfig(nextClient).sse.reconnect).toEqual({ attempts: 5, delayMs: 2000 })
+    expect(getClientConfig(nextClient).sse.reconnect).not.toBe(getClientConfig(withReconnect).sse.reconnect)
+
+    ;(getClientConfig(nextClient).sse.reconnect as { attempts: number }).attempts = 99
+    expect(getClientConfig(withReconnect).sse.reconnect).toEqual({ attempts: 3, delayMs: 1000 })
+  })
+
+  test('should cloneClient override sse queue with spread', () => {
+    const withQueue = cloneClient(baseClient, withSSEQueue({ maxSize: 10, overflow: 'drop-oldest' }))
+    const nextClient = cloneClient(withQueue, withSSEQueue({ maxSize: 20, overflow: 'error' }))
+
+    expect(getClientConfig(nextClient).sse.queue).toEqual({ maxSize: 20, overflow: 'error' })
+    expect(getClientConfig(nextClient).sse.queue).not.toBe(getClientConfig(withQueue).sse.queue)
+
+    ;(getClientConfig(nextClient).sse.queue as { maxSize: number }).maxSize = 99
+    expect(getClientConfig(withQueue).sse.queue).toEqual({ maxSize: 10, overflow: 'drop-oldest' })
+  })
+
   test('should cloneClient preserve xsrf config when not overridden', () => {
     const tokenProvider = vi.fn(() => 'initial-token')
     const client = createClient(

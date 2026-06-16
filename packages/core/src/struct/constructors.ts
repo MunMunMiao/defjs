@@ -111,7 +111,7 @@ export function createEnumSchema<const T extends readonly [string, ...string[]]>
   )
 }
 
-export function createObjectEnumSchema<const T extends Record<string, number | string>>(
+export function createObjectEnumSchema<const T extends { [key: string]: number | string }>(
   value: T,
 ): Schema<T[keyof T] | undefined, T[keyof T]> {
   const values = Object.values(value).filter((item): item is T[keyof T] => typeof item === 'number' || typeof item === 'string')

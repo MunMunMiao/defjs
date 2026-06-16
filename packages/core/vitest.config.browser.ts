@@ -1,6 +1,6 @@
 import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
-import { coverageConfig, globalSetupPath, packageRoot } from './test/shared'
+import { globalSetupPath, packageRoot } from './test/shared'
 import { xsrfProxyPlugin } from './test/vite-xsrf-plugin'
 
 export default defineConfig({
@@ -9,9 +9,6 @@ export default defineConfig({
   test: {
     name: 'core-browser',
     globalSetup: globalSetupPath,
-    coverage: {
-      ...coverageConfig,
-    },
     browser: {
       enabled: true,
       provider: playwright(),

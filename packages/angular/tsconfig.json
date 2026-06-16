@@ -1,10 +1,6 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
-    "outDir": "./dist",
-    "declaration": true,
-    "noEmit": false,
-    "emitDeclarationOnly": false,
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "target": "ESNext",
     "module": "ESNext",
@@ -14,10 +10,14 @@
     "strictNullChecks": true,
     "isolatedModules": true,
     "skipLibCheck": true,
+    "noEmit": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noPropertyAccessFromIndexSignature": true
+    "noPropertyAccessFromIndexSignature": true,
+    "paths": {
+      "@defjs/core": ["../core/src"]
+    }
   },
   "include": ["src/**/*.ts"]
 }

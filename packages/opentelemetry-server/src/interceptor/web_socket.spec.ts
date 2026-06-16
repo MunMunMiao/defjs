@@ -1,3 +1,4 @@
+import type { FnReturn } from '../utility_types'
 import type { HttpRequest } from '@defjs/core'
 import type { Context, TextMapGetter, TextMapPropagator, TextMapSetter } from '@opentelemetry/api'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
@@ -32,7 +33,7 @@ function isQueryCarrier(value: unknown): value is QueryCarrier {
   return typeof value === 'object' && value !== null && Reflect.get(value, 'params') instanceof URLSearchParams
 }
 
-let mockPropagator: ReturnType<typeof createMockWsPropagator>
+let mockPropagator: FnReturn<typeof createMockWsPropagator>
 
 describe('createOpenTelemetryWebSocketInterceptor', () => {
   beforeEach(() => {

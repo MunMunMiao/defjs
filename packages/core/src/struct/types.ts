@@ -1,3 +1,4 @@
+import type { ExcludeUnion } from '../internal/utility_types'
 import type { StructError } from './errors'
 import type { DEFINITION, TYPES } from './symbols'
 import type { FieldTagOption } from './tag'
@@ -40,7 +41,7 @@ export interface FormattedSchemaError {
 
 export interface FlattenedSchemaError {
   formErrors: string[]
-  fieldErrors: Record<string, string[]>
+  fieldErrors: { [key: string]: string[] }
 }
 
 export interface SchemaMethods<I, O, OO extends boolean> {
@@ -68,7 +69,7 @@ export type Infer<T> = SchemaOutput<T>
 export type FieldOutput<S> =
   S extends SchemaLike<unknown, unknown, boolean>
     ? S extends OptionalOutputSchema
-      ? Exclude<S['_struct']['output'], undefined>
+      ? ExcludeUnion<S['_struct']['output'], undefined>
       : S['_struct']['output']
     : never
 
@@ -77,7 +78,7 @@ export type Simplify<T> = { [K in keyof T]: T[K] } & {}
 // Type boundary: ObjectShape accepts any field schema type; `any` is the only way to express "a record whose
 // values are arbitrary schema instances" before the caller provides a concrete shape.
 // oxlint-disable-next-line typescript/no-explicit-any
-export type ObjectShape = Record<string, any>
+export type ObjectShape = { [key: string]: any }
 
 export type ObjectInput<T extends ObjectShape> = Simplify<{
   -readonly [K in keyof T]?: T[K]['_struct']['input']
@@ -86,11 +87,11 @@ export type ObjectInput<T extends ObjectShape> = Simplify<{
 export type ObjectOutput<T extends ObjectShape> = Simplify<
   {
     -readonly [K in keyof T as T[K] extends OptionalOutputSchema ? never : K]: T[K] extends OptionalOutputSchema
-      ? Exclude<T[K]['_struct']['output'], undefined>
+      ? ExcludeUnion<T[K]['_struct']['output'], undefined>
       : T[K]['_struct']['output']
   } & {
     -readonly [K in keyof T as T[K] extends OptionalOutputSchema ? K : never]?: T[K] extends OptionalOutputSchema
-      ? Exclude<T[K]['_struct']['output'], undefined>
+      ? ExcludeUnion<T[K]['_struct']['output'], undefined>
       : T[K]['_struct']['output']
   }
 >
@@ -199,8 +200,8 @@ export interface RequestSchema<T extends RequestShape>
 }
 
 export type RecordSchema<S extends SchemaLike<unknown, unknown, boolean>> = Schema<
-  Record<string, SchemaInput<S>>,
-  Record<string, FieldOutput<S>>
+  { [key: string]: SchemaInput<S> },
+  { [key: string]: FieldOutput<S> }
 >
 export type TupleSchema<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = Schema<TupleOutput<T>, TupleOutput<T>>
 export type UnionSchema<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = Schema<unknown, UnionOutput<T>>

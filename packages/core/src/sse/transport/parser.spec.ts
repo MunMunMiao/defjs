@@ -1,3 +1,4 @@
+import type { FnReturn } from '../../internal/utility_types'
 import { describe, expect, test } from 'vitest'
 import type { EventStreamMessage } from './parser'
 import { createLineParser, createMessageParser, readStreamBytes } from './parser'
@@ -60,8 +61,8 @@ describe('sse parser', () => {
   })
 
   test('should handle abort without reason gracefully', async () => {
-    let enqueueTimeout: ReturnType<typeof setTimeout> | undefined
-    let closeTimeout: ReturnType<typeof setTimeout> | undefined
+    let enqueueTimeout: FnReturn<typeof setTimeout> | undefined
+    let closeTimeout: FnReturn<typeof setTimeout> | undefined
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {

@@ -51,8 +51,8 @@ export function createWebSocketUrlFromRequest(request: HttpRequest): string {
 export function createWebSocketUrl(
   baseEndpoint: string,
   path: string,
-  params: Record<string, RequestBuildValue> | undefined,
-  query: Record<string, RequestBuildValue> | undefined,
+  params: { [key: string]: RequestBuildValue } | undefined,
+  query: { [key: string]: RequestBuildValue } | undefined,
   queryParamsSerializer: QueryParamsSerializer,
 ): string {
   const url = createResolvedRequestUrl(baseEndpoint, fillUrl(path, params), queryParamsSerializer(createSearchParams(query)))
@@ -66,7 +66,7 @@ export function createWebSocketUrl(
 
 // WebSocket-specific search params builder that serializes complex values (objects → JSON, bigint → string).
 // Differs from internal/url's createSearchParams which silently skips non-scalar values.
-function createSearchParams(query?: Record<string, RequestBuildValue>): URLSearchParams {
+function createSearchParams(query?: { [key: string]: RequestBuildValue }): URLSearchParams {
   const searchParams = new URLSearchParams()
   if (!query) {
     return searchParams

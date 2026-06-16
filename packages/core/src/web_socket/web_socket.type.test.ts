@@ -1,3 +1,4 @@
+import type { FnReturn, FnParams } from '../internal/utility_types'
 import { struct } from '../struct'
 import type { UseWebSocketConfig, WebSocketIncomingData, WebSocketOutgoingData, WebSocketRef, WebSocketSession } from './index'
 import { defineWebSocket } from './index'
@@ -89,8 +90,8 @@ type ExpectedOutgoing =
 type IncomingCases = Expect<Equal<WebSocketIncomingData<typeof incomingSchemas>, ExpectedIncoming>>
 
 type OutgoingCases = Expect<Equal<WebSocketOutgoingData<typeof outgoingSchemas>, ExpectedOutgoing>>
-type RefCases = Expect<Equal<ReturnType<typeof useSocket>, WebSocketRef<ExpectedIncoming, ExpectedOutgoing>>>
-type InputCases = Expect<Equal<Parameters<typeof useSocket>, [({ roomId?: string | undefined } | undefined)?]>>
+type RefCases = Expect<Equal<FnReturn<typeof useSocket>, WebSocketRef<ExpectedIncoming, ExpectedOutgoing>>>
+type InputCases = Expect<Equal<FnParams<typeof useSocket>, [({ roomId?: string | undefined } | undefined)?]>>
 
 const socketRef = useSocket({ roomId: 'room-1' })
 

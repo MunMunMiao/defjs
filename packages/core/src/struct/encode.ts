@@ -6,7 +6,7 @@ import { hasOwnKey, isPlainObject } from './utils'
 export type EncodeChild = (schema: RuntimeSchema, value: unknown) => unknown
 
 export interface EncodeOptions {
-  encodeObject?: (schema: RuntimeSchema, value: Record<string, unknown>, encodeChild: EncodeChild) => unknown
+  encodeObject?: (schema: RuntimeSchema, value: { [key: string]: unknown }, encodeChild: EncodeChild) => unknown
 }
 
 export function encodeValue(schema: RuntimeSchema, value: unknown, options: EncodeOptions = {}): unknown {
@@ -44,7 +44,7 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
       if (!isPlainObject(value)) {
         return value
       }
-      const output: Record<string, unknown> = Object.create(null)
+      const output: { [key: string]: unknown } = Object.create(null)
       for (const [key, entry] of Object.entries(value)) {
         output[key] = encodeValue(definition.value as unknown as RuntimeSchema, entry, options)
       }
@@ -58,7 +58,7 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
       if (options.encodeObject) {
         return options.encodeObject(schema, value, (fieldSchema, fieldValue) => encodeValue(fieldSchema, fieldValue, options))
       }
-      const output: Record<string, unknown> = Object.create(null)
+      const output: { [key: string]: unknown } = Object.create(null)
       const shape = resolveObjectShape(schema, definition)
       for (const [key, fieldSchema] of Object.entries(shape)) {
         if (!hasOwnKey(value, key)) {
@@ -73,7 +73,7 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
       if (!isPlainObject(value)) {
         return value
       }
-      const output: Record<string, unknown> = Object.create(null)
+      const output: { [key: string]: unknown } = Object.create(null)
       if (definition.path && hasOwnKey(value, 'path')) {
         output['path'] = encodeValue(definition.path as unknown as RuntimeSchema, value['path'], options)
       }
@@ -104,7 +104,7 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
 
     case 'discriminatedUnion': {
       if (isPlainObject(value)) {
-        const matched = definition.map.get((value as Record<string, unknown>)[definition.discriminator])
+        const matched = definition.map.get((value as { [key: string]: unknown })[definition.discriminator])
         if (matched) {
           return encodeValue(matched as unknown as RuntimeSchema, value, options)
         }
@@ -198,7 +198,7 @@ export function matchesDefinition(definition: SchemaDefinition, value: unknown, 
         matchesDefinition((opt as unknown as RuntimeSchema)[DEFINITION], value, opt as unknown as RuntimeSchema),
       )
     case 'discriminatedUnion':
-      return isPlainObject(value) && definition.map.has((value as Record<string, unknown>)[definition.discriminator])
+      return isPlainObject(value) && definition.map.has((value as { [key: string]: unknown })[definition.discriminator])
     case 'intersection':
       return (
         matchesDefinition((definition.left as unknown as RuntimeSchema)[DEFINITION], value, definition.left as unknown as RuntimeSchema) &&
@@ -207,7 +207,7 @@ export function matchesDefinition(definition: SchemaDefinition, value: unknown, 
   }
 }
 
-function matchesObjectValue(schema: RuntimeSchema, value: Record<string, unknown>): boolean {
+function matchesObjectValue(schema: RuntimeSchema, value: { [key: string]: unknown }): boolean {
   const definition = schema[DEFINITION]
   if (definition.kind !== 'object') {
     return true

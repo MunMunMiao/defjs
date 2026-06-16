@@ -1,3 +1,4 @@
+import type { NonNullableValue, SelectKeys, ExtractUnion } from './utility_types'
 import type { AnyStruct, RequestBodyCodec as StructRequestBodyCodec } from '../struct'
 import { getWireKey } from '../struct/codec/common'
 import { encodeValue } from '../struct/encode'
@@ -65,7 +66,7 @@ export type BuildInput<T> = T extends { readonly _struct: { readonly output: inf
 
 type BuildOutput<TOutput> = TOutput extends readonly (infer TItem)[]
   ? BuildArray<BuildOutput<TItem>, TOutput>
-  : TOutput extends Record<string, unknown>
+  : TOutput extends { [key: string]: unknown }
     ? BuildBoundRef & { readonly [K in keyof TOutput]: BuildOutput<TOutput[K]> }
     : BuildBoundRef<TOutput>
 
@@ -98,13 +99,12 @@ type BuildPlanStep =
   | { kind: 'addHeaders'; projection: unknown }
   | { kind: 'formData'; projection: unknown }
   | { contentType?: string | null; kind: 'formUrlEncoded'; projection: unknown }
-  | { kind: 'headers'; projection: HeadersInit | Record<string, unknown> | unknown }
+  | { kind: 'headers'; projection: HeadersInit | { [key: string]: unknown } | unknown }
   | { contentType?: string | null; kind: 'html'; projection: unknown }
   | { contentType?: string | null; kind: 'json'; projection: unknown }
   | { kind: 'pathParams'; projection: unknown }
   | { kind: 'queryParams'; projection: unknown }
   | { contentType?: string | null; kind: 'text'; projection: unknown }
-  | { contentType?: string | null; kind: 'xml'; projection: unknown }
 
 export interface RequestBuilder {
   addFormData(projection: BuildFormDataProjection): void
@@ -126,19 +126,19 @@ export type RequestBuild = {
   body?: HttpRequest['body']
   bodyContentType?: string | null
   headers?: Headers
-  params?: Record<string, RequestBuildValue>
-  query?: Record<string, RequestBuildValue>
+  params?: { [key: string]: RequestBuildValue }
+  query?: { [key: string]: RequestBuildValue }
   withCredentials?: boolean
 }
 
 export type RequestBuildInput<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? unknown
-  : BuildInput<NonNullable<TInput>>
+  : BuildInput<NonNullableValue<TInput>>
 
 export type RequestBuildContext<TTransport extends RequestTransport = 'http'> = TTransport extends 'webSocket'
-  ? Pick<RequestBuilder, 'setPathParams' | 'setQueryParams'>
+  ? SelectKeys<RequestBuilder, 'setPathParams' | 'setQueryParams'>
   : TTransport extends 'sse'
-    ? Pick<RequestBuilder, 'setHeaders' | 'addHeaders' | 'setPathParams' | 'setQueryParams'>
+    ? SelectKeys<RequestBuilder, 'setHeaders' | 'addHeaders' | 'setPathParams' | 'setQueryParams'>
     : RequestBuilder
 
 export type RequestBuildHandler<TInput extends AnyStruct | undefined, TTransport extends RequestTransport = 'http'> = (
@@ -193,7 +193,7 @@ function createTypedBuildContext<TTransport extends RequestTransport>(
 }
 
 function createTypedBuildInput<TInput extends AnyStruct | undefined>(
-  schema: NonNullable<TInput>,
+  schema: NonNullableValue<TInput>,
   owner: symbol,
 ): RequestBuildInput<TInput> {
   // Type boundary: createBoundView materializes a runtime proxy from the same schema used by RequestBuildInput's conditional type.
@@ -217,7 +217,7 @@ function buildDefaultRequest<TInput>(input: TInput, options: RequestAutoBuildOpt
 
 function buildRequestShape<TInput>(
   input: TInput,
-  definition: Extract<SchemaDefinition, { kind: 'request' }>,
+  definition: ExtractUnion<SchemaDefinition, { kind: 'request' }>,
   transport: RequestTransport,
 ): RequestBuild {
   assertRequestShapeTransport(definition, transport)
@@ -225,7 +225,7 @@ function buildRequestShape<TInput>(
   const state: RequestBuilderState = {
     snapshot: {},
   }
-  const requestInput: Record<string, unknown> = isPlainObject(input) ? input : {}
+  const requestInput: { [key: string]: unknown } = isPlainObject(input) ? input : {}
 
   if (definition.path) {
     setPathParamsState(state, encodeFlatRecord(definition.path as unknown as RuntimeSchema, requestInput['path'], 'path'))
@@ -254,7 +254,7 @@ function setRequestShapeBody(state: RequestBuilderState, bodySchema: RuntimeSche
       setFormUrlEncodedBody(state, encodeFlatRecord(body.schema, bodyValue, 'urlencoded'))
       return
     case 'formData':
-      setFormDataBody(state, encodeFlatRecord(body.schema, bodyValue, 'formData') as Record<string, RequestFormDataValue>)
+      setFormDataBody(state, encodeFlatRecord(body.schema, bodyValue, 'formData') as { [key: string]: RequestFormDataValue })
       return
     case 'text':
       setTextBody(state, String(encodeValue(body.schema, bodyValue) ?? ''))
@@ -278,15 +278,11 @@ function setHtmlBody(state: RequestBuilderState, value: string, options?: Reques
   setBody(state, value, resolveBodyContentTypeOption(options, 'text/html;charset=UTF-8'))
 }
 
-function setXmlBody(state: RequestBuilderState, value: string, options?: RequestBodyOptions): void {
-  setBody(state, value, resolveBodyContentTypeOption(options, 'application/xml;charset=UTF-8'))
-}
-
 function setRawBody(state: RequestBuilderState, value: HttpRequest['body'], options?: RequestBodyOptions): void {
   setBody(state, value, options?.contentType)
 }
 
-function setFormDataBody(state: RequestBuilderState, record: Record<string, RequestFormDataValue>): void {
+function setFormDataBody(state: RequestBuilderState, record: { [key: string]: RequestFormDataValue }): void {
   /* istanbul ignore next -- unreachable: FormData is available in all target runtimes */
   if (typeof FormData === 'undefined') {
     throw new Error('FormData is not supported in current runtime')
@@ -300,7 +296,11 @@ function setFormDataBody(state: RequestBuilderState, record: Record<string, Requ
   setBody(state, body)
 }
 
-function setFormUrlEncodedBody(state: RequestBuilderState, record: Record<string, RequestBuildValue>, options?: RequestBodyOptions): void {
+function setFormUrlEncodedBody(
+  state: RequestBuilderState,
+  record: { [key: string]: RequestBuildValue },
+  options?: RequestBodyOptions,
+): void {
   const body = new URLSearchParams()
   setBody(state, body, resolveBodyContentTypeOption(options, 'application/x-www-form-urlencoded;charset=UTF-8'))
   for (const [key, value] of Object.entries(record)) {
@@ -308,28 +308,28 @@ function setFormUrlEncodedBody(state: RequestBuilderState, record: Record<string
   }
 }
 
-function setHeadersState(state: RequestBuilderState, record: HeadersInit | Record<string, RequestBuildValue>): void {
+function setHeadersState(state: RequestBuilderState, record: { [key: string]: RequestBuildValue }): void {
   const headers = new Headers()
   appendHeaders(headers, record)
   state.snapshot.headers = headers
 }
 
-function setPathParamsState(state: RequestBuilderState, record: Record<string, RequestBuildValue>): void {
+function setPathParamsState(state: RequestBuilderState, record: { [key: string]: RequestBuildValue }): void {
   state.snapshot.params = { ...record }
 }
 
-function setQueryParamsState(state: RequestBuilderState, record: Record<string, RequestBuildValue>): void {
+function setQueryParamsState(state: RequestBuilderState, record: { [key: string]: RequestBuildValue }): void {
   state.snapshot.query = { ...record }
 }
 
-function addHeadersState(state: RequestBuilderState, record: HeadersInit | Record<string, RequestBuildValue>): void {
+function addHeadersState(state: RequestBuilderState, record: { [key: string]: RequestBuildValue }): void {
   if (!state.snapshot.headers) {
     state.snapshot.headers = new Headers()
   }
   appendHeaders(state.snapshot.headers, record)
 }
 
-function addFormDataBody(state: RequestBuilderState, record: Record<string, RequestFormDataValue>): void {
+function addFormDataBody(state: RequestBuilderState, record: { [key: string]: RequestFormDataValue }): void {
   /* istanbul ignore next -- unreachable: FormData is available in all target runtimes */
   if (typeof FormData === 'undefined') {
     throw new Error('FormData is not supported in current runtime')
@@ -343,7 +343,11 @@ function addFormDataBody(state: RequestBuilderState, record: Record<string, Requ
   setBody(state, body)
 }
 
-function addFormUrlEncodedBody(state: RequestBuilderState, record: Record<string, RequestBuildValue>, options?: RequestBodyOptions): void {
+function addFormUrlEncodedBody(
+  state: RequestBuilderState,
+  record: { [key: string]: RequestBuildValue },
+  options?: RequestBodyOptions,
+): void {
   const body = state.snapshot.body instanceof URLSearchParams ? state.snapshot.body : new URLSearchParams()
   for (const [key, value] of Object.entries(record)) {
     appendUrlEncodedBodyValue(body, key, value)
@@ -403,7 +407,7 @@ function materializeBuildPlan(plan: readonly BuildPlanStep[], input: unknown, st
       case 'addFormData':
         addFormDataBody(
           state,
-          materializeRecordProjection(step.projection, input, scope, 'formData', owner) as Record<string, RequestFormDataValue>,
+          materializeRecordProjection(step.projection, input, scope, 'formData', owner) as { [key: string]: RequestFormDataValue },
         )
         break
       case 'addFormUrlEncoded':
@@ -423,7 +427,7 @@ function materializeBuildPlan(plan: readonly BuildPlanStep[], input: unknown, st
       case 'formData':
         setFormDataBody(
           state,
-          materializeRecordProjection(step.projection, input, scope, 'formData', owner) as Record<string, RequestFormDataValue>,
+          materializeRecordProjection(step.projection, input, scope, 'formData', owner) as { [key: string]: RequestFormDataValue },
         )
         break
       case 'formUrlEncoded':
@@ -449,11 +453,6 @@ function materializeBuildPlan(plan: readonly BuildPlanStep[], input: unknown, st
       case 'text':
         setTextBody(state, materializeSingleTextProjection(step.projection, input, scope, 'text', owner), { contentType: step.contentType })
         break
-      case 'xml':
-        setXmlBody(state, String(materializeProjection(step.projection, input, scope, 'xml', owner) ?? ''), {
-          contentType: step.contentType,
-        })
-        break
     }
   }
 }
@@ -464,7 +463,7 @@ function createBoundView(schema: RuntimeSchema, path: readonly BoundPathSegment[
     return createBoundView(definition.schema as RuntimeSchema, path, owner)
   }
 
-  const view: Record<PropertyKey, unknown> = Object.create(null)
+  const view: { [key: PropertyKey]: unknown } = Object.create(null)
   Object.defineProperty(view, BOUND_SOURCE, {
     enumerable: false,
     value: { owner, path, schema },
@@ -508,7 +507,7 @@ function createBoundView(schema: RuntimeSchema, path: readonly BoundPathSegment[
 }
 
 function defineBoundSection(
-  view: Record<PropertyKey, unknown>,
+  view: { [key: PropertyKey]: unknown },
   key: 'body' | 'headers' | 'path' | 'query',
   schema: SchemaLike<unknown, unknown, boolean> | undefined,
   path: readonly BoundPathSegment[],
@@ -528,7 +527,7 @@ function materializeHeadersProjection(
   input: unknown,
   scope: BuildScope,
   owner: symbol,
-): Record<string, RequestBuildValue> {
+): { [key: string]: RequestBuildValue } {
   return materializeRecordProjection(projection, input, scope, 'headers', owner)
 }
 
@@ -538,7 +537,7 @@ function materializeRecordProjection(
   scope: BuildScope,
   target: 'formData' | 'headers' | 'path' | 'query' | 'urlencoded',
   owner: symbol,
-): Record<string, RequestBuildValue> {
+): { [key: string]: RequestBuildValue } {
   if (isBoundSource(projection)) {
     const source = projection[BOUND_SOURCE]
     assertBoundOwner(source, owner)
@@ -549,7 +548,7 @@ function materializeRecordProjection(
     throw new Error(`${target} binding expects an object projection`)
   }
 
-  const output: Record<string, RequestBuildValue> = Object.create(null)
+  const output: { [key: string]: RequestBuildValue } = Object.create(null)
   for (const [key, value] of Object.entries(projection)) {
     const materialized = materializeProjection(value, input, scope, target, owner)
     if (typeof materialized !== 'undefined') {
@@ -586,7 +585,7 @@ function materializeProjection(projection: unknown, input: unknown, scope: Build
   }
 
   if (isPlainObject(projection)) {
-    const output: Record<string, unknown> = Object.create(null)
+    const output: { [key: string]: unknown } = Object.create(null)
     for (const [key, value] of Object.entries(projection)) {
       const materialized = materializeProjection(value, input, scope, target, owner)
       if (typeof materialized !== 'undefined') {
@@ -625,7 +624,7 @@ function readBoundSource(source: BoundSource[typeof BOUND_SOURCE], input: unknow
       current = scope.get(segment)
       continue
     }
-    current = isPlainObject(current) || Array.isArray(current) ? (current as Record<string, unknown>)[segment] : undefined
+    current = isPlainObject(current) || Array.isArray(current) ? (current as { [key: string]: unknown })[segment] : undefined
   }
   return current
 }
@@ -637,10 +636,6 @@ function assertBoundOwner(source: BoundSource[typeof BOUND_SOURCE], owner: symbo
 }
 
 function encodeSourceValue(schema: RuntimeSchema, value: unknown, target: string): unknown {
-  const body = maybeRequestBody(schema)
-  if (body) {
-    return encodeSourceValue(body.schema, value, target)
-  }
   if (target === 'json') {
     return encodeKeyedValue(schema, value)
   }
@@ -648,14 +643,9 @@ function encodeSourceValue(schema: RuntimeSchema, value: unknown, target: string
 }
 
 function encodeKeyedValue(schema: RuntimeSchema, value: unknown): unknown {
-  const body = maybeRequestBody(schema)
-  if (body) {
-    return encodeKeyedValue(body.schema, value)
-  }
-
   return encodeValue(schema, value, {
     encodeObject(objectStruct, objectValue, encodeChild) {
-      const output: Record<string, unknown> = Object.create(null)
+      const output: { [key: string]: unknown } = Object.create(null)
       for (const field of getStructFields(objectStruct)) {
         if (!hasOwnKey(objectValue, field.key)) {
           continue
@@ -675,12 +665,7 @@ function encodeFlatRecord(
   schema: RuntimeSchema,
   value: unknown,
   target: 'formData' | 'headers' | 'path' | 'query' | 'urlencoded',
-): Record<string, RequestBuildValue> {
-  const body = maybeRequestBody(schema)
-  if (body) {
-    return encodeFlatRecord(body.schema, value, target)
-  }
-
+): { [key: string]: RequestBuildValue } {
   const definition = schema[DEFINITION]
   if (definition.kind !== 'object') {
     throw new Error(`${target} binding expects an object struct`)
@@ -689,7 +674,7 @@ function encodeFlatRecord(
     throw new Error(`${target} binding expects an object value`)
   }
 
-  const output: Record<string, RequestBuildValue> = Object.create(null)
+  const output: { [key: string]: RequestBuildValue } = Object.create(null)
   for (const field of getStructFields(schema)) {
     if (!hasOwnKey(value, field.key)) {
       continue
@@ -723,7 +708,7 @@ function assertFlatValue(target: string, key: string, value: unknown): void {
   }
 }
 
-function assertSingleBodyValue(kind: 'arrayBuffer' | 'blob' | 'text', value: unknown): asserts value is ArrayBuffer | Blob | string {
+function assertSingleBodyValue(kind: 'arrayBuffer' | 'blob', value: unknown): asserts value is ArrayBuffer | Blob {
   if (kind === 'arrayBuffer') {
     if (value instanceof ArrayBuffer) {
       return
@@ -731,14 +716,10 @@ function assertSingleBodyValue(kind: 'arrayBuffer' | 'blob' | 'text', value: unk
     throw new Error('setArrayBuffer() expects an ArrayBuffer field')
   }
 
-  if (kind === 'blob') {
-    if (typeof Blob !== 'undefined' && value instanceof Blob) {
-      return
-    }
-    throw new Error('setBlob() expects a Blob field')
+  if (typeof Blob !== 'undefined' && value instanceof Blob) {
+    return
   }
-
-  assertTextBodyValue(value)
+  throw new Error('setBlob() expects a Blob field')
 }
 
 function assertTextBodyValue(value: unknown): asserts value is string {
@@ -758,14 +739,12 @@ function resolveRequestBody(schema: RuntimeSchema): { codec: StructRequestBodyCo
   if (definition.kind === 'blob') {
     return { codec: 'blob', schema }
   }
+  /* istanbul ignore else -- unreachable: body wrappers are validated at construction time */
   if (definition.kind === 'arrayBuffer') {
     return { codec: 'arrayBuffer', schema }
   }
+  /* istanbul ignore next -- unreachable: struct.request validates the body section at construction time */
   throw new Error('body binding requires a body wrapper schema')
-}
-
-function maybeRequestBody(schema: RuntimeSchema): { codec: StructRequestBodyCodec; schema: RuntimeSchema } | undefined {
-  return schema[DEFINITION].kind === 'requestBody' ? resolveRequestBody(schema) : undefined
 }
 
 function getFlatTargetTagKind(target: 'formData' | 'headers' | 'path' | 'query' | 'urlencoded'): symbol {
@@ -791,7 +770,7 @@ function isArrayProjection(value: unknown): value is ArrayProjection {
   return isPlainObject(value) && ARRAY_PROJECTION in value
 }
 
-function assertRequestShapeTransport(definition: Extract<SchemaDefinition, { kind: 'request' }>, transport: RequestTransport): void {
+function assertRequestShapeTransport(definition: ExtractUnion<SchemaDefinition, { kind: 'request' }>, transport: RequestTransport): void {
   if (transport === 'sse' && definition.body) {
     throw new Error('SSE request input does not support body section')
   }
@@ -814,6 +793,7 @@ function assertTransportBuild(build: RequestBuild, transport: RequestTransport):
     if (typeof build.body !== 'undefined' || typeof build.bodyContentType !== 'undefined') {
       throw new Error('SSE build() does not support request body')
     }
+    /* istanbul ignore if -- unreachable: the builder never produces withCredentials */
     if (typeof build.withCredentials !== 'undefined') {
       throw new Error('SSE build() does not support withCredentials()')
     }
@@ -839,22 +819,9 @@ function resolveBodyContentTypeOption(options: RequestBodyOptions | undefined, d
   return options?.contentType === undefined ? defaultContentType : options.contentType
 }
 
-function appendHeaders(headers: Headers, value: HeadersInit | Record<string, RequestBuildValue>): void {
-  if (value instanceof Headers) {
-    value.forEach((headerValue, key) => {
-      headers.set(key, headerValue)
-    })
-    return
-  }
-
-  if (Array.isArray(value)) {
-    for (const [key, headerValue] of value) {
-      headers.append(key, headerValue)
-    }
-    return
-  }
-
-  for (const [key, headerValue] of Object.entries(value)) {
+function appendHeaders(headers: Headers, record: { [key: string]: RequestBuildValue }): void {
+  for (const [key, headerValue] of Object.entries(record)) {
+    /* istanbul ignore next -- unreachable: materializeRecordProjection filters undefined record values */
     if (typeof headerValue === 'undefined') {
       continue
     }
@@ -871,6 +838,7 @@ function appendHeaders(headers: Headers, value: HeadersInit | Record<string, Req
 }
 
 function appendRequestFormDataValue(formData: FormData, key: string, value: RequestFormDataValue): void {
+  /* istanbul ignore next -- unreachable: callers filter undefined record values */
   if (typeof value === 'undefined') {
     return
   }
@@ -905,6 +873,7 @@ function appendRequestFormDataItem(formData: FormData, key: string, value: Reque
 }
 
 function appendUrlEncodedBodyValue(searchParams: URLSearchParams, key: string, value: RequestBuildValue): void {
+  /* istanbul ignore next -- unreachable: callers filter undefined record values */
   if (typeof value === 'undefined') {
     return
   }
@@ -928,6 +897,7 @@ function serializeValue(value: unknown): string {
       return String(value)
     case value === null:
       return 'null'
+    /* istanbul ignore next -- unreachable: objects are rejected by assertFlatValue before serialization */
     case typeof value === 'object':
       return JSON.stringify(value)
     default:

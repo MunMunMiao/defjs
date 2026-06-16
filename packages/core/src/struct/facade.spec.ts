@@ -66,8 +66,8 @@ describe('facade.ts', () => {
   })
 
   test('covers internal primitive definitions that are otherwise short-circuited', () => {
-    const booleanSchema = struct.boolean() as unknown as Record<symbol, unknown>
-    const nullSchema = struct.null() as unknown as Record<symbol, unknown>
+    const booleanSchema = struct.boolean() as unknown as { [key: symbol]: unknown }
+    const nullSchema = struct.null() as unknown as { [key: symbol]: unknown }
     const booleanDefinition = Object.getOwnPropertySymbols(booleanSchema)
       .map((symbol) => booleanSchema[symbol])
       .find((value) => typeof value === 'object' && value !== null && 'kind' in (value as object)) as {
@@ -118,7 +118,7 @@ describe('facade.ts', () => {
   test('object schema snapshots the declared shape at construction time', () => {
     const shape = { name: struct.string() }
     const user = struct.object(shape)
-    ;(shape as Record<string, unknown>)['secret'] = struct.string()
+    ;(shape as { [key: string]: unknown })['secret'] = struct.string()
 
     const [err, val] = parse(user, { name: 'Miao', secret: 'hidden' })
 

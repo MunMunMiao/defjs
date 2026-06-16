@@ -43,7 +43,7 @@ describe('struct coverage boundary cases', () => {
   })
 
   test('constructor guards reject invalid enum and object definitions', () => {
-    expect(() => struct.enum({} as Record<string, never>)).toThrow('enum schema requires at least one string or number value')
+    expect(() => struct.enum({} as { [key: string]: never })).toThrow('enum schema requires at least one string or number value')
     expect(() => struct.object(null as never)).toThrow('object schema requires a plain object')
     expect(() => struct.request(null as never)).toThrow('request schema requires a plain object')
     expect(() => struct.request({ path: struct.string() as never })).toThrow('request.path must be an object schema')

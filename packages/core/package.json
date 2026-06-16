@@ -20,13 +20,9 @@
   },
   "scripts": {
     "build": "tsdown",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint . --fix",
     "pub": "pnpm publish",
     "test": "vitest run --config vitest.config.ts --coverage",
-    "typecheck": "tsgo --project tsconfig.json --noEmit",
-    "fmt": "oxfmt . --write",
-    "fmt:check": "oxfmt . --check"
+    "typecheck": "tsgo --project tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@hono/node-server": "catalog:",

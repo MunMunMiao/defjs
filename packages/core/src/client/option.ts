@@ -68,25 +68,25 @@ export function withWebSocketBeforeConnect(beforeConnect: WebSocketBeforeConnect
  */
 export function withWebSocketProtocols(protocols: readonly string[]): ClientOption {
   return (config) => {
-    config.webSocket.protocols = [...protocols]
+    config.webSocket.protocols = protocols
   }
 }
 
 export function withWebSocketHeartbeat(options: WebSocketHeartbeatOptions): ClientOption {
   return (config) => {
-    config.webSocket.heartbeat = { ...options }
+    config.webSocket.heartbeat = options
   }
 }
 
 export function withWebSocketQueue(options: WebSocketQueueOptions): ClientOption {
   return (config) => {
-    config.webSocket.queue = { ...options }
+    config.webSocket.queue = options
   }
 }
 
 export function withWebSocketReconnect(options: WebSocketReconnectOptions): ClientOption {
   return (config) => {
-    config.webSocket.reconnect = { ...options }
+    config.webSocket.reconnect = options
   }
 }
 
@@ -99,10 +99,10 @@ export function withSSEOptions(options: ClientSSEOptions): ClientOption {
       config.sse.onInvalidEvent = options.onInvalidEvent
     }
     if (options.reconnect !== undefined) {
-      config.sse.reconnect = { ...options.reconnect }
+      config.sse.reconnect = options.reconnect
     }
     if (options.queue !== undefined) {
-      config.sse.queue = { ...options.queue }
+      config.sse.queue = options.queue
     }
     if (options.maxBufferSize !== undefined) {
       config.sse.maxBufferSize = options.maxBufferSize
@@ -118,13 +118,13 @@ export function withSSEOnInvalidEvent(handler: SSEInvalidEventHandler): ClientOp
 
 export function withSSEReconnect(options: SSEReconnectOptions): ClientOption {
   return (config) => {
-    config.sse.reconnect = { ...options }
+    config.sse.reconnect = options
   }
 }
 
 export function withSSEQueue(options: SSEQueueOptions): ClientOption {
   return (config) => {
-    config.sse.queue = { ...options }
+    config.sse.queue = options
   }
 }
 
@@ -137,16 +137,16 @@ export function withWebSocketOptions(options: ClientWebSocketOptions): ClientOpt
       config.webSocket.beforeConnect = options.beforeConnect
     }
     if (options.heartbeat !== undefined) {
-      config.webSocket.heartbeat = { ...options.heartbeat }
+      config.webSocket.heartbeat = options.heartbeat
     }
     if (options.protocols !== undefined) {
-      config.webSocket.protocols = [...options.protocols]
+      config.webSocket.protocols = options.protocols
     }
     if (options.queue !== undefined) {
-      config.webSocket.queue = { ...options.queue }
+      config.webSocket.queue = options.queue
     }
     if (options.reconnect !== undefined) {
-      config.webSocket.reconnect = { ...options.reconnect }
+      config.webSocket.reconnect = options.reconnect
     }
   }
 }

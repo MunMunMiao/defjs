@@ -6,7 +6,10 @@
     "isolatedModules": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noPropertyAccessFromIndexSignature": true
+    "noPropertyAccessFromIndexSignature": true,
+    "paths": {
+      "@defjs/core": ["../core/src"]
+    }
   },
   "include": ["src/**/*", "test/**/*.ts", "e2e.spec.ts", "scripts/**/*.ts"]
 }

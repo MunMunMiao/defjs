@@ -10,14 +10,14 @@ describe('parse.ts prototype pollution defense', () => {
     if (err) {
       throw err
     }
-    expect((Object.prototype as Record<string, unknown>)['polluted']).toBeUndefined()
+    expect((Object.prototype as { [key: string]: unknown })['polluted']).toBeUndefined()
     expect(Object.hasOwn(val as object, '__proto__')).toBe(false)
   })
 
   test('parseRecordValue does not pollute Object.prototype', () => {
     const s = struct.record(struct.any())
     parse(s, JSON.parse('{"__proto__":{"polluted":true}}'))
-    expect((Object.prototype as Record<string, unknown>)['polluted']).toBeUndefined()
+    expect((Object.prototype as { [key: string]: unknown })['polluted']).toBeUndefined()
   })
 
   test('parsed object output has null prototype(Object.create(null))', () => {
@@ -45,7 +45,7 @@ describe('parse.ts prototype pollution defense', () => {
       throw err
     }
     expect(Object.hasOwn(val as object, '__proto__')).toBe(true)
-    expect((val as Record<string, unknown>)['__proto__']).toBe('data')
+    expect((val as { [key: string]: unknown })['__proto__']).toBe('data')
   })
 
   test('parseObjectValue ignores inherited declared fields', () => {
@@ -63,7 +63,7 @@ describe('parse.ts prototype pollution defense', () => {
 
       expect(val).toEqual({ pollutedId: '' })
     } finally {
-      delete (Object.prototype as Record<string, unknown>)['pollutedId']
+      delete (Object.prototype as { [key: string]: unknown })['pollutedId']
     }
   })
 
@@ -82,7 +82,7 @@ describe('parse.ts prototype pollution defense', () => {
 
       expect(val).toEqual({ pollutedId: '' })
     } finally {
-      delete (Object.prototype as Record<string, unknown>)['pollutedId']
+      delete (Object.prototype as { [key: string]: unknown })['pollutedId']
     }
   })
 

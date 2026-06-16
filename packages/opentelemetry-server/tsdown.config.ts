@@ -21,42 +21,24 @@ async function rewritePackageJson(outDir: string): Promise<void> {
   await writeFile(`${outDir}/package.json`, JSON.stringify(pkg, undefined, 2))
 }
 
-export default defineConfig([
-  {
-    entry: ['./src/index.ts'],
-    outDir: './dist',
-    format: 'esm',
-    platform: 'browser',
-    target: 'esnext',
-    dts: false,
-    clean: true,
-    minify: true,
-    sourcemap: false,
-    tsconfig: './tsconfig.build.json',
-    deps: {
-      neverBundle: ['@defjs/core', '@opentelemetry/api', '@opentelemetry/core'],
-    },
-    outExtensions: () => ({ js: '.min.js' }),
+export default defineConfig({
+  entry: ['./src/index.ts'],
+  outDir: './dist',
+  format: 'esm',
+  platform: 'browser',
+  target: 'esnext',
+  dts: true,
+  clean: true,
+  minify: false,
+  sourcemap: false,
+  tsconfig: './tsconfig.build.json',
+  deps: {
+    neverBundle: ['@defjs/core', '@opentelemetry/api', '@opentelemetry/core'],
   },
-  {
-    entry: ['./src/index.ts'],
-    outDir: './dist',
-    format: 'esm',
-    platform: 'browser',
-    target: 'esnext',
-    dts: true,
-    clean: false,
-    minify: false,
-    sourcemap: false,
-    tsconfig: './tsconfig.build.json',
-    deps: {
-      neverBundle: ['@defjs/core', '@opentelemetry/api', '@opentelemetry/core'],
-    },
-    copy: ['../../LICENSE', './README.md'],
-    hooks: {
-      async 'build:done'({ options }) {
-        await rewritePackageJson(options.outDir)
-      },
+  copy: ['../../LICENSE', './README.md'],
+  hooks: {
+    async 'build:done'({ options }) {
+      await rewritePackageJson(options.outDir)
     },
   },
-])
+})

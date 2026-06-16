@@ -41,7 +41,7 @@ export class StructError extends Error {
 
   flatten(): FlattenedSchemaError {
     const formErrors: string[] = []
-    const fieldErrors: Record<string, string[]> = {}
+    const fieldErrors: { [key: string]: string[] } = {}
     for (const item of this.issues) {
       if (item.path.length === 0) {
         formErrors.push(item.message)

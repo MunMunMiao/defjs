@@ -20,7 +20,7 @@ export async function setup({ provide }: TestProject) {
 
   // HTTP: echo back received headers
   app.post('/echo-headers', async (c) => {
-    const headers: Record<string, string> = {}
+    const headers: { [key: string]: string } = {}
     c.req.raw.headers.forEach((value, key) => {
       headers[key] = value
     })

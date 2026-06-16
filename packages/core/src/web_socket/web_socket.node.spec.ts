@@ -45,7 +45,7 @@ function createMockWebSocketClass(
     triggerClose: MockWebSocketInstance['triggerClose']
     triggerError: MockWebSocketInstance['triggerError']
 
-    private listeners: Record<string, Array<(event: unknown) => void>>
+    private listeners: { [key: string]: Array<(event: unknown) => void> }
 
     constructor(url: string, protocols?: string | string[]) {
       if (throwOnConstruct) {

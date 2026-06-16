@@ -1,7 +1,7 @@
 import type { HttpRequest } from './http_request'
 import type { RequestBuildValue } from './request_values'
 
-export function fillUrl(path: string, params?: Record<string, RequestBuildValue>): string {
+export function fillUrl(path: string, params?: { [key: string]: RequestBuildValue }): string {
   const paramMap = new Map<string, string>()
   if (params) {
     for (const [key, value] of Object.entries(params)) {
@@ -35,7 +35,7 @@ export interface SearchParamsOptions {
   allowComplex?: boolean
 }
 
-export function createSearchParams(query?: Record<string, RequestBuildValue>, options: SearchParamsOptions = {}): URLSearchParams {
+export function createSearchParams(query?: { [key: string]: RequestBuildValue }, options: SearchParamsOptions = {}): URLSearchParams {
   const searchParams = new URLSearchParams()
   if (!query) {
     return searchParams
@@ -48,7 +48,7 @@ export function createSearchParams(query?: Record<string, RequestBuildValue>, op
   return searchParams
 }
 
-export function appendRecordToHeaders(headers: Headers, value?: HeadersInit | Record<string, RequestBuildValue>): void {
+export function appendRecordToHeaders(headers: Headers, value?: HeadersInit | { [key: string]: RequestBuildValue }): void {
   if (!value) {
     return
   }

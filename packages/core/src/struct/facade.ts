@@ -30,18 +30,18 @@ import type { Schema, SchemaLike, UnionSchema } from './types'
 
 type EnumValue<T> = T extends readonly (infer U extends string)[]
   ? U
-  : T extends Record<string, infer U extends number | string>
+  : T extends { [key: string]: infer U extends number | string }
     ? U
     : never
 
 function structEnum<const T extends readonly [string, ...string[]]>(value: T): Schema<EnumValue<T> | undefined, EnumValue<T>>
-function structEnum<const T extends Record<string, number | string>>(value: T): Schema<EnumValue<T> | undefined, EnumValue<T>>
-function structEnum(value: Record<string, number | string> | readonly [string, ...string[]]) {
+function structEnum<const T extends { [key: string]: number | string }>(value: T): Schema<EnumValue<T> | undefined, EnumValue<T>>
+function structEnum(value: { [key: string]: number | string } | readonly [string, ...string[]]) {
   if (Array.isArray(value)) {
     return createEnumSchema(value as readonly [string, ...string[]])
   }
 
-  return createObjectEnumSchema(value as Record<string, number | string>)
+  return createObjectEnumSchema(value as { [key: string]: number | string })
 }
 
 function structOr<const T extends readonly [SchemaLike, ...SchemaLike[]]>(...options: T): UnionSchema<T> {

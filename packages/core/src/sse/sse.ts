@@ -1,6 +1,7 @@
-import { resolveClientConfig } from '../client/client'
+import type { BaseCommand } from '../client/command'
+import type { ClientConfig } from '../client/config'
+import type { ExcludeUnion, ExtractUnion, NonNullableValue, FnParams } from '../internal/utility_types'
 import type { SSEInvalidEventHandler } from '../client/config'
-import type { Client } from '../client/resolve'
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { SSEHandler } from '../interceptor/interceptor'
@@ -20,15 +21,14 @@ import { fetchEventStream, getErrorOpenInfo } from './transport/event_stream'
 import type { EventStreamMessage } from './transport/parser'
 
 interface UseEventStreamBaseConfig {
-  client?: Client
   context?: HttpContext
 }
 
 export type UseEventStreamConfig = UseEventStreamBaseConfig & UseCancellationConfig
 
-export type EventSchemas = Record<string, AnyStruct>
+export type EventSchemas = { [key: string]: AnyStruct }
 
-type KnownEventKey<TEvents extends EventSchemas> = Exclude<Extract<keyof TEvents, string>, 'default'>
+type KnownEventKey<TEvents extends EventSchemas> = ExcludeUnion<ExtractUnion<keyof TEvents, string>, 'default'>
 
 type KnownEventUnion<TEvents extends EventSchemas> = {
   [K in KnownEventKey<TEvents>]: {
@@ -90,24 +90,35 @@ export type StreamAwaitResult<TEvent> =
   | [error: null, stream: EventStreamHandle<TEvent>, open: StreamOpenInfo]
   | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
 
-export interface EventStreamRef<TEvent = unknown> extends PromiseLike<StreamAwaitResult<TEvent>> {
-  readonly error?: RequestError<unknown>
-  readonly open?: StreamOpenInfo
-  readonly status: 'aborted' | 'closed' | 'connecting' | 'error' | 'idle' | 'open'
-  close(reason?: unknown): void
-  with(config: UseEventStreamConfig): EventStreamRef<TEvent>
+export interface StreamRefState<TEvent> {
+  error?: RequestError<unknown>
+  open?: StreamOpenInfo
+  promise?: Promise<StreamAwaitResult<TEvent>>
+  status: 'aborted' | 'closed' | 'connecting' | 'error' | 'idle' | 'open'
+  stream?: EventStreamHandle<TEvent>
 }
 
 type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends EndpointInput<NonNullable<TInput>>
+  : {} extends EndpointInput<NonNullableValue<TInput>>
     ? true
     : false
 
-export type UseEventStreamEndpointFn<TInput extends AnyStruct | undefined, TEvents extends EventSchemas> =
-  IsInputOptional<TInput> extends true
-    ? (input?: EndpointInput<TInput>) => EventStreamRef<EventStreamData<TEvents>>
-    : (input: EndpointInput<TInput>) => EventStreamRef<EventStreamData<TEvents>>
+export interface EventStreamCommand<
+  TInput extends AnyStruct | undefined,
+  TEvents extends EventSchemas,
+> extends BaseCommand<'event-stream'> {
+  readonly endpoint: EventStreamEndpoint<TInput, TEvents>
+  readonly input: EndpointInput<TInput> | undefined
+  readonly config?: UseEventStreamConfig
+}
+
+export type EventStreamCommandBuilder<
+  TInput extends AnyStruct | undefined,
+  TEvents extends EventSchemas,
+> = IsInputOptional<TInput> extends true
+  ? (input?: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
+  : (input: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
 
 type EventStreamEndpoint<
   TInput extends AnyStruct | undefined = undefined,
@@ -117,18 +128,32 @@ type EventStreamEndpoint<
   readonly method: string
 }
 
-type StreamRefState<TEvent> = {
-  error?: RequestError<unknown>
-  open?: StreamOpenInfo
-  promise?: Promise<StreamAwaitResult<TEvent>>
-  status: EventStreamRef<TEvent>['status']
-  stream?: EventStreamHandle<TEvent>
-}
+export function defineEventStream<TInput extends AnyStruct, TEvents extends EventSchemas = EventSchemas>(
+  definition: EventStreamDefinitionWithBuild<TInput, TEvents>,
+): EventStreamCommandBuilder<TInput, TEvents>
+export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
+  definition: EventStreamDefinitionWithoutBuild<TInput, TEvents>,
+): EventStreamCommandBuilder<TInput, TEvents>
+export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
+  definition: EventStreamDefinition<TInput, TEvents>,
+): EventStreamCommandBuilder<TInput, TEvents> {
+  const endpoint: EventStreamEndpoint<TInput, TEvents> = {
+    ...definition,
+    kind: 'event-stream' as const,
+    method: definition.method ?? 'GET',
+  }
 
-function createTypedEventStreamEndpoint<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
-  endpoint: EventStreamEndpoint<TInput, TEvents>,
-): UseEventStreamEndpointFn<TInput, TEvents> {
-  return (input: EndpointInput<TInput> | undefined) => createEventStreamRef(endpoint, input)
+  function create(input?: EndpointInput<TInput>, config?: UseEventStreamConfig): EventStreamCommand<TInput, TEvents> {
+    return {
+      kind: 'event-stream',
+      endpoint,
+      input,
+      config,
+    } as EventStreamCommand<TInput, TEvents>
+  }
+
+  return ((input?: EndpointInput<TInput>, config?: UseEventStreamConfig) =>
+    create(input, config)) as EventStreamCommandBuilder<TInput, TEvents>
 }
 
 function castParsedEventStreamInput<TInput extends AnyStruct | undefined>(value: unknown): ParsedInput<TInput> {
@@ -136,71 +161,28 @@ function castParsedEventStreamInput<TInput extends AnyStruct | undefined>(value:
   return value as ParsedInput<TInput>
 }
 
-export function defineEventStream<TInput extends AnyStruct, TEvents extends EventSchemas = EventSchemas>(
-  definition: EventStreamDefinitionWithBuild<TInput, TEvents>,
-): UseEventStreamEndpointFn<TInput, TEvents>
-export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
-  definition: EventStreamDefinitionWithoutBuild<TInput, TEvents>,
-): UseEventStreamEndpointFn<TInput, TEvents>
-export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
-  definition: EventStreamDefinition<TInput, TEvents>,
-): UseEventStreamEndpointFn<TInput, TEvents> {
-  const endpoint: EventStreamEndpoint<TInput, TEvents> = {
-    ...definition,
-    kind: 'event-stream' as const,
-    method: definition.method ?? 'GET',
-  }
-
-  return createTypedEventStreamEndpoint(endpoint)
-}
-
-function createEventStreamRef<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
-  endpoint: EventStreamEndpoint<TInput, TEvents>,
-  input: EndpointInput<TInput> | undefined,
-  config?: UseEventStreamConfig,
-): EventStreamRef<EventStreamData<TEvents>> {
+export async function executeEventStreamCommand<
+  TInput extends AnyStruct | undefined,
+  TEvents extends EventSchemas,
+>(
+  clientConfig: ClientConfig,
+  command: EventStreamCommand<TInput, TEvents>,
+  options?: { signal?: AbortSignal },
+): Promise<StreamAwaitResult<EventStreamData<TEvents>>> {
+  const { endpoint, input, config = {} } = command
   const controller = new AbortController()
-  const state: StreamRefState<EventStreamData<TEvents>> = {
-    status: 'idle',
-  }
-
-  const getPromise = (): Promise<StreamAwaitResult<EventStreamData<TEvents>>> => {
-    if (!state.promise) {
-      state.promise = executeEventStreamEndpoint(endpoint, input, config ?? {}, controller, state)
-    }
-
-    return state.promise
-  }
-
-  return {
-    get error() {
-      return state.error
-    },
-    get open() {
-      return state.open
-    },
-    get status() {
-      return state.status
-    },
-    close(reason?: unknown) {
-      controller.abort(reason)
-      state.stream?.close(reason)
-    },
-    with(nextConfig: UseEventStreamConfig) {
-      return createEventStreamRef(endpoint, input, nextConfig)
-    },
-    then(onfulfilled, onrejected) {
-      return getPromise().then(onfulfilled, onrejected)
-    },
-  }
+  const state: StreamRefState<EventStreamData<TEvents>> = { status: 'idle' }
+  return runEventStreamCommand(clientConfig, endpoint, input, config, controller, state, options)
 }
 
-async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+  clientConfig: ClientConfig,
   endpoint: EventStreamEndpoint<TInput, TEvents>,
   input: EndpointInput<TInput> | undefined,
   config: UseEventStreamConfig,
   controller: AbortController,
   state: StreamRefState<EventStreamData<TEvents>>,
+  options?: { signal?: AbortSignal },
 ): Promise<StreamAwaitResult<EventStreamData<TEvents>>> {
   state.status = 'connecting'
 
@@ -230,25 +212,15 @@ async function executeEventStreamEndpoint<TInput extends AnyStruct | undefined, 
     return [definitionError, undefined, undefined]
   }
 
-  let clientConfig
-  try {
-    clientConfig = resolveClientConfig(config.client)
-  } catch (error) {
-    const transportError = createTransportError(error)
-    state.error = transportError
-    /* istanbul ignore next -- unreachable: resolveClientConfig never throws ERR_ABORTED */
-    state.status = transportError.kind === 'transport' && transportError.code === 'ABORTED' ? 'aborted' : 'error'
-    return [transportError, undefined, undefined]
-  }
-
   let request
   try {
     request = createEventStreamRequest(endpoint.method, endpoint.path, parsedInput, endpoint.build, {
-      abort: mergeAbortSignals(controller.signal, [config.abort], config.timeout),
+      abort: mergeAbortSignals(controller.signal, [config.abort, options?.signal], config.timeout),
       baseEndpoint: clientConfig.endpoint,
       context: config.context,
       input: endpoint.input,
       queryParamsSerializer: clientConfig.queryParamsSerializer,
+      timeout: config.timeout,
       withCredentials: clientConfig.withCredentials,
     })
   } catch (error) {
@@ -358,7 +330,7 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
 
 async function notifyInvalidEvent(
   onInvalidEvent: SSEInvalidEventHandler | undefined,
-  context: Parameters<SSEInvalidEventHandler>[0],
+  context: FnParams<SSEInvalidEventHandler>[0],
 ): Promise<void> {
   if (!onInvalidEvent) {
     return

@@ -1,3 +1,4 @@
+import type { NonNullableValue } from '../../internal/utility_types'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { HttpRequest } from '../../http'
 import {
@@ -16,7 +17,7 @@ afterEach(() => {
 
 function stubXsrfBrowserEnvironment(origin: string, cookieValue: string) {
   const cookieGetter = vi.fn(() => cookieValue)
-  const documentStub = {} as Record<string, unknown>
+  const documentStub = {} as { [key: string]: unknown }
 
   vi.stubGlobal('location', { origin })
   vi.stubGlobal('document', documentStub)
@@ -29,7 +30,7 @@ function stubXsrfBrowserEnvironment(origin: string, cookieValue: string) {
   return { cookieGetter }
 }
 
-function createXsrfConfig(tokenProvider?: NonNullable<HttpRequest['xsrf']>['tokenProvider']): NonNullable<HttpRequest['xsrf']> {
+function createXsrfConfig(tokenProvider?: NonNullableValue<HttpRequest['xsrf']>['tokenProvider']): NonNullableValue<HttpRequest['xsrf']> {
   return {
     cookieName: 'XSRF-TOKEN',
     headerName: 'X-XSRF-TOKEN',
@@ -198,7 +199,7 @@ describe('Fetch handler XSRF injection', () => {
     const cookieGetter = vi.fn(() => {
       throw new Error('cookie unavailable')
     })
-    const documentStub = {} as Record<string, unknown>
+    const documentStub = {} as { [key: string]: unknown }
 
     vi.stubGlobal('location', { origin: 'https://example.com' })
     vi.stubGlobal('document', documentStub)

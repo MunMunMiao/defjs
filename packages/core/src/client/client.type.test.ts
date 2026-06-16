@@ -30,7 +30,7 @@ type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Expect<T extends true> = T
 
 const serializer: QueryParamsSerializer = (params) => params.toString()
-type SerializerCases = Expect<Equal<typeof serializer, (params: URLSearchParams, rawParams?: Record<string, unknown>) => string>>
+type SerializerCases = Expect<Equal<typeof serializer, (params: URLSearchParams, rawParams?: { [key: string]: unknown }) => string>>
 
 const xsrfTokenProvider: XSRFTokenProvider = ({ request }: XSRFTokenProviderContext) => {
   void request

@@ -1,3 +1,4 @@
+import type { FnReturn, NonNullableValue } from '../../internal/utility_types'
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
 import type { HttpRequest } from '../../internal/http_request'
 import type { HttpResponse, HttpResponseBody } from '../../internal/http_response'
@@ -14,7 +15,7 @@ export const ERR_STREAMING_REQUEST_UNSUPPORTED = new Error('ERR_STREAMING_REQUES
 
 const XSRF_MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
-export function isReadableStreamBody(body: HttpRequest['body'] | ReturnType<typeof serializeHttpBody>): body is ReadableStream<Uint8Array> {
+export function isReadableStreamBody(body: HttpRequest['body'] | FnReturn<typeof serializeHttpBody>): body is ReadableStream<Uint8Array> {
   return typeof ReadableStream !== 'undefined' && body instanceof ReadableStream
 }
 
@@ -102,7 +103,7 @@ function normalizeXSRFToken(token: string | null | undefined): string | undefine
   return token
 }
 
-function resolveXSRFToken(request: HttpRequest, xsrf: NonNullable<HttpRequest['xsrf']>): string | undefined {
+function resolveXSRFToken(request: HttpRequest, xsrf: NonNullableValue<HttpRequest['xsrf']>): string | undefined {
   if (xsrf.tokenProvider) {
     return normalizeXSRFToken(xsrf.tokenProvider({ request }))
   }
@@ -142,7 +143,7 @@ function applyXSRFHeaderIfNeeded(request: HttpRequest, headers: Headers): void {
 
 function wrapUploadProgressStream(
   stream: ReadableStream<Uint8Array>,
-  onProgress: NonNullable<HttpRequest['uploadProgress']>,
+  onProgress: NonNullableValue<HttpRequest['uploadProgress']>,
   total: number,
 ): ReadableStream<Uint8Array> {
   const reader = stream.getReader()

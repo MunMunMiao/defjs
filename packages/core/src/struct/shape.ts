@@ -22,7 +22,7 @@ export function resolveRuntimeSchema(schema: RuntimeSchema): RuntimeSchema {
 }
 
 export function readObjectShape(shape: ObjectShape): ObjectShape {
-  const output: Record<string, unknown> = Object.create(null)
+  const output: { [key: string]: unknown } = Object.create(null)
   const descriptors = Object.getOwnPropertyDescriptors(shape)
 
   for (const [key, descriptor] of Object.entries(descriptors)) {

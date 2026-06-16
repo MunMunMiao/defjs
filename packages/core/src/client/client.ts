@@ -7,6 +7,8 @@ import type { Client } from './resolve'
 import { CLIENT, getClientConfig } from './resolve'
 import { executeHttpCommand } from '../http/http'
 import type { HttpCommand } from '../http/http'
+import { executeEventStreamCommand } from '../sse/sse'
+import type { EventStreamCommand } from '../sse/sse'
 
 function createClientFromConfig(config: ClientConfig): Client {
   const client: Client = {
@@ -15,6 +17,8 @@ function createClientFromConfig(config: ClientConfig): Client {
       switch (command.kind) {
         case 'http':
           return executeHttpCommand(config, command as HttpCommand<any, any>, options)
+        case 'event-stream':
+          return executeEventStreamCommand(config, command as EventStreamCommand<any, any>, options) as Promise<unknown>
       }
       return Promise.reject(new Error(`Unsupported command kind: ${command.kind}`))
     },

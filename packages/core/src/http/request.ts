@@ -13,7 +13,7 @@ export type ResponseGroupItem<S extends number = number, B extends AnyStruct = A
   status: S | readonly S[]
 }
 
-export type RequestOutputShape = Record<number, AnyStruct> | readonly ResponseGroupItem[]
+export type RequestOutputShape = { [key: number]: AnyStruct } | readonly ResponseGroupItem[]
 
 export function createHttpRequest<TInput extends AnyStruct | undefined>(
   method: string,

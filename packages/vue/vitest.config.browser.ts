@@ -1,15 +1,18 @@
+import { resolve } from 'node:path'
 import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
-import { coverageConfig, globalSetupPath, packageRoot } from './test/shared'
+import { globalSetupPath, packageRoot } from './test/shared'
 
 export default defineConfig({
   root: packageRoot,
+  resolve: {
+    alias: {
+      '@defjs/core': resolve(packageRoot, '../core/src'),
+    },
+  },
   test: {
     name: 'vue-browser',
     globalSetup: globalSetupPath,
-    coverage: {
-      ...coverageConfig,
-    },
     browser: {
       enabled: true,
       provider: playwright(),

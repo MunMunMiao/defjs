@@ -1,3 +1,4 @@
+import type { FnReturn, AwaitedValue } from '../internal/utility_types'
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../http'
 import type { WebSocketInterceptorFn } from './interceptor'
@@ -33,7 +34,7 @@ describe('WebSocket interceptor chain', () => {
       return {
         connection: {},
         state: 'open',
-      } as unknown as ReturnType<WebSocketInterceptorFn>
+      } as unknown as FnReturn<WebSocketInterceptorFn>
     }
 
     const chain = makeWebSocketInterceptorChain(interceptors)
@@ -48,7 +49,7 @@ describe('WebSocket interceptor chain', () => {
     const fakeSession = {
       connection: { url: 'ws://test' },
       wrapped: false,
-    } as unknown as Awaited<ReturnType<WebSocketInterceptorFn>>
+    } as unknown as AwaitedValue<FnReturn<WebSocketInterceptorFn>>
 
     const interceptor: WebSocketInterceptorFn = async (req, next) => {
       const session = await next(req)

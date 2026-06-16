@@ -7,7 +7,7 @@ function toRequest(req: IncomingMessage, body: Buffer): Request {
   const host = req.headers.host ?? 'localhost'
   return new Request(`http://${host}${req.url}`, {
     method: req.method,
-    headers: req.headers as unknown as Record<string, string>,
+    headers: req.headers as unknown as { [key: string]: string },
     body: body.length > 0 ? (body as unknown as BodyInit) : undefined,
   })
 }

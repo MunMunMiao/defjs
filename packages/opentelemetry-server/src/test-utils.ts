@@ -1,0 +1,314 @@
+import type { FnReturn, OmitKeys, SelectKeys } from './utility_types'
+import type { EventStreamHandle, HttpRequest, HttpResponse, WebSocketSessionLike } from '@defjs/core'
+import type {
+  Context,
+  Exception,
+  Link,
+  Span,
+  SpanAttributes,
+  SpanAttributeValue,
+  SpanOptions,
+  SpanStatus,
+  TextMapGetter,
+  TextMapPropagator,
+  TextMapSetter,
+  TimeInput,
+  Tracer,
+} from '@opentelemetry/api'
+import { vi } from 'vitest'
+
+type MockFn = FnReturn<typeof vi.fn>
+type SSECloseCode = 'eof' | 'error' | 'aborted'
+interface WebSocketCloseInfo {
+  cause?: unknown
+  code?: number
+  reason?: string
+  wasClean?: boolean
+}
+
+function noop(): void {
+  return undefined
+}
+
+function emptyAsyncIterable(): AsyncIterable<unknown> {
+  const iterator: AsyncIterator<unknown> = {
+    async next() {
+      return { done: true, value: undefined }
+    },
+  }
+
+  return {
+    [Symbol.asyncIterator]() {
+      return iterator
+    },
+  }
+}
+
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve(value: T): void
+  reject(reason?: unknown): void
+}
+
+interface SSECloseInfo {
+  code: SSECloseCode
+  reason?: string
+  cause?: unknown
+}
+
+export type MockSpan = OmitKeys<
+  Span,
+  | 'setAttribute'
+  | 'setAttributes'
+  | 'addEvent'
+  | 'addLink'
+  | 'addLinks'
+  | 'setStatus'
+  | 'updateName'
+  | 'end'
+  | 'isRecording'
+  | 'recordException'
+> & {
+  setAttribute: ((key: string, value: SpanAttributeValue) => MockSpan) & MockFn
+  setAttributes: ((attributes: SpanAttributes) => MockSpan) & MockFn
+  addEvent: ((name: string, attributesOrStartTime?: SpanAttributes | TimeInput, startTime?: TimeInput) => MockSpan) & MockFn
+  addLink: ((link: Link) => MockSpan) & MockFn
+  addLinks: ((links: Link[]) => MockSpan) & MockFn
+  setStatus: ((status: SpanStatus) => MockSpan) & MockFn
+  updateName: ((name: string) => MockSpan) & MockFn
+  end: ((endTime?: TimeInput) => void) & MockFn
+  isRecording: (() => boolean) & MockFn
+  recordException: ((exception: Exception, time?: TimeInput) => void) & MockFn
+
+  name: string
+  kind: number
+  attributes: { [key: string]: unknown }
+  status?: { code: number }
+  ended: boolean
+}
+
+export let activeSpans: MockSpan[]
+
+export interface MockTracer extends Tracer {
+  startSpan(name: string, options?: SpanOptions, context?: Context): MockSpan
+}
+
+export function createMockPropagator(): TextMapPropagator<Headers> {
+  return {
+    inject: vi.fn((_ctx: Context, carrier: Headers, _setter?: TextMapSetter<Headers>) => {
+      carrier.set('traceparent', 'mock-trace-id')
+    }),
+    extract: vi.fn((ctx: Context, _carrier?: Headers, _getter?: TextMapGetter<Headers>) => ctx),
+    fields: vi.fn(() => ['traceparent', 'tracestate']),
+  }
+}
+
+export function createMockTracer() {
+  activeSpans = []
+
+  const startSpan = vi.fn(
+    (_name: string, options?: { kind?: number; attributes?: { [key: string]: unknown } }, _ctx?: Context): MockSpan => {
+      const span: MockSpan = {
+        name: _name,
+        kind: options?.kind ?? 0,
+        attributes: { ...(options?.attributes ?? {}) },
+        status: undefined,
+        ended: false,
+        spanContext: () => ({
+          traceId: 'aabbccddeeff00112233445566778899',
+          spanId: 'aabbccddeeff0011',
+          traceFlags: 1,
+          isRemote: false,
+        }),
+        setAttribute: vi.fn((key: string, value: SpanAttributeValue) => {
+          span.attributes[key] = value
+          return span
+        }),
+        setAttributes: vi.fn((attributes: SpanAttributes) => {
+          for (const [key, value] of Object.entries(attributes)) {
+            if (value !== undefined) {
+              span.attributes[key] = value
+            }
+          }
+          return span
+        }),
+        addEvent: vi.fn((_eventName: string, _attributesOrStartTime?: SpanAttributes | TimeInput, _startTime?: TimeInput) => span),
+        addLink: vi.fn((_link: Link) => span),
+        addLinks: vi.fn((_links: Link[]) => span),
+        setStatus: vi.fn((status: SpanStatus) => {
+          span.status = status
+          return span
+        }),
+        updateName: vi.fn((_newName: string) => span),
+        end: vi.fn((_endTime?: TimeInput) => {
+          span.ended = true
+        }),
+        isRecording: vi.fn(() => !span.ended),
+        recordException: vi.fn((_exception: Exception, _time?: TimeInput) => noop()),
+      }
+      activeSpans.push(span)
+      return span
+    },
+  )
+
+  const tracer: MockTracer = {
+    startSpan,
+    startActiveSpan: vi.fn(),
+  }
+
+  return { tracer, spans: activeSpans }
+}
+
+export function createMockMetrics() {
+  return {
+    requestDuration: { record: vi.fn() },
+    connectDuration: { record: vi.fn() },
+    connectionDuration: { record: vi.fn() },
+    activeStreams: { add: vi.fn() },
+    activeConnections: { add: vi.fn() },
+  }
+}
+
+export function makeHttpRequest(headers?: Headers): HttpRequest {
+  return {
+    method: 'GET',
+    endpoint: '/test',
+    baseEndpoint: 'https://api.example.com',
+    headers: headers ?? new Headers(),
+  }
+}
+
+export function makeHttpResponse<R = unknown>(body: R | null = null): HttpResponse<R> {
+  return {
+    status: 200,
+    statusText: 'OK',
+    headers: new Headers(),
+    url: 'https://api.example.com/test',
+    body,
+  }
+}
+
+export function makeSSERequest(headers?: Headers): HttpRequest {
+  return {
+    method: 'GET',
+    endpoint: '/events',
+    baseEndpoint: 'https://api.example.com',
+    headers: headers ?? new Headers(),
+  }
+}
+
+function makeSSEHandleBase(): SelectKeys<EventStreamHandle<unknown>, 'open' | 'close'> {
+  return {
+    open: {
+      response: makeHttpResponse<null>(),
+      url: 'https://api.example.com/events',
+    },
+    close: noop,
+  }
+}
+
+export function makeSSEStream(closeCode: SSECloseCode = 'eof', closeCause?: unknown): EventStreamHandle<unknown> {
+  return {
+    ...makeSSEHandleBase(),
+    closed: Promise.resolve({ code: closeCode, cause: closeCause, reason: '' }),
+    async *[Symbol.asyncIterator]() {
+      // no events
+    },
+  }
+}
+
+export function makeDeferredSSEStream() {
+  const closed = createDeferred<SSECloseInfo>()
+  const stream: EventStreamHandle<unknown> = {
+    ...makeSSEHandleBase(),
+    closed: closed.promise,
+    async *[Symbol.asyncIterator]() {
+      // no events
+    },
+  }
+
+  return {
+    stream,
+    close(code: SSECloseCode = 'eof', cause?: unknown) {
+      closed.resolve({ code, cause, reason: '' })
+    },
+    reject(error: unknown) {
+      closed.reject(error)
+    },
+  }
+}
+
+export function makeSSEStreamError(error: unknown): EventStreamHandle<unknown> {
+  return {
+    ...makeSSEHandleBase(),
+    closed: Promise.reject(error),
+    async *[Symbol.asyncIterator]() {
+      // no events
+    },
+  }
+}
+
+export function makeWsRequest(queryParams?: URLSearchParams, headers?: Headers): HttpRequest {
+  return {
+    method: 'GET',
+    endpoint: '/ws',
+    baseEndpoint: 'wss://api.example.com',
+    queryParams: queryParams ?? new URLSearchParams(),
+    queryString: queryParams?.toString() ?? '',
+    headers: headers ?? new Headers(),
+  }
+}
+
+export function makeWsSession(): WebSocketSessionLike {
+  return createWsSession(Promise.resolve())
+}
+
+export function makeDeferredWsSession() {
+  const closed = createDeferred<WebSocketCloseInfo | undefined>()
+  return {
+    session: createWsSession(closed.promise),
+    close(info?: WebSocketCloseInfo) {
+      closed.resolve(info)
+    },
+    reject(error: unknown) {
+      closed.reject(error)
+    },
+  }
+}
+
+export function makeWsSessionError(error: unknown): WebSocketSessionLike {
+  return createWsSession(Promise.reject(error))
+}
+
+export function waitForSettledPromises(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolveValue: (value: T) => void = noop
+  let rejectValue: (reason?: unknown) => void = noop
+
+  const promise = new Promise<T>((resolve, reject) => {
+    resolveValue = resolve
+    rejectValue = reject
+  })
+
+  return {
+    promise,
+    resolve: resolveValue,
+    reject: rejectValue,
+  }
+}
+
+function createWsSession(closed: Promise<unknown>): WebSocketSessionLike {
+  return {
+    connection: {},
+    closed,
+    receive: emptyAsyncIterable(),
+    state: 'open',
+    close: noop,
+    onRuntimeError: () => noop,
+    onStateChange: () => noop,
+    send: noop,
+  }
+}

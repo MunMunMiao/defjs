@@ -86,7 +86,7 @@ function decodeWebSocketText(text: string): unknown {
   }
 }
 
-function normalizeSocketPayload(type: string, payload: unknown): Record<string, unknown> {
+function normalizeSocketPayload(type: string, payload: unknown): { [key: string]: unknown } {
   if (isRecord(payload)) {
     return {
       type,
@@ -100,12 +100,12 @@ function normalizeSocketPayload(type: string, payload: unknown): Record<string, 
   }
 }
 
-function omitSocketType(value: Record<string, unknown>): Record<string, unknown> {
+function omitSocketType(value: { [key: string]: unknown }): { [key: string]: unknown } {
   const { type: _type, ...payload } = value
   return payload
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is { [key: string]: unknown } {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 

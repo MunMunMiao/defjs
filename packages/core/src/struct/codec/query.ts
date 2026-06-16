@@ -16,15 +16,15 @@ export function encodeQueryParams(
   struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   options: QueryCodecOptions = {},
-): Record<string, RequestBuildValue> {
+): { [key: string]: RequestBuildValue } {
   return encodeTaggedRecord(struct, value, QueryTag, 'query', options)
 }
 
-export function encodePathParams(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): Record<string, RequestBuildValue> {
+export function encodePathParams(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): { [key: string]: RequestBuildValue } {
   return encodeTaggedRecord(struct, value, UriTag, 'uri', { scalarOnly: true })
 }
 
-export function encodeHeaders(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): Record<string, RequestBuildValue> {
+export function encodeHeaders(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): { [key: string]: RequestBuildValue } {
   return encodeTaggedRecord(struct, value, HeaderTag, 'header')
 }
 
@@ -34,14 +34,14 @@ function encodeTaggedRecord(
   namespace: TagNamespace,
   label: string,
   options: QueryCodecOptions & { scalarOnly?: boolean } = {},
-): Record<string, RequestBuildValue> {
+): { [key: string]: RequestBuildValue } {
   if (!isObjectStruct(struct)) {
     throw new TypeError(`${label} encode expects object struct`)
   }
 
   assertPlainObject(value, `${label} encode expects object value`)
 
-  const record: Record<string, RequestBuildValue> = Object.create(null)
+  const record: { [key: string]: RequestBuildValue } = Object.create(null)
   for (const field of getStructFields(struct)) {
     const fieldTag = field.tags.get(namespace.kind)
     const encoded = encodeStructValue(field.struct, value[field.key])
@@ -62,7 +62,7 @@ function normalizeRecordValue(label: string, key: string, value: unknown, option
   }
 
   if (options.allowComplex && typeof value === 'object' && value !== null) {
-    return value as unknown as Record<string, unknown>
+    return value as unknown as { [key: string]: unknown }
   }
 
   return normalizeScalarRecordValue(label, key, value)

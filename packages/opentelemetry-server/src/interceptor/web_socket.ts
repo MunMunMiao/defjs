@@ -1,3 +1,4 @@
+import type { FnReturn } from '../utility_types'
 import type { HttpRequest, WebSocketSessionLike } from '@defjs/core'
 import { createWebSocketInterceptor } from '@defjs/core'
 import type { Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
@@ -23,9 +24,7 @@ export interface WebSocketInterceptorOptions {
   responseHook?: (span: Span, session: WebSocketSessionLike) => void
 }
 
-export function createOpenTelemetryWebSocketInterceptor(
-  options: WebSocketInterceptorOptions,
-): ReturnType<typeof createWebSocketInterceptor> {
+export function createOpenTelemetryWebSocketInterceptor(options: WebSocketInterceptorOptions): FnReturn<typeof createWebSocketInterceptor> {
   return createWebSocketInterceptor(async (req, next) => {
     const { tracer, propagator, metrics, requireParentSpan, queryPropagation = true, requestHook, responseHook } = options
 

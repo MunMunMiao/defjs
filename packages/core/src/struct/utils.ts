@@ -88,11 +88,11 @@ export function formatPath(path: Path): string {
   return output
 }
 
-export function hasOwnKey(value: Record<string, unknown>, key: string): boolean {
+export function hasOwnKey(value: { [key: string]: unknown }, key: string): boolean {
   return Object.hasOwn(value, key)
 }
 
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(value: unknown): value is { [key: string]: unknown } {
   if (typeof value !== 'object' || value === null) {
     return false
   }
@@ -123,7 +123,7 @@ export function cloneValue<T>(value: T): T {
   }
 
   if (isPlainObject(value)) {
-    const output: Record<string, unknown> = Object.create(null)
+    const output: { [key: string]: unknown } = Object.create(null)
     for (const [key, item] of Object.entries(value)) {
       output[key] = cloneValue(item)
     }

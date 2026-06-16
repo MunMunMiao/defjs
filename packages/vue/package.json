@@ -1,6 +1,6 @@
 {
   "name": "@defjs/vue",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "bugs": {
     "url": "https://github.com/defjs/defjs/issues"
   },
@@ -10,27 +10,20 @@
     "url": "git+https://github.com/defjs/defjs.git"
   },
   "type": "module",
-  "module": "dist/index.js",
-  "typings": "dist/index.d.ts",
+  "module": "src/index.ts",
+  "typings": "src/index.ts",
   "exports": {
     "./package.json": "./package.json",
-    ".": {
-      "types": "./index.d.ts",
-      "default": "./index.js"
-    }
+    ".": "./src/index.ts"
   },
   "publishConfig": {
     "directory": "dist"
   },
   "scripts": {
     "build": "tsdown",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint . --fix",
     "pub": "pnpm publish",
     "test": "vitest run --config vitest.config.ts --coverage",
-    "typecheck": "tsgo --project tsconfig.json --noEmit",
-    "fmt": "oxfmt . --write",
-    "fmt:check": "oxfmt . --check"
+    "typecheck": "tsgo --project tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@hono/node-server": "catalog:",

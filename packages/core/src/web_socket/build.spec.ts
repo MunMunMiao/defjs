@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import type { RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct } from '../struct'
 import { struct } from '../struct'
-import { createWebSocketBuild, createWebSocketUrl } from './build'
+import { createWebSocketBuild, createWebSocketRequest, createWebSocketUrl, createWebSocketUrlFromRequest } from './build'
 
 function unsupportedWebSocketBuild<TInput extends AnyStruct>(build: RequestBuildHandler<TInput>): RequestBuildHandler<TInput, 'webSocket'> {
   // Type boundary: this spec intentionally builds unsupported WebSocket output so the runtime guard rejects it.
@@ -144,5 +144,47 @@ describe('web socket build helpers', () => {
     expect(createWebSocketUrl('http://localhost', '/ws', undefined, { id: 1n as never }, (p) => p.toString())).toBe(
       'ws://localhost/ws?id=1',
     )
+  })
+
+  test('createWebSocketUrl serializes number and boolean query params', () => {
+    expect(createWebSocketUrl('http://localhost', '/ws', undefined, { active: true, port: 42 }, (p) => p.toString())).toBe(
+      'ws://localhost/ws?active=true&port=42',
+    )
+  })
+
+  test('createWebSocketUrlFromRequest converts https to wss', () => {
+    const request = createWebSocketRequest({
+      abort: new AbortController().signal,
+      baseEndpoint: 'https://api.example.com/v1',
+      build: { params: { roomId: '9' }, query: { token: 'abc' } },
+      path: '/chat/:roomId',
+      queryParamsSerializer: (params) => params.toString(),
+      withCredentials: false,
+    })
+    expect(createWebSocketUrlFromRequest(request)).toBe('wss://api.example.com/v1/chat/9?token=abc')
+  })
+
+  test('createWebSocketUrlFromRequest converts http to ws', () => {
+    const request = createWebSocketRequest({
+      abort: new AbortController().signal,
+      baseEndpoint: 'http://api.example.com/v1',
+      build: { params: {}, query: {} },
+      path: '/chat',
+      queryParamsSerializer: (params) => params.toString(),
+      withCredentials: false,
+    })
+    expect(createWebSocketUrlFromRequest(request)).toBe('ws://api.example.com/v1/chat')
+  })
+
+  test('createWebSocketUrlFromRequest keeps non-http protocols unchanged', () => {
+    const request = createWebSocketRequest({
+      abort: new AbortController().signal,
+      baseEndpoint: 'wss://api.example.com/v1',
+      build: { params: {}, query: {} },
+      path: '/chat',
+      queryParamsSerializer: (params) => params.toString(),
+      withCredentials: false,
+    })
+    expect(createWebSocketUrlFromRequest(request)).toBe('wss://api.example.com/v1/chat')
   })
 })

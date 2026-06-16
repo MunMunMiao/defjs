@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
+import { createClient, getGlobalClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
 import { struct } from '../struct'
 import { defineEventStream } from './index'
 
@@ -21,7 +21,7 @@ describe('sse browser runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream, open] = await useBasicStream()
+    const [error, stream, open] = (await getGlobalClient().execute(useBasicStream())) as any
 
     expect(error).toBeNull()
     expect(open?.response?.ok).toBe(true)
@@ -45,7 +45,8 @@ describe('sse browser runtime', () => {
       },
       path: '/sse/basic',
     })
-    const [error, stream] = await useStream()
+
+    const [error, stream] = (await getGlobalClient().execute(useStream())) as any
 
     expect(error).toBeNull()
     if (!stream) {

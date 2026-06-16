@@ -1,2 +1,1 @@
-export { getGlobalClient, resetGlobalClient } from '@defjs/core'
-export { HTTP_CLIENT, injectClient, provideClient, provideGlobalClient, withHost, withInterceptors } from './core'
+export { HTTP_CLIENT, injectClient, provideClient, provideGlobalClient, withEndpoint, withInterceptors } from './core'

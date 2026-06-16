@@ -1,7 +1,8 @@
+import type { RequireAll } from '../internal/utility_types'
 import type { Interceptor } from '../interceptor/interceptor'
 import type { HttpRequest } from '../internal/http_request'
 
-export type QueryParamsSerializer = (params: URLSearchParams, rawParams?: Record<string, unknown>) => string
+export type QueryParamsSerializer = (params: URLSearchParams, rawParams?: { [key: string]: unknown }) => string
 
 export const DEFAULT_QUERY_PARAMS_SERIALIZER: QueryParamsSerializer = (params) => params.toString()
 
@@ -124,7 +125,7 @@ export interface ClientOptions {
 
 export interface ClientConfig {
   endpoint: string
-  http: Required<ClientHttpOptions>
+  http: RequireAll<ClientHttpOptions>
   interceptors: Interceptor[]
   queryParamsSerializer: QueryParamsSerializer
   sse: ClientSSEConfig
@@ -135,7 +136,7 @@ export interface ClientConfig {
 
 const DEFAULT_FETCH = globalThis.fetch.bind(globalThis) as typeof fetch
 
-export const DEFAULT_HTTP_OPTIONS: Required<ClientHttpOptions> = {
+export const DEFAULT_HTTP_OPTIONS: RequireAll<ClientHttpOptions> = {
   fetch: DEFAULT_FETCH,
 }
 

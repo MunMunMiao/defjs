@@ -1178,3 +1178,386 @@ describe('request_builder addXxx', () => {
     expect(body.get('a')).toBe('1')
   })
 })
+
+describe('request_builder edge coverage', () => {
+  test('request-shaped text body sets body and content type', () => {
+    const input = struct.request({
+      body: struct.text(),
+    })
+    const built = buildRequest({ body: 'hello' }, undefined, { input })
+    expect(built.body).toBe('hello')
+    expect(built.bodyContentType).toBe('text/plain;charset=UTF-8')
+  })
+
+  test('request-shaped blob body sets body', () => {
+    const blob = new Blob(['payload'], { type: 'application/octet-stream' })
+    const input = struct.request({
+      body: struct.blob(),
+    })
+    const built = buildRequest({ body: blob }, undefined, { input })
+    expect(built.body).toBe(blob)
+    expect(built.bodyContentType).toBeUndefined()
+  })
+
+  test('request-shaped arrayBuffer body sets body', () => {
+    const buffer = new ArrayBuffer(8)
+    const input = struct.request({
+      body: struct.arrayBuffer(),
+    })
+    const built = buildRequest({ body: buffer }, undefined, { input })
+    expect(built.body).toBe(buffer)
+    expect(built.bodyContentType).toBeUndefined()
+  })
+
+  test('passing a bound request body to a flat helper unwraps the body wrapper', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          name: struct.string(),
+        }),
+      ),
+    })
+    const built = buildRequest(
+      { body: { name: 'Miao' } },
+      (request, view) => {
+        // Runtime boundary: view.body is a bound source; casting exercises the bound-source materialization path.
+        request.setFormUrlEncoded(view.body as never)
+      },
+      { input },
+    )
+    const body = built.body as URLSearchParams
+    expect(body.get('name')).toBe('Miao')
+  })
+
+  test('passing a bound request body to setJson unwraps the body wrapper', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          name: struct.string(),
+        }),
+      ),
+    })
+    const built = buildRequest(
+      { body: { name: 'Miao' } },
+      (request, view) => {
+        // Runtime boundary: view.body is a bound source; casting exercises json target unwrapping.
+        request.setJson(view.body as never)
+      },
+      { input },
+    )
+    expect(built.body).toBe('{"name":"Miao"}')
+  })
+
+  test('ArrayProjection source that is not an array throws', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          tags: struct.array(struct.string()),
+        }),
+      ),
+    })
+    expect(() =>
+      buildRequest(
+        { body: { tags: 'not-an-array' as never } },
+        (request, view) => {
+          // Runtime boundary: view.body.tags schema is array but the bound value is not.
+          request.setJson({ items: (view.body.tags as unknown as string[]).map((item) => item) } as never)
+        },
+        { input },
+      ),
+    ).toThrow('ArrayProjection source must resolve to an array')
+  })
+
+  test('array literal projection materializes each item', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          a: struct.string(),
+          b: struct.string(),
+        }),
+      ),
+    })
+    const built = buildRequest(
+      { body: { a: '1', b: '2' } },
+      (request, view) => {
+        request.setJson({ items: [view.body.a, view.body.b] })
+      },
+      { input },
+    )
+    expect(built.body).toBe('{"items":["1","2"]}')
+  })
+
+  test('undefined projection values are omitted from json body', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          name: struct.string(),
+        }),
+      ),
+    })
+    const built = buildRequest(
+      { body: { name: 'Miao' } },
+      (request) => {
+        // Runtime boundary: explicit undefined projection should be skipped during materialization.
+        request.setJson({ missing: undefined } as never)
+      },
+      { input },
+    )
+    expect(built.body).toBe('{}')
+  })
+
+  test('encodeFlatRecord rejects non-object struct via bound source', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          name: struct.string(),
+        }),
+      ),
+    })
+    expect(() =>
+      buildRequest(
+        { body: { name: 'Miao' } },
+        (request, view) => {
+          // Runtime boundary: view.body.name is a scalar bound source, not a flat-record struct.
+          request.setFormUrlEncoded(view.body.name as never)
+        },
+        { input },
+      ),
+    ).toThrow('urlencoded binding expects an object struct')
+  })
+
+  test('encodeFlatRecord rejects non-object value via bound source', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          profile: struct.object({
+            name: struct.string(),
+          }),
+        }),
+      ),
+    })
+    expect(() =>
+      buildRequest(
+        { body: { profile: 'not-an-object' as never } },
+        (request, view) => {
+          // Runtime boundary: view.body.profile schema is object but the bound value is not.
+          request.setFormUrlEncoded(view.body.profile as never)
+        },
+        { input },
+      ),
+    ).toThrow('urlencoded binding expects an object value')
+  })
+
+  test('flat bindings reject binary values except for formData', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          file: struct.blob(),
+        }),
+      ),
+    })
+    const blob = new Blob(['x'])
+    expect(() =>
+      buildRequest(
+        { body: { file: blob } },
+        (request, view) => {
+          // Runtime boundary: headers binding does not accept Blob values.
+          request.setHeaders({ file: view.body.file } as never)
+        },
+        { input },
+      ),
+    ).toThrow('headers binding does not support binary value for key "file"')
+  })
+
+  test('setArrayBuffer rejects non-ArrayBuffer field', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          name: struct.string(),
+        }),
+      ),
+    })
+    expect(() =>
+      buildRequest(
+        { body: { name: 'Miao' } },
+        (request, view) => {
+          request.setArrayBuffer(view.body.name as never)
+        },
+        { input },
+      ),
+    ).toThrow('setArrayBuffer() expects an ArrayBuffer field')
+  })
+
+  test('setBlob accepts a Blob field', () => {
+    const blob = new Blob(['payload'], { type: 'text/plain' })
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          file: struct.blob(),
+        }),
+      ),
+    })
+    const built = buildRequest(
+      { body: { file: blob } },
+      (request, view) => {
+        request.setBlob(view.body.file)
+      },
+      { input },
+    )
+    expect(built.body).toBe(blob)
+  })
+
+  test('setArrayBuffer accepts an ArrayBuffer field', () => {
+    const buffer = new ArrayBuffer(8)
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          data: struct.arrayBuffer(),
+        }),
+      ),
+    })
+    const built = buildRequest(
+      { body: { data: buffer } },
+      (request, view) => {
+        request.setArrayBuffer(view.body.data)
+      },
+      { input },
+    )
+    expect(built.body).toBe(buffer)
+  })
+
+  test('setText rejects non-string field', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          id: struct.number(),
+        }),
+      ),
+    })
+    expect(() =>
+      buildRequest(
+        { body: { id: 1 } },
+        (request, view) => {
+          request.setText(view.body.id as never)
+        },
+        { input },
+      ),
+    ).toThrow('text body binding expects a string field')
+  })
+
+  test('addHeaders skips undefined header values', () => {
+    const input = struct.request({
+      headers: struct.object({
+        'x-auth': struct.string().optional(),
+        'x-trace': struct.string(),
+      }),
+    })
+    const built = buildRequest(
+      { headers: { 'x-trace': 'id' } },
+      (request, view) => {
+        request.addHeaders({ 'x-auth': view.headers['x-auth'], 'x-trace': view.headers['x-trace'] })
+      },
+      { input },
+    )
+    expect(built.headers?.has('x-auth')).toBe(false)
+    expect(built.headers?.get('x-trace')).toBe('id')
+  })
+
+  test('request-shaped json body skips missing and undefined fields', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          age: struct.number().optional(),
+          name: struct.string().optional(),
+        }),
+      ),
+    })
+    const built = buildRequest({ body: { age: undefined } }, undefined, { input })
+    expect(built.body).toBe('{}')
+  })
+
+  test('bound flat helper skips missing and undefined object fields', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          a: struct.string().optional(),
+          b: struct.string().optional(),
+        }),
+      ),
+    })
+    const built = buildRequest(
+      { body: { b: undefined } },
+      (request, view) => {
+        request.setFormUrlEncoded(view.body as never)
+      },
+      { input },
+    )
+    const body = built.body as URLSearchParams
+    expect(body.has('a')).toBe(false)
+    expect(body.has('b')).toBe(false)
+  })
+
+  test('headers serialize unsupported scalar values via default String coercion', () => {
+    const input = struct.request({
+      headers: struct.object({
+        id: struct.unknown(),
+      }),
+    })
+    const built = buildRequest(
+      { headers: { id: 1n as never } },
+      (request, view) => {
+        request.setHeaders({ id: view.headers.id } as never)
+      },
+      { input },
+    )
+    expect(built.headers?.get('id')).toBe('1')
+  })
+
+  test('formData throws for unsupported scalar value', () => {
+    const input = struct.request({
+      body: struct.formData({
+        id: struct.unknown(),
+      }),
+    })
+    expect(() =>
+      buildRequest(
+        { body: { id: 1n } },
+        (request, view) => {
+          request.setFormData({ id: view.body.id as never })
+        },
+        { input },
+      ),
+    ).toThrow('formData binding does not support value for key "id"')
+  })
+
+  test('request-shaped build treats non-plain-object input as empty', () => {
+    const input = struct.request({})
+    const built = buildRequest(null as never, undefined, { input })
+    expect(built.params).toBeUndefined()
+    expect(built.query).toBeUndefined()
+  })
+
+  test('request-shaped text body with undefined falls back to empty string', () => {
+    const input = struct.request({ body: struct.text() })
+    const built = buildRequest({ body: undefined }, undefined, { input })
+    expect(built.body).toBe('')
+  })
+
+  test('bound source path stops at scalar intermediate value', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          profile: struct.object({ name: struct.string() }),
+        }),
+      ),
+    })
+    const built = buildRequest(
+      { body: { profile: 'not-an-object' as never } },
+      (request, view) => {
+        request.setJson({ name: view.body.profile.name })
+      },
+      { input },
+    )
+    expect(built.body).toBe('{}')
+  })
+})

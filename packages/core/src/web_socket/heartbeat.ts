@@ -1,3 +1,4 @@
+import type { FnReturn } from '../internal/utility_types'
 import { serializeOutgoingWebSocketMessage } from './codec'
 import type { SendQueue } from './queue'
 import type { SocketSchemas, WebSocketHeartbeatConfig, WebSocketOutgoingData } from './web_socket'
@@ -27,7 +28,7 @@ export function startHeartbeat<TIncoming, TOutgoing extends SocketSchemas | unde
     return
   }
 
-  let ackTimer: ReturnType<typeof setTimeout> | undefined
+  let ackTimer: FnReturn<typeof setTimeout> | undefined
   const interval = setInterval(() => {
     if (socket.readyState !== WebSocket.OPEN) {
       return

@@ -1,3 +1,4 @@
+import type { FnReturn } from '../internal/utility_types'
 import { describe, expect, test } from 'vitest'
 import { encodeValue } from './encode'
 import { struct } from './index'
@@ -18,7 +19,7 @@ describe('encode.ts', () => {
   test('encode follows getter-recursive object schemas', () => {
     const tree = struct.object({
       id: struct.string(),
-      get children(): ReturnType<typeof struct.array> {
+      get children(): FnReturn<typeof struct.array> {
         return struct.array(tree)
       },
     })

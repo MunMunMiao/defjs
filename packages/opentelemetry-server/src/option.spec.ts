@@ -151,6 +151,15 @@ describe('withOpenTelemetryServer', () => {
     expect(typeof option).toBe('function')
   })
 
+  test('should apply interceptors with external meter', () => {
+    const meter = makeMeter()
+    const config = makeConfig()
+
+    withOpenTelemetryServer({ tracer: createMockTracer().tracer, meter })(config)
+
+    expect(config.interceptors).toHaveLength(3)
+  })
+
   test('should accept custom propagator', () => {
     const propagator = makePropagator()
 

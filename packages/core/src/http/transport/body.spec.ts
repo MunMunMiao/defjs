@@ -1,3 +1,4 @@
+import type { SelectKeys, Optional } from '../../internal/utility_types'
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../../internal/http_request'
 import { applyRequestContentType, detectHttpContentType, serializeHttpBody } from './body'
@@ -118,7 +119,7 @@ describe('http utils', () => {
   })
 })
 
-function makeRequest(init: Pick<HttpRequest, 'body'> & Partial<HttpRequest>): HttpRequest {
+function makeRequest(init: SelectKeys<HttpRequest, 'body'> & Optional<HttpRequest>): HttpRequest {
   return {
     endpoint: '/test',
     method: 'POST',

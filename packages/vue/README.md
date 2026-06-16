@@ -17,15 +17,15 @@ pnpm add @defjs/vue
 ```typescript
 // main.ts
 import { createApp } from 'vue'
-import { provideClient, provideGlobalClient, withHost, withInterceptors } from '@defjs/vue'
+import { provideClient, provideGlobalClient, withEndpoint, withInterceptors } from '@defjs/vue'
 
 const app = createApp(App)
 
 // 方式 1：provideClient（不设置全局）
-app.use(provideClient(withHost('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
+app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 
 // 方式 2：provideGlobalClient（设置全局）
-app.use(provideGlobalClient(withHost('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
+app.use(provideGlobalClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 ```
 
 ```typescript
@@ -49,9 +49,9 @@ const client = injectClient() // 返回 Client 实例
 
 获取注入的 Client 实例。
 
-### withHost(host: string): ClientOption
+### withEndpoint(endpoint: string): ClientOption
 
-配置 HTTP 主机。
+配置 HTTP endpoint。
 
 ### withInterceptors(...fns: (() => Interceptor)[]): ClientOption
 

@@ -1,5 +1,4 @@
-import type { ClientOption, EventStreamHandle, HttpRequest, HttpResponse, Interceptor, WebSocketSessionLike } from '@defjs/core'
-import { withInterceptors } from '@defjs/core'
+import type { ClientOption, EventStreamHandle, HttpRequest, HttpResponse, WebSocketSessionLike } from '@defjs/core'
 import type { Meter, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
 import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
 import { createOpenTelemetryHttpInterceptor } from './interceptor/http'
@@ -69,49 +68,47 @@ export function withOpenTelemetryServer(options: OpenTelemetryServerOptions): Cl
     requireParentSpan = false,
   } = options
 
-  const interceptors: Interceptor[] = []
+  return (config) => {
+    if (isTransportEnabled(options.http)) {
+      config.interceptors.push(
+        createOpenTelemetryHttpInterceptor({
+          tracer,
+          propagator,
+          metrics: meter ? createHttpClientMetrics(meter) : undefined,
+          requireParentSpan,
+          requestHook: options.http?.requestHook,
+          responseHook: options.http?.responseHook,
+        }),
+      )
+    }
 
-  if (isTransportEnabled(options.http)) {
-    interceptors.push(
-      createOpenTelemetryHttpInterceptor({
-        tracer,
-        propagator,
-        metrics: meter ? createHttpClientMetrics(meter) : undefined,
-        requireParentSpan,
-        requestHook: options.http?.requestHook,
-        responseHook: options.http?.responseHook,
-      }),
-    )
+    if (isTransportEnabled(options.sse)) {
+      config.interceptors.push(
+        createOpenTelemetrySSEInterceptor({
+          tracer,
+          propagator,
+          metrics: meter ? createSSEClientMetrics(meter) : undefined,
+          requireParentSpan,
+          requestHook: options.sse?.requestHook,
+          responseHook: options.sse?.responseHook,
+        }),
+      )
+    }
+
+    if (isTransportEnabled(options.webSocket)) {
+      config.interceptors.push(
+        createOpenTelemetryWebSocketInterceptor({
+          tracer,
+          propagator,
+          metrics: meter ? createWebSocketClientMetrics(meter) : undefined,
+          requireParentSpan,
+          queryPropagation: options.webSocket?.queryPropagation,
+          requestHook: options.webSocket?.requestHook,
+          responseHook: options.webSocket?.responseHook,
+        }),
+      )
+    }
   }
-
-  if (isTransportEnabled(options.sse)) {
-    interceptors.push(
-      createOpenTelemetrySSEInterceptor({
-        tracer,
-        propagator,
-        metrics: meter ? createSSEClientMetrics(meter) : undefined,
-        requireParentSpan,
-        requestHook: options.sse?.requestHook,
-        responseHook: options.sse?.responseHook,
-      }),
-    )
-  }
-
-  if (isTransportEnabled(options.webSocket)) {
-    interceptors.push(
-      createOpenTelemetryWebSocketInterceptor({
-        tracer,
-        propagator,
-        metrics: meter ? createWebSocketClientMetrics(meter) : undefined,
-        requireParentSpan,
-        queryPropagation: options.webSocket?.queryPropagation,
-        requestHook: options.webSocket?.requestHook,
-        responseHook: options.webSocket?.responseHook,
-      }),
-    )
-  }
-
-  return withInterceptors(...interceptors)
 }
 
 function isTransportEnabled(option: TransportSwitch | undefined): boolean {

@@ -1,3 +1,4 @@
+import type { SelectKeys } from '../internal/utility_types'
 import { issue } from './errors'
 import { resolveObjectShape } from './shape'
 import { DEFINITION, OMIT } from './symbols'
@@ -157,13 +158,13 @@ function parseObjectValue(
   definition: ObjectDefinition,
   input: unknown,
   path: Path,
-): ParseResult<Record<string, unknown>> {
+): ParseResult<{ [key: string]: unknown }> {
   if (!isPlainObject(input)) {
     return failure(issue(path, 'invalid_type', 'object', input))
   }
 
   const shape = resolveObjectShape(schema, definition)
-  const output: Record<string, unknown> = Object.create(null)
+  const output: { [key: string]: unknown } = Object.create(null)
   const issues: SchemaIssue[] = []
 
   for (const [key, itemSchema] of Object.entries(shape)) {
@@ -186,12 +187,12 @@ export function isFieldRequired(itemDefinition: SchemaDefinition): boolean {
   return !itemDefinition.flags.optional && !itemDefinition.flags.nullable
 }
 
-function parseRecordValue(definition: RecordDefinition, input: unknown, path: Path): ParseResult<Record<string, unknown>> {
+function parseRecordValue(definition: RecordDefinition, input: unknown, path: Path): ParseResult<{ [key: string]: unknown }> {
   if (!isPlainObject(input)) {
     return failure(issue(path, 'invalid_type', 'record', input))
   }
 
-  const output: Record<string, unknown> = Object.create(null)
+  const output: { [key: string]: unknown } = Object.create(null)
   const issues: SchemaIssue[] = []
 
   for (const [key, value] of Object.entries(input)) {
@@ -208,12 +209,12 @@ function parseRecordValue(definition: RecordDefinition, input: unknown, path: Pa
   return issues.length > 0 ? failure(...issues) : success(output)
 }
 
-function parseRequestValue(definition: RequestDefinition, input: unknown, path: Path): ParseResult<Record<string, unknown>> {
+function parseRequestValue(definition: RequestDefinition, input: unknown, path: Path): ParseResult<{ [key: string]: unknown }> {
   if (!isPlainObject(input)) {
     return failure(issue(path, 'invalid_type', 'object', input))
   }
 
-  const output: Record<string, unknown> = Object.create(null)
+  const output: { [key: string]: unknown } = Object.create(null)
   const issues: SchemaIssue[] = []
   const sections = getRequestSections(definition)
 
@@ -337,7 +338,7 @@ export function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
       return cloneValue(definition.value)
 
     case 'object': {
-      const output: Record<string, unknown> = Object.create(null)
+      const output: { [key: string]: unknown } = Object.create(null)
       const shape = resolveObjectShape(schema, definition)
 
       for (const [key, itemSchema] of Object.entries(shape)) {
@@ -360,7 +361,7 @@ export function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
       return {}
 
     case 'request': {
-      const output: Record<string, unknown> = Object.create(null)
+      const output: { [key: string]: unknown } = Object.create(null)
       for (const [key, sectionSchema] of getRequestSections(definition)) {
         const value = buildMissingValue(sectionSchema, [...path, key], 'field')
         if (value !== OMIT) {
@@ -403,8 +404,8 @@ function buildMissingValue(schema: RuntimeSchema, path: Path, mode: ParseMode): 
 
 function getRequestSections(
   definition: RequestDefinition,
-): [keyof Pick<RequestDefinition, 'body' | 'headers' | 'path' | 'query'>, RuntimeSchema][] {
-  const sections: [keyof Pick<RequestDefinition, 'body' | 'headers' | 'path' | 'query'>, RuntimeSchema][] = []
+): [keyof SelectKeys<RequestDefinition, 'body' | 'headers' | 'path' | 'query'>, RuntimeSchema][] {
+  const sections: [keyof SelectKeys<RequestDefinition, 'body' | 'headers' | 'path' | 'query'>, RuntimeSchema][] = []
   if (definition.path) {
     sections.push(['path', definition.path as unknown as RuntimeSchema])
   }

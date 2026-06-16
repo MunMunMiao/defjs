@@ -1,5 +1,5 @@
 import type { Client, ClientOption, Interceptor } from '@defjs/core'
-import { createClient, setGlobalClient, withEndpoint, withInterceptors as withClientInterceptors } from '@defjs/core'
+import { createClient, setGlobalClient } from '@defjs/core'
 import type { App, InjectionKey, Plugin } from 'vue'
 import { inject } from 'vue'
 
@@ -8,17 +8,15 @@ import { inject } from 'vue'
  */
 export const HTTP_CLIENT: InjectionKey<Client> = Symbol('HTTP_CLIENT')
 
-type ClientOptionConfig = Parameters<ClientOption>[0]
-
 /**
- * Create a ClientOption that sets the host/endpoint for the HTTP client.
+ * Create a ClientOption that sets the endpoint for the HTTP client.
  *
- * @param host - The base URL for API requests (e.g., 'https://api.example.com')
+ * @param endpoint - The base URL for API requests (e.g., 'https://api.example.com')
  * @returns A ClientOption function that configures the endpoint
  */
-export function withHost(host: string): ClientOption {
+export function withEndpoint(endpoint: string): ClientOption {
   return (config) => {
-    config.endpoint = host
+    config.endpoint = endpoint
   }
 }
 
@@ -43,25 +41,7 @@ export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
 export function provideClient(...feature: ClientOption[]): Plugin {
   return {
     install(app: App) {
-      // Collect host and interceptors from options
-      let host = ''
-      const interceptors: Interceptor[] = []
-
-      const configProxy: Partial<Pick<ClientOptionConfig, 'endpoint' | 'interceptors'>> = {}
-      for (const option of feature) {
-        // Type boundary: Vue adapters historically apply options to a partial config and only read endpoint/interceptors.
-        option(configProxy as ClientOptionConfig)
-      }
-
-      host = configProxy.endpoint || ''
-      if (configProxy.interceptors) {
-        interceptors.push(...configProxy.interceptors)
-      }
-
-      // Create Client instance
-      const client = createClient(withEndpoint(host), withClientInterceptors(...interceptors))
-
-      // Provide Client instance
+      const client = createClient(...feature)
       app.provide(HTTP_CLIENT, client)
     },
   }
@@ -76,28 +56,8 @@ export function provideClient(...feature: ClientOption[]): Plugin {
 export function provideGlobalClient(...feature: ClientOption[]): Plugin {
   return {
     install(app: App) {
-      // Collect host and interceptors from options
-      let host = ''
-      const interceptors: Interceptor[] = []
-
-      const configProxy: Partial<Pick<ClientOptionConfig, 'endpoint' | 'interceptors'>> = {}
-      for (const option of feature) {
-        // Type boundary: Vue adapters historically apply options to a partial config and only read endpoint/interceptors.
-        option(configProxy as ClientOptionConfig)
-      }
-
-      host = configProxy.endpoint || ''
-      if (configProxy.interceptors) {
-        interceptors.push(...configProxy.interceptors)
-      }
-
-      // Create Client instance
-      const client = createClient(withEndpoint(host), withClientInterceptors(...interceptors))
-
-      // Provide Client instance
+      const client = createClient(...feature)
       app.provide(HTTP_CLIENT, client)
-
-      // Set as global client
       setGlobalClient(client)
     },
   }

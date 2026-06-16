@@ -18,10 +18,10 @@ bun add @defjs/angular @defjs/core
 
 ```typescript
 // app.config.ts
-import { provideGlobalClient, withHost } from '@defjs/angular'
+import { provideGlobalClient, withEndpoint } from '@defjs/angular'
 
 export const appConfig = {
-  providers: [provideGlobalClient(withHost('https://api.example.com'))],
+  providers: [provideGlobalClient(withEndpoint('https://api.example.com'))],
 }
 ```
 
@@ -31,10 +31,10 @@ This creates a `@defjs/core` client pointing at the given host and registers it 
 
 ```typescript
 // app.config.ts
-import { provideClient, withHost } from '@defjs/angular'
+import { provideClient, withEndpoint } from '@defjs/angular'
 
 export const appConfig = {
-  providers: [provideClient(withHost('https://api.example.com'))],
+  providers: [provideClient(withEndpoint('https://api.example.com'))],
 }
 ```
 
@@ -74,7 +74,7 @@ Creates a client and registers it as an injectable `Client` token. Does **not** 
 
 Injects the client provided by `provideClient` or `provideGlobalClient`.
 
-### `withHost(host: string): EnvironmentProviders`
+### `withEndpoint(endpoint: string): EnvironmentProviders`
 
 Sets the base endpoint URL for the client. If omitted, defaults to `document.location.origin`.
 
@@ -87,7 +87,7 @@ import { withInterceptors } from '@defjs/angular'
 import { basicAuthHttpInterceptor } from '@defjs/core'
 
 provideGlobalClient(
-  withHost('https://api.example.com'),
+  withEndpoint('https://api.example.com'),
   withInterceptors(() => basicAuthHttpInterceptor(() => ({ username: 'user', password: 'pass' }))),
 )
 ```

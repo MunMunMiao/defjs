@@ -1,25 +1,25 @@
 import { DOCUMENT } from '@angular/common'
 import type { EnvironmentProviders } from '@angular/core'
-import { APP_INITIALIZER, InjectionToken, inject, makeEnvironmentProviders } from '@angular/core'
+import { InjectionToken, inject, makeEnvironmentProviders, provideAppInitializer } from '@angular/core'
 import type { Client, Interceptor } from '@defjs/core'
-import { createClient, setGlobalClient, withEndpoint, withInterceptors as withClientInterceptors } from '@defjs/core'
+import { createClient, setGlobalClient, withInterceptors as withClientInterceptors, withEndpoint as withCoreEndpoint } from '@defjs/core'
 
 const HTTP_CLIENT = new InjectionToken<Client>('HTTP_CLIENT')
 const HTTP_INTERCEPTOR_FNS = new InjectionToken<Interceptor[]>('HTTP_INTERCEPTOR_FNS')
-const HTTP_HOST = new InjectionToken<string>('HTTP_HOST')
+const HTTP_ENDPOINT = new InjectionToken<string>('HTTP_ENDPOINT')
 
-export function withHost(host: string): EnvironmentProviders {
+export function withEndpoint(endpoint: string): EnvironmentProviders {
   return makeEnvironmentProviders([
     {
-      provide: HTTP_HOST,
-      useValue: host,
+      provide: HTTP_ENDPOINT,
+      useValue: endpoint,
     },
   ])
 }
 
 export function withInterceptors(...fns: (() => Interceptor)[]): EnvironmentProviders {
   return makeEnvironmentProviders(
-    fns.map((fn) => ({
+    fns.map(fn => ({
       provide: HTTP_INTERCEPTOR_FNS,
       useFactory: fn,
       multi: true,
@@ -33,17 +33,17 @@ export function provideClient(...feature: EnvironmentProviders[]): EnvironmentPr
     {
       provide: HTTP_CLIENT,
       useFactory: () => {
-        let host = inject(HTTP_HOST, { optional: true })
+        let endpoint = inject(HTTP_ENDPOINT, { optional: true })
 
-        if (!host) {
+        if (!endpoint) {
           const document: Document | null = inject(DOCUMENT, { optional: true })
 
-          host = document?.location.origin ?? ''
+          endpoint = document?.location.origin ?? ''
         }
 
         const interceptors = inject(HTTP_INTERCEPTOR_FNS, { optional: true }) ?? []
 
-        return createClient(withEndpoint(host), withClientInterceptors(...interceptors))
+        return createClient(withCoreEndpoint(endpoint), withClientInterceptors(...interceptors))
       },
     },
   ])
@@ -52,17 +52,11 @@ export function provideClient(...feature: EnvironmentProviders[]): EnvironmentPr
 export function provideGlobalClient(...feature: EnvironmentProviders[]): EnvironmentProviders {
   return makeEnvironmentProviders([
     provideClient(...feature),
-    {
-      provide: APP_INITIALIZER,
-      useFactory: () => {
-        const client = inject(HTTP_CLIENT)
+    provideAppInitializer(() => {
+      const client = inject(HTTP_CLIENT)
 
-        return () => {
-          setGlobalClient(client)
-        }
-      },
-      multi: true,
-    },
+      setGlobalClient(client)
+    }),
   ])
 }
 

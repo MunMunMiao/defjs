@@ -1,3 +1,4 @@
+import type { ExcludeUnion, ExtractUnion, NonNullableValue, OmitKeys } from '../internal/utility_types'
 import { resolveClientConfig } from '../client/client'
 import type { ClientConfig, WebSocketBeforeConnect, WebSocketHeartbeatOptions } from '../client/config'
 import type { Client } from '../client/resolve'
@@ -30,32 +31,30 @@ import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait 
 
 export type WebSocketState = 'aborted' | 'closed' | 'closing' | 'connecting' | 'error' | 'idle' | 'open' | 'reconnecting'
 
-export type SocketSchemas = Record<string, AnyStruct>
+export type SocketSchemas = { [key: string]: AnyStruct }
 
-type KnownSocketKey<TMessages extends SocketSchemas> = Exclude<Extract<keyof TMessages, string>, 'default'>
+type KnownSocketKey<TMessages extends SocketSchemas> = ExcludeUnion<ExtractUnion<keyof TMessages, string>, 'default'>
 
 type SimplifySocket<T> = { [K in keyof T]: T[K] } & {}
 
-type NormalizeSocketMessage<TKey extends string, TPayload> =
-  TPayload extends Record<string, unknown>
-    ? SimplifySocket<{ type: TKey } & TPayload>
-    : {
-        data: TPayload
-        type: TKey
-      }
+type NormalizeSocketMessage<TKey extends string, TPayload> = TPayload extends { [key: string]: unknown }
+  ? SimplifySocket<{ type: TKey } & TPayload>
+  : {
+      data: TPayload
+      type: TKey
+    }
 
-type SocketSendMessage<TKey extends string, TPayload> =
-  TPayload extends Record<string, unknown>
-    ?
-        | SimplifySocket<{ type: TKey } & TPayload>
-        | {
-            data: TPayload
-            type: TKey
-          }
-    : {
-        data: TPayload
-        type: TKey
-      }
+type SocketSendMessage<TKey extends string, TPayload> = TPayload extends { [key: string]: unknown }
+  ?
+      | SimplifySocket<{ type: TKey } & TPayload>
+      | {
+          data: TPayload
+          type: TKey
+        }
+  : {
+      data: TPayload
+      type: TKey
+    }
 
 type KnownIncomingSocketUnion<TIncoming extends SocketSchemas> = {
   [K in KnownSocketKey<TIncoming>]: NormalizeSocketMessage<K, Infer<TIncoming[K]>>
@@ -169,7 +168,7 @@ export interface WebSocketRef<TIncoming = unknown, TOutgoing = never> extends Pr
 
 type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends EndpointInput<NonNullable<TInput>>
+  : {} extends EndpointInput<NonNullableValue<TInput>>
     ? true
     : false
 
@@ -215,7 +214,10 @@ type Deferred<T> = {
 }
 
 export type { WebSocketQueueConfig, WebSocketReconnectConfig }
-export type WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> = Omit<WebSocketHeartbeatOptions, 'isAck' | 'message'> & {
+export type WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> = OmitKeys<
+  WebSocketHeartbeatOptions,
+  'isAck' | 'message'
+> & {
   isAck?: (message: TIncoming) => boolean
   message?: <T = TOutgoing>() => T | unknown
 }

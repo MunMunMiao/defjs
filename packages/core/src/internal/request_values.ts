@@ -1,4 +1,4 @@
-export type RequestBuildValue = readonly unknown[] | Record<string, unknown> | string | number | boolean | null | undefined
+export type RequestBuildValue = readonly unknown[] | { [key: string]: unknown } | string | number | boolean | null | undefined
 
 export type RequestFormDataScalar = boolean | null | number | string | undefined
 export type RequestFormDataFileLike = Blob | File

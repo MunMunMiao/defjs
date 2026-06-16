@@ -1,13 +1,19 @@
-import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
+import { coverageConfig } from './test/shared'
 
-const browserConfig = fileURLToPath(new URL('./vitest.config.browser.ts', import.meta.url))
-
+/**
+ * Package-level workspace aggregator.
+ *
+ * Runs the browser Vitest project for @defjs/vue (Chromium + Firefox).
+ *
+ * Coverage configuration is centralized here so it applies across all projects
+ * when running via the package test script.
+ */
 export default defineConfig({
   test: {
     coverage: {
-      provider: 'istanbul',
+      ...coverageConfig,
     },
-    projects: [browserConfig],
+    projects: ['./vitest.config.browser.ts'],
   },
 })
