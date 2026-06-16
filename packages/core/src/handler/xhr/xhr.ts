@@ -8,7 +8,9 @@ export function extractHeaders(value: string): Headers {
   const headers = new Headers()
 
   value.split('\r\n').forEach((header) => {
-    const [key, value] = header.split(':')
+    const parts = header.split(':')
+    const key = parts[0]
+    const value = parts.slice(1).join(':')
     if (key && value) {
       headers.set(key.trim(), value.trim())
     }

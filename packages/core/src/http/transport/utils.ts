@@ -28,7 +28,7 @@ export function parseBody(params: {
   request: HttpRequest
   contentType: string
   content: Uint8Array
-}): string | ArrayBuffer | Blob | object | null {
+}): unknown {
   const { request, content, contentType } = params
   const responseType = request.responseType
 
@@ -38,7 +38,7 @@ export function parseBody(params: {
       if (text === '') {
         return null
       }
-      return JSON.parse(text) as object
+      return JSON.parse(text)
     }
     case 'text':
       return textDecoder.decode(content)

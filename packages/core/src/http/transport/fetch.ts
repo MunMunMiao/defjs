@@ -220,7 +220,7 @@ async function parseNativeResponseBody(response: Response, responseType: HttpReq
   switch (responseType) {
     case 'json': {
       const text = await response.text()
-      return text === '' ? null : (JSON.parse(text) as object)
+      return text === '' ? null : JSON.parse(text)
     }
     case 'text':
       return await response.text()

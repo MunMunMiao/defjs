@@ -1,4 +1,4 @@
-export type HttpResponseBody = string | ArrayBuffer | Blob | object | null
+export type HttpResponseBody = unknown
 
 export type HttpResponse<R> = {
   readonly url: string

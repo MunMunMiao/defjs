@@ -3,7 +3,7 @@ import { defineConfig } from 'tsdown'
 
 async function rewritePackageJson(outDir: string): Promise<void> {
   const raw = await readFile('./package.json', 'utf8')
-  const pkg = JSON.parse(raw) as Record<string, unknown>
+  const pkg: Record<string, unknown> = JSON.parse(raw)
 
   delete pkg.devDependencies
   delete pkg.scripts
