@@ -47,18 +47,19 @@ bun install @defjs/core
 
 ```javascript
 import {
-  createGlobalClient,
+  createClient,
   defineRequest,
-  field
+  execute,
+  struct,
 } from 'https://unpkg.com/@defjs/core/index.min.js';
 
 /**
  * @title Step 1
  * @file src/main.ts
- * @description Set up a global client
+ * @description Set up a client
  */
-createGlobalClient({
-  host: 'https://example.com',
+const client = createClient({
+  endpoint: 'https://example.com',
 });
 
 /**
@@ -66,23 +67,27 @@ createGlobalClient({
  * @file src/lib/api/user.ts
  * @description Define the request in the lib/api directory
  */
-const useGetUser = defineRequest('/v1/user/:id')
-  .withField({
-    id: field<number>().withParam()
-  })
+const useGetUser = defineRequest({
+  method: 'GET',
+  output: {
+    200: struct.object({
+      id: struct.number(),
+      name: struct.string(),
+    }),
+  },
+  path: '/v1/user',
+});
 
 /**
  * @title Step 3
  * @file src/pages/home.ts
  * @description Use the defined request in business code
  */
-const { doRequest } = useGetUser();
-const { error, body } = await doRequest({id: 1});
+const [error, user] = await execute(useGetUser(), { client });
 if (error) {
   console.error(error);
-  return;
 }
-console.log(body);
+console.log(user);
 ```
 
 ## Documentation
