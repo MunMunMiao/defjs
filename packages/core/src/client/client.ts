@@ -11,18 +11,14 @@ import { executeEventStreamCommand } from '../sse/sse'
 import type { WebSocketCommand } from '../web_socket/web_socket'
 import { executeWebSocketCommand } from '../web_socket/web_socket'
 
-function dispatchCommand(
-  config: ClientConfig,
-  command: Command,
-  options?: { signal?: AbortSignal },
-): Promise<unknown> {
+function dispatchCommand(config: ClientConfig, command: Command, options?: unknown): Promise<unknown> {
   switch (command.kind) {
     case 'http':
-      return executeHttpCommand(config, command as HttpCommand<any, any>, options)
+      return executeHttpCommand(config, command as HttpCommand<any, any>, options as any)
     case 'event-stream':
-      return executeEventStreamCommand(config, command as EventStreamCommand<any, any>, options) as Promise<unknown>
+      return executeEventStreamCommand(config, command as EventStreamCommand<any, any>, options as any) as Promise<unknown>
     case 'web-socket':
-      return executeWebSocketCommand(config, command as WebSocketCommand<any, any, any>, options) as Promise<unknown>
+      return executeWebSocketCommand(config, command as WebSocketCommand<any, any, any>, options as any) as Promise<unknown>
   }
   return Promise.reject(new Error(`Unsupported command kind: ${command.kind}`))
 }
@@ -30,8 +26,7 @@ function dispatchCommand(
 function createClientFromConfig(config: ClientConfig): Client {
   return {
     [CLIENT]: config,
-    execute: ((command: Command, options?: { signal?: AbortSignal }) =>
-      dispatchCommand(config, command, options)) as Client['execute'],
+    execute: ((command: Command, options?: unknown) => dispatchCommand(config, command, options)) as Client['execute'],
   }
 }
 

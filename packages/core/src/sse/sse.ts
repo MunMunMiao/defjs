@@ -110,15 +110,16 @@ export interface EventStreamCommand<
 > extends BaseCommand<'event-stream'> {
   readonly endpoint: EventStreamEndpoint<TInput, TEvents>
   readonly input: EndpointInput<TInput> | undefined
-  readonly config?: UseEventStreamConfig
 }
+
+export type EventStreamExecuteOptions = UseEventStreamConfig & { signal?: AbortSignal }
 
 export type EventStreamCommandBuilder<
   TInput extends AnyStruct | undefined,
   TEvents extends EventSchemas,
 > = IsInputOptional<TInput> extends true
-  ? (input?: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
-  : (input: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
+  ? (input?: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
+  : (input: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
 
 type EventStreamEndpoint<
   TInput extends AnyStruct | undefined = undefined,
@@ -143,17 +144,15 @@ export function defineEventStream<TInput extends AnyStruct | undefined = undefin
     method: definition.method ?? 'GET',
   }
 
-  function create(input?: EndpointInput<TInput>, config?: UseEventStreamConfig): EventStreamCommand<TInput, TEvents> {
+  function create(input?: EndpointInput<TInput>): EventStreamCommand<TInput, TEvents> {
     return {
       kind: 'event-stream',
       endpoint,
       input,
-      config,
     } as EventStreamCommand<TInput, TEvents>
   }
 
-  return ((input?: EndpointInput<TInput>, config?: UseEventStreamConfig) =>
-    create(input, config)) as EventStreamCommandBuilder<TInput, TEvents>
+  return ((input?: EndpointInput<TInput>) => create(input)) as EventStreamCommandBuilder<TInput, TEvents>
 }
 
 function castParsedEventStreamInput<TInput extends AnyStruct | undefined>(value: unknown): ParsedInput<TInput> {
@@ -167,22 +166,22 @@ export async function executeEventStreamCommand<
 >(
   clientConfig: ClientConfig,
   command: EventStreamCommand<TInput, TEvents>,
-  options?: { signal?: AbortSignal },
+  options?: EventStreamExecuteOptions,
 ): Promise<StreamAwaitResult<EventStreamData<TEvents>>> {
-  const { endpoint, input, config = {} } = command
+  const { endpoint, input } = command
+  const config = options ?? {}
   const controller = new AbortController()
   const state: StreamRefState<EventStreamData<TEvents>> = { status: 'idle' }
-  return runEventStreamCommand(clientConfig, endpoint, input, config, controller, state, options)
+  return runEventStreamCommand(clientConfig, endpoint, input, config, controller, state)
 }
 
 async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
   clientConfig: ClientConfig,
   endpoint: EventStreamEndpoint<TInput, TEvents>,
   input: EndpointInput<TInput> | undefined,
-  config: UseEventStreamConfig,
+  config: EventStreamExecuteOptions,
   controller: AbortController,
   state: StreamRefState<EventStreamData<TEvents>>,
-  options?: { signal?: AbortSignal },
 ): Promise<StreamAwaitResult<EventStreamData<TEvents>>> {
   state.status = 'connecting'
 
@@ -215,7 +214,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
   let request
   try {
     request = createEventStreamRequest(endpoint.method, endpoint.path, parsedInput, endpoint.build, {
-      abort: mergeAbortSignals(controller.signal, [config.abort, options?.signal], config.timeout),
+      abort: mergeAbortSignals(controller.signal, [config.abort, config.signal], config.timeout),
       baseEndpoint: clientConfig.endpoint,
       context: config.context,
       input: endpoint.input,

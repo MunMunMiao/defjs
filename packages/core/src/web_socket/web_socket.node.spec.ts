@@ -111,7 +111,7 @@ describe('web socket runtime environment edge cases', () => {
     lastMockInstance = undefined
   })
 
-  async function run(client: Client, command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+  async function run(client: Client, command: unknown, options?: unknown): Promise<any> {
     return client.execute(command as never, options)
   }
 

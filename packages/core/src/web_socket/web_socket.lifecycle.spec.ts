@@ -15,7 +15,7 @@ describe('web socket runtime lifecycle', () => {
     // cleanup only
   })
 
-  async function run(command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+  async function run(command: unknown, options?: unknown): Promise<any> {
     return client.execute(command as never, options)
   }
 
@@ -110,15 +110,11 @@ describe('web socket runtime lifecycle', () => {
     let callCount = 0
 
     const command = useBeforeConnectSocket({ query: { token: 'secret-0' } })
-    const commandWithConfig = {
-      ...command,
-      config: {
-        beforeConnect: async () => {
-          callCount += 1
-        },
+    const [error, socket, connection] = (await clientWithSerializer.execute(command, {
+      beforeConnect: async () => {
+        callCount += 1
       },
-    }
-    const [error, socket, connection] = (await clientWithSerializer.execute(commandWithConfig)) as any
+    })) as any
 
     expect(error).toBeNull()
     expect(callCount).toBe(1)

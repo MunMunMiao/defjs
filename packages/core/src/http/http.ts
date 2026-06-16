@@ -33,15 +33,16 @@ export interface HttpCommand<
 > extends BaseCommand<'http'> {
   readonly definition: RequestDefinition<TInput, TOutput>
   readonly input: EndpointInput<TInput> | undefined
-  readonly config?: UseRequestConfig
 }
+
+export type HttpExecuteOptions = UseRequestConfig & { signal?: AbortSignal }
 
 export type RequestCommandBuilder<
   TInput extends AnyStruct | undefined,
   TOutput extends RequestOutputShape | undefined,
 > = IsInputOptional<TInput> extends true
-  ? (input?: EndpointInput<TInput>, config?: UseRequestConfig) => HttpCommand<TInput, TOutput>
-  : (input: EndpointInput<TInput>, config?: UseRequestConfig) => HttpCommand<TInput, TOutput>
+  ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
+  : (input: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
 
 type ExpandStatus<T> = T extends readonly (infer U extends number)[] ? U : T extends number ? T : never
 
@@ -134,17 +135,15 @@ export function defineRequest<TInput extends AnyStruct | undefined = undefined, 
 export function defineRequest<TInput extends AnyStruct | undefined = undefined, TOutput extends RequestOutputShape | undefined = undefined>(
   definition: RequestDefinition<TInput, TOutput>,
 ): RequestCommandBuilder<TInput, TOutput> {
-  function create(input?: EndpointInput<TInput>, config?: UseRequestConfig): HttpCommand<TInput, TOutput> {
+  function create(input?: EndpointInput<TInput>): HttpCommand<TInput, TOutput> {
     return {
       kind: 'http',
       definition,
       input,
-      config,
     } as HttpCommand<TInput, TOutput>
   }
 
-  return ((input?: EndpointInput<TInput>, config?: UseRequestConfig) =>
-    create(input, config)) as RequestCommandBuilder<TInput, TOutput>
+  return ((input?: EndpointInput<TInput>) => create(input)) as RequestCommandBuilder<TInput, TOutput>
 }
 
 export async function executeHttpCommand<
@@ -153,9 +152,10 @@ export async function executeHttpCommand<
 >(
   clientConfig: ClientConfig,
   command: HttpCommand<TInput, TOutput>,
-  options?: { signal?: AbortSignal },
+  options?: HttpExecuteOptions,
 ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>> {
-  const { definition, input, config = {} } = command
+  const { definition, input } = command
+  const config = options ?? {}
 
   const fail = (
     error: RequestError<RequestErrorData<TOutput>>,
@@ -190,7 +190,7 @@ export async function executeHttpCommand<
   const responseType = resolveDefaultResponseType(definition.output, definition.responseType)
   try {
     request = createHttpRequest(definition.method, definition.path, parsedInput, definition.build, {
-      abort: mergeAbortSignals(controller.signal, [config.abort, options?.signal], config.timeout),
+      abort: mergeAbortSignals(controller.signal, [config.abort, config.signal], config.timeout),
       baseEndpoint: clientConfig.endpoint,
       context: config.context,
       downloadProgress: config.onDownloadProgress,

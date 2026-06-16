@@ -262,12 +262,11 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const command = useStream(
-      {},
-      // @ts-expect-error testing runtime defensive behavior with invalid config combination
-      { abort: controller.signal, timeout: 1 },
-    )
-    const [error, stream, open] = (await client.execute(command)) as any
+    const command = useStream({})
+    const [error, stream, open] = (await client.execute(command, {
+      abort: controller.signal,
+      timeout: 1,
+    })) as any
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
@@ -287,12 +286,11 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const command = useStream(
-      {},
-      // @ts-expect-error testing runtime defensive behavior with invalid config combination
-      { abort: controller.signal, timeout: 1 },
-    )
-    const [error, stream, open] = (await baseClient.execute(command)) as any
+    const command = useStream({})
+    const [error, stream, open] = (await baseClient.execute(command, {
+      abort: controller.signal,
+      timeout: 1,
+    })) as any
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
@@ -376,8 +374,8 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const command = useStream({}, { abort: controller.signal })
-    const [error, stream, open] = (await baseClient.execute(command)) as any
+    const command = useStream({})
+    const [error, stream, open] = (await baseClient.execute(command, { abort: controller.signal })) as any
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
@@ -394,8 +392,8 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const command = useStream({}, { abort: controller.signal })
-    const [error, stream] = (await baseClient.execute(command)) as any
+    const command = useStream({})
+    const [error, stream] = (await baseClient.execute(command, { abort: controller.signal })) as any
 
     expect(error).toBeNull()
     expect(stream).toBeDefined()
@@ -495,8 +493,8 @@ describe('request event stream runtime', () => {
       path: '/sse/basic',
     })
 
-    const command = useStream({}, { abort: controller.signal })
-    const [error, stream, open] = (await baseClient.execute(command)) as any
+    const command = useStream({})
+    const [error, stream, open] = (await baseClient.execute(command, { abort: controller.signal })) as any
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()

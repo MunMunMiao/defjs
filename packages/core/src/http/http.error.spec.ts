@@ -200,7 +200,8 @@ describe('request http runtime errors', () => {
     })
 
     const [error, result, response] = (await client.execute(
-      useRequest({ id: 1 } as never, { abort: controller.signal, timeout: 1 } as never),
+      useRequest({ id: 1 } as never),
+      { abort: controller.signal, timeout: 1 },
     )) as any
 
     expect(result).toBeUndefined()
@@ -222,7 +223,8 @@ describe('request http runtime errors', () => {
     })
 
     const [error, result, response] = (await client.execute(
-      useRequest(undefined, { abort: controller.signal, timeout: 1 } as never),
+      useRequest(undefined),
+      { abort: controller.signal, timeout: 1 },
     )) as any
 
     expect(result).toBeUndefined()
@@ -243,7 +245,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await client.execute(useRequest(undefined, { abort: signal }))) as any
+    const [error, result, response] = (await client.execute(useRequest(undefined), { abort: signal })) as any
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -573,7 +575,8 @@ describe('request http runtime errors', () => {
     })
 
     const [error, result, response] = (await client.execute(
-      useDelay({ query: { ms: 100 } }, { timeout: 10 }),
+      useDelay({ query: { ms: 100 } }),
+      { timeout: 10 },
     )) as any
 
     expect(result).toBeUndefined()

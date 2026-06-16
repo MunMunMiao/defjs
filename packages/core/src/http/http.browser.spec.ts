@@ -47,11 +47,12 @@ describe('http browser runtime', () => {
     })
 
     const [error, result, response] = (await baseClient.execute(
-      useCreateAccount({ body: new Uint8Array(32 * 1024).buffer }, {
+      useCreateAccount({ body: new Uint8Array(32 * 1024).buffer }),
+      {
         onDownloadProgress(event) {
           downloadLoaded.push(event.loaded)
         },
-      }),
+      },
     )) as any
 
     expect(error).toBeNull()
@@ -71,7 +72,8 @@ describe('http browser runtime', () => {
     })
 
     const [error, result, response] = (await baseClient.execute(
-      useDelay({ query: { ms: 1000 } }, { timeout: 100 }),
+      useDelay({ query: { ms: 1000 } }),
+      { timeout: 100 },
     )) as any
 
     expect(result).toBeUndefined()

@@ -14,7 +14,7 @@ describe('web socket runtime heartbeat', () => {
     // cleanup only
   })
 
-  async function run(command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+  async function run(command: unknown, options?: unknown): Promise<any> {
     return client.execute(command as never, options)
   }
 
@@ -37,24 +37,21 @@ describe('web socket runtime heartbeat', () => {
 
     const controller = new AbortController()
     const command = useHeartbeatSocket()
-    const commandWithConfig = {
-      ...command,
-      config: {
-        heartbeat: {
-          intervalMs: 10,
-          isAck(message: { type: string }) {
-            return message.type === 'pong'
-          },
-          message: () => ({
-            at: Date.now(),
-            type: 'ping',
-          }),
-          timeoutMs: 100,
-        },
-      },
-    }
 
-    const executePromise = run(commandWithConfig, { signal: controller.signal })
+    const executePromise = run(command, {
+      signal: controller.signal,
+      heartbeat: {
+        intervalMs: 10,
+        isAck(message: { type: string }) {
+          return message.type === 'pong'
+        },
+        message: () => ({
+          at: Date.now(),
+          type: 'ping',
+        }),
+        timeoutMs: 100,
+      },
+    })
 
     const [error, socket] = await executePromise
 

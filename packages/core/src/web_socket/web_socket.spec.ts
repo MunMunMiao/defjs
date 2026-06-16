@@ -16,7 +16,7 @@ describe('web socket runtime', () => {
     // cleanup only
   })
 
-  async function run(command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+  async function run(command: unknown, options?: unknown): Promise<any> {
     return client.execute(command as never, options)
   }
 
@@ -50,17 +50,13 @@ describe('web socket runtime', () => {
     })
 
     const command = useSocket()
-    const commandWithConfig = {
-      ...command,
-      config: {
-        abort: controller.signal,
-        beforeConnect: () => {
-          beforeConnectCalls += 1
-        },
-        timeout: 1,
+    const [error, socket, connection] = await run(command, {
+      abort: controller.signal,
+      beforeConnect: () => {
+        beforeConnectCalls += 1
       },
-    }
-    const [error, socket, connection] = await run(commandWithConfig)
+      timeout: 1,
+    })
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -79,14 +75,10 @@ describe('web socket runtime', () => {
     })
 
     const command = useSocket()
-    const commandWithConfig = {
-      ...command,
-      config: {
-        abort: controller.signal,
-        timeout: 1,
-      },
-    }
-    const [error, socket, connection] = await run(commandWithConfig)
+    const [error, socket, connection] = await run(command, {
+      abort: controller.signal,
+      timeout: 1,
+    })
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -210,17 +202,13 @@ describe('web socket runtime', () => {
     })
 
     const command = useHeartbeatSocket()
-    const commandWithConfig = {
-      ...command,
-      config: {
-        heartbeat: {
-          intervalMs: 10,
-          message: () => ({ type: 'ping' }),
-          timeoutMs: 5,
-        },
+    const [error, socket] = await run(command, {
+      heartbeat: {
+        intervalMs: 10,
+        message: () => ({ type: 'ping' }),
+        timeoutMs: 5,
       },
-    }
-    const [error, socket] = await run(commandWithConfig)
+    })
 
     expect(error).toBeNull()
     if (!socket) {
@@ -252,18 +240,14 @@ describe('web socket runtime', () => {
     })
 
     const command = useHeartbeatSocket()
-    const commandWithConfig = {
-      ...command,
-      config: {
-        heartbeat: {
-          intervalMs: 10,
-          isAck: (message: { type: string }) => message.type === 'pong',
-          message: () => ({ type: 'ping' }),
-          timeoutMs: 30,
-        },
+    const [error, socket] = await run(command, {
+      heartbeat: {
+        intervalMs: 10,
+        isAck: (message: { type: string }) => message.type === 'pong',
+        message: () => ({ type: 'ping' }),
+        timeoutMs: 30,
       },
-    }
-    const [error, socket] = await run(commandWithConfig)
+    })
 
     expect(error).toBeNull()
     if (!socket) {
@@ -497,15 +481,11 @@ describe('web socket runtime', () => {
     })
 
     const command = useSocket()
-    const commandWithConfig = {
-      ...command,
-      config: {
-        beforeConnect: async () => {
-          throw new Error('beforeConnect failed')
-        },
+    const [error, socket, connection] = await run(command, {
+      beforeConnect: async () => {
+        throw new Error('beforeConnect failed')
       },
-    }
-    const [error, socket, connection] = await run(commandWithConfig)
+    })
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -537,14 +517,10 @@ describe('web socket runtime', () => {
     const controller = new AbortController()
     const testKey = `reconnect-queue-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const command = useSocket({ query: { key: testKey } })
-    const commandWithConfig = {
-      ...command,
-      config: {
-        abort: controller.signal,
-        reconnect: { attempts: 2, delayMs: 20 },
-      },
-    }
-    const [error, socket] = await run(commandWithConfig)
+    const [error, socket] = await run(command, {
+      abort: controller.signal,
+      reconnect: { attempts: 2, delayMs: 20 },
+    })
 
     expect(error).toBeNull()
     if (!socket) {
@@ -585,14 +561,10 @@ describe('web socket runtime', () => {
 
     const controller = new AbortController()
     const command = useSocket()
-    const commandWithConfig = {
-      ...command,
-      config: {
-        abort: controller.signal,
-        reconnect: { attempts: 2, delayMs: 100 },
-      },
-    }
-    const [error, socket] = await run(commandWithConfig)
+    const [error, socket] = await run(command, {
+      abort: controller.signal,
+      reconnect: { attempts: 2, delayMs: 100 },
+    })
 
     expect(error).toBeNull()
     if (!socket) {
@@ -621,13 +593,9 @@ describe('web socket runtime', () => {
     })
 
     const command = useSocket({ query: { key: 'immediate-case' } })
-    const commandWithConfig = {
-      ...command,
-      config: {
-        reconnect: { attempts: 1, delayMs: 0 },
-      },
-    }
-    const [error, socket] = await run(commandWithConfig)
+    const [error, socket] = await run(command, {
+      reconnect: { attempts: 1, delayMs: 0 },
+    })
 
     expect(error).toBeNull()
     if (!socket) {

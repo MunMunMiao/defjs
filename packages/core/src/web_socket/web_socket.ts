@@ -155,6 +155,11 @@ interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
 export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketBaseConfig<TIncoming, TOutgoing> &
   UseCancellationConfig
 
+export type WebSocketExecuteOptions<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketConfig<
+  TIncoming,
+  TOutgoing
+> & { signal?: AbortSignal }
+
 export interface WebSocketCommand<
   TInput extends AnyStruct | undefined,
   TIncoming extends SocketSchemas,
@@ -162,7 +167,6 @@ export interface WebSocketCommand<
 > extends BaseCommand<'web-socket'> {
   readonly endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>
   readonly input: EndpointInput<TInput> | undefined
-  readonly config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 }
 
 export type WebSocketCommandBuilder<
@@ -170,14 +174,8 @@ export type WebSocketCommandBuilder<
   TIncoming extends SocketSchemas,
   TOutgoing extends SocketSchemas | undefined,
 > = IsInputOptional<TInput> extends true
-  ? (
-      input?: EndpointInput<TInput>,
-      config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
-    ) => WebSocketCommand<TInput, TIncoming, TOutgoing>
-  : (
-      input: EndpointInput<TInput>,
-      config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
-    ) => WebSocketCommand<TInput, TIncoming, TOutgoing>
+  ? (input?: EndpointInput<TInput>) => WebSocketCommand<TInput, TIncoming, TOutgoing>
+  : (input: EndpointInput<TInput>) => WebSocketCommand<TInput, TIncoming, TOutgoing>
 
 type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
@@ -251,22 +249,19 @@ export function defineWebSocket<
     kind: 'web-socket' as const,
   }
 
-  function create(
-    input?: EndpointInput<TInput>,
-    config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
-  ): WebSocketCommand<TInput, TIncoming, TOutgoing> {
+  function create(input?: EndpointInput<TInput>): WebSocketCommand<TInput, TIncoming, TOutgoing> {
     return {
       kind: 'web-socket',
       endpoint,
       input,
-      config,
     } as WebSocketCommand<TInput, TIncoming, TOutgoing>
   }
 
-  return ((
-    input?: EndpointInput<TInput>,
-    config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
-  ) => create(input, config)) as WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
+  return ((input?: EndpointInput<TInput>) => create(input)) as WebSocketCommandBuilder<
+    TInput,
+    TIncoming,
+    TOutgoing
+  >
 }
 
 async function runWebSocketCommand<
@@ -277,10 +272,9 @@ async function runWebSocketCommand<
   clientConfig: ClientConfig,
   endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>,
   input: EndpointInput<TInput> | undefined,
-  config: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>> | undefined,
+  config: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   controller: AbortController,
   state: SocketRefState<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
-  options?: { signal?: AbortSignal },
 ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>> {
   setSocketState(state, 'connecting')
 
@@ -311,7 +305,7 @@ async function runWebSocketCommand<
     return [definitionError, undefined, undefined]
   }
 
-  const signal = mergeAbortSignals(controller.signal, [config?.abort, options?.signal], config?.timeout)
+  const signal = mergeAbortSignals(controller.signal, [config.abort, config.signal], config.timeout)
   const abortedBeforeStart = resolveAbortTransportError(signal)
   if (abortedBeforeStart) {
     state.error = abortedBeforeStart
@@ -694,11 +688,12 @@ export async function executeWebSocketCommand<
 >(
   clientConfig: ClientConfig,
   command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
-  options?: { signal?: AbortSignal },
+  options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
 ): Promise<
   SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 > {
-  const { endpoint, input, config } = command
+  const { endpoint, input } = command
+  const config = options ?? {}
   const controller = new AbortController()
   const state: SocketRefState<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>> = {
     listeners: {
@@ -707,7 +702,7 @@ export async function executeWebSocketCommand<
     },
     status: 'idle',
   }
-  return runWebSocketCommand(clientConfig, endpoint, input, config, controller, state, options)
+  return runWebSocketCommand(clientConfig, endpoint, input, config, controller, state)
 }
 
 function createDeferred<T>(): Deferred<T> {

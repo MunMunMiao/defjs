@@ -15,7 +15,7 @@ describe('web socket browser runtime', () => {
     // cleanup only
   })
 
-  async function run(command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+  async function run(command: unknown, options?: unknown): Promise<any> {
     return client.execute(command as never, options)
   }
 
@@ -110,13 +110,9 @@ describe('web socket browser runtime', () => {
       }),
       path: '/ws/reconnect',
     })({ query: { key: 'browser-reconnect' } })
-    const commandWithConfig = {
-      ...command,
-      config: {
-        reconnect: { attempts: 1, delayMs: 0 },
-      },
-    }
-    const [error, socket] = await run(commandWithConfig)
+    const [error, socket] = await run(command, {
+      reconnect: { attempts: 1, delayMs: 0 },
+    })
 
     expect(error).toBeNull()
     if (!socket) {
