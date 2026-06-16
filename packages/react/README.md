@@ -24,12 +24,7 @@ import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
 
 function App() {
   return (
-    <ClientProvider
-      options={[
-        withEndpoint('https://api.example.com'),
-        withInterceptors(authInterceptor),
-      ]}
-    >
+    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(authInterceptor)]}>
       <Router />
     </ClientProvider>
   )
@@ -76,20 +71,24 @@ Sets the base endpoint URL for the client. If omitted, the client defaults to an
 Registers interceptors for the client.
 
 ```tsx
-import { withInterceptors } from '@defjs/react'
+import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
 
-<ClientProvider
-  options={[
-    withEndpoint('https://api.example.com'),
-    withInterceptors(() => ({
-      request({ request }) {
-        request.headers.set('Authorization', 'Bearer token')
-      },
-    })),
-  ]}
->
-  <App />
-</ClientProvider>
+function App() {
+  return (
+    <ClientProvider
+      options={[
+        withEndpoint('https://api.example.com'),
+        withInterceptors(() => ({
+          request({ request }) {
+            request.headers.set('Authorization', 'Bearer token')
+          },
+        })),
+      ]}
+    >
+      <Router />
+    </ClientProvider>
+  )
+}
 ```
 
 ## Version Compatibility

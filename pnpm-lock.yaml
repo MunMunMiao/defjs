@@ -233,6 +233,50 @@ importers:
         version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(@vitest/browser-playwright@4.1.8)(@vitest/coverage-istanbul@4.1.8)(@vitest/ui@4.1.8)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(tsx@4.22.4))
     publishDirectory: dist
 
+  packages/react:
+    dependencies:
+      '@defjs/core':
+        specifier: workspace:^
+        version: link:../core/dist
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.17)
+      '@vitest/browser':
+        specifier: 'catalog:'
+        version: 4.1.8(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(tsx@4.22.4))(vitest@4.1.8)
+      '@vitest/browser-playwright':
+        specifier: 'catalog:'
+        version: 4.1.8(playwright@1.60.0)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(tsx@4.22.4))(vitest@4.1.8)
+      '@vitest/coverage-istanbul':
+        specifier: 'catalog:'
+        version: 4.1.8(vitest@4.1.8)
+      playwright:
+        specifier: 'catalog:'
+        version: 1.60.0
+      react:
+        specifier: ^19.0.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.7(react@19.2.7)
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.22.2(@typescript/native-preview@7.0.0-dev.20260612.1)(tsx@4.22.4)(typescript@6.0.3)
+      tsx:
+        specifier: 'catalog:'
+        version: 4.22.4
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(@vitest/browser-playwright@4.1.8)(@vitest/coverage-istanbul@4.1.8)(@vitest/ui@4.1.8)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(tsx@4.22.4))
+    publishDirectory: dist
+
   packages/vue:
     dependencies:
       '@defjs/core':
@@ -1212,6 +1256,14 @@ packages:
   '@types/node@25.9.3':
     resolution: {integrity: sha512-603BddQMv3pUcr4U2dhujk83N2tTDVr/34wII2B6bJy6g+8WD6yUb11jszNs0gdi4PesVWl7ABt8nYMVpnLUcg==}
 
+  '@types/react-dom@19.2.3':
+    resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
+    peerDependencies:
+      '@types/react': ^19.2.0
+
+  '@types/react@19.2.17':
+    resolution: {integrity: sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw==}
+
   '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260612.1':
     resolution: {integrity: sha512-4GXIs4Z/4E0E1fRXmt1XE7mKRiwghkoNHstbqSHFl6Z7PeWBdTiSFR5j4JGo3Zp8RzZ+N6zZoVZOfG3HNqjWtQ==}
     engines: {node: '>=16.20.0'}
@@ -1907,6 +1959,15 @@ packages:
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
 
+  react-dom@19.2.7:
+    resolution: {integrity: sha512-t0BRVXvbiE/o20Hfw669rLbMCDWtYZLvmJigy2f0MxsXF+71pxhR3xOkspmsO8h3ZlNzyibAmtCa3l4lYKk6gQ==}
+    peerDependencies:
+      react: ^19.2.7
+
+  react@19.2.7:
+    resolution: {integrity: sha512-HNe9WslTbXmFK8o8cmwgAeJFSBvt1bPdHCVKtaaV+WlAN36mpT4hcRpwbf3fY56ar2oIXzsBpOAiIRHAdY0OlQ==}
+    engines: {node: '>=0.10.0'}
+
   read-yaml-file@1.1.0:
     resolution: {integrity: sha512-VIMnQi/Z4HT2Fxuwg5KrY174U1VdUIASQVWXXyqtNRtxSr9IYkn1rsI6Tb6HsrHCmB7gVpNwX6JxPTHcH6IoTA==}
     engines: {node: '>=6'}
@@ -1959,6 +2020,9 @@ packages:
 
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
+
+  scheduler@0.27.0:
+    resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
   semver@6.3.1:
     resolution: {integrity: sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==}
@@ -3009,6 +3073,14 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
+  '@types/react-dom@19.2.3(@types/react@19.2.17)':
+    dependencies:
+      '@types/react': 19.2.17
+
+  '@types/react@19.2.17':
+    dependencies:
+      csstype: 3.2.3
+
   '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260612.1':
     optional: true
 
@@ -3676,6 +3748,13 @@ snapshots:
 
   queue-microtask@1.2.3: {}
 
+  react-dom@19.2.7(react@19.2.7):
+    dependencies:
+      react: 19.2.7
+      scheduler: 0.27.0
+
+  react@19.2.7: {}
+
   read-yaml-file@1.1.0:
     dependencies:
       graceful-fs: 4.2.11
@@ -3757,6 +3836,8 @@ snapshots:
       tslib: 2.8.1
 
   safer-buffer@2.1.2: {}
+
+  scheduler@0.27.0: {}
 
   semver@6.3.1: {}
 

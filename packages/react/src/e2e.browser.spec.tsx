@@ -35,7 +35,9 @@ function UserList() {
   return (
     <ul data-testid="user-list">
       {users.map((user) => (
-        <li key={user.id} data-testid={`user-${user.id}`}>{user.name}</li>
+        <li key={user.id} data-testid={`user-${user.id}`}>
+          {user.name}
+        </li>
       ))}
     </ul>
   )
@@ -59,9 +61,7 @@ describe('React wrapper e2e', () => {
     document.body.appendChild(container)
     const root = createRoot(container)
 
-    root.render(
-      <App endpoint={endpoint} />,
-    )
+    root.render(<App endpoint={endpoint} />)
 
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="user-1"]')?.textContent).toBe('John')
