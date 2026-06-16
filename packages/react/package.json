@@ -1,0 +1,49 @@
+{
+  "name": "@defjs/react",
+  "version": "0.0.1",
+  "bugs": {
+    "url": "https://github.com/defjs/defjs/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/defjs/defjs.git"
+  },
+  "type": "module",
+  "module": "src/index.ts",
+  "typings": "src/index.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "directory": "dist"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "pub": "pnpm publish",
+    "test": "vitest run --config vitest.config.ts --coverage",
+    "typecheck": "tsgo --project tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitest/browser": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "playwright": "catalog:",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsdown": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@defjs/core": "workspace:^",
+    "react": ">=18.0.0"
+  },
+  "engines": {
+    "node": ">=26"
+  }
+}
