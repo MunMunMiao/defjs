@@ -322,22 +322,23 @@ try {
 
 ```typescript
 // src/e2e.browser.spec.ts
-import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
+import { describe, expect, it, inject, vi } from 'vitest'
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ClientProvider, useClient, withEndpoint } from '../src'
-import { defineRequest, array, object, number, string } from '@defjs/core'
-import { startHonoServer } from './test/setup'
+import { defineRequest, struct } from '@defjs/core'
 
-const UserSchema = object({
-  id: number(),
-  name: string(),
+const UserSchema = struct.object({
+  id: struct.number(),
+  name: struct.string(),
 })
 
 const getUsers = defineRequest({
   method: 'GET',
   path: '/api/users',
-  response: array(UserSchema),
+  output: {
+    200: struct.array(UserSchema),
+  },
 })
 
 function UserList() {
@@ -345,9 +346,9 @@ function UserList() {
   const [users, setUsers] = useState<Array<{ id: number; name: string }>>([])
 
   useEffect(() => {
-    client.execute(getUsers()).then((result) => {
-      if (result.ok) {
-        setUsers(result.data)
+    client.execute(getUsers()).then(([, users]) => {
+      if (users) {
+        setUsers(users)
       }
     })
   }, [client])
@@ -373,23 +374,14 @@ function App({ endpoint }: { endpoint: string }) {
 }
 
 describe('React wrapper e2e', () => {
-  let server: { port: number; close: () => Promise<void> }
-
-  beforeAll(async () => {
-    server = await startHonoServer()
-  })
-
-  afterAll(async () => {
-    await server.close()
-  })
-
   it('should fetch and render real data through useClient', async () => {
+    const endpoint = inject('testServerHost')
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
 
     root.render(
-      <App endpoint={`http://127.0.0.1:${server.port}`} />,
+      <App endpoint={endpoint} />,
     )
 
     await vi.waitFor(() => {
