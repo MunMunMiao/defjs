@@ -635,7 +635,7 @@ packages/react/
 ├── src/
 │   ├── index.ts             # 导出入口
 │   ├── public_api.ts        # 统一导出
-│   ├── core.ts              # ClientProvider, useClient, withEndpoint, withInterceptors
+│   ├── core.tsx             # ClientProvider, useClient, withEndpoint, withInterceptors
 │   ├── core.browser.spec.ts # 浏览器单元/集成测试
 │   └── e2e.browser.spec.ts  # 完整 React 应用端到端测试
 └── test/
@@ -647,7 +647,7 @@ packages/react/
 
 | 文件                       | 职责                                              |
 | -------------------------- | ------------------------------------------------- |
-| `src/core.ts`              | 实现 Provider、Hook、withEndpoint、withInterceptors |
+| `src/core.tsx`             | 实现 Provider、Hook、withEndpoint、withInterceptors |
 | `src/public_api.ts`        | 统一导出公共 API                                   |
 | `src/index.ts`             | 包入口，转发 public_api                            |
 | `src/core.browser.spec.ts` | 浏览器单元/集成测试                                |
