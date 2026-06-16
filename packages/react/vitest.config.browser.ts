@@ -9,6 +9,10 @@ export default defineConfig({
     alias: {
       '@defjs/core': resolve(packageRoot, '../core/src'),
     },
+    dedupe: ['react', 'react-dom', 'react-dom/client'],
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom/client'],
   },
   test: {
     name: 'react-browser',

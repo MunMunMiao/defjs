@@ -1,18 +1,26 @@
-import type { Client, ClientConfig, Interceptor } from '@defjs/core'
-import { describe, expect, it } from 'vitest'
+import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { ReactElement } from 'react'
+import type { Client, ClientConfig, Interceptor } from '@defjs/core'
+import { describe, expect, it } from 'vitest'
 import { ClientProvider, useClient, withEndpoint, withInterceptors } from './core'
+
+// Tell React that `act()` is supported in this test environment.
+;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 function mount(element: ReactElement): { container: HTMLDivElement; unmount: () => void } {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
-  root.render(element)
+  act(() => {
+    root.render(element)
+  })
   return {
     container,
     unmount: () => {
-      root.unmount()
+      act(() => {
+        root.unmount()
+      })
       container.remove()
     },
   }
@@ -97,10 +105,14 @@ describe('useClient', () => {
     const root = createRoot(container)
 
     expect(() => {
-      root.render(<Child />)
+      act(() => {
+        root.render(<Child />)
+      })
     }).toThrow('No HTTP client provided')
 
-    root.unmount()
+    act(() => {
+      root.unmount()
+    })
     container.remove()
   })
 })
