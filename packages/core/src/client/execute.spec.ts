@@ -1,8 +1,10 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, inject, test } from 'vitest'
 import { makeResponse } from '../internal/http_response'
 import { createHttpInterceptor } from '../interceptor'
 import { struct } from '../struct'
 import { defineRequest } from '../http'
+import { defineEventStream } from '../sse'
+import { defineWebSocket } from '../web_socket'
 import { createClient, execute } from './client'
 import type { Command } from './command'
 import { withEndpoint, withInterceptors } from './option'
@@ -43,5 +45,65 @@ describe('Client.execute', () => {
 
     expect(error).toBeNull()
     expect(result).toEqual({ ok: true })
+  })
+
+  test('top-level execute dispatches event-stream command', async () => {
+    const useBasicSse = defineEventStream({
+      events: {
+        message: struct.string(),
+      },
+      path: '/sse/basic',
+    })
+
+    const client = createClient(withEndpoint(inject('testServerHost')))
+
+    const [error, stream, open] = await execute(useBasicSse(), { client })
+
+    expect(error).toBeNull()
+    if (!stream || !open) {
+      throw new Error('Expected stream')
+    }
+
+    expect(open.url).toContain('/sse/basic')
+
+    const iterator = stream[Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: { data: 'first', event: 'message', id: '1' },
+    })
+
+    stream.close()
+    await expect(stream.closed).resolves.toBeDefined()
+  })
+
+  test('top-level execute dispatches web-socket command', async () => {
+    const useChatSocket = defineWebSocket({
+      incoming: {
+        joined: struct.object({
+          roomId: struct.string(),
+          userId: struct.number(),
+        }),
+      },
+      path: '/ws/basic',
+    })
+
+    const client = createClient(withEndpoint(inject('testServerHost')))
+
+    const [error, socket, connection] = await execute(useChatSocket(), { client })
+
+    expect(error).toBeNull()
+    if (!socket || !connection) {
+      throw new Error('Expected socket')
+    }
+
+    expect(connection.url).toContain('/ws/basic')
+
+    const iterator = socket.receive[Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: { roomId: 'default', type: 'joined', userId: 1 },
+    })
+
+    await expect(socket.closed).resolves.toBeDefined()
   })
 })

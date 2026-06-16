@@ -535,7 +535,8 @@ describe('web socket runtime', () => {
     })
 
     const controller = new AbortController()
-    const command = useSocket({ query: { key: 'reconnect-queue-case' } })
+    const testKey = `reconnect-queue-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const command = useSocket({ query: { key: testKey } })
     const commandWithConfig = {
       ...command,
       config: {
@@ -566,7 +567,7 @@ describe('web socket runtime', () => {
     controller.abort('stop reconnect loop')
     await expect(socket.closed).resolves.toBeDefined()
     expect(socket.state).toBe('error')
-  }, 10_000)
+  }, 2000)
 
   test('should abort during reconnect delay with aborted state', async () => {
     const useSocket = defineWebSocket({
