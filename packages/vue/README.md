@@ -17,22 +17,22 @@ pnpm add @defjs/vue
 ```typescript
 // main.ts
 import { createApp } from 'vue'
-import { provideClient, provideGlobalClient, withEndpoint, withInterceptors } from '@defjs/vue'
+import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
 
 const app = createApp(App)
 
-// 方式 1：provideClient（不设置全局）
+// 提供 Client 实例
 app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
-
-// 方式 2：provideGlobalClient（设置全局）
-app.use(provideGlobalClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 ```
 
 ```typescript
 // 组件中使用
 import { injectClient } from '@defjs/vue'
+import { execute } from '@defjs/core'
+import { getUser } from './api'
 
 const client = injectClient() // 返回 Client 实例
+const [error, user] = await execute(getUser(), { client })
 ```
 
 ## API
@@ -40,10 +40,6 @@ const client = injectClient() // 返回 Client 实例
 ### provideClient(...feature: ClientOption[]): Plugin
 
 创建一个 Plugin，用于提供 Client 实例。
-
-### provideGlobalClient(...feature: ClientOption[]): Plugin
-
-创建一个 Plugin，用于提供 Client 实例并设置为全局。
 
 ### injectClient(): Client
 

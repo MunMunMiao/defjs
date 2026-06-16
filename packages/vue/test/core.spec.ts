@@ -1,8 +1,7 @@
 import type { Client, ClientConfig, Interceptor } from '@defjs/core'
-import { getGlobalClient, resetGlobalClient } from '@defjs/core'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from 'vue'
-import { injectClient, provideClient, provideGlobalClient, withEndpoint, withInterceptors } from '../src'
+import { injectClient, provideClient, withEndpoint, withInterceptors } from '../src'
 import { startHonoServer } from './server'
 
 type TestServer = { port: number; close: () => Promise<void> }
@@ -137,60 +136,3 @@ describe('provideClient', () => {
   })
 })
 
-describe('provideGlobalClient', () => {
-  let server: TestServer
-
-  beforeAll(async () => {
-    server = await startHonoServer()
-  })
-
-  afterAll(async () => {
-    await server.close()
-  })
-
-  afterEach(() => {
-    resetGlobalClient()
-  })
-
-  it('should create a Plugin', () => {
-    const plugin = provideGlobalClient(
-      withEndpoint(`http://localhost:${server.port}`),
-      withInterceptors((() => ({})) as unknown as () => Interceptor),
-    )
-    expect(plugin).toHaveProperty('install')
-  })
-
-  it('should set global client', () => {
-    const app = createApp({
-      template: '<div></div>',
-    })
-
-    app.use(
-      provideGlobalClient(withEndpoint(`http://localhost:${server.port}`), withInterceptors((() => ({})) as unknown as () => Interceptor)),
-    )
-
-    // 验证全局 client 已被设置且可通过 getGlobalClient 获取
-    const globalClient = getGlobalClient()
-    expect(globalClient).toBeDefined()
-  })
-
-  it('should set global client with no options', () => {
-    const app = createApp({
-      template: '<div></div>',
-    })
-
-    app.use(provideGlobalClient())
-
-    expect(getGlobalClient()).toBeDefined()
-  })
-
-  it('should set global client with only interceptors', () => {
-    const app = createApp({
-      template: '<div></div>',
-    })
-
-    app.use(provideGlobalClient(withInterceptors((() => ({})) as unknown as () => Interceptor)))
-
-    expect(getGlobalClient()).toBeDefined()
-  })
-})

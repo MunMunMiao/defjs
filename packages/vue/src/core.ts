@@ -1,5 +1,5 @@
 import type { Client, ClientOption, Interceptor } from '@defjs/core'
-import { createClient, setGlobalClient } from '@defjs/core'
+import { createClient } from '@defjs/core'
 import type { App, InjectionKey, Plugin } from 'vue'
 import { inject } from 'vue'
 
@@ -43,22 +43,6 @@ export function provideClient(...feature: ClientOption[]): Plugin {
     install(app: App) {
       const client = createClient(...feature)
       app.provide(HTTP_CLIENT, client)
-    },
-  }
-}
-
-/**
- * Create a Vue Plugin that provides an HTTP Client instance and sets it as the global client.
- *
- * @param feature - ClientOption functions to configure the client
- * @returns A Vue Plugin object
- */
-export function provideGlobalClient(...feature: ClientOption[]): Plugin {
-  return {
-    install(app: App) {
-      const client = createClient(...feature)
-      app.provide(HTTP_CLIENT, client)
-      setGlobalClient(client)
     },
   }
 }

@@ -1,1 +1,1 @@
-export { HTTP_CLIENT, injectClient, provideClient, provideGlobalClient, withEndpoint, withInterceptors } from './core'
+export { HTTP_CLIENT, injectClient, provideClient, withEndpoint, withInterceptors } from './core'

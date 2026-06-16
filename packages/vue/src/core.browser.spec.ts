@@ -1,8 +1,7 @@
-import type { Client } from '@defjs/core'
-import { createHttpInterceptor, defineRequest, getGlobalClient, resetGlobalClient, struct } from '@defjs/core'
+import { createHttpInterceptor, defineRequest, execute, resetGlobalClient, struct, type Client } from '@defjs/core'
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createApp } from 'vue'
-import { injectClient, provideClient, provideGlobalClient, withEndpoint, withInterceptors } from './index'
+import { injectClient, provideClient, withEndpoint, withInterceptors } from './index'
 
 const passthroughHttpInterceptor = () => createHttpInterceptor((req, next) => next(req))
 
@@ -22,21 +21,6 @@ describe('vue browser runtime', () => {
     const plugin = provideClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor))
     expect(plugin).toHaveProperty('install')
     expect(typeof plugin.install).toBe('function')
-  })
-
-  test('should create a Plugin with provideGlobalClient', () => {
-    const plugin = provideGlobalClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor))
-    expect(plugin).toHaveProperty('install')
-    expect(typeof plugin.install).toBe('function')
-  })
-
-  test('should set global client with provideGlobalClient', () => {
-    const app = createApp({ template: '<div></div>' })
-
-    app.use(provideGlobalClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor)))
-
-    const globalClient = getGlobalClient()
-    expect(globalClient).toBeDefined()
   })
 
   test('should provide client via app.provide', () => {
@@ -113,7 +97,7 @@ describe('vue browser runtime', () => {
       },
       template: '<div></div>',
     })
-    appOnlyHost.use(provideGlobalClient(withEndpoint(testServerHost)))
+    appOnlyHost.use(provideClient(withEndpoint(testServerHost)))
     appOnlyHost.mount(document.createElement('div'))
     expect(injectedClient).toBeDefined()
 
@@ -127,7 +111,7 @@ describe('vue browser runtime', () => {
       },
       template: '<div></div>',
     })
-    appOnlyInterceptors.use(provideGlobalClient(withInterceptors(passthroughHttpInterceptor)))
+    appOnlyInterceptors.use(provideClient(withInterceptors(passthroughHttpInterceptor)))
     appOnlyInterceptors.mount(document.createElement('div'))
     expect(injectedClient).toBeDefined()
 
@@ -141,15 +125,23 @@ describe('vue browser runtime', () => {
       },
       template: '<div></div>',
     })
-    appNoOptions.use(provideGlobalClient())
+    appNoOptions.use(provideClient())
     appNoOptions.mount(document.createElement('div'))
     expect(injectedClient).toBeDefined()
   })
 
   test('should make HTTP requests with provided client using both options', async () => {
-    const app = createApp({ template: '<div></div>' })
+    let injectedClient: Client | undefined
+    const app = createApp({
+      setup() {
+        injectedClient = injectClient()
+        return {}
+      },
+      template: '<div></div>',
+    })
 
-    app.use(provideGlobalClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor)))
+    app.use(provideClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor)))
+    app.mount(document.createElement('div'))
 
     const getUsers = defineRequest({
       method: 'GET',
@@ -164,7 +156,7 @@ describe('vue browser runtime', () => {
       path: '/api/users',
     })
 
-    const [error, users] = await getUsers().with({ client: getGlobalClient() })
+    const [error, users] = await execute(getUsers(), { client: injectedClient! })
 
     expect(error).toBeNull()
     expect(users).toEqual([
