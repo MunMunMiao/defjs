@@ -5,14 +5,22 @@ import { getGlobalClient } from './global'
 import type { ClientOption } from './option'
 import type { Client } from './resolve'
 import { CLIENT, getClientConfig } from './resolve'
+import { executeHttpCommand } from '../http/http'
+import type { HttpCommand } from '../http/http'
 
 function createClientFromConfig(config: ClientConfig): Client {
-  return {
+  const client: Client = {
     [CLIENT]: config,
     execute(command: Command, options?: { signal?: AbortSignal }): Promise<unknown> {
+      switch (command.kind) {
+        case 'http':
+          return executeHttpCommand(config, command as HttpCommand<any, any>, options)
+      }
       return Promise.reject(new Error(`Unsupported command kind: ${command.kind}`))
     },
   }
+
+  return client
 }
 
 export function createClient(...options: ClientOption[]): Client {

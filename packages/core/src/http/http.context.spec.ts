@@ -18,30 +18,28 @@ describe('request http runtime context', () => {
     const transactionToken = makeHttpContextToken(() => '')
     let seenHeader: string | null = null
 
-    setGlobalClient(
-      createClient(
-        withEndpoint('https://example.com'),
-        withInterceptors(
-          createHttpInterceptor(async (request, next) => {
-            const nextHeaders = new Headers(request.headers)
-            const transactionId = request.context?.get(transactionToken)
-            if (transactionId) {
-              nextHeaders.set('x-transaction-id', transactionId)
-            }
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async (request, next) => {
+          const nextHeaders = new Headers(request.headers)
+          const transactionId = request.context?.get(transactionToken)
+          if (transactionId) {
+            nextHeaders.set('x-transaction-id', transactionId)
+          }
 
-            return next({
-              ...request,
-              headers: nextHeaders,
-            })
-          }),
-          createHttpInterceptor(async (request) => {
-            seenHeader = request.headers?.get('x-transaction-id') ?? null
-            return makeResponse({
-              body: null,
-              status: 200,
-            })
-          }),
-        ),
+          return next({
+            ...request,
+            headers: nextHeaders,
+          })
+        }),
+        createHttpInterceptor(async (request) => {
+          seenHeader = request.headers?.get('x-transaction-id') ?? null
+          return makeResponse({
+            body: null,
+            status: 200,
+          })
+        }),
       ),
     )
 
@@ -53,9 +51,7 @@ describe('request http runtime context', () => {
     const context = makeHttpContext()
     context.set(transactionToken, 'tx-001')
 
-    const [error] = await useTxRequest().with({
-      context,
-    })
+    const [error] = (await client.execute(useTxRequest(undefined, { context }))) as any
 
     expect(error).toBeNull()
     expect(seenHeader).toBe('tx-001')

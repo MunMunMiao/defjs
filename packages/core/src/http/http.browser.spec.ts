@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, inject, test, vi } from 'vitest'
 
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withHTTPHandle, withXSRF } from '../client'
+import { createClient, getGlobalClient, resetGlobalClient, setGlobalClient, withEndpoint, withHTTPHandle, withXSRF } from '../client'
 import { struct } from '../struct'
 import { defineRequest } from './index'
 
@@ -25,7 +25,7 @@ describe('http browser runtime', () => {
       path: '/json',
     })
 
-    const [error, result, response] = await useGetAccount()
+    const [error, result, response] = (await getGlobalClient().execute(useGetAccount())) as any
 
     expect(error).toBeNull()
     expect(result).toEqual({ id: 1 })
@@ -44,13 +44,13 @@ describe('http browser runtime', () => {
       path: '/',
     })
 
-    const ref = useCreateAccount({ body: new Uint8Array(32 * 1024).buffer }).with({
-      onDownloadProgress(event) {
-        downloadLoaded.push(event.loaded)
-      },
-    })
-
-    const [error, result, response] = await ref
+    const [error, result, response] = (await getGlobalClient().execute(
+      useCreateAccount({ body: new Uint8Array(32 * 1024).buffer }, {
+        onDownloadProgress(event) {
+          downloadLoaded.push(event.loaded)
+        },
+      }),
+    )) as any
 
     expect(error).toBeNull()
     expect(result).toBeUndefined()
@@ -68,9 +68,9 @@ describe('http browser runtime', () => {
       path: '/delay',
     })
 
-    const [error, result, response] = await useDelay({ query: { ms: 1000 } }).with({
-      timeout: 100,
-    })
+    const [error, result, response] = (await getGlobalClient().execute(
+      useDelay({ query: { ms: 1000 } }, { timeout: 100 }),
+    )) as any
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -99,7 +99,7 @@ describe('http browser runtime', () => {
       path: '/xsrf',
     })
 
-    const [error, result, response] = await useXsrf()
+    const [error, result, response] = (await getGlobalClient().execute(useXsrf())) as any
 
     expect(error).toBeNull()
     expect(result).toBeUndefined()
@@ -122,7 +122,7 @@ describe('http browser runtime', () => {
       path: '/xsrf-validate',
     })
 
-    const [error, result, response] = await useValidate()
+    const [error, result, response] = (await getGlobalClient().execute(useValidate())) as any
 
     expect(error).toBeNull()
     expect(result).toEqual({ ok: true })
@@ -144,7 +144,7 @@ describe('http browser runtime', () => {
       path: '/xsrf-validate',
     })
 
-    const [error, result, response] = await useValidate()
+    const [error, result, response] = (await getGlobalClient().execute(useValidate())) as any
 
     expect(error).not.toBeNull()
     expect(result).toBeUndefined()

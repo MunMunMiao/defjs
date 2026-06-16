@@ -1,5 +1,5 @@
-import { resolveClientConfig } from '../client/client'
-import type { Client } from '../client/resolve'
+import type { BaseCommand } from '../client/command'
+import type { ClientConfig } from '../client/config'
 import type { RequestError } from '../error'
 import { createDefinitionError, createHttpStatusError, createTransportError, ERR_ABORTED } from '../error'
 import { makeInterceptorChain, resolveHttpInterceptors } from '../interceptor/interceptor'
@@ -20,13 +20,28 @@ import { createHttpRequest, normalizeOutputShape, resolveDefaultResponseType } f
 import { fetchHandler } from './transport/fetch'
 
 interface UseRequestBaseConfig {
-  client?: Client
   context?: HttpContext
   onDownloadProgress?: HttpProgressFn
   onUploadProgress?: HttpProgressFn
 }
 
 export type UseRequestConfig = UseRequestBaseConfig & UseCancellationConfig
+
+export interface HttpCommand<
+  TInput extends AnyStruct | undefined,
+  TOutput extends RequestOutputShape | undefined,
+> extends BaseCommand<'http'> {
+  readonly definition: RequestDefinition<TInput, TOutput>
+  readonly input: EndpointInput<TInput> | undefined
+  readonly config?: UseRequestConfig
+}
+
+export type RequestCommandBuilder<
+  TInput extends AnyStruct | undefined,
+  TOutput extends RequestOutputShape | undefined,
+> = IsInputOptional<TInput> extends true
+  ? (input?: EndpointInput<TInput>, config?: UseRequestConfig) => HttpCommand<TInput, TOutput>
+  : (input: EndpointInput<TInput>, config?: UseRequestConfig) => HttpCommand<TInput, TOutput>
 
 type ExpandStatus<T> = T extends readonly (infer U extends number)[] ? U : T extends number ? T : never
 
@@ -104,94 +119,48 @@ export type HttpAwaitResult<TSuccess = unknown, TErrorData = unknown> =
   | [error: null, result: TSuccess, response: SettledResponse<TSuccess>]
   | [error: RequestError<TErrorData>, result: undefined, response: SettledResponse<unknown> | undefined]
 
-export interface HttpRequestRef<TSuccess = unknown, TErrorData = unknown> extends PromiseLike<HttpAwaitResult<TSuccess, TErrorData>> {
-  readonly error?: RequestError<TErrorData>
-  readonly status: 'aborted' | 'error' | 'idle' | 'pending' | 'success'
-  cancel(reason?: unknown): void
-  with(config: UseRequestConfig): HttpRequestRef<TSuccess, TErrorData>
-}
-
 type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
   : {} extends EndpointInput<NonNullable<TInput>>
     ? true
     : false
 
-export type UseRequestEndpointFn<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> =
-  IsInputOptional<TInput> extends true
-    ? (input?: EndpointInput<TInput>) => HttpRequestRef<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>
-    : (input: EndpointInput<TInput>) => HttpRequestRef<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>
-
-type HttpRefState<TSuccess, TErrorData> = {
-  error?: RequestError<TErrorData>
-  promise?: Promise<HttpAwaitResult<TSuccess, TErrorData>>
-  status: HttpRequestRef<TSuccess, TErrorData>['status']
-}
-
 export function defineRequest<TInput extends AnyStruct, TOutput extends RequestOutputShape | undefined = undefined>(
   definition: RequestDefinitionWithBuild<TInput, TOutput>,
-): UseRequestEndpointFn<TInput, TOutput>
+): RequestCommandBuilder<TInput, TOutput>
 export function defineRequest<TInput extends AnyStruct | undefined = undefined, TOutput extends RequestOutputShape | undefined = undefined>(
   definition: RequestDefinitionWithoutBuild<TInput, TOutput>,
-): UseRequestEndpointFn<TInput, TOutput>
+): RequestCommandBuilder<TInput, TOutput>
 export function defineRequest<TInput extends AnyStruct | undefined = undefined, TOutput extends RequestOutputShape | undefined = undefined>(
   definition: RequestDefinition<TInput, TOutput>,
-): UseRequestEndpointFn<TInput, TOutput> {
-  return ((input?: EndpointInput<TInput>) => createHttpRequestRef(definition, input, undefined)) as UseRequestEndpointFn<TInput, TOutput>
+): RequestCommandBuilder<TInput, TOutput> {
+  function create(input?: EndpointInput<TInput>, config?: UseRequestConfig): HttpCommand<TInput, TOutput> {
+    return {
+      kind: 'http',
+      definition,
+      input,
+      config,
+    } as HttpCommand<TInput, TOutput>
+  }
+
+  return ((input?: EndpointInput<TInput>, config?: UseRequestConfig) =>
+    create(input, config)) as RequestCommandBuilder<TInput, TOutput>
 }
 
-function createHttpRequestRef<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
-  endpoint: RequestDefinition<TInput, TOutput>,
-  input: EndpointInput<TInput> | undefined,
-  config: UseRequestConfig | undefined,
-): HttpRequestRef<RequestSuccessData<TOutput>, RequestErrorData<TOutput>> {
-  const controller = new AbortController()
-  const state: HttpRefState<RequestSuccessData<TOutput>, RequestErrorData<TOutput>> = {
-    status: 'idle',
-  }
-
-  const getPromise = (): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>> => {
-    if (!state.promise) {
-      state.promise = executeHttpEndpoint(endpoint, input, config ?? {}, controller, state)
-    }
-
-    return state.promise
-  }
-
-  return {
-    get error() {
-      return state.error
-    },
-    get status() {
-      return state.status
-    },
-    cancel(reason?: unknown) {
-      controller.abort(reason)
-    },
-    with(nextConfig: UseRequestConfig) {
-      return createHttpRequestRef(endpoint, input, nextConfig)
-    },
-    then(onfulfilled, onrejected) {
-      return getPromise().then(onfulfilled, onrejected)
-    },
-  }
-}
-
-async function executeHttpEndpoint<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
-  endpoint: RequestDefinition<TInput, TOutput>,
-  input: EndpointInput<TInput> | undefined,
-  config: UseRequestConfig,
-  controller: AbortController,
-  state: HttpRefState<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>,
+export async function executeHttpCommand<
+  TInput extends AnyStruct | undefined,
+  TOutput extends RequestOutputShape | undefined,
+>(
+  clientConfig: ClientConfig,
+  command: HttpCommand<TInput, TOutput>,
+  options?: { signal?: AbortSignal },
 ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>> {
-  state.status = 'pending'
+  const { definition, input, config = {} } = command
 
   const fail = (
     error: RequestError<RequestErrorData<TOutput>>,
     response?: SettledResponse<unknown>,
   ): HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>> => {
-    state.error = error
-    state.status = error.kind === 'transport' && error.code === 'ABORTED' ? 'aborted' : 'error'
     return [error, undefined, response]
   }
 
@@ -200,7 +169,9 @@ async function executeHttpEndpoint<TInput extends AnyStruct | undefined, TOutput
     return fail(definitionError as RequestError<RequestErrorData<TOutput>>)
   }
 
-  // Fast path: caller already aborted before we did any schema work — skip parseEndpointInput / resolveClientConfig.
+  const controller = new AbortController()
+
+  // Fast path: caller already aborted before we did any schema work — skip parseEndpointInput.
   const requestAbort = config.abort
   if (requestAbort?.aborted) {
     const transportError = createTransportError(requestAbort.reason ?? ERR_ABORTED)
@@ -209,29 +180,21 @@ async function executeHttpEndpoint<TInput extends AnyStruct | undefined, TOutput
 
   let parsedInput: ParsedInput<TInput>
   try {
-    parsedInput = (await parseEndpointInput(endpoint.input, input)) as ParsedInput<TInput>
+    parsedInput = (await parseEndpointInput(definition.input, input)) as ParsedInput<TInput>
   } catch (error) {
     const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
     return fail(definitionError as RequestError<RequestErrorData<TOutput>>)
   }
 
-  let clientConfig
-  try {
-    clientConfig = resolveClientConfig(config.client)
-  } catch (error) {
-    const transportError = createTransportError(error)
-    return fail(transportError as RequestError<RequestErrorData<TOutput>>)
-  }
-
   let request
-  const responseType = resolveDefaultResponseType(endpoint.output, endpoint.responseType)
+  const responseType = resolveDefaultResponseType(definition.output, definition.responseType)
   try {
-    request = createHttpRequest(endpoint.method, endpoint.path, parsedInput, endpoint.build, {
-      abort: mergeAbortSignals(controller.signal, [config.abort], config.timeout),
+    request = createHttpRequest(definition.method, definition.path, parsedInput, definition.build, {
+      abort: mergeAbortSignals(controller.signal, [config.abort, options?.signal], config.timeout),
       baseEndpoint: clientConfig.endpoint,
       context: config.context,
       downloadProgress: config.onDownloadProgress,
-      input: endpoint.input,
+      input: definition.input,
       queryParamsSerializer: clientConfig.queryParamsSerializer,
       responseType,
       timeout: config.timeout,
@@ -261,14 +224,13 @@ async function executeHttpEndpoint<TInput extends AnyStruct | undefined, TOutput
     return fail(transportError as RequestError<RequestErrorData<TOutput>>)
   }
 
-  if (!endpoint.output) {
+  if (!definition.output) {
     const ignoredResponse = {
       ...settledResponse,
       body: null,
     } as SettledResponse<undefined>
 
     if (ignoredResponse.ok) {
-      state.status = 'success'
       return [null, undefined as RequestSuccessData<TOutput>, ignoredResponse]
     }
 
@@ -279,7 +241,7 @@ async function executeHttpEndpoint<TInput extends AnyStruct | undefined, TOutput
     return fail(httpError, ignoredResponse)
   }
 
-  const schema = resolveOutputSchema(endpoint.output, response.status)
+  const schema = resolveOutputSchema(definition.output, response.status)
   if (!schema) {
     const definitionError = createDefinitionError('UNDECLARED_STATUS', new Error(`Undeclared status: ${response.status}`), settledResponse)
     return fail(definitionError as RequestError<RequestErrorData<TOutput>>, settledResponse)
@@ -298,7 +260,6 @@ async function executeHttpEndpoint<TInput extends AnyStruct | undefined, TOutput
       ...settledResponse,
       body: parsedBody as RequestSuccessData<TOutput>,
     }
-    state.status = 'success'
     return [null, parsedBody as RequestSuccessData<TOutput>, successResponse]
   }
 

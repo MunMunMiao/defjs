@@ -10,8 +10,9 @@ export function getGlobalClient(): Client {
   return globalClient
 }
 
-export function setGlobalClient(client: Client): void {
+export function setGlobalClient(client: Client): Client {
   globalClient = client
+  return client
 }
 
 export function resetGlobalClient(): void {

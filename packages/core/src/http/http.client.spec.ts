@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test, vi } from 'vitest'
 import {
   createClient,
+  getGlobalClient,
   resetGlobalClient,
   setGlobalClient,
   withEndpoint,
@@ -25,25 +26,23 @@ describe('request http runtime with client config', () => {
   test('should support queryParamsSerializer from client config', async () => {
     let capturedRequestUrl = ''
 
-    setGlobalClient(
-      createClient(
-        withEndpoint('https://example.com'),
-        withInterceptors(
-          createHttpInterceptor(async (request) => {
-            capturedRequestUrl = `${request.endpoint}?${request.queryString ?? ''}`
-            return makeResponse({
-              body: null,
-              status: 200,
-            })
-          }),
-        ),
-        withQueryParamsSerializer((params) => {
-          return Array.from(params.entries())
-            .sort(([left], [right]) => left.localeCompare(right))
-            .map(([key, value]) => `${key.toUpperCase()}=${value}`)
-            .join('&')
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async (request) => {
+          capturedRequestUrl = `${request.endpoint}?${request.queryString ?? ''}`
+          return makeResponse({
+            body: null,
+            status: 200,
+          })
         }),
       ),
+      withQueryParamsSerializer((params) => {
+        return Array.from(params.entries())
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, value]) => `${key.toUpperCase()}=${value}`)
+          .join('&')
+      }),
     )
 
     const useSerializedQuery = defineRequest({
@@ -55,7 +54,7 @@ describe('request http runtime with client config', () => {
       path: '/query',
     })
 
-    const [error] = await useSerializedQuery({ query: { a: '1', b: '2' } })
+    const [error] = (await client.execute(useSerializedQuery({ query: { a: '1', b: '2' } }))) as any
 
     expect(error).toBeNull()
     expect(capturedRequestUrl).toBe('/query?A=1&B=2')
@@ -70,23 +69,21 @@ describe('request http runtime with client config', () => {
     }) as unknown as typeof fetch
     let interceptorCalls = 0
 
-    setGlobalClient(
-      createClient(
-        withEndpoint('https://example.com'),
-        withInterceptors(
-          createHttpInterceptor(async (request, next) => {
-            interceptorCalls += 1
-            return await next(request)
-          }),
-        ),
-        withHTTPHandle(fetchMock),
-        withQueryParamsSerializer((params) => {
-          return Array.from(params.entries())
-            .sort(([left], [right]) => left.localeCompare(right))
-            .map(([key, value]) => `${key.toUpperCase()}=${value}`)
-            .join('&')
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async (request, next) => {
+          interceptorCalls += 1
+          return await next(request)
         }),
       ),
+      withHTTPHandle(fetchMock),
+      withQueryParamsSerializer((params) => {
+        return Array.from(params.entries())
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, value]) => `${key.toUpperCase()}=${value}`)
+          .join('&')
+      }),
     )
 
     const useSerializedQuery = defineRequest({
@@ -98,7 +95,7 @@ describe('request http runtime with client config', () => {
       path: '/query',
     })
 
-    const [error] = await useSerializedQuery({ query: { a: '1', b: '2' } })
+    const [error] = (await client.execute(useSerializedQuery({ query: { a: '1', b: '2' } }))) as any
 
     expect(error).toBeNull()
     expect(interceptorCalls).toBe(1)
@@ -132,18 +129,20 @@ describe('request http runtime with client config', () => {
       path: '/info',
     })
 
-    const [localError, localResult] = await useGetInfo().with({
-      client: localClient,
-    })
+    const [localError, localResult] = (await localClient.execute(useGetInfo())) as any
 
     expect(localError).toBeNull()
     expect(localResult).toEqual({
       endpoint: 'https://example.com/api',
     })
 
-    const [missingClientError] = await useGetInfo()
+    let missingClientError: Error | undefined
+    try {
+      await getGlobalClient().execute(useGetInfo())
+    } catch (e) {
+      missingClientError = e as Error
+    }
 
-    expect(missingClientError?.kind).toBe('transport')
     expect(missingClientError?.message).toContain('Global client has not been set')
   })
 })

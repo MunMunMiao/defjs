@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors, withXSRF } from '../client'
+import { createClient, getGlobalClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors, withXSRF } from '../client'
 import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
 import { struct, tag } from '../struct'
@@ -27,7 +27,7 @@ describe('request http runtime', () => {
       path: '/account',
     })
 
-    const [error, result, response] = await useCreateAccount()
+    const [error, result, response] = (await getGlobalClient().execute(useCreateAccount())) as any
 
     expect(error).toBeNull()
     expect(result).toEqual({ id: 1, name: 'Jack' })
@@ -50,7 +50,7 @@ describe('request http runtime', () => {
       path: '/account/not-found',
     })
 
-    const [error, result, response] = await useMissingAccount()
+    const [error, result, response] = (await getGlobalClient().execute(useMissingAccount())) as any
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(404)
@@ -67,18 +67,16 @@ describe('request http runtime', () => {
   })
 
   test('should decode response bodies with struct key aliases', async () => {
-    setGlobalClient(
-      createClient(
-        withEndpoint('https://example.com'),
-        withInterceptors(
-          createHttpInterceptor(async () =>
-            makeResponse({
-              body: {
-                user_name: 'Miao',
-              },
-              status: 200,
-            }),
-          ),
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () =>
+          makeResponse({
+            body: {
+              user_name: 'Miao',
+            },
+            status: 200,
+          }),
         ),
       ),
     )
@@ -93,7 +91,7 @@ describe('request http runtime', () => {
       path: '/user',
     })
 
-    const [error, result] = await useUser()
+    const [error, result] = (await client.execute(useUser())) as any
 
     expect(error).toBeNull()
     expect(result).toEqual({ name: 'Miao' })
@@ -161,22 +159,23 @@ describe('request http runtime', () => {
       path: '/inspect/:id',
     })
 
-    const ref = useInspectRequest({
+    const command = useInspectRequest({
       body: { nickname: 'Miao' },
       headers: { token: 'secret' },
       path: { id: 7 },
       query: { include: true, tags: ['a', 'b'] },
-    }).with({
-      client,
     })
 
-    const [[firstError, firstResult], [secondError, secondResult]] = await Promise.all([ref, ref])
+    const [[firstError, firstResult], [secondError, secondResult]] = (await Promise.all([
+      client.execute(command),
+      client.execute(command),
+    ])) as any
 
     expect(firstError).toBeNull()
     expect(secondError).toBeNull()
     expect(firstResult).toEqual({ ok: true })
     expect(secondResult).toEqual({ ok: true })
-    expect(callCount).toBe(1)
+    expect(callCount).toBe(2)
     expect(capturedRequest?.baseEndpoint).toBe('https://example.com/api')
     expect(capturedRequest?.endpoint).toBe('/inspect/7')
     expect(capturedRequest?.queryParams?.get('include')).toBe('true')
@@ -189,25 +188,23 @@ describe('request http runtime', () => {
     const tokenProvider = () => 'xsrf-token'
     let capturedRequest: HttpRequest | undefined
 
-    setGlobalClient(
-      createClient(
-        withEndpoint('https://example.com/api'),
-        withXSRF({
-          cookieName: 'CUSTOM-XSRF-TOKEN',
-          headerName: 'X-CUSTOM-XSRF-TOKEN',
-          tokenProvider,
+    const client = createClient(
+      withEndpoint('https://example.com/api'),
+      withXSRF({
+        cookieName: 'CUSTOM-XSRF-TOKEN',
+        headerName: 'X-CUSTOM-XSRF-TOKEN',
+        tokenProvider,
+      }),
+      withInterceptors(
+        createHttpInterceptor(async (request) => {
+          capturedRequest = request as typeof capturedRequest
+          return makeResponse({
+            body: {
+              ok: true,
+            },
+            status: 200,
+          })
         }),
-        withInterceptors(
-          createHttpInterceptor(async (request) => {
-            capturedRequest = request as typeof capturedRequest
-            return makeResponse({
-              body: {
-                ok: true,
-              },
-              status: 200,
-            })
-          }),
-        ),
       ),
     )
 
@@ -221,7 +218,7 @@ describe('request http runtime', () => {
       path: '/xsrf',
     })
 
-    const [error, result] = await useInspectXsrf()
+    const [error, result] = (await client.execute(useInspectXsrf())) as any
 
     expect(error).toBeNull()
     expect(result).toEqual({ ok: true })
@@ -241,7 +238,7 @@ describe('request http runtime', () => {
       path: '/raw-input',
     } as never)
 
-    const [error, result, response] = await useRawInput()
+    const [error, result, response] = (await getGlobalClient().execute(useRawInput())) as any
 
     expect(error?.kind).toBe('definition')
     expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
@@ -250,18 +247,16 @@ describe('request http runtime', () => {
   })
 
   test('should ignore response body when output is omitted', async () => {
-    setGlobalClient(
-      createClient(
-        withEndpoint('https://example.com'),
-        withInterceptors(
-          createHttpInterceptor(async () =>
-            makeResponse({
-              body: {
-                ignored: true,
-              },
-              status: 200,
-            }),
-          ),
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () =>
+          makeResponse({
+            body: {
+              ignored: true,
+            },
+            status: 200,
+          }),
         ),
       ),
     )
@@ -271,7 +266,7 @@ describe('request http runtime', () => {
       path: '/ignored-output',
     })
 
-    const [error, result, response] = await useIgnoredOutput()
+    const [error, result, response] = (await client.execute(useIgnoredOutput())) as any
 
     expect(error).toBeNull()
     expect(result).toBeUndefined()
@@ -280,17 +275,15 @@ describe('request http runtime', () => {
   })
 
   test('should return http error when output is omitted and response is not ok', async () => {
-    setGlobalClient(
-      createClient(
-        withEndpoint('https://example.com'),
-        withInterceptors(
-          createHttpInterceptor(async () =>
-            makeResponse({
-              body: { error: 'fail' },
-              status: 500,
-              statusText: 'Internal Server Error',
-            }),
-          ),
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () =>
+          makeResponse({
+            body: { error: 'fail' },
+            status: 500,
+            statusText: 'Internal Server Error',
+          }),
         ),
       ),
     )
@@ -300,7 +293,7 @@ describe('request http runtime', () => {
       path: '/fail',
     })
 
-    const [error, result, response] = await useNoOutput()
+    const [error, result, response] = (await client.execute(useNoOutput())) as any
 
     expect(error?.kind).toBe('http')
     expect(error?.code).toBe('HTTP_STATUS')

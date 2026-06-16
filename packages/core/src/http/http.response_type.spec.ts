@@ -62,10 +62,10 @@ describe('request http response type declarations', () => {
       path: '/plain-text',
     })
 
-    const [[jsonError, jsonResult], [textError, textResult]] = await Promise.all([
-      useJsonResponse().with({ client }),
-      useTextResponse().with({ client }),
-    ])
+    const [[jsonError, jsonResult], [textError, textResult]] = (await Promise.all([
+      client.execute(useJsonResponse()),
+      client.execute(useTextResponse()),
+    ])) as any
 
     expect(jsonError).toBeNull()
     expect(jsonResult).toEqual({ id: 1 })
