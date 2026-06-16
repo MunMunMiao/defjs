@@ -1,11 +1,8 @@
-import { describe, expect, inject, it, vi } from 'vitest'
-import { act, useEffect, useState } from 'react'
-import { createRoot } from 'react-dom/client'
+import { describe, expect, inject, it } from 'vitest'
+import { useEffect, useState } from 'react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { defineRequest, struct } from '@defjs/core'
 import { ClientProvider, useClient, withEndpoint } from './core'
-
-// Tell React that `act()` is supported in this test environment.
-;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const UserSchema = struct.object({
   id: struct.number(),
@@ -57,29 +54,18 @@ function App({ endpoint }: { endpoint: string }) {
 describe('React wrapper e2e', () => {
   it('should fetch and render real data through useClient', async () => {
     const endpoint = inject('testServerHost')
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
 
-    root.render(<App endpoint={endpoint} />)
+    render(<App endpoint={endpoint} />)
 
-    await vi.waitFor(() => {
-      expect(container.querySelector('[data-testid="user-1"]')?.textContent).toBe('John')
-      expect(container.querySelector('[data-testid="user-2"]')?.textContent).toBe('Jane')
+    await waitFor(() => {
+      expect(screen.getByTestId('user-1').textContent).toBe('John')
+      expect(screen.getByTestId('user-2').textContent).toBe('Jane')
     })
-
-    act(() => {
-      root.unmount()
-    })
-    container.remove()
   })
 
   it('should provide the same client instance to nested components', () => {
     const endpoint = inject('testServerHost')
     const clients: unknown[] = []
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
 
     function DeepChild() {
       clients.push(useClient())
@@ -91,19 +77,13 @@ describe('React wrapper e2e', () => {
       return <DeepChild />
     }
 
-    act(() => {
-      root.render(
-        <ClientProvider options={[withEndpoint(endpoint)]}>
-          <MiddleChild />
-        </ClientProvider>,
-      )
-    })
+    render(
+      <ClientProvider options={[withEndpoint(endpoint)]}>
+        <MiddleChild />
+      </ClientProvider>,
+    )
 
     expect(clients.length).toBe(2)
     expect(clients[0]).toBe(clients[1])
-    act(() => {
-      root.unmount()
-    })
-    container.remove()
   })
 })

@@ -12,7 +12,7 @@ export default defineConfig({
     dedupe: ['react', 'react-dom', 'react-dom/client'],
   },
   optimizeDeps: {
-    include: ['react', 'react-dom/client'],
+    include: ['react', 'react-dom/client', '@testing-library/react'],
   },
   test: {
     name: 'react-browser',

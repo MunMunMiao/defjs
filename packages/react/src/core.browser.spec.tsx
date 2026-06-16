@@ -1,30 +1,9 @@
-import { act } from 'react'
-import { createRoot } from 'react-dom/client'
-import type { ReactElement } from 'react'
-import type { Client, ClientConfig, Interceptor } from '@defjs/core'
-import { describe, expect, it } from 'vitest'
+import type { ClientConfig, Interceptor } from '@defjs/core'
+import { cleanup, render } from '@testing-library/react'
+import { describe, expect, it, afterEach } from 'vitest'
 import { ClientProvider, useClient, withEndpoint, withInterceptors } from './core'
 
-// Tell React that `act()` is supported in this test environment.
-;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-function mount(element: ReactElement): { container: HTMLDivElement; unmount: () => void } {
-  const container = document.createElement('div')
-  document.body.appendChild(container)
-  const root = createRoot(container)
-  act(() => {
-    root.render(element)
-  })
-  return {
-    container,
-    unmount: () => {
-      act(() => {
-        root.unmount()
-      })
-      container.remove()
-    },
-  }
-}
+afterEach(cleanup)
 
 describe('withEndpoint', () => {
   it('should return a ClientOption function', () => {
@@ -57,39 +36,37 @@ describe('withInterceptors', () => {
 
 describe('ClientProvider', () => {
   it('should provide client to child component', () => {
-    let injectedClient: Client | undefined
+    let injectedClient: unknown
 
     function Child() {
       injectedClient = useClient()
       return null
     }
 
-    const { unmount } = mount(
+    render(
       <ClientProvider>
         <Child />
       </ClientProvider>,
     )
 
     expect(injectedClient).toBeDefined()
-    unmount()
   })
 
   it('should configure endpoint via withEndpoint', () => {
-    let injectedClient: Client | undefined
+    let injectedClient: unknown
 
     function Child() {
       injectedClient = useClient()
       return null
     }
 
-    const { unmount } = mount(
+    render(
       <ClientProvider options={[withEndpoint('https://api.example.com')]}>
         <Child />
       </ClientProvider>,
     )
 
     expect(injectedClient).toBeDefined()
-    unmount()
   })
 })
 
@@ -100,19 +77,6 @@ describe('useClient', () => {
       return null
     }
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-
-    expect(() => {
-      act(() => {
-        root.render(<Child />)
-      })
-    }).toThrow('No HTTP client provided')
-
-    act(() => {
-      root.unmount()
-    })
-    container.remove()
+    expect(() => render(<Child />)).toThrow('No HTTP client provided')
   })
 })
