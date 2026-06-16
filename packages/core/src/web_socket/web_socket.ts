@@ -1,8 +1,8 @@
-import type { ExcludeUnion, ExtractUnion, NonNullableValue, OmitKeys } from '../internal/utility_types'
-import { resolveClientConfig } from '../client/client'
+import type { BaseCommand } from '../client/command'
 import type { ClientConfig, WebSocketBeforeConnect, WebSocketHeartbeatOptions } from '../client/config'
-import type { Client } from '../client/resolve'
+
 import type { RequestError } from '../error'
+import type { ExcludeUnion, ExtractUnion, NonNullableValue, OmitKeys } from '../internal/utility_types'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { WebSocketSessionLike } from '../interceptor/interceptor'
 import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors } from '../interceptor/interceptor'
@@ -146,7 +146,6 @@ export type SocketAwaitResult<TIncoming, TOutgoing = never> =
 
 interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
   beforeConnect?: WebSocketBeforeConnect
-  client?: Client
   heartbeat?: WebSocketHeartbeatConfig<TIncoming, TOutgoing>
   protocols?: readonly string[]
   queue?: WebSocketQueueConfig
@@ -156,30 +155,35 @@ interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
 export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketBaseConfig<TIncoming, TOutgoing> &
   UseCancellationConfig
 
-export interface WebSocketRef<TIncoming = unknown, TOutgoing = never> extends PromiseLike<SocketAwaitResult<TIncoming, TOutgoing>> {
-  readonly connection?: WebSocketConnectionInfo
-  readonly error?: RequestError<unknown>
-  readonly status: WebSocketState
-  close(code?: number, reason?: string): void
-  onRuntimeError(listener: (error: unknown) => void): () => void
-  onStateChange(listener: (state: WebSocketState) => void): () => void
-  with(config: UseWebSocketConfig<TIncoming, TOutgoing>): WebSocketRef<TIncoming, TOutgoing>
+export interface WebSocketCommand<
+  TInput extends AnyStruct | undefined,
+  TIncoming extends SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined,
+> extends BaseCommand<'web-socket'> {
+  readonly endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>
+  readonly input: EndpointInput<TInput> | undefined
+  readonly config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 }
+
+export type WebSocketCommandBuilder<
+  TInput extends AnyStruct | undefined,
+  TIncoming extends SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined,
+> = IsInputOptional<TInput> extends true
+  ? (
+      input?: EndpointInput<TInput>,
+      config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+    ) => WebSocketCommand<TInput, TIncoming, TOutgoing>
+  : (
+      input: EndpointInput<TInput>,
+      config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+    ) => WebSocketCommand<TInput, TIncoming, TOutgoing>
 
 type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
   : {} extends EndpointInput<NonNullableValue<TInput>>
     ? true
     : false
-
-export type UseWebSocketEndpointFn<
-  TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
-> =
-  IsInputOptional<TInput> extends true
-    ? (input?: EndpointInput<TInput>) => WebSocketRef<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
-    : (input: EndpointInput<TInput>) => WebSocketRef<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 
 type WebSocketEndpoint<
   TInput extends AnyStruct | undefined = undefined,
@@ -222,14 +226,6 @@ export type WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> =
   message?: <T = TOutgoing>() => T | unknown
 }
 
-function createTypedWebSocketEndpoint<
-  TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
->(endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>): UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing> {
-  return (input: EndpointInput<TInput> | undefined) => createWebSocketRef(endpoint, input)
-}
-
 function castParsedWebSocketInput<TInput extends AnyStruct | undefined>(value: unknown): ParsedInput<TInput> {
   // Type boundary: parseEndpointInput validates with endpoint.input before this helper is called.
   return value as ParsedInput<TInput>
@@ -239,98 +235,52 @@ export function defineWebSocket<
   TInput extends AnyStruct,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
->(definition: WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing>): UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing>
+>(definition: WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
->(definition: WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>): UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing>
+>(definition: WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
->(definition: WebSocketDefinition<TInput, TIncoming, TOutgoing>): UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing> {
+>(definition: WebSocketDefinition<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing> {
   const endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing> = {
     ...definition,
     kind: 'web-socket' as const,
   }
 
-  return createTypedWebSocketEndpoint(endpoint)
+  function create(
+    input?: EndpointInput<TInput>,
+    config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+  ): WebSocketCommand<TInput, TIncoming, TOutgoing> {
+    return {
+      kind: 'web-socket',
+      endpoint,
+      input,
+      config,
+    } as WebSocketCommand<TInput, TIncoming, TOutgoing>
+  }
+
+  return ((
+    input?: EndpointInput<TInput>,
+    config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+  ) => create(input, config)) as WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 }
 
-function createWebSocketRef<
+async function runWebSocketCommand<
   TInput extends AnyStruct | undefined,
   TIncoming extends SocketSchemas,
   TOutgoing extends SocketSchemas | undefined,
 >(
-  endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>,
-  input: EndpointInput<TInput> | undefined,
-  config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
-): WebSocketRef<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>> {
-  const controller = new AbortController()
-  const state: SocketRefState<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>> = {
-    listeners: {
-      runtimeError: new Set(),
-      stateChange: new Set(),
-    },
-    status: 'idle',
-  }
-
-  const getPromise = (): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>> => {
-    if (!state.promise) {
-      state.promise = executeWebSocketEndpoint(endpoint, input, config, controller, state)
-    }
-
-    return state.promise
-  }
-
-  return {
-    get connection() {
-      return state.connection
-    },
-    get error() {
-      return state.error
-    },
-    get status() {
-      return state.status
-    },
-    close(code?: number, reason?: string) {
-      state.socket?.close(code, reason)
-      if (!controller.signal.aborted) {
-        controller.abort({ code, kind: 'manual-web-socket-close', reason } satisfies ManualSocketCloseReason)
-      }
-    },
-    onRuntimeError(listener) {
-      state.listeners.runtimeError.add(listener)
-      return () => {
-        state.listeners.runtimeError.delete(listener)
-      }
-    },
-    onStateChange(listener) {
-      state.listeners.stateChange.add(listener)
-      return () => {
-        state.listeners.stateChange.delete(listener)
-      }
-    },
-    with(nextConfig) {
-      return createWebSocketRef(endpoint, input, nextConfig)
-    },
-    then(onfulfilled, onrejected) {
-      return getPromise().then(onfulfilled, onrejected)
-    },
-  }
-}
-
-async function executeWebSocketEndpoint<
-  TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
->(
+  clientConfig: ClientConfig,
   endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>,
   input: EndpointInput<TInput> | undefined,
   config: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>> | undefined,
   controller: AbortController,
   state: SocketRefState<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+  options?: { signal?: AbortSignal },
 ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>> {
   setSocketState(state, 'connecting')
 
@@ -361,22 +311,7 @@ async function executeWebSocketEndpoint<
     return [definitionError, undefined, undefined]
   }
 
-  let clientConfig: ClientConfig
-  try {
-    clientConfig = resolveClientConfig(config?.client)
-  } catch (error) {
-    const transportError = createTransportError(error)
-    state.error = transportError
-    /* istanbul ignore next -- unreachable: resolveClientConfig never throws ERR_ABORTED */
-    if (transportError.code === 'ABORTED') {
-      setSocketState(state, 'aborted')
-    } else {
-      setSocketState(state, 'error')
-    }
-    return [transportError, undefined, undefined]
-  }
-
-  const signal = mergeAbortSignals(controller.signal, [config?.abort], config?.timeout)
+  const signal = mergeAbortSignals(controller.signal, [config?.abort, options?.signal], config?.timeout)
   const abortedBeforeStart = resolveAbortTransportError(signal)
   if (abortedBeforeStart) {
     state.error = abortedBeforeStart
@@ -750,6 +685,29 @@ async function executeWebSocketEndpoint<
     // Type boundary: wsChain rejects with RequestError<unknown> per interceptor contract.
     return [error as RequestError<unknown>, undefined, state.connection]
   }
+}
+
+export async function executeWebSocketCommand<
+  TInput extends AnyStruct | undefined,
+  TIncoming extends SocketSchemas,
+  TOutgoing extends SocketSchemas | undefined,
+>(
+  clientConfig: ClientConfig,
+  command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
+  options?: { signal?: AbortSignal },
+): Promise<
+  SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
+> {
+  const { endpoint, input, config } = command
+  const controller = new AbortController()
+  const state: SocketRefState<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>> = {
+    listeners: {
+      runtimeError: new Set(),
+      stateChange: new Set(),
+    },
+    status: 'idle',
+  }
+  return runWebSocketCommand(clientConfig, endpoint, input, config, controller, state, options)
 }
 
 function createDeferred<T>(): Deferred<T> {

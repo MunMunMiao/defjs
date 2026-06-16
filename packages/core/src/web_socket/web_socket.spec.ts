@@ -1,18 +1,24 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withInterceptors } from '../client'
+import { createClient, getClientConfig, withEndpoint, withInterceptors, type Client } from '../client'
 import { ERR_ABORTED } from '../error'
 import { createWebSocketInterceptor } from '../interceptor'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime', () => {
+  let client: Client
+
   beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
+    client = createClient(withEndpoint(inject('testServerHost')))
   })
 
   afterEach(() => {
-    resetGlobalClient()
+    // cleanup only
   })
+
+  async function run(command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+    return client.execute(command as never, options)
+  }
 
   test('should return transport error with invalid client', async () => {
     const useSocket = defineWebSocket({
@@ -20,17 +26,22 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const [error, socket, connection] = await useSocket().with({
-      // @ts-expect-error testing runtime defensive behavior with invalid client
-      client: {},
-    })
+    const client = createClient(withEndpoint('http://localhost'))
+    // @ts-expect-error testing runtime defensive behavior with invalid client WebSocket constructor
+    getClientConfig(client).webSocket.WebSocket = class {
+      constructor() {
+        throw new Error('invalid client')
+      }
+    }
+
+    const [error, socket, connection] = (await client.execute(useSocket())) as any
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(error?.kind).toBe('transport')
   })
 
-  test('should reject with.abort and with.timeout before starting websocket transport', async () => {
+  test('should reject with abort and timeout before starting websocket transport', async () => {
     const controller = new AbortController()
     let beforeConnectCalls = 0
     const useSocket = defineWebSocket({
@@ -38,24 +49,24 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const ref = useSocket().with(
-      // @ts-expect-error testing runtime defensive behavior with invalid config combination
-      {
+    const command = useSocket()
+    const commandWithConfig = {
+      ...command,
+      config: {
         abort: controller.signal,
         beforeConnect: () => {
           beforeConnectCalls += 1
         },
         timeout: 1,
       },
-    )
-    const [error, socket, connection] = await ref
+    }
+    const [error, socket, connection] = await run(commandWithConfig)
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(error?.kind).toBe('definition')
     expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
     expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
-    expect(ref.status).toBe('error')
     expect(beforeConnectCalls).toBe(0)
   })
 
@@ -67,23 +78,26 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const ref = useSocket().with(
-      // @ts-expect-error testing runtime defensive behavior with invalid config combination
-      { abort: controller.signal, timeout: 1 },
-    )
-    const [error, socket, connection] = await ref
+    const command = useSocket()
+    const commandWithConfig = {
+      ...command,
+      config: {
+        abort: controller.signal,
+        timeout: 1,
+      },
+    }
+    const [error, socket, connection] = await run(commandWithConfig)
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(error?.kind).toBe('definition')
     expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
     expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
-    expect(ref.status).toBe('error')
   })
 
-  test('should resolve thenable websocket refs and receive typed messages', async () => {
+  test('should resolve execute and receive typed messages', async () => {
     const useChatSocket = defineWebSocket({
-      build: (request, input) => {
+      build: (request: any, input: any) => {
         request.setQueryParams({
           roomId: input.query.roomId,
         })
@@ -112,7 +126,7 @@ describe('web socket runtime', () => {
       protocols: ['json'],
     })
 
-    const [error, socket, connection] = await useChatSocket({ query: { roomId: 'room-1' } })
+    const [error, socket, connection] = await run(useChatSocket({ query: { roomId: 'room-1' } }))
 
     expect(error).toBeNull()
     expect(connection?.protocol).toBe('json')
@@ -150,11 +164,10 @@ describe('web socket runtime', () => {
         }),
       },
       path: '/ws/echo',
-    })
-
-    const [error, socket, connection] = await useEchoSocket().with({
       protocols: ['json'],
     })
+
+    const [error, socket, connection] = await run(useEchoSocket())
 
     expect(error).toBeNull()
     expect(connection?.protocol).toBe('json')
@@ -196,13 +209,18 @@ describe('web socket runtime', () => {
       path: '/ws/heartbeat-silent',
     })
 
-    const [error, socket] = await useHeartbeatSocket().with({
-      heartbeat: {
-        intervalMs: 10,
-        message: () => ({ type: 'ping' }),
-        timeoutMs: 5,
+    const command = useHeartbeatSocket()
+    const commandWithConfig = {
+      ...command,
+      config: {
+        heartbeat: {
+          intervalMs: 10,
+          message: () => ({ type: 'ping' }),
+          timeoutMs: 5,
+        },
       },
-    })
+    }
+    const [error, socket] = await run(commandWithConfig)
 
     expect(error).toBeNull()
     if (!socket) {
@@ -210,7 +228,7 @@ describe('web socket runtime', () => {
     }
 
     let runtimeError: unknown
-    socket.onRuntimeError((err) => {
+    socket.onRuntimeError((err: unknown) => {
       runtimeError = err
     })
 
@@ -233,14 +251,19 @@ describe('web socket runtime', () => {
       path: '/ws/heartbeat',
     })
 
-    const [error, socket] = await useHeartbeatSocket().with({
-      heartbeat: {
-        intervalMs: 10,
-        isAck: (message) => message.type === 'pong',
-        message: () => ({ type: 'ping' }),
-        timeoutMs: 30,
+    const command = useHeartbeatSocket()
+    const commandWithConfig = {
+      ...command,
+      config: {
+        heartbeat: {
+          intervalMs: 10,
+          isAck: (message: { type: string }) => message.type === 'pong',
+          message: () => ({ type: 'ping' }),
+          timeoutMs: 30,
+        },
       },
-    })
+    }
+    const [error, socket] = await run(commandWithConfig)
 
     expect(error).toBeNull()
     if (!socket) {
@@ -248,7 +271,7 @@ describe('web socket runtime', () => {
     }
 
     let runtimeError: unknown
-    socket.onRuntimeError((err) => {
+    socket.onRuntimeError((err: unknown) => {
       runtimeError = err
     })
 
@@ -266,7 +289,7 @@ describe('web socket runtime', () => {
       path: '/ws/invalid',
     })
 
-    const [error, socket] = await useSocket()
+    const [error, socket] = await run(useSocket())
 
     expect(error).toBeNull()
     if (!socket) {
@@ -292,7 +315,7 @@ describe('web socket runtime', () => {
       path: '/ws/error-before-close',
     })
 
-    const [error, socket] = await useSocket()
+    const [error, socket] = await run(useSocket())
 
     expect(error).toBeNull()
     if (!socket) {
@@ -300,7 +323,7 @@ describe('web socket runtime', () => {
     }
 
     let runtimeError: unknown
-    socket.onRuntimeError((err) => {
+    socket.onRuntimeError((err: unknown) => {
       runtimeError = err
     })
 
@@ -318,7 +341,7 @@ describe('web socket runtime', () => {
       path: '/ws/unknown-message',
     })
 
-    const [error, socket] = await useSocket()
+    const [error, socket] = await run(useSocket())
 
     expect(error).toBeNull()
     if (!socket) {
@@ -334,7 +357,7 @@ describe('web socket runtime', () => {
     await expect(socket.closed).resolves.toMatchObject({ code: 1000, reason: 'done' })
   })
 
-  test('should expose ref state transitions and allow unsubscribing listeners', async () => {
+  test('should expose session state transitions and allow unsubscribing listeners', async () => {
     const useSocket = defineWebSocket({
       incoming: {
         ready: struct.object({
@@ -344,36 +367,17 @@ describe('web socket runtime', () => {
       path: '/ws/echo',
     })
 
-    const ref = useSocket()
-    const states: string[] = []
-    const refStates: string[] = []
-    const unsubscribeRefState = ref.onStateChange((state) => {
-      refStates.push(state)
-    })
-    const unsubscribeRefError = ref.onRuntimeError(() => {
-      throw new Error('Unexpected ref runtime error')
-    })
-
-    expect(ref.status).toBe('idle')
-    void ref.then(() => undefined)
-    expect(ref.status).toBe('connecting')
-
-    const [error, socket, connection] = await ref
+    const [error, socket, connection] = await run(useSocket())
 
     expect(error).toBeNull()
     expect(connection?.url).toContain('/ws/echo')
-    expect(ref.connection?.url).toContain('/ws/echo')
-    expect(ref.error).toBeUndefined()
-    expect(ref.status).toBe('open')
-
-    unsubscribeRefState()
-    unsubscribeRefError()
 
     if (!socket) {
       throw new Error('Expected socket')
     }
 
-    const unsubscribeSocketState = socket.onStateChange((state) => {
+    const states: string[] = []
+    const unsubscribeSocketState = socket.onStateChange((state: any) => {
       states.push(state)
     })
     const unsubscribeSocketError = socket.onRuntimeError(() => {
@@ -388,13 +392,10 @@ describe('web socket runtime', () => {
 
     socket.close(1000, 'done')
     await expect(socket.closed).resolves.toMatchObject({ code: 1000, reason: 'done' })
-    expect(ref.status).toBe('closed')
-    expect(refStates).toContain('connecting')
-    expect(refStates).toContain('open')
     expect(states).toEqual([])
   })
 
-  test('should support ref.close after startup and ignore socket.close after cleanup', async () => {
+  test('should support abort after startup and ignore socket.close after cleanup', async () => {
     const useSocket = defineWebSocket({
       incoming: {
         ready: struct.object({
@@ -404,37 +405,37 @@ describe('web socket runtime', () => {
       path: '/ws/echo',
     })
 
-    const ref = useSocket()
-    const [error, socket] = await ref
+    const controller = new AbortController()
+    const [error, socket] = await run(useSocket(), { signal: controller.signal })
 
     expect(error).toBeNull()
     if (!socket) {
       throw new Error('Expected socket')
     }
 
-    ref.close(1000, 'manual')
+    controller.abort('manual')
     await expect(socket.closed).resolves.toBeDefined()
-    expect(ref.status).toBe('closed')
 
     socket.close(1000, 'after-cleanup')
+    socket.close(1000, 'after-cleanup-2')
   })
 
-  test('should close ref before startup and surface aborted transport error', async () => {
+  test('should abort before startup and surface aborted transport error', async () => {
     const useSocket = defineWebSocket({
       incoming: {},
       path: '/ws/basic',
     })
 
-    const ref = useSocket()
-    ref.close(1000, 'manual-stop')
+    const controller = new AbortController()
+    const executePromise = run(useSocket(), { signal: controller.signal })
+    controller.abort(ERR_ABORTED)
 
-    const [error, socket, connection] = await ref
+    const [error, socket, connection] = await executePromise
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(error?.kind).toBe('transport')
     expect(error?.code).toBe('ABORTED')
-    expect(ref.status).toBe('aborted')
   })
 
   test('should return definition error when input validation fails', async () => {
@@ -446,9 +447,8 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const [error, socket, connection] = await useSocket(
-      // @ts-expect-error testing runtime defensive behavior with invalid input type
-      { id: 'bad' },
+    const [error, socket, connection] = await run(
+      useSocket({ id: 'bad' } as never),
     )
 
     expect(socket).toBeUndefined()
@@ -467,7 +467,7 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const [error, socket, connection] = await useSocket({})
+    const [error, socket, connection] = await run(useSocket({}))
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -481,9 +481,8 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const [error, socket, connection] = await useSocket().with({
-      client: createClient(withEndpoint('not-a-valid-url')),
-    })
+    const badClient = createClient(withEndpoint('not-a-valid-url'))
+    const [error, socket, connection] = (await badClient.execute(useSocket())) as any
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -497,11 +496,16 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const [error, socket, connection] = await useSocket().with({
-      beforeConnect: async () => {
-        throw new Error('beforeConnect failed')
+    const command = useSocket()
+    const commandWithConfig = {
+      ...command,
+      config: {
+        beforeConnect: async () => {
+          throw new Error('beforeConnect failed')
+        },
       },
-    })
+    }
+    const [error, socket, connection] = await run(commandWithConfig)
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -510,7 +514,7 @@ describe('web socket runtime', () => {
 
   test('should support reconnect, queued sends, and abort during reconnect delay', async () => {
     const useSocket = defineWebSocket({
-      build(request, input) {
+      build(request: any, input: any) {
         request.setQueryParams({ key: input.query.key })
       },
       input: struct.request({ query: struct.object({ key: struct.string() }) }),
@@ -531,10 +535,15 @@ describe('web socket runtime', () => {
     })
 
     const controller = new AbortController()
-    const [error, socket] = await useSocket().with({
-      abort: controller.signal,
-      reconnect: { attempts: 2, delayMs: 20 },
-    })
+    const command = useSocket({ query: { key: 'reconnect-queue-case' } })
+    const commandWithConfig = {
+      ...command,
+      config: {
+        abort: controller.signal,
+        reconnect: { attempts: 2, delayMs: 20 },
+      },
+    }
+    const [error, socket] = await run(commandWithConfig)
 
     expect(error).toBeNull()
     if (!socket) {
@@ -561,7 +570,7 @@ describe('web socket runtime', () => {
 
   test('should abort during reconnect delay with aborted state', async () => {
     const useSocket = defineWebSocket({
-      build(request, input) {
+      build(request: any, input: any) {
         request.setQueryParams({ key: input.query.key })
       },
       input: struct.request({ query: struct.object({ key: struct.string() }) }),
@@ -574,10 +583,15 @@ describe('web socket runtime', () => {
     })
 
     const controller = new AbortController()
-    const [error, socket] = await useSocket().with({
-      abort: controller.signal,
-      reconnect: { attempts: 2, delayMs: 100 },
-    })
+    const command = useSocket()
+    const commandWithConfig = {
+      ...command,
+      config: {
+        abort: controller.signal,
+        reconnect: { attempts: 2, delayMs: 100 },
+      },
+    }
+    const [error, socket] = await run(commandWithConfig)
 
     expect(error).toBeNull()
     if (!socket) {
@@ -593,7 +607,7 @@ describe('web socket runtime', () => {
 
   test('should reconnect immediately when delay is zero', async () => {
     const useSocket = defineWebSocket({
-      build(request, input) {
+      build(request: any, input: any) {
         request.setQueryParams({ key: input.query.key })
       },
       input: struct.request({ query: struct.object({ key: struct.string() }) }),
@@ -605,9 +619,14 @@ describe('web socket runtime', () => {
       path: '/ws/reconnect',
     })
 
-    const [error, socket] = await useSocket({ query: { key: 'immediate-case' } }).with({
-      reconnect: { attempts: 1, delayMs: 0 },
-    })
+    const command = useSocket({ query: { key: 'immediate-case' } })
+    const commandWithConfig = {
+      ...command,
+      config: {
+        reconnect: { attempts: 1, delayMs: 0 },
+      },
+    }
+    const [error, socket] = await run(commandWithConfig)
 
     expect(error).toBeNull()
     if (!socket) {
@@ -630,7 +649,7 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const client = createClient(
+    const clientWithInterceptor = createClient(
       withEndpoint(inject('testServerHost')),
       withInterceptors(
         createWebSocketInterceptor(async () => {
@@ -639,7 +658,7 @@ describe('web socket runtime', () => {
       ),
     )
 
-    const [error, socket, connection] = await useSocket().with({ client })
+    const [error, socket, connection] = (await clientWithInterceptor.execute(useSocket())) as any
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -657,7 +676,7 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const client = createClient(
+    const clientWithInterceptor = createClient(
       withEndpoint(inject('testServerHost')),
       withInterceptors(
         createWebSocketInterceptor(async (request, next) =>
@@ -669,7 +688,7 @@ describe('web socket runtime', () => {
       ),
     )
 
-    const [error, socket, connection] = await useSocket().with({ client })
+    const [error, socket, connection] = (await clientWithInterceptor.execute(useSocket())) as any
 
     expect(error).toBeNull()
     expect(connection?.url).toContain('roomId=from-interceptor')

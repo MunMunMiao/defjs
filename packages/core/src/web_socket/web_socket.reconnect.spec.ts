@@ -1,20 +1,26 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
+import { createClient, withEndpoint, type Client } from '../client'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime reconnect', () => {
+  let client: Client
+
   beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
+    client = createClient(withEndpoint(inject('testServerHost')))
   })
 
   afterEach(() => {
-    resetGlobalClient()
+    // cleanup only
   })
+
+  async function run(command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+    return client.execute(command as never, options)
+  }
 
   test('should reconnect and flush queued messages', async () => {
     const useReconnectSocket = defineWebSocket({
-      build: (request, input) => {
+      build: (request: any, input: any) => {
         request.setQueryParams({
           key: input.query.key,
         })
@@ -40,10 +46,14 @@ describe('web socket runtime reconnect', () => {
       path: '/ws/reconnect',
     })
 
-    const ref = useReconnectSocket({ query: { key: 'queue-case' } }).with({
-      queue: { maxSize: 2 },
-      reconnect: { attempts: 1, delayMs: 0 },
-    })
+    const command = useReconnectSocket({ query: { key: 'queue-case' } })
+    const commandWithConfig = {
+      ...command,
+      config: {
+        queue: { maxSize: 2 },
+        reconnect: { attempts: 1, delayMs: 0 },
+      },
+    }
 
     const states: string[] = []
     let session:
@@ -52,7 +62,18 @@ describe('web socket runtime reconnect', () => {
         }
       | undefined
 
-    ref.onStateChange((state) => {
+    const executePromise = run(commandWithConfig)
+
+    const [error, socket] = await executePromise
+
+    expect(error).toBeNull()
+    if (!socket) {
+      throw new Error('Expected socket session')
+    }
+
+    session = socket
+
+    socket.onStateChange((state: string) => {
       states.push(state)
       if (state === 'reconnecting' && session) {
         session.send({
@@ -61,15 +82,6 @@ describe('web socket runtime reconnect', () => {
         })
       }
     })
-
-    const [error, socket] = await ref
-
-    expect(error).toBeNull()
-    if (!socket) {
-      throw new Error('Expected socket session')
-    }
-
-    session = socket
 
     const iterator = socket.receive[Symbol.asyncIterator]()
     await expect(iterator.next()).resolves.toEqual({
@@ -96,17 +108,22 @@ describe('web socket runtime reconnect', () => {
 
     const attempts: number[] = []
 
-    const [error, socket, connection] = await useRetrySocket().with({
-      client: retryClient,
-      reconnect: {
-        attempts: 2,
-        delayMs: 0,
-        shouldReconnect(context) {
-          attempts.push(context.attempt)
-          return context.attempt < 2
+    const command = useRetrySocket()
+    const commandWithConfig = {
+      ...command,
+      config: {
+        reconnect: {
+          attempts: 2,
+          delayMs: 0,
+          shouldReconnect(context: { attempt: number }) {
+            attempts.push(context.attempt)
+            return context.attempt < 2
+          },
         },
       },
-    })
+    }
+
+    const [error, socket, connection] = (await retryClient.execute(commandWithConfig)) as any
 
     expect(socket).toBeUndefined()
     expect(connection?.url).toBe('ws://127.0.0.1:1/ws/reconnect')
@@ -125,20 +142,25 @@ describe('web socket runtime reconnect', () => {
     })
 
     const attempts: number[] = []
-    const [error, socket] = await useSocket().with({
-      reconnect: {
-        attempts: 1,
-        delayMs: 0,
-        shouldReconnect(context) {
-          attempts.push(context.attempt)
-          return false
+    const command = useSocket()
+    const commandWithConfig = {
+      ...command,
+      config: {
+        reconnect: {
+          attempts: 1,
+          delayMs: 0,
+          shouldReconnect(context: { attempt: number }) {
+            attempts.push(context.attempt)
+            return false
+          },
         },
       },
-    })
+    }
+    const [error, socket] = await run(commandWithConfig)
 
     expect(error).toBeNull()
     if (!socket) {
-      throw new Error('Expected socket session')
+      throw new Error('Expected socket')
     }
 
     socket.close(1000, 'manual')

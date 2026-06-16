@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { createClient, withEndpoint, withWebSocketHandle, withWebSocketReconnect } from '../client'
+import { createClient, withEndpoint, withWebSocketHandle, withWebSocketReconnect, type Client } from '../client'
 import { ERR_ABORTED } from '../error'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
@@ -111,6 +111,10 @@ describe('web socket runtime environment edge cases', () => {
     lastMockInstance = undefined
   })
 
+  async function run(client: Client, command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+    return client.execute(command as never, options)
+  }
+
   test('should return transport error when WebSocket constructor throws', async () => {
     vi.stubGlobal('WebSocket', createMockWebSocketClass({ throwOnConstruct: new Error('connection refused') }))
 
@@ -119,9 +123,8 @@ describe('web socket runtime environment edge cases', () => {
       path: '/ws/test',
     })
 
-    const [error, socket, connection] = await useSocket().with({
-      client: createClient(withEndpoint('http://localhost')),
-    })
+    const client = createClient(withEndpoint('http://localhost'))
+    const [error, socket, connection] = await run(client,useSocket())
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -142,9 +145,8 @@ describe('web socket runtime environment edge cases', () => {
       path: '/ws/test',
     })
 
-    const [error, socket, connection] = await useSocket().with({
-      client: createClient(withEndpoint('http://localhost')),
-    })
+    const client = createClient(withEndpoint('http://localhost'))
+    const [error, socket, connection] = await run(client,useSocket())
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -161,14 +163,12 @@ describe('web socket runtime environment edge cases', () => {
       path: '/ws/test',
     })
 
-    const ref = useSocket().with({
-      abort: controller.signal,
-      client: createClient(withEndpoint('http://localhost')),
-    })
+    const client = createClient(withEndpoint('http://localhost'))
+    const executePromise = run(client,useSocket(), { signal: controller.signal })
 
     setTimeout(() => controller.abort(ERR_ABORTED), 10)
 
-    const [error, socket, connection] = await ref
+    const [error, socket, connection] = await executePromise
 
     expect(socket).toBeUndefined()
     expect(connection?.url).toBe('ws://localhost/ws/test')
@@ -185,9 +185,8 @@ describe('web socket runtime environment edge cases', () => {
       path: '/ws/test',
     })
 
-    const [error, socket, connection] = await useSocket().with({
-      client: createClient(withEndpoint('http://localhost')),
-    })
+    const client = createClient(withEndpoint('http://localhost'))
+    const [error, socket, connection] = await run(client,useSocket())
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -205,19 +204,18 @@ describe('web socket runtime environment edge cases', () => {
       path: '/ws/test',
     })
 
-    const ref = useSocket().with({
-      client: createClient(withEndpoint('http://localhost')),
-    })
+    const client = createClient(withEndpoint('http://localhost'))
+    const executePromise = run(client,useSocket())
 
-    ref.onStateChange((state) => {
-      states.push(state)
-    })
-
-    const [, socket] = await ref
+    const [, socket] = await executePromise
 
     if (!socket) {
       throw new Error('Expected socket')
     }
+
+    socket.onStateChange((state: string) => {
+      states.push(state)
+    })
 
     await new Promise((resolve) => setTimeout(resolve, 10))
 
@@ -225,7 +223,10 @@ describe('web socket runtime environment edge cases', () => {
     lastMockInstance?.triggerOpen()
 
     await expect(socket.closed).resolves.toMatchObject({ code: 1000 })
-    expect(states.filter((state) => state === 'open')).toHaveLength(1)
+    // In the command-based API the listener can only be attached after the socket resolves,
+    // so the first 'open' is not observable here. We still verify that duplicate open events
+    // after the socket is already open do not emit additional 'open' states.
+    expect(states.filter((state) => state === 'open')).toHaveLength(0)
   })
 
   test('should emit runtime error when send throws during queued flush', async () => {
@@ -239,13 +240,12 @@ describe('web socket runtime environment edge cases', () => {
       path: '/ws/test',
     })
 
-    const [error, socket] = await useSocket().with({
-      client: createClient(
-        withEndpoint('http://localhost'),
-        withWebSocketHandle(globalThis.WebSocket),
-        withWebSocketReconnect({ attempts: 1, delayMs: 50 }),
-      ),
-    })
+    const client = createClient(
+      withEndpoint('http://localhost'),
+      withWebSocketHandle(globalThis.WebSocket),
+      withWebSocketReconnect({ attempts: 1, delayMs: 50 }),
+    )
+    const [error, socket] = await run(client,useSocket())
 
     expect(error).toBeNull()
     if (!socket) {
@@ -253,7 +253,7 @@ describe('web socket runtime environment edge cases', () => {
     }
 
     let runtimeError: unknown
-    socket.onRuntimeError((err) => {
+    socket.onRuntimeError((err: unknown) => {
       runtimeError = err
     })
 
@@ -275,9 +275,8 @@ describe('web socket runtime environment edge cases', () => {
       path: '/ws/test',
     })
 
-    const [, socket] = await useSocket().with({
-      client: createClient(withEndpoint('http://localhost')),
-    })
+    const client = createClient(withEndpoint('http://localhost'))
+    const [, socket] = await run(client,useSocket())
 
     expect(socket).toBeDefined()
     expect(lastMockInstance?.binaryType).toBe('arraybuffer')
@@ -291,9 +290,8 @@ describe('web socket runtime environment edge cases', () => {
       path: '/ws/test',
     })
 
-    const [error, socket] = await useSocket().with({
-      client: createClient(withEndpoint('http://localhost')),
-    })
+    const client = createClient(withEndpoint('http://localhost'))
+    const [error, socket] = await run(client,useSocket())
 
     expect(error).toBeNull()
     if (!socket) {

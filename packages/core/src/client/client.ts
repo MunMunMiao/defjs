@@ -10,6 +10,9 @@ import type { HttpCommand } from '../http/http'
 import { executeEventStreamCommand } from '../sse/sse'
 import type { EventStreamCommand } from '../sse/sse'
 
+import { executeWebSocketCommand } from '../web_socket/web_socket'
+import type { WebSocketCommand } from '../web_socket/web_socket'
+
 function createClientFromConfig(config: ClientConfig): Client {
   const client: Client = {
     [CLIENT]: config,
@@ -19,6 +22,8 @@ function createClientFromConfig(config: ClientConfig): Client {
           return executeHttpCommand(config, command as HttpCommand<any, any>, options)
         case 'event-stream':
           return executeEventStreamCommand(config, command as EventStreamCommand<any, any>, options) as Promise<unknown>
+        case 'web-socket':
+          return executeWebSocketCommand(config, command as WebSocketCommand<any, any, any>, options) as Promise<unknown>
       }
       return Promise.reject(new Error(`Unsupported command kind: ${command.kind}`))
     },

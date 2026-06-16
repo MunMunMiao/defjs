@@ -1,17 +1,23 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint, withQueryParamsSerializer } from '../client'
+import { createClient, withEndpoint, withQueryParamsSerializer, type Client } from '../client'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket runtime lifecycle', () => {
+  let client: Client
+
   beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
+    client = createClient(withEndpoint(inject('testServerHost')))
   })
 
   afterEach(() => {
-    resetGlobalClient()
+    // cleanup only
   })
+
+  async function run(command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+    return client.execute(command as never, options)
+  }
 
   test('message listener add/remove use the same ref(no leak)', () => {
     // Bun 的 native WebSocket(C++ 实现)让 prototype-level spy 无法拦截 addEventListener/removeEventListener,
@@ -25,7 +31,7 @@ describe('web socket runtime lifecycle', () => {
     expect(source).not.toMatch(/socket\.removeEventListener\('message', handleMessage\)/)
   })
 
-  test('should allow closing websocket refs before startup', async () => {
+  test('should allow closing websocket before startup', async () => {
     const useEchoSocket = defineWebSocket({
       incoming: {
         ready: struct.object({
@@ -34,11 +40,12 @@ describe('web socket runtime lifecycle', () => {
       },
       path: '/ws/echo',
     })
-    const ref = useEchoSocket()
 
-    ref.close()
+    const controller = new AbortController()
+    const executePromise = run(useEchoSocket(), { signal: controller.signal })
+    controller.abort()
 
-    const [error, socket, connection] = await ref
+    const [error, socket, connection] = await executePromise
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -49,7 +56,6 @@ describe('web socket runtime lifecycle', () => {
     }
 
     expect(error.code).toBe('ABORTED')
-    expect(ref.status).toBe('aborted')
   })
 
   test('should skip unexpected websocket messages after startup', async () => {
@@ -61,9 +67,8 @@ describe('web socket runtime lifecycle', () => {
       },
       path: '/ws/invalid',
     })
-    const ref = useInvalidSocket()
 
-    const [error, socket] = await ref
+    const [error, socket] = await run(useInvalidSocket())
 
     expect(error).toBeNull()
     if (!socket) {
@@ -77,22 +82,18 @@ describe('web socket runtime lifecycle', () => {
 
     expect(messages).toEqual([])
     await expect(socket.closed).resolves.toMatchObject({ code: 1000 })
-    expect(ref.status).toBe('closed')
-    expect(ref.error).toBeUndefined()
   })
 
   test('should use request-level beforeConnect hook and client query serializer', async () => {
-    setGlobalClient(
-      createClient(
-        withEndpoint(inject('testServerHost')),
-        withQueryParamsSerializer((params) => {
-          return `token=${params.get('token') ?? 'missing'}&from=serializer`
-        }),
-      ),
+    const clientWithSerializer = createClient(
+      withEndpoint(inject('testServerHost')),
+      withQueryParamsSerializer((params) => {
+        return `token=${params.get('token') ?? 'missing'}&from=serializer`
+      }),
     )
 
     const useBeforeConnectSocket = defineWebSocket({
-      build: (request, input) => {
+      build: (request: any, input: any) => {
         request.setQueryParams({
           token: input.query.token,
         })
@@ -108,11 +109,16 @@ describe('web socket runtime lifecycle', () => {
 
     let callCount = 0
 
-    const [error, socket, connection] = await useBeforeConnectSocket({ query: { token: 'secret-0' } }).with({
-      beforeConnect: async () => {
-        callCount += 1
+    const command = useBeforeConnectSocket({ query: { token: 'secret-0' } })
+    const commandWithConfig = {
+      ...command,
+      config: {
+        beforeConnect: async () => {
+          callCount += 1
+        },
       },
-    })
+    }
+    const [error, socket, connection] = (await clientWithSerializer.execute(commandWithConfig)) as any
 
     expect(error).toBeNull()
     expect(callCount).toBe(1)

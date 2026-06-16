@@ -1,17 +1,23 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
-import { createClient, resetGlobalClient, setGlobalClient, withEndpoint } from '../client'
+import { createClient, withEndpoint, type Client } from '../client'
 import { struct } from '../struct'
 import { defineWebSocket } from './index'
 
 describe('web socket browser runtime', () => {
+  let client: Client
+
   beforeEach(() => {
-    setGlobalClient(createClient(withEndpoint(inject('testServerHost'))))
+    client = createClient(withEndpoint(inject('testServerHost')))
   })
 
   afterEach(() => {
-    resetGlobalClient()
+    // cleanup only
   })
+
+  async function run(command: unknown, options?: { signal?: AbortSignal }): Promise<any> {
+    return client.execute(command as never, options)
+  }
 
   test('should connect and exchange typed messages in real browsers', async () => {
     const useEchoSocket = defineWebSocket({
@@ -29,11 +35,10 @@ describe('web socket browser runtime', () => {
         }),
       },
       path: '/ws/echo',
-    })
-
-    const [error, socket, connection] = await useEchoSocket().with({
       protocols: ['json'],
     })
+
+    const [error, socket, connection] = await run(useEchoSocket())
 
     expect(error).toBeNull()
     expect(connection?.protocol).toBe('json')
@@ -69,11 +74,10 @@ describe('web socket browser runtime', () => {
         }),
       },
       path: '/ws/binary',
-    })
-
-    const [error, socket] = await useBinarySocket().with({
       protocols: ['json'],
     })
+
+    const [error, socket] = await run(useBinarySocket())
 
     expect(error).toBeNull()
     if (!socket) {
@@ -88,8 +92,8 @@ describe('web socket browser runtime', () => {
   })
 
   test('should reconnect in real browsers', async () => {
-    const [error, socket] = await defineWebSocket({
-      build: (request, input) => {
+    const command = defineWebSocket({
+      build: (request: any, input: any) => {
         request.setQueryParams({
           key: input.query.key,
         })
@@ -105,9 +109,14 @@ describe('web socket browser runtime', () => {
         }),
       }),
       path: '/ws/reconnect',
-    })({ query: { key: 'browser-reconnect' } }).with({
-      reconnect: { attempts: 1, delayMs: 0 },
-    })
+    })({ query: { key: 'browser-reconnect' } })
+    const commandWithConfig = {
+      ...command,
+      config: {
+        reconnect: { attempts: 1, delayMs: 0 },
+      },
+    }
+    const [error, socket] = await run(commandWithConfig)
 
     expect(error).toBeNull()
     if (!socket) {
