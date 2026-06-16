@@ -1,4 +1,4 @@
-import { createHttpInterceptor, defineRequest, execute, struct, type Client } from '@defjs/core'
+import { createHttpInterceptor, defineRequest, struct, type Client } from '@defjs/core'
 import { beforeEach, describe, expect, inject, test } from 'vitest'
 import { createApp } from 'vue'
 import { injectClient, provideClient, withEndpoint, withInterceptors } from './index'
@@ -149,7 +149,7 @@ describe('vue browser runtime', () => {
       path: '/api/users',
     })
 
-    const [error, users] = await execute(getUsers(), { client: injectedClient! })
+    const [error, users] = await injectedClient!.execute(getUsers())
 
     expect(error).toBeNull()
     expect(users).toEqual([

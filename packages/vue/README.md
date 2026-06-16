@@ -28,11 +28,10 @@ app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(
 ```typescript
 // 组件中使用
 import { injectClient } from '@defjs/vue'
-import { execute } from '@defjs/core'
 import { getUser } from './api'
 
 const client = injectClient() // 返回 Client 实例
-const [error, user] = await execute(getUser(), { client })
+const [error, user] = await client.execute(getUser())
 ```
 
 ## API

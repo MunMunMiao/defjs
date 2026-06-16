@@ -4,19 +4,11 @@ import type { Command } from './command'
 import type { ClientOption } from './option'
 import type { Client } from './resolve'
 import { CLIENT } from './resolve'
-import type { AnyStruct } from '../struct'
-import type { RequestOutputShape } from '../http/request'
-import type { HttpAwaitResult, HttpCommand, RequestErrorData, RequestSuccessData } from '../http/http'
+import type { HttpCommand } from '../http/http'
 import { executeHttpCommand } from '../http/http'
-import type { EventSchemas, EventStreamCommand, EventStreamData, StreamAwaitResult } from '../sse/sse'
+import type { EventStreamCommand } from '../sse/sse'
 import { executeEventStreamCommand } from '../sse/sse'
-import type {
-  SocketAwaitResult,
-  SocketSchemas,
-  WebSocketCommand,
-  WebSocketIncomingData,
-  WebSocketOutgoingData,
-} from '../web_socket/web_socket'
+import type { WebSocketCommand } from '../web_socket/web_socket'
 import { executeWebSocketCommand } from '../web_socket/web_socket'
 
 function dispatchCommand(
@@ -66,24 +58,4 @@ export function createClient(...options: ClientOption[]): Client {
   }
 
   return createClientFromConfig(conf)
-}
-
-export function execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
-  command: HttpCommand<TInput, TOutput>,
-  options: { client: Client; signal?: AbortSignal },
-): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>>
-export function execute<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
-  command: EventStreamCommand<TInput, TEvents>,
-  options: { client: Client; signal?: AbortSignal },
-): Promise<StreamAwaitResult<EventStreamData<TEvents>>>
-export function execute<
-  TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
->(
-  command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
-  options: { client: Client; signal?: AbortSignal },
-): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
-export function execute(command: Command, options: { client: Client; signal?: AbortSignal }): Promise<unknown> {
-  return options.client.execute(command, options)
 }

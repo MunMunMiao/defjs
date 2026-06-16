@@ -49,7 +49,6 @@ bun install @defjs/core
 import {
   createClient,
   defineRequest,
-  execute,
   struct,
 } from 'https://unpkg.com/@defjs/core/index.min.js';
 
@@ -83,7 +82,7 @@ const useGetUser = defineRequest({
  * @file src/pages/home.ts
  * @description Use the defined request in business code
  */
-const [error, user] = await execute(useGetUser(), { client });
+const [error, user] = await client.execute(useGetUser());
 if (error) {
   console.error(error);
 }

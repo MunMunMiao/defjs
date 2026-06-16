@@ -1,4 +1,4 @@
-import { createClient, defineEventStream, defineRequest, defineWebSocket, execute, struct, withEndpoint } from '@defjs/core'
+import { createClient, defineEventStream, defineRequest, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
 import { describe, expect, inject, test } from 'vitest'
 import { withOpenTelemetryServer } from './src/option'
@@ -58,7 +58,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
       },
     })
 
-    const [error, result] = await execute(useEchoHeaders({}), { client })
+    const [error, result] = await client.execute(useEchoHeaders({}))
 
     expect(error).toBeNull()
     expect(result).toBeDefined()
@@ -87,7 +87,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
       path: '/500',
     })
 
-    const [error] = await execute(useFail(undefined), { client })
+    const [error] = await client.execute(useFail(undefined))
 
     expect(error).not.toBeNull()
     const span = onlySpan(spans)

@@ -11,7 +11,7 @@ This release intentionally removes legacy public APIs instead of keeping aliases
 | Old API                                               | Replacement                                                                                                                |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `withSseOptions`                                      | `withSSEOptions`                                                                                                           |
-| `createGlobalClient` / `getGlobalClient` / `setGlobalClient` / `resetGlobalClient` | Create a `Client` with `createClient` and pass it to `execute(command, { client })` or call `client.execute(command)`      |
+| `createGlobalClient` / `getGlobalClient` / `setGlobalClient` / `resetGlobalClient` | Create a `Client` with `createClient` and call `client.execute(command)`      |
 | `cloneClient`                                         | Create a new `Client` with `createClient(...)` using the desired options                                                   |
 | old error submodules                                  | import `RequestError`, `createDefinitionError`, `createTransportError`, `ERR_ABORTED`, or `ERR_TIMEOUT` from `@defjs/core` |
 | old `ERR_*` string comparisons                        | branch on `RequestError.code` and the new error object shape                                                               |

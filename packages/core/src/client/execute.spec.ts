@@ -5,7 +5,7 @@ import { struct } from '../struct'
 import { defineRequest } from '../http'
 import { defineEventStream } from '../sse'
 import { defineWebSocket } from '../web_socket'
-import { createClient, execute } from './client'
+import { createClient } from './client'
 import type { Command } from './command'
 import { withEndpoint, withInterceptors } from './option'
 
@@ -20,7 +20,7 @@ describe('Client.execute', () => {
     await expect(client.execute({ kind: 'test' } as Command)).rejects.toThrow('Unsupported command kind: test')
   })
 
-  test('top-level execute dispatches http command', async () => {
+  test('client.execute dispatches http command', async () => {
     const useGet = defineRequest({
       method: 'GET',
       output: {
@@ -41,13 +41,13 @@ describe('Client.execute', () => {
       ),
     )
 
-    const [error, result] = await execute(useGet(), { client })
+    const [error, result] = await client.execute(useGet())
 
     expect(error).toBeNull()
     expect(result).toEqual({ ok: true })
   })
 
-  test('top-level execute dispatches event-stream command', async () => {
+  test('client.execute dispatches event-stream command', async () => {
     const useBasicSse = defineEventStream({
       events: {
         message: struct.string(),
@@ -57,7 +57,7 @@ describe('Client.execute', () => {
 
     const client = createClient(withEndpoint(inject('testServerHost')))
 
-    const [error, stream, open] = await execute(useBasicSse(), { client })
+    const [error, stream, open] = await client.execute(useBasicSse())
 
     expect(error).toBeNull()
     if (!stream || !open) {
@@ -76,7 +76,7 @@ describe('Client.execute', () => {
     await expect(stream.closed).resolves.toBeDefined()
   })
 
-  test('top-level execute dispatches web-socket command', async () => {
+  test('client.execute dispatches web-socket command', async () => {
     const useChatSocket = defineWebSocket({
       incoming: {
         joined: struct.object({
@@ -89,7 +89,7 @@ describe('Client.execute', () => {
 
     const client = createClient(withEndpoint(inject('testServerHost')))
 
-    const [error, socket, connection] = await execute(useChatSocket(), { client })
+    const [error, socket, connection] = await client.execute(useChatSocket())
 
     expect(error).toBeNull()
     if (!socket || !connection) {

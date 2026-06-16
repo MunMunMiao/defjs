@@ -25,13 +25,13 @@ export const appConfig = {
 }
 ```
 
-This creates a `@defjs/core` client pointing at the given host and registers it as an injectable `Client` token. You can retrieve it with `injectClient()` in components or services, or set it as the global client explicitly if you prefer implicit command execution.
+This creates a `@defjs/core` client pointing at the given host and registers it as an injectable `Client` token. You can retrieve it with `injectClient()` in components or services, then call `client.execute(command)`.
 
 ### 2. Use the injected client
 
 ```typescript
 import { injectClient } from '@defjs/angular'
-import { defineRequest, execute, struct } from '@defjs/core'
+import { defineRequest, struct } from '@defjs/core'
 
 @Component({
   /* ... */
@@ -46,7 +46,7 @@ export class UserComponent {
   })
 
   async loadUser() {
-    const [error, user] = await execute(this.getUser(), { client: this.client })
+    const [error, user] = await this.client.execute(this.getUser())
     // ...
   }
 }

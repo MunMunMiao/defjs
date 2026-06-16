@@ -1,4 +1,4 @@
-export { createClient, execute } from './client'
+export { createClient } from './client'
 export type {
   ClientConfig,
   ClientHttpOptions,
