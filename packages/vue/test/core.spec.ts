@@ -1,6 +1,6 @@
 import type { Client, ClientConfig, Interceptor } from '@defjs/core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createApp } from 'vue'
+import { createApp, h } from 'vue'
 import { injectClient, provideClient, withEndpoint, withInterceptors } from '../src'
 import { startHonoServer } from './server'
 
@@ -39,10 +39,11 @@ describe('injectClient', () => {
   it('should throw when no client is provided', () => {
     const app = createApp({
       setup() {
-        return { client: injectClient() }
+        injectClient()
+        return () => h('div')
       },
-      template: '<div></div>',
     })
+    app.config.warnHandler = () => {}
 
     expect(() => app.mount(document.createElement('div'))).toThrow('No HTTP client provided')
   })
@@ -135,4 +136,3 @@ describe('provideClient', () => {
     expect(injectedClient).toBeDefined()
   })
 })
-

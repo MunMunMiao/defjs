@@ -26,7 +26,7 @@ describe('request http runtime', () => {
       path: '/account',
     })
 
-    const [error, result, response] = (await client.execute(useCreateAccount())) as any
+    const [error, result, response] = await client.execute(useCreateAccount())
 
     expect(error).toBeNull()
     expect(result).toEqual({ id: 1, name: 'Jack' })
@@ -49,7 +49,7 @@ describe('request http runtime', () => {
       path: '/account/not-found',
     })
 
-    const [error, result, response] = (await client.execute(useMissingAccount())) as any
+    const [error, result, response] = await client.execute(useMissingAccount())
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(404)
@@ -90,7 +90,7 @@ describe('request http runtime', () => {
       path: '/user',
     })
 
-    const [error, result] = (await client.execute(useUser())) as any
+    const [error, result] = await client.execute(useUser())
 
     expect(error).toBeNull()
     expect(result).toEqual({ name: 'Miao' })
@@ -165,10 +165,7 @@ describe('request http runtime', () => {
       query: { include: true, tags: ['a', 'b'] },
     })
 
-    const [[firstError, firstResult], [secondError, secondResult]] = (await Promise.all([
-      client.execute(command),
-      client.execute(command),
-    ])) as any
+    const [[firstError, firstResult], [secondError, secondResult]] = await Promise.all([client.execute(command), client.execute(command)])
 
     expect(firstError).toBeNull()
     expect(secondError).toBeNull()
@@ -217,7 +214,7 @@ describe('request http runtime', () => {
       path: '/xsrf',
     })
 
-    const [error, result] = (await client.execute(useInspectXsrf())) as any
+    const [error, result] = await client.execute(useInspectXsrf())
 
     expect(error).toBeNull()
     expect(result).toEqual({ ok: true })
@@ -237,7 +234,7 @@ describe('request http runtime', () => {
       path: '/raw-input',
     } as never)
 
-    const [error, result, response] = (await client.execute(useRawInput())) as any
+    const [error, result, response] = await client.execute(useRawInput())
 
     expect(error?.kind).toBe('definition')
     expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
@@ -265,7 +262,7 @@ describe('request http runtime', () => {
       path: '/ignored-output',
     })
 
-    const [error, result, response] = (await client.execute(useIgnoredOutput())) as any
+    const [error, result, response] = await client.execute(useIgnoredOutput())
 
     expect(error).toBeNull()
     expect(result).toBeUndefined()
@@ -292,7 +289,7 @@ describe('request http runtime', () => {
       path: '/fail',
     })
 
-    const [error, result, response] = (await client.execute(useNoOutput())) as any
+    const [error, result, response] = await client.execute(useNoOutput())
 
     expect(error?.kind).toBe('http')
     expect(error?.code).toBe('HTTP_STATUS')

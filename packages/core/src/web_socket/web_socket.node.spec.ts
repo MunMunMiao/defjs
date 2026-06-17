@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { createClient, withEndpoint, withWebSocketHandle, withWebSocketReconnect, type Client } from '../client'
 import { ERR_ABORTED } from '../error'
 import { struct } from '../struct'
-import { defineWebSocket } from './index'
+import { defineWebSocket, type SocketAwaitResult } from './index'
 
 let lastMockInstance: MockWebSocketInstance | undefined
 
@@ -111,8 +111,8 @@ describe('web socket runtime environment edge cases', () => {
     lastMockInstance = undefined
   })
 
-  async function run(client: Client, command: unknown, options?: unknown): Promise<any> {
-    return client.execute(command as never, options)
+  async function run(client: Client, command: unknown, options?: unknown): Promise<SocketAwaitResult<unknown, unknown>> {
+    return client.execute(command as never, options) as Promise<SocketAwaitResult<unknown, unknown>>
   }
 
   test('should return transport error when WebSocket constructor throws', async () => {
@@ -124,7 +124,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const client = createClient(withEndpoint('http://localhost'))
-    const [error, socket, connection] = await run(client,useSocket())
+    const [error, socket, connection] = await run(client, useSocket())
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -146,7 +146,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const client = createClient(withEndpoint('http://localhost'))
-    const [error, socket, connection] = await run(client,useSocket())
+    const [error, socket, connection] = await run(client, useSocket())
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -164,7 +164,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const client = createClient(withEndpoint('http://localhost'))
-    const executePromise = run(client,useSocket(), { signal: controller.signal })
+    const executePromise = run(client, useSocket(), { signal: controller.signal })
 
     setTimeout(() => controller.abort(ERR_ABORTED), 10)
 
@@ -186,7 +186,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const client = createClient(withEndpoint('http://localhost'))
-    const [error, socket, connection] = await run(client,useSocket())
+    const [error, socket, connection] = await run(client, useSocket())
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -205,7 +205,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const client = createClient(withEndpoint('http://localhost'))
-    const executePromise = run(client,useSocket())
+    const executePromise = run(client, useSocket())
 
     const [, socket] = await executePromise
 
@@ -245,7 +245,7 @@ describe('web socket runtime environment edge cases', () => {
       withWebSocketHandle(globalThis.WebSocket),
       withWebSocketReconnect({ attempts: 1, delayMs: 50 }),
     )
-    const [error, socket] = await run(client,useSocket())
+    const [error, socket] = await run(client, useSocket())
 
     expect(error).toBeNull()
     if (!socket) {
@@ -276,7 +276,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const client = createClient(withEndpoint('http://localhost'))
-    const [, socket] = await run(client,useSocket())
+    const [, socket] = await run(client, useSocket())
 
     expect(socket).toBeDefined()
     expect(lastMockInstance?.binaryType).toBe('arraybuffer')
@@ -291,7 +291,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     const client = createClient(withEndpoint('http://localhost'))
-    const [error, socket] = await run(client,useSocket())
+    const [error, socket] = await run(client, useSocket())
 
     expect(error).toBeNull()
     if (!socket) {

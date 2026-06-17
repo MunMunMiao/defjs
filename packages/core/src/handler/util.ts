@@ -18,11 +18,7 @@ export function __getContentType(headers: Headers): string {
   return headers.get('Content-Type') || ''
 }
 
-export function __parseBody(params: {
-  request: HttpRequest
-  contentType: string
-  content: Uint8Array
-}): unknown {
+export function __parseBody(params: { request: HttpRequest; contentType: string; content: Uint8Array }): unknown {
   const { request, content, contentType } = params
   const responseType = request.responseType
 

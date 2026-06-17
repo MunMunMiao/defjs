@@ -24,11 +24,7 @@ function toArrayBuffer(content: Uint8Array): ArrayBuffer {
   return buffer.slice(byteOffset, byteOffset + byteLength) as ArrayBuffer
 }
 
-export function parseBody(params: {
-  request: HttpRequest
-  contentType: string
-  content: Uint8Array
-}): unknown {
+export function parseBody(params: { request: HttpRequest; contentType: string; content: Uint8Array }): unknown {
   const { request, content, contentType } = params
   const responseType = request.responseType
 

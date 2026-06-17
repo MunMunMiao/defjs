@@ -43,7 +43,7 @@ describe('request http runtime context', () => {
     const context = makeHttpContext()
     context.set(transactionToken, 'tx-001')
 
-    const [error] = (await client.execute(useTxRequest(undefined), { context })) as any
+    const [error] = await client.execute(useTxRequest(undefined), { context })
 
     expect(error).toBeNull()
     expect(seenHeader).toBe('tx-001')

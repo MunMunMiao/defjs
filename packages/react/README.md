@@ -56,7 +56,7 @@ function UserProfile() {
 
 ### `<ClientProvider options?: ClientOption[]>`
 
-Creates a client and provides it to child components. Throws if nested inside another `ClientProvider` is not supported; nest providers only at separate tree branches.
+Creates a client and provides it to child components. Nested `ClientProvider`s are supported: components read the nearest provider, so an inner provider creates a separate client for its subtree while siblings continue using the outer client.
 
 ### `useClient(): Client`
 

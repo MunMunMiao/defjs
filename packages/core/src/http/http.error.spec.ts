@@ -26,7 +26,7 @@ describe('request http runtime errors', () => {
       path: '/account/not-found',
     })
 
-    const [error, result, response] = (await client.execute(useMissingAccount())) as any
+    const [error, result, response] = await client.execute(useMissingAccount())
 
     expect(result).toBeUndefined()
     expect(response?.ok).toBe(false)
@@ -56,7 +56,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await client.execute(useValidatedRequest({ id: 'oops' } as never))) as any
+    const [error, result, response] = await client.execute(useValidatedRequest({ id: 'oops' } as never))
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -80,7 +80,7 @@ describe('request http runtime errors', () => {
       path: '/json',
     })
 
-    const [error, result, response] = (await client.execute(useBadResponse())) as any
+    const [error, result, response] = await client.execute(useBadResponse())
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(200)
@@ -102,7 +102,7 @@ describe('request http runtime errors', () => {
       path: '/500',
     })
 
-    const [error, result, response] = (await client.execute(useUndeclaredStatus())) as any
+    const [error, result, response] = await client.execute(useUndeclaredStatus())
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
@@ -125,7 +125,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await client.execute(useBadBuild({}))) as any
+    const [error, result, response] = await client.execute(useBadBuild({}))
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -153,7 +153,7 @@ describe('request http runtime errors', () => {
       path: '/intercepted',
     })
 
-    const [error, result, response] = (await client.execute(useIntercepted())) as any
+    const [error, result, response] = await client.execute(useIntercepted())
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -178,7 +178,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await client.execute(useRequest(), { signal: controller.signal })) as any
+    const [error, result, response] = await client.execute(useRequest(), { signal: controller.signal })
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -199,10 +199,10 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await client.execute(
-      useRequest({ id: 1 } as never),
-      { abort: controller.signal, timeout: 1 },
-    )) as any
+    const [error, result, response] = await client.execute(useRequest({ id: 1 } as never), {
+      abort: controller.signal,
+      timeout: 1,
+    } as never)
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -222,10 +222,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await client.execute(
-      useRequest(undefined),
-      { abort: controller.signal, timeout: 1 },
-    )) as any
+    const [error, result, response] = await client.execute(useRequest(undefined), { abort: controller.signal, timeout: 1 } as never)
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -245,7 +242,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error, result, response] = (await client.execute(useRequest(undefined), { abort: signal })) as any
+    const [error, result, response] = await client.execute(useRequest(undefined), { abort: signal })
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -274,7 +271,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await client.execute(useRequest())) as any
+    const [error, result, response] = await client.execute(useRequest())
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
@@ -307,7 +304,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await client.execute(useRequest())) as any
+    const [error, result, response] = await client.execute(useRequest())
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
@@ -330,7 +327,7 @@ describe('request http runtime errors', () => {
       path: '/null',
     })
 
-    const [error] = (await client.execute(useBadRequest({ id: 'invalid' } as never))) as any
+    const [error] = await client.execute(useBadRequest({ id: 'invalid' } as never))
 
     expect(error?.kind).toBe('definition')
   })
@@ -359,7 +356,7 @@ describe('request http runtime errors', () => {
     const promise = client.execute(command, { signal: controller.signal })
     controller.abort()
 
-    const [error] = (await promise) as any
+    const [error] = await promise
     expect(error?.kind).toBe('transport')
     expect(error?.code).toBe('ABORTED')
   })
@@ -394,7 +391,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await client.execute(useRequest())) as any
+    const [error, result, response] = await client.execute(useRequest())
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -422,7 +419,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await client.execute(useRequest())) as any
+    const [error, result, response] = await client.execute(useRequest())
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
@@ -453,7 +450,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await client.execute(useRequest())) as any
+    const [error, result, response] = await client.execute(useRequest())
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
@@ -483,7 +480,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await client.execute(useRequest())) as any
+    const [error, result, response] = await client.execute(useRequest())
 
     expect(error).toBeNull()
     expect(result).toBeUndefined()
@@ -510,7 +507,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await client.execute(useRequest())) as any
+    const [error, result, response] = await client.execute(useRequest())
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
@@ -543,7 +540,7 @@ describe('request http runtime errors', () => {
       path: '/test',
     })
 
-    const [error, result, response] = (await client.execute(useRequest())) as any
+    const [error, result, response] = await client.execute(useRequest())
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
@@ -574,10 +571,7 @@ describe('request http runtime errors', () => {
       path: '/delay',
     })
 
-    const [error, result, response] = (await client.execute(
-      useDelay({ query: { ms: 100 } }),
-      { timeout: 10 },
-    )) as any
+    const [error, result, response] = await client.execute(useDelay({ query: { ms: 100 } }), { timeout: 10 })
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()

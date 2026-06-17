@@ -5,6 +5,7 @@
 **Goal:** 将 `@defjs/core` 从「lazy PromiseLike ref + 内部状态机」迁移到「Command 只读描述对象 + `client.execute(command)` 解释器」范式，同时删除不再需要的全局 client、`provideGlobalClient`、`cloneClient`。
 
 **Architecture:**
+
 - `defineRequest` / `defineEventStream` / `defineWebSocket` 返回 **Command Builder**，调用后得到只读 `Command` 描述对象。
 - `Command` 不再是 `PromiseLike`，不暴露状态机、`cancel()`、`close()`、`onStateChange()`、`onRuntimeError()` 或 `.with()`；per-call 配置通过 builder 第二参数和 `client.execute(command, options)` 传入。
 - `createClient()` 返回的 `Client` 新增 `execute(command)` 方法，按 `command.kind` 分发到三个传输层执行器。
@@ -33,53 +34,53 @@ Expected: `packages/**/src`、`packages/**/test` 和 `packages/opentelemetry-ser
 
 ## 旧 Ref 能力迁移表
 
-| 旧能力 | 新写法 |
-|---|---|
-| `await useGetUser(input)` | `await client.execute(useGetUser(input))` |
-| `await useGetUser(input).with({ client })` | `await client.execute(useGetUser(input))` |
-| `ref.cancel(reason)` | 执行前创建 `AbortController`，调用 `client.execute(command, { signal })` 后用 `controller.abort(reason)` |
-| SSE/WebSocket 连接完成前 `ref.close()` | 使用 `AbortController` 中止 pending `client.execute(...)` |
-| SSE 连接完成后 `ref.close(reason)` | 使用返回的 `stream.close(reason)` |
-| WebSocket 连接完成后 `ref.close(code, reason)` | 使用返回的 `socket.close(code, reason)` |
-| `ref.status` / `ref.error` | 不再提供启动前 Ref 状态；通过返回元组、handle/session 状态和 runtime error 监听表达结果 |
-| WebSocket 启动前 `ref.onStateChange()` / `ref.onRuntimeError()` | 不再支持启动前监听；连接成功后使用返回的 session 监听 |
+| 旧能力                                                          | 新写法                                                                                                   |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `await useGetUser(input)`                                       | `await client.execute(useGetUser(input))`                                                                |
+| `await useGetUser(input).with({ client })`                      | `await client.execute(useGetUser(input))`                                                                |
+| `ref.cancel(reason)`                                            | 执行前创建 `AbortController`，调用 `client.execute(command, { signal })` 后用 `controller.abort(reason)` |
+| SSE/WebSocket 连接完成前 `ref.close()`                          | 使用 `AbortController` 中止 pending `client.execute(...)`                                                |
+| SSE 连接完成后 `ref.close(reason)`                              | 使用返回的 `stream.close(reason)`                                                                        |
+| WebSocket 连接完成后 `ref.close(code, reason)`                  | 使用返回的 `socket.close(code, reason)`                                                                  |
+| `ref.status` / `ref.error`                                      | 不再提供启动前 Ref 状态；通过返回元组、handle/session 状态和 runtime error 监听表达结果                  |
+| WebSocket 启动前 `ref.onStateChange()` / `ref.onRuntimeError()` | 不再支持启动前监听；连接成功后使用返回的 session 监听                                                    |
 
 ## 文件结构映射
 
-| 文件 | 职责 |
-|---|---|
-| `packages/core/src/client/command.ts` | 新增：`BaseCommand`；Task 5 在三个传输 Command 类型存在后收窄 `Command` 联合类型 |
-| `packages/core/src/client/resolve.ts` | 修改：`Client` 接口增加 `execute()` 重载 |
-| `packages/core/src/client/client.ts` | 修改：`createClient` 返回完整 Client；新增顶层 `execute()`；删除 `cloneClient`；保留 `resolveClientConfig` 直到所有旧调用点迁移完成 |
-| `packages/core/src/client/client.spec.ts` | 删除 `cloneClient` 与 global client 相关测试 |
-| `packages/core/src/client/client.type.test.ts` | 删除 `cloneClient` 类型测试 |
-| `packages/core/src/client/execute.spec.ts` | 新增：Client.execute 与顶层 execute 测试 |
-| `packages/core/src/client/global.ts` | 删除（旧 API 调用点清零后） |
-| `packages/core/src/client/resolve.spec.ts` | 删除（旧 API 调用点清零后） |
-| `packages/core/src/client/public_api.ts` | 修改：移除 `cloneClient` / global client 导出 |
-| `packages/core/src/http/http.ts` | 修改：定义 `HttpCommand` / `RequestCommandBuilder`；改写 `defineRequest`；`executeHttpEndpoint` → `executeHttpCommand`；移除 Ref |
-| `packages/core/src/http/public_api.ts` | 修改：导出 Command 类型，移除 Ref |
-| `packages/core/src/sse/sse.ts` | 修改：定义 `EventStreamCommand` / builder；改写 `defineEventStream`；`executeEventStreamEndpoint` → `runEventStreamCommand`；移除 Ref |
-| `packages/core/src/sse/public_api.ts` | 修改：导出 Command 类型，移除 Ref |
-| `packages/core/src/web_socket/web_socket.ts` | 修改：定义 `WebSocketCommand` / builder；改写 `defineWebSocket`；`executeWebSocketEndpoint` → `runWebSocketCommand`；移除 Ref |
-| `packages/core/src/web_socket/public_api.ts` | 修改：导出 Command 类型，移除 Ref |
-| `packages/core/src/public_api.ts` | 修改：导出 `Command` / `execute` |
-| `packages/angular/src/core.ts` | 移除 `provideGlobalClient` |
-| `packages/angular/src/public_api.ts` | 移除 `provideGlobalClient` 导出 |
-| `packages/vue/src/core.ts` | 移除 `provideGlobalClient` |
-| `packages/vue/src/public_api.ts` | 移除 `provideGlobalClient` 导出 |
-| `packages/vue/src/core.browser.spec.ts` | 改调用方式，移除 provideGlobalClient 测试 |
-| `packages/vue/test/core.spec.ts` | 改调用方式，移除 provideGlobalClient 测试 |
-| `packages/opentelemetry-server/e2e.spec.ts` | 改调用方式，移除 `setGlobalClient` |
-| `packages/core/README.md` / `packages/angular/README.md` / `packages/vue/README.md` | 删除全局 client / cloneClient / provideGlobalClient 文档 |
-| `packages/opentelemetry-server/src/option.ts` | 不变 |
+| 文件                                                                                | 职责                                                                                                                                  |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core/src/client/command.ts`                                               | 新增：`BaseCommand`；Task 5 在三个传输 Command 类型存在后收窄 `Command` 联合类型                                                      |
+| `packages/core/src/client/resolve.ts`                                               | 修改：`Client` 接口增加 `execute()` 重载                                                                                              |
+| `packages/core/src/client/client.ts`                                                | 修改：`createClient` 返回完整 Client；新增顶层 `execute()`；删除 `cloneClient`；保留 `resolveClientConfig` 直到所有旧调用点迁移完成   |
+| `packages/core/src/client/client.spec.ts`                                           | 删除 `cloneClient` 与 global client 相关测试                                                                                          |
+| `packages/core/src/client/client.type.test.ts`                                      | 删除 `cloneClient` 类型测试                                                                                                           |
+| `packages/core/src/client/execute.spec.ts`                                          | 新增：Client.execute 与顶层 execute 测试                                                                                              |
+| `packages/core/src/client/global.ts`                                                | 删除（旧 API 调用点清零后）                                                                                                           |
+| `packages/core/src/client/resolve.spec.ts`                                          | 删除（旧 API 调用点清零后）                                                                                                           |
+| `packages/core/src/client/public_api.ts`                                            | 修改：移除 `cloneClient` / global client 导出                                                                                         |
+| `packages/core/src/http/http.ts`                                                    | 修改：定义 `HttpCommand` / `RequestCommandBuilder`；改写 `defineRequest`；`executeHttpEndpoint` → `executeHttpCommand`；移除 Ref      |
+| `packages/core/src/http/public_api.ts`                                              | 修改：导出 Command 类型，移除 Ref                                                                                                     |
+| `packages/core/src/sse/sse.ts`                                                      | 修改：定义 `EventStreamCommand` / builder；改写 `defineEventStream`；`executeEventStreamEndpoint` → `runEventStreamCommand`；移除 Ref |
+| `packages/core/src/sse/public_api.ts`                                               | 修改：导出 Command 类型，移除 Ref                                                                                                     |
+| `packages/core/src/web_socket/web_socket.ts`                                        | 修改：定义 `WebSocketCommand` / builder；改写 `defineWebSocket`；`executeWebSocketEndpoint` → `runWebSocketCommand`；移除 Ref         |
+| `packages/core/src/web_socket/public_api.ts`                                        | 修改：导出 Command 类型，移除 Ref                                                                                                     |
+| `packages/core/src/public_api.ts`                                                   | 修改：导出 `Command` / `execute`                                                                                                      |
+| `packages/angular/src/core.ts`                                                      | 移除 `provideGlobalClient`                                                                                                            |
+| `packages/angular/src/public_api.ts`                                                | 移除 `provideGlobalClient` 导出                                                                                                       |
+| `packages/vue/src/core.ts`                                                          | 移除 `provideGlobalClient`                                                                                                            |
+| `packages/vue/src/public_api.ts`                                                    | 移除 `provideGlobalClient` 导出                                                                                                       |
+| `packages/vue/src/core.browser.spec.ts`                                             | 改调用方式，移除 provideGlobalClient 测试                                                                                             |
+| `packages/vue/test/core.spec.ts`                                                    | 改调用方式，移除 provideGlobalClient 测试                                                                                             |
+| `packages/opentelemetry-server/e2e.spec.ts`                                         | 改调用方式，移除 `setGlobalClient`                                                                                                    |
+| `packages/core/README.md` / `packages/angular/README.md` / `packages/vue/README.md` | 删除全局 client / cloneClient / provideGlobalClient 文档                                                                              |
+| `packages/opentelemetry-server/src/option.ts`                                       | 不变                                                                                                                                  |
 
 ---
 
 ### Task 1: 创建 `BaseCommand` / `Command` 并更新 `Client` 接口
 
-
 **Files:**
+
 - Create: `packages/core/src/client/command.ts`
 - Modify: `packages/core/src/client/resolve.ts`
 - Modify: `packages/core/src/client/client.ts`
@@ -188,8 +189,8 @@ git commit -m "feat(core): add command base and client execute shell"
 
 ### Task 2: HTTP `HttpCommand` / `RequestCommandBuilder` 与 `executeHttpCommand`
 
-
 **Files:**
+
 - Modify: `packages/core/src/http/http.ts`
 - Modify: `packages/core/src/http/public_api.ts`
 - Test: `packages/core/src/http/http.type.test.ts`
@@ -225,11 +226,12 @@ import { number, object, string } from '../struct'
 
 describe('Client.execute HTTP command', () => {
   test('executes an HTTP command with configured transport', async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ name: 'Ada' }), {
-        headers: { 'content-type': 'application/json' },
-        status: 200,
-      }),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ name: 'Ada' }), {
+          headers: { 'content-type': 'application/json' },
+          status: 200,
+        }),
     )
     const client = createClient(withEndpoint('https://api.example.com'), withHTTPHandle(fetchMock))
     const useGetUser = defineRequest({
@@ -267,12 +269,10 @@ export interface HttpCommand<
   readonly config?: UseRequestConfig
 }
 
-export type RequestCommandBuilder<
-  TInput extends AnyStruct | undefined,
-  TOutput extends RequestOutputShape | undefined,
-> = IsInputOptional<TInput> extends true
-  ? (input?: EndpointInput<TInput>, config?: UseRequestConfig) => HttpCommand<TInput, TOutput>
-  : (input: EndpointInput<TInput>, config?: UseRequestConfig) => HttpCommand<TInput, TOutput>
+export type RequestCommandBuilder<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> =
+  IsInputOptional<TInput> extends true
+    ? (input?: EndpointInput<TInput>, config?: UseRequestConfig) => HttpCommand<TInput, TOutput>
+    : (input: EndpointInput<TInput>, config?: UseRequestConfig) => HttpCommand<TInput, TOutput>
 ```
 
 同时从 `UseRequestBaseConfig` 中移除 `client?: Client`：
@@ -306,8 +306,7 @@ export function defineRequest<TInput extends AnyStruct | undefined = undefined, 
     } as HttpCommand<TInput, TOutput>
   }
 
-  return ((input?: EndpointInput<TInput>, config?: UseRequestConfig) =>
-    create(input, config)) as RequestCommandBuilder<TInput, TOutput>
+  return ((input?: EndpointInput<TInput>, config?: UseRequestConfig) => create(input, config)) as RequestCommandBuilder<TInput, TOutput>
 }
 ```
 
@@ -316,10 +315,7 @@ export function defineRequest<TInput extends AnyStruct | undefined = undefined, 
 删除 `createHttpRequestRef`、`HttpRequestRef`、`UseRequestEndpointFn`、`HttpRefState`。将原 `executeHttpEndpoint` 重命名为 `executeHttpCommand`，签名改为：
 
 ```ts
-export async function executeHttpCommand<
-  TInput extends AnyStruct | undefined,
-  TOutput extends RequestOutputShape | undefined,
->(
+export async function executeHttpCommand<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
   clientConfig: ClientConfig,
   command: HttpCommand<TInput, TOutput>,
   options?: { signal?: AbortSignal },
@@ -391,19 +387,30 @@ export async function executeHttpCommand<
       return [null, undefined as RequestSuccessData<TOutput>, ignoredResponse]
     }
     const errorMessage = getHttpErrorMessage(response)
-    return fail(createHttpStatusError(response.status, errorMessage, ignoredResponse) as RequestError<RequestErrorData<TOutput>>, ignoredResponse)
+    return fail(
+      createHttpStatusError(response.status, errorMessage, ignoredResponse) as RequestError<RequestErrorData<TOutput>>,
+      ignoredResponse,
+    )
   }
 
   const schema = resolveOutputSchema(definition.output, response.status)
   if (!schema) {
-    return fail(createDefinitionError('UNDECLARED_STATUS', new Error(`Undeclared status: ${response.status}`), settledResponse) as RequestError<RequestErrorData<TOutput>>, settledResponse)
+    return fail(
+      createDefinitionError('UNDECLARED_STATUS', new Error(`Undeclared status: ${response.status}`), settledResponse) as RequestError<
+        RequestErrorData<TOutput>
+      >,
+      settledResponse,
+    )
   }
 
   let parsedBody: unknown
   try {
     parsedBody = parseStructResponse(schema, response.body, responseType)
   } catch (error) {
-    return fail(createDefinitionError('RESPONSE_VALIDATION_FAILED', error, settledResponse) as RequestError<RequestErrorData<TOutput>>, settledResponse)
+    return fail(
+      createDefinitionError('RESPONSE_VALIDATION_FAILED', error, settledResponse) as RequestError<RequestErrorData<TOutput>>,
+      settledResponse,
+    )
   }
 
   if (settledResponse.ok) {
@@ -412,7 +419,12 @@ export async function executeHttpCommand<
   }
 
   const errorMessage = getHttpErrorMessage(response)
-  return fail(createHttpStatusError(response.status, errorMessage, settledResponse, parsedBody as RequestErrorData<TOutput>) as RequestError<RequestErrorData<TOutput>>, settledResponse)
+  return fail(
+    createHttpStatusError(response.status, errorMessage, settledResponse, parsedBody as RequestErrorData<TOutput>) as RequestError<
+      RequestErrorData<TOutput>
+    >,
+    settledResponse,
+  )
 }
 ```
 
@@ -442,8 +454,8 @@ git commit -m "feat(core): HttpCommand, RequestCommandBuilder and executeHttpCom
 
 ### Task 3: SSE `EventStreamCommand` / builder 与 `executeEventStreamCommand`
 
-
 **Files:**
+
 - Modify: `packages/core/src/sse/sse.ts`
 - Modify: `packages/core/src/sse/public_api.ts`
 - Test: `packages/core/src/sse/sse.type.test.ts`
@@ -485,12 +497,10 @@ export interface EventStreamCommand<
   readonly config?: UseEventStreamConfig
 }
 
-export type EventStreamCommandBuilder<
-  TInput extends AnyStruct | undefined,
-  TEvents extends EventSchemas,
-> = IsInputOptional<TInput> extends true
-  ? (input?: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
-  : (input: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
+export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEvents extends EventSchemas> =
+  IsInputOptional<TInput> extends true
+    ? (input?: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
+    : (input: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
 ```
 
 从 `UseEventStreamBaseConfig` 中移除 `client?: Client`。
@@ -522,8 +532,10 @@ export function defineEventStream<TInput extends AnyStruct | undefined = undefin
     } as EventStreamCommand<TInput, TEvents>
   }
 
-  return ((input?: EndpointInput<TInput>, config?: UseEventStreamConfig) =>
-    create(input, config)) as EventStreamCommandBuilder<TInput, TEvents>
+  return ((input?: EndpointInput<TInput>, config?: UseEventStreamConfig) => create(input, config)) as EventStreamCommandBuilder<
+    TInput,
+    TEvents
+  >
 }
 ```
 
@@ -534,10 +546,7 @@ export function defineEventStream<TInput extends AnyStruct | undefined = undefin
 新增导出包装函数：
 
 ```ts
-export async function executeEventStreamCommand<
-  TInput extends AnyStruct | undefined,
-  TEvents extends EventSchemas,
->(
+export async function executeEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
   clientConfig: ClientConfig,
   command: EventStreamCommand<TInput, TEvents>,
   options?: { signal?: AbortSignal },
@@ -564,6 +573,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
 ```
 
 函数体做三处替换：
+
 1. 删除 `clientConfig = resolveClientConfig(config.client)` 块，直接使用参数 `clientConfig`。
 2. `createEventStreamRequest(...)` 调用增加 `timeout: config.timeout`。
 3. `mergeAbortSignals(controller.signal, [config.abort], config.timeout)` 改为 `mergeAbortSignals(controller.signal, [config.abort, options?.signal], config.timeout)`。
@@ -598,8 +608,8 @@ git commit -m "feat(core): EventStreamCommand, builder and executeEventStreamCom
 
 ### Task 4: WebSocket `WebSocketCommand` / builder 与 `executeWebSocketCommand`
 
-
 **Files:**
+
 - Modify: `packages/core/src/web_socket/web_socket.ts`
 - Modify: `packages/core/src/web_socket/public_api.ts`
 - Test: `packages/core/src/web_socket/web_socket.type.test.ts`
@@ -646,15 +656,16 @@ export type WebSocketCommandBuilder<
   TInput extends AnyStruct | undefined,
   TIncoming extends SocketSchemas,
   TOutgoing extends SocketSchemas | undefined,
-> = IsInputOptional<TInput> extends true
-  ? (
-      input?: EndpointInput<TInput>,
-      config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
-    ) => WebSocketCommand<TInput, TIncoming, TOutgoing>
-  : (
-      input: EndpointInput<TInput>,
-      config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
-    ) => WebSocketCommand<TInput, TIncoming, TOutgoing>
+> =
+  IsInputOptional<TInput> extends true
+    ? (
+        input?: EndpointInput<TInput>,
+        config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+      ) => WebSocketCommand<TInput, TIncoming, TOutgoing>
+    : (
+        input: EndpointInput<TInput>,
+        config?: UseWebSocketConfig<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+      ) => WebSocketCommand<TInput, TIncoming, TOutgoing>
 ```
 
 从 `UseWebSocketBaseConfig` 中移除 `client?: Client`。
@@ -666,23 +677,17 @@ export function defineWebSocket<
   TInput extends AnyStruct,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
->(
-  definition: WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing>,
-): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
+>(definition: WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
->(
-  definition: WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>,
-): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
+>(definition: WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
->(
-  definition: WebSocketDefinition<TInput, TIncoming, TOutgoing>,
-): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing> {
+>(definition: WebSocketDefinition<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing> {
   const endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing> = {
     ...definition,
     kind: 'web-socket' as const,
@@ -722,9 +727,7 @@ export async function executeWebSocketCommand<
   clientConfig: ClientConfig,
   command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
   options?: { signal?: AbortSignal },
-): Promise<
-  SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
-> {
+): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>> {
   const { endpoint, input, config } = command
   const controller = new AbortController()
   const state: SocketRefState<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>> = {
@@ -757,6 +760,7 @@ async function runWebSocketCommand<
 ```
 
 函数体做三处替换：
+
 1. 删除 `clientConfig = resolveClientConfig(config?.client)` 块，直接使用参数 `clientConfig`。
 2. `mergeAbortSignals(controller.signal, [config?.abort], config?.timeout)` 改为 `mergeAbortSignals(controller.signal, [config?.abort, options?.signal], config?.timeout)`。
 3. 其余逻辑（`createWebSocketBuild`、`createWebSocketRequest`、session 生命周期、心跳、重连、队列）保持不变。
@@ -782,8 +786,8 @@ git commit -m "feat(core): WebSocketCommand, builder and executeWebSocketCommand
 
 ### Task 5: 实现 `createClient` 的 `execute()` 与顶层 `execute()`，并删除 `cloneClient`
 
-
 **Files:**
+
 - Modify: `packages/core/src/client/client.ts`
 - Modify: `packages/core/src/client/client.spec.ts`
 - Modify: `packages/core/src/client/client.type.test.ts`
@@ -817,10 +821,7 @@ export interface BaseCommand<TKind extends string> {
   readonly kind: TKind
 }
 
-export type Command =
-  | HttpCommand<any, any>
-  | EventStreamCommand<any, any>
-  | WebSocketCommand<any, any, any>
+export type Command = HttpCommand<any, any> | EventStreamCommand<any, any> | WebSocketCommand<any, any, any>
 ```
 
 ```ts
@@ -916,6 +917,7 @@ export type { BaseCommand, Command } from './command'
 - [ ] **Step 3: 删除 `cloneClient` 相关测试与类型测试**
 
 在 `packages/core/src/client/client.spec.ts` 中删除所有 `cloneClient` 测试，例如：
+
 - `should cloneClient override endpoint and transport seams`
 - `should cloneClient preserve previous endpoint when not overridden`
 - `should cloneClient preserve previous webSocket protocols when not overridden`
@@ -947,8 +949,8 @@ git commit -m "feat(core): Client.execute dispatcher, top-level execute, remove 
 
 ### Task 6: 移除 Angular / Vue `provideGlobalClient`，保留 core global 直到调用点清零
 
-
 **Files:**
+
 - Modify: `packages/angular/src/core.ts`
 - Modify: `packages/angular/src/public_api.ts`
 - Modify: `packages/vue/src/core.ts`
@@ -989,6 +991,7 @@ export { HTTP_CLIENT, injectClient, provideClient, withEndpoint, withInterceptor
 - [ ] **Step 3: 更新 Vue 中 `provideGlobalClient` 相关测试**
 
 删除或改写以下测试：
+
 - `should create a Plugin with provideGlobalClient`
 - `should set global client with provideGlobalClient`
 - `test/core.spec.ts` 中所有 `provideGlobalClient` 相关 `it`
@@ -1020,8 +1023,8 @@ git commit -m "feat(angular,vue): remove provideGlobalClient"
 
 ### Task 7: 更新 Angular / Vue 调用用例
 
-
 **Files:**
+
 - Modify: `packages/vue/src/core.browser.spec.ts`
 - Modify: `packages/vue/test/core.spec.ts`
 - Modify: `packages/angular/` 中的测试（如有）
@@ -1053,8 +1056,8 @@ git commit -m "test(vue): migrate tests to client.execute"
 
 ### Task 8: 重写核心单元测试、类型测试与 OpenTelemetry e2e
 
-
 **Files:**
+
 - Modify: `packages/core/src/http/http.spec.ts`
 - Modify: `packages/core/src/http/http.browser.spec.ts`
 - Modify: `packages/core/src/http/http.client.spec.ts`
@@ -1077,6 +1080,7 @@ git commit -m "test(vue): migrate tests to client.execute"
 - [ ] **Step 1: 统一替换模式**
 
 HTTP：
+
 - `beforeEach(() => setGlobalClient(client))` / `afterEach(() => resetGlobalClient())` → 删除。
 - `const ref = useGetUser(...)` → `const command = useGetUser(...)`
 - `await ref` / `await ref.with({ client })` → `await client.execute(command)`
@@ -1084,17 +1088,20 @@ HTTP：
 - 多次 `await` 同一 ref 的测试改为每次 `client.execute` 都发起请求。
 
 SSE / WebSocket：
+
 - `await useStream().with({ client })` / `await useStream()` → `await client.execute(useStream())`
 - 连接完成前的 `ref.close()` → `const controller = new AbortController()` + `client.execute(command, { signal: controller.signal })` + `controller.abort(reason)`。
 - 连接完成后的 `ref.close()` → 返回的 `stream.close(reason)` / `session.close(code, reason)`。
 - 状态机测试改为验证返回的 handle/session 状态。
 
 OpenTelemetry e2e：
+
 - `setGlobalClient(client)` → 删除。
 - `await useEchoHeaders({}).with({ client })` → `await client.execute(useEchoHeaders({}))`
 - `await useStream()` / `await useSocket()` → `await client.execute(useStream())` / `await client.execute(useSocket())`
 
 类型测试：
+
 - `streamRef.with({ client: streamClient })` → `client.execute(streamCommand)`。
 - `cloneClient(...)` 相关断言删除。
 
@@ -1125,10 +1132,12 @@ rg "setGlobalClient|resetGlobalClient|getGlobalClient|resolveClientConfig|provid
 Expected: `packages/**/src`、`packages/**/test` 和 `packages/opentelemetry-server/e2e.spec.ts` 无旧 API 命中。
 
 删除：
+
 - `packages/core/src/client/global.ts`
 - `packages/core/src/client/resolve.spec.ts`
 
 同时清理：
+
 - `packages/core/src/client/client.ts` 中的 `import { getGlobalClient } from './global'`
 - `packages/core/src/client/client.ts` 中的 `export function resolveClientConfig(...)`
 - `packages/core/src/client/public_api.ts` 中的 `getGlobalClient` / `setGlobalClient` / `resetGlobalClient` 导出
@@ -1151,6 +1160,7 @@ git commit -m "test(core,opentelemetry-server): migrate tests and remove global 
 ### Task 9: 文档更新与全量验证
 
 **Files:**
+
 - Modify: `packages/core/README.md`
 - Modify: `packages/angular/README.md`
 - Modify: `packages/vue/README.md`
@@ -1159,6 +1169,7 @@ git commit -m "test(core,opentelemetry-server): migrate tests and remove global 
 - [ ] **Step 1: 更新 README**
 
 删除或替换以下内容：
+
 - `setGlobalClient` / `getGlobalClient` / `resetGlobalClient` 相关说明。
 - `cloneClient` 相关说明。
 - Angular / Vue `provideGlobalClient` 相关说明。
@@ -1178,9 +1189,9 @@ const [err2, user2] = await execute(useGetUser({ id: 1 }), { client })
 
 ```md
 ---
-"@defjs/core": major
-"@defjs/angular": major
-"@defjs/vue": major
+'@defjs/core': major
+'@defjs/angular': major
+'@defjs/vue': major
 ---
 
 Replace PromiseLike request refs and global client helpers with explicit Command objects and `client.execute(command)`.

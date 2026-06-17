@@ -1,24 +1,34 @@
+import type { Command } from './command'
 import type { ClientConfig } from './config'
 import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
-import type { Command } from './command'
 import type { ClientOption } from './option'
 import type { Client } from './resolve'
 import { CLIENT } from './resolve'
-import type { HttpCommand } from '../http/http'
+import type { AnyStruct } from '../struct'
+import type { HttpCommand, HttpExecuteOptions } from '../http/http'
 import { executeHttpCommand } from '../http/http'
-import type { EventStreamCommand } from '../sse/sse'
+import type { RequestOutputShape } from '../http/request'
+import type { EventSchemas, EventStreamCommand, EventStreamExecuteOptions } from '../sse/sse'
 import { executeEventStreamCommand } from '../sse/sse'
-import type { WebSocketCommand } from '../web_socket/web_socket'
+import type { SocketSchemas, WebSocketCommand, WebSocketExecuteOptions } from '../web_socket/web_socket'
 import { executeWebSocketCommand } from '../web_socket/web_socket'
+
+type DispatchHttpCommand = HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>
+type DispatchEventStreamCommand = EventStreamCommand<AnyStruct | undefined, EventSchemas>
+type DispatchWebSocketCommand = WebSocketCommand<AnyStruct | undefined, SocketSchemas, SocketSchemas | undefined>
 
 function dispatchCommand(config: ClientConfig, command: Command, options?: unknown): Promise<unknown> {
   switch (command.kind) {
     case 'http':
-      return executeHttpCommand(config, command as HttpCommand<any, any>, options as any)
+      return executeHttpCommand(config, command as DispatchHttpCommand, options as HttpExecuteOptions)
     case 'event-stream':
-      return executeEventStreamCommand(config, command as EventStreamCommand<any, any>, options as any) as Promise<unknown>
+      return executeEventStreamCommand(
+        config,
+        command as DispatchEventStreamCommand,
+        options as EventStreamExecuteOptions,
+      ) as Promise<unknown>
     case 'web-socket':
-      return executeWebSocketCommand(config, command as WebSocketCommand<any, any, any>, options as any) as Promise<unknown>
+      return executeWebSocketCommand(config, command as DispatchWebSocketCommand, options as WebSocketExecuteOptions) as Promise<unknown>
   }
   return Promise.reject(new Error(`Unsupported command kind: ${command.kind}`))
 }

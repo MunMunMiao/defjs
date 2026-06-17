@@ -19,6 +19,7 @@ export default defineConfig({
     globalSetup: globalSetupPath,
     browser: {
       enabled: true,
+      api: 63317,
       provider: playwright(),
       connectTimeout: 120_000,
       headless: true,

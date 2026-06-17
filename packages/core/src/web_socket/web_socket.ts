@@ -155,10 +155,9 @@ interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
 export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketBaseConfig<TIncoming, TOutgoing> &
   UseCancellationConfig
 
-export type WebSocketExecuteOptions<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketConfig<
-  TIncoming,
-  TOutgoing
-> & { signal?: AbortSignal }
+export type WebSocketExecuteOptions<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketConfig<TIncoming, TOutgoing> & {
+  signal?: AbortSignal
+}
 
 export interface WebSocketCommand<
   TInput extends AnyStruct | undefined,
@@ -173,9 +172,10 @@ export type WebSocketCommandBuilder<
   TInput extends AnyStruct | undefined,
   TIncoming extends SocketSchemas,
   TOutgoing extends SocketSchemas | undefined,
-> = IsInputOptional<TInput> extends true
-  ? (input?: EndpointInput<TInput>) => WebSocketCommand<TInput, TIncoming, TOutgoing>
-  : (input: EndpointInput<TInput>) => WebSocketCommand<TInput, TIncoming, TOutgoing>
+> =
+  IsInputOptional<TInput> extends true
+    ? (input?: EndpointInput<TInput>) => WebSocketCommand<TInput, TIncoming, TOutgoing>
+    : (input: EndpointInput<TInput>) => WebSocketCommand<TInput, TIncoming, TOutgoing>
 
 type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
@@ -257,11 +257,7 @@ export function defineWebSocket<
     } as WebSocketCommand<TInput, TIncoming, TOutgoing>
   }
 
-  return ((input?: EndpointInput<TInput>) => create(input)) as WebSocketCommandBuilder<
-    TInput,
-    TIncoming,
-    TOutgoing
-  >
+  return ((input?: EndpointInput<TInput>) => create(input)) as WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 }
 
 async function runWebSocketCommand<
@@ -689,9 +685,7 @@ export async function executeWebSocketCommand<
   clientConfig: ClientConfig,
   command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
   options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
-): Promise<
-  SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
-> {
+): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>> {
   const { endpoint, input } = command
   const config = options ?? {}
   const controller = new AbortController()

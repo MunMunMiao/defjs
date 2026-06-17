@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, withEndpoint, type Client } from '../client'
 import { struct } from '../struct'
-import { defineWebSocket } from './index'
+import { defineWebSocket, type SocketAwaitResult } from './index'
 
 describe('web socket runtime reconnect', () => {
   let client: Client
@@ -14,13 +14,13 @@ describe('web socket runtime reconnect', () => {
     // cleanup only
   })
 
-  async function run(command: unknown, options?: unknown): Promise<any> {
-    return client.execute(command as never, options)
+  async function run(command: unknown, options?: unknown): Promise<SocketAwaitResult<unknown, unknown>> {
+    return client.execute(command as never, options) as Promise<SocketAwaitResult<unknown, unknown>>
   }
 
   test('should reconnect and flush queued messages', async () => {
     const useReconnectSocket = defineWebSocket({
-      build: (request: any, input: any) => {
+      build: (request, input) => {
         request.setQueryParams({
           key: input.query.key,
         })
@@ -106,7 +106,7 @@ describe('web socket runtime reconnect', () => {
 
     const command = useRetrySocket()
 
-    const [error, socket, connection] = (await retryClient.execute(command, {
+    const [error, socket, connection] = await retryClient.execute(command, {
       reconnect: {
         attempts: 2,
         delayMs: 0,
@@ -115,7 +115,7 @@ describe('web socket runtime reconnect', () => {
           return context.attempt < 2
         },
       },
-    })) as any
+    })
 
     expect(socket).toBeUndefined()
     expect(connection?.url).toBe('ws://127.0.0.1:1/ws/reconnect')

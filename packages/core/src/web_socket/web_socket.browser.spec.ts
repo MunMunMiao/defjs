@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 
 import { createClient, withEndpoint, type Client } from '../client'
 import { struct } from '../struct'
-import { defineWebSocket } from './index'
+import { defineWebSocket, type SocketAwaitResult } from './index'
 
 describe('web socket browser runtime', () => {
   let client: Client
@@ -15,8 +15,8 @@ describe('web socket browser runtime', () => {
     // cleanup only
   })
 
-  async function run(command: unknown, options?: unknown): Promise<any> {
-    return client.execute(command as never, options)
+  async function run(command: unknown, options?: unknown): Promise<SocketAwaitResult<unknown, unknown>> {
+    return client.execute(command as never, options) as Promise<SocketAwaitResult<unknown, unknown>>
   }
 
   test('should connect and exchange typed messages in real browsers', async () => {
@@ -93,7 +93,7 @@ describe('web socket browser runtime', () => {
 
   test('should reconnect in real browsers', async () => {
     const command = defineWebSocket({
-      build: (request: any, input: any) => {
+      build: (request, input) => {
         request.setQueryParams({
           key: input.query.key,
         })

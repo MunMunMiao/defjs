@@ -37,6 +37,7 @@ yarn-error.log*
 # output
 dist
 test-out
+doc/.vitepress/cache/
 
 # IDEA
 .idea

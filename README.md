@@ -46,11 +46,7 @@ bun install @defjs/core
 **ES modules only**
 
 ```javascript
-import {
-  createClient,
-  defineRequest,
-  struct,
-} from 'https://unpkg.com/@defjs/core/index.min.js';
+import { createClient, defineRequest, struct } from 'https://unpkg.com/@defjs/core/index.min.js'
 
 /**
  * @title Step 1
@@ -59,7 +55,7 @@ import {
  */
 const client = createClient({
   endpoint: 'https://example.com',
-});
+})
 
 /**
  * @title Step 2
@@ -75,18 +71,18 @@ const useGetUser = defineRequest({
     }),
   },
   path: '/v1/user',
-});
+})
 
 /**
  * @title Step 3
  * @file src/pages/home.ts
  * @description Use the defined request in business code
  */
-const [error, user] = await client.execute(useGetUser());
+const [error, user] = await client.execute(useGetUser())
 if (error) {
-  console.error(error);
+  console.error(error)
 }
-console.log(user);
+console.log(user)
 ```
 
 ## Documentation

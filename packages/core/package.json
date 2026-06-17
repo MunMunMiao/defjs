@@ -21,7 +21,8 @@
   "scripts": {
     "build": "tsdown",
     "pub": "pnpm publish",
-    "test": "vitest run --config vitest.config.ts --coverage",
+    "test": "vitest run --config vitest.config.ts --coverage && pnpm run test:type",
+    "test:type": "vitest run --config vitest.config.node.ts --typecheck.only --typecheck.include \"src/**/*.type.test.ts\"",
     "typecheck": "tsgo --project tsconfig.json --noEmit"
   },
   "devDependencies": {

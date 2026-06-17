@@ -1,8 +1,8 @@
 import { describe, expect, inject, it } from 'vitest'
 import { useEffect, useState } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
-import { defineRequest, struct } from '@defjs/core'
-import { ClientProvider, useClient, withEndpoint } from './core'
+import { createHttpInterceptor, defineRequest, struct } from '@defjs/core'
+import { ClientProvider, useClient, withEndpoint, withInterceptors } from './core'
 
 const UserSchema = struct.object({
   id: struct.number(),
@@ -85,5 +85,93 @@ describe('React wrapper e2e', () => {
 
     expect(clients.length).toBe(2)
     expect(clients[0]).toBe(clients[1])
+  })
+
+  it('should resolve the nearest client provider in nested component trees', async () => {
+    const endpoint = inject('testServerHost')
+    const seenScopes: string[] = []
+    let outerClient: unknown
+    let outerSiblingClient: unknown
+    let innerMiddleClient: unknown
+    let innerLeafClient: unknown
+
+    const scopedInterceptor = (scope: string) =>
+      createHttpInterceptor(async (req, next) => {
+        seenScopes.push(scope)
+        req.headers?.set('x-defjs-scope', scope)
+        return next(req)
+      })
+
+    function OuterRequestConsumer() {
+      const client = useClient()
+      const [count, setCount] = useState('loading')
+      outerClient = client
+
+      useEffect(() => {
+        client.execute(getUsers()).then(([error, users]) => {
+          if (error) {
+            setCount('error')
+            return
+          }
+
+          setCount(String((users as Array<{ id: number; name: string }>).length))
+        })
+      }, [client])
+
+      return <span data-testid="outer-count">{count}</span>
+    }
+
+    function OuterSiblingConsumer() {
+      outerSiblingClient = useClient()
+      return null
+    }
+
+    function InnerMiddle() {
+      innerMiddleClient = useClient()
+      return <InnerLeaf />
+    }
+
+    function InnerLeaf() {
+      const client = useClient()
+      const [count, setCount] = useState('loading')
+      innerLeafClient = client
+
+      useEffect(() => {
+        client.execute(getUsers()).then(([error, users]) => {
+          if (error) {
+            setCount('error')
+            return
+          }
+
+          setCount(String((users as Array<{ id: number; name: string }>).length))
+        })
+      }, [client])
+
+      return <span data-testid="inner-count">{count}</span>
+    }
+
+    render(
+      <ClientProvider options={[withEndpoint(endpoint), withInterceptors(() => scopedInterceptor('outer'))]}>
+        <OuterRequestConsumer />
+        <ClientProvider options={[withEndpoint(endpoint), withInterceptors(() => scopedInterceptor('inner'))]}>
+          <InnerMiddle />
+        </ClientProvider>
+        <OuterSiblingConsumer />
+      </ClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('outer-count').textContent).toBe('2')
+      expect(screen.getByTestId('inner-count').textContent).toBe('2')
+    })
+
+    expect(outerClient).toBeDefined()
+    expect(outerSiblingClient).toBeDefined()
+    expect(innerMiddleClient).toBeDefined()
+    expect(innerLeafClient).toBeDefined()
+    expect(outerClient).toBe(outerSiblingClient)
+    expect(innerMiddleClient).toBe(innerLeafClient)
+    expect(innerLeafClient).not.toBe(outerClient)
+    expect([...seenScopes].sort()).toEqual(['inner', 'outer'])
   })
 })

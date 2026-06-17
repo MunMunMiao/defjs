@@ -62,12 +62,12 @@
 
 ### 与 Vue/Angular 包装器的映射
 
-| Vue/Angular                  | React                                  | 实现方式                          |
-| ---------------------------- | -------------------------------------- | --------------------------------- |
-| `provideClient(...options)`  | `<ClientProvider options={[...]}>`     | React Context Provider            |
-| `injectClient()`             | `useClient()`                          | `useContext(HttpClientContext)`   |
-| `withEndpoint(endpoint)`     | `withEndpoint(endpoint)`               | 复用 @defjs/core 的 helper        |
-| `withInterceptors(...fns)`   | `withInterceptors(...fns)`             | 复用 @defjs/core 的 helper        |
+| Vue/Angular                 | React                              | 实现方式                        |
+| --------------------------- | ---------------------------------- | ------------------------------- |
+| `provideClient(...options)` | `<ClientProvider options={[...]}>` | React Context Provider          |
+| `injectClient()`            | `useClient()`                      | `useContext(HttpClientContext)` |
+| `withEndpoint(endpoint)`    | `withEndpoint(endpoint)`           | 复用 @defjs/core 的 helper      |
+| `withInterceptors(...fns)`  | `withInterceptors(...fns)`         | 复用 @defjs/core 的 helper      |
 
 ### 关键设计决策
 
@@ -100,10 +100,7 @@ import { createAuthInterceptor } from './interceptors'
 
 function App() {
   return (
-    <ClientProvider options={[
-      withEndpoint('https://api.example.com'),
-      withInterceptors(createAuthInterceptor),
-    ]}>
+    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)]}>
       <Router />
     </ClientProvider>
   )
@@ -182,11 +179,7 @@ export interface ClientProviderProps {
 export function ClientProvider({ options = [], children }: ClientProviderProps) {
   const [client] = useState(() => createClient(...options))
 
-  return (
-    <HttpClientContext.Provider value={client}>
-      {children}
-    </HttpClientContext.Provider>
-  )
+  return <HttpClientContext.Provider value={client}>{children}</HttpClientContext.Provider>
 }
 
 export function useClient(): Client {
@@ -241,10 +234,10 @@ try {
 
 ### 错误处理策略
 
-| 错误类型   | 处理方式            | 示例                                                           |
-| ---------- | ------------------- | -------------------------------------------------------------- |
-| 依赖缺失   | 抛出异常            | `throw new Error('No HTTP client provided ...')`               |
-| 运行时错误 | 由 @defjs/core 处理 | `catch (error) { ... }`                                        |
+| 错误类型   | 处理方式            | 示例                                             |
+| ---------- | ------------------- | ------------------------------------------------ |
+| 依赖缺失   | 抛出异常            | `throw new Error('No HTTP client provided ...')` |
+| 运行时错误 | 由 @defjs/core 处理 | `catch (error) { ... }`                          |
 
 ## 测试设计
 
@@ -645,44 +638,44 @@ packages/react/
 
 ### 文件职责
 
-| 文件                       | 职责                                              |
-| -------------------------- | ------------------------------------------------- |
+| 文件                       | 职责                                                |
+| -------------------------- | --------------------------------------------------- |
 | `src/core.tsx`             | 实现 Provider、Hook、withEndpoint、withInterceptors |
-| `src/public_api.ts`        | 统一导出公共 API                                   |
-| `src/index.ts`             | 包入口，转发 public_api                            |
-| `src/core.browser.spec.ts` | 浏览器单元/集成测试                                |
-| `src/e2e.browser.spec.ts`  | 完整 React 应用端到端测试                          |
-| `test/shared.ts`           | 测试共享配置                                       |
-| `test/setup.ts`            | Hono 测试服务器 global setup                       |
+| `src/public_api.ts`        | 统一导出公共 API                                    |
+| `src/index.ts`             | 包入口，转发 public_api                             |
+| `src/core.browser.spec.ts` | 浏览器单元/集成测试                                 |
+| `src/e2e.browser.spec.ts`  | 完整 React 应用端到端测试                           |
+| `test/shared.ts`           | 测试共享配置                                        |
+| `test/setup.ts`            | Hono 测试服务器 global setup                        |
 
 ## 与 Vue/Angular 包装器的对比
 
 ### 功能对比
 
-| 功能             | Angular | Vue | React |
-| ---------------- | ------- | --- | ----- |
-| provideClient    | ✅      | ✅  | ✅（组件形式） |
+| 功能             | Angular | Vue | React                |
+| ---------------- | ------- | --- | -------------------- |
+| provideClient    | ✅      | ✅  | ✅（组件形式）       |
 | injectClient     | ✅      | ✅  | ✅（useClient Hook） |
-| withEndpoint     | ✅      | ✅  | ✅ |
-| withInterceptors | ✅      | ✅  | ✅ |
+| withEndpoint     | ✅      | ✅  | ✅                   |
+| withInterceptors | ✅      | ✅  | ✅                   |
 
 ### API 对比
 
-| API              | Angular                                           | Vue                            | React                                      |
-| ---------------- | ------------------------------------------------- | ------------------------------ | ------------------------------------------ |
-| provideClient    | `provideClient(...feature): EnvironmentProviders` | `provideClient(...): Plugin`   | `<ClientProvider options={[...]}>`         |
-| injectClient     | `injectClient(): Client`                          | `injectClient(): Client`       | `useClient(): Client`                      |
-| withEndpoint     | `withEndpoint(endpoint): EnvironmentProviders`    | `withEndpoint(endpoint): ClientOption` | `withEndpoint(endpoint): ClientOption` |
+| API              | Angular                                           | Vue                                      | React                                    |
+| ---------------- | ------------------------------------------------- | ---------------------------------------- | ---------------------------------------- |
+| provideClient    | `provideClient(...feature): EnvironmentProviders` | `provideClient(...): Plugin`             | `<ClientProvider options={[...]}>`       |
+| injectClient     | `injectClient(): Client`                          | `injectClient(): Client`                 | `useClient(): Client`                    |
+| withEndpoint     | `withEndpoint(endpoint): EnvironmentProviders`    | `withEndpoint(endpoint): ClientOption`   | `withEndpoint(endpoint): ClientOption`   |
 | withInterceptors | `withInterceptors(...fns): EnvironmentProviders`  | `withInterceptors(...fns): ClientOption` | `withInterceptors(...fns): ClientOption` |
 
 ### 实现对比
 
-| 实现         | Angular                       | Vue                    | React                        |
-| ------------ | ----------------------------- | ---------------------- | ---------------------------- |
-| 依赖注入     | InjectionToken + 环境 Provider | InjectionKey + provide | React Context + useContext   |
-| 初始化时机   | APP_INITIALIZER（异步）        | Plugin install（同步）  | 组件首次渲染 useState 初始化器 |
-| SSR 安全     | 依赖 Angular 平台抽象          | Vue 3 SSR 需额外注意    | `"use client"` + useState    |
-| 构建工具     | tsdown                        | tsdown                 | tsdown                       |
+| 实现       | Angular                        | Vue                    | React                          |
+| ---------- | ------------------------------ | ---------------------- | ------------------------------ |
+| 依赖注入   | InjectionToken + 环境 Provider | InjectionKey + provide | React Context + useContext     |
+| 初始化时机 | APP_INITIALIZER（异步）        | Plugin install（同步） | 组件首次渲染 useState 初始化器 |
+| SSR 安全   | 依赖 Angular 平台抽象          | Vue 3 SSR 需额外注意   | `"use client"` + useState      |
+| 构建工具   | tsdown                         | tsdown                 | tsdown                         |
 
 ## 待确认问题
 

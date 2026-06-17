@@ -20,7 +20,7 @@ describe('sse browser runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream, open] = (await baseClient.execute(useBasicStream())) as any
+    const [error, stream, open] = await baseClient.execute(useBasicStream())
 
     expect(error).toBeNull()
     expect(open?.response?.ok).toBe(true)
@@ -45,7 +45,7 @@ describe('sse browser runtime', () => {
       path: '/sse/basic',
     })
 
-    const [error, stream] = (await baseClient.execute(useStream())) as any
+    const [error, stream] = await baseClient.execute(useStream())
 
     expect(error).toBeNull()
     if (!stream) {

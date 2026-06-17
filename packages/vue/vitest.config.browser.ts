@@ -5,6 +5,11 @@ import { globalSetupPath, packageRoot } from './test/shared'
 
 export default defineConfig({
   root: packageRoot,
+  define: {
+    __VUE_OPTIONS_API__: 'true',
+    __VUE_PROD_DEVTOOLS__: 'false',
+    __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
+  },
   resolve: {
     alias: {
       '@defjs/core': resolve(packageRoot, '../core/src'),
@@ -15,6 +20,7 @@ export default defineConfig({
     globalSetup: globalSetupPath,
     browser: {
       enabled: true,
+      api: 63316,
       provider: playwright(),
       connectTimeout: 120_000,
       headless: true,

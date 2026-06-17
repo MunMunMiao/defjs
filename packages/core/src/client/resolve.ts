@@ -2,20 +2,8 @@ import type { Command } from './command'
 import type { ClientConfig } from './config'
 import type { AnyStruct } from '../struct'
 import type { RequestOutputShape } from '../http/request'
-import type {
-  HttpAwaitResult,
-  HttpCommand,
-  HttpExecuteOptions,
-  RequestErrorData,
-  RequestSuccessData,
-} from '../http/http'
-import type {
-  EventSchemas,
-  EventStreamCommand,
-  EventStreamData,
-  EventStreamExecuteOptions,
-  StreamAwaitResult,
-} from '../sse/sse'
+import type { HttpAwaitResult, HttpCommand, HttpExecuteOptions, RequestErrorData, RequestSuccessData } from '../http/http'
+import type { EventSchemas, EventStreamCommand, EventStreamData, EventStreamExecuteOptions, StreamAwaitResult } from '../sse/sse'
 import type {
   SocketAwaitResult,
   SocketSchemas,
@@ -40,11 +28,7 @@ export type Client = {
     options?: EventStreamExecuteOptions,
   ): Promise<StreamAwaitResult<EventStreamData<TEvents>>>
 
-  execute<
-    TInput extends AnyStruct | undefined,
-    TIncoming extends SocketSchemas,
-    TOutgoing extends SocketSchemas | undefined,
-  >(
+  execute<TInput extends AnyStruct | undefined, TIncoming extends SocketSchemas, TOutgoing extends SocketSchemas | undefined>(
     command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
     options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>

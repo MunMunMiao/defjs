@@ -8,6 +8,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "strictNullChecks": true,
+    "experimentalDecorators": true,
     "isolatedModules": true,
     "skipLibCheck": true,
     "noEmit": true,

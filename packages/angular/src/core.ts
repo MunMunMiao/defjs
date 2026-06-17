@@ -19,7 +19,7 @@ export function withEndpoint(endpoint: string): EnvironmentProviders {
 
 export function withInterceptors(...fns: (() => Interceptor)[]): EnvironmentProviders {
   return makeEnvironmentProviders(
-    fns.map(fn => ({
+    fns.map((fn) => ({
       provide: HTTP_INTERCEPTOR_FNS,
       useFactory: fn,
       multi: true,

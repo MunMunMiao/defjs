@@ -27,7 +27,7 @@ describe('http browser runtime', () => {
       path: '/json',
     })
 
-    const [error, result, response] = (await baseClient.execute(useGetAccount())) as any
+    const [error, result, response] = await baseClient.execute(useGetAccount())
 
     expect(error).toBeNull()
     expect(result).toEqual({ id: 1 })
@@ -46,14 +46,11 @@ describe('http browser runtime', () => {
       path: '/',
     })
 
-    const [error, result, response] = (await baseClient.execute(
-      useCreateAccount({ body: new Uint8Array(32 * 1024).buffer }),
-      {
-        onDownloadProgress(event) {
-          downloadLoaded.push(event.loaded)
-        },
+    const [error, result, response] = await baseClient.execute(useCreateAccount({ body: new Uint8Array(32 * 1024).buffer }), {
+      onDownloadProgress(event) {
+        downloadLoaded.push(event.loaded)
       },
-    )) as any
+    })
 
     expect(error).toBeNull()
     expect(result).toBeUndefined()
@@ -71,10 +68,7 @@ describe('http browser runtime', () => {
       path: '/delay',
     })
 
-    const [error, result, response] = (await baseClient.execute(
-      useDelay({ query: { ms: 1000 } }),
-      { timeout: 100 },
-    )) as any
+    const [error, result, response] = await baseClient.execute(useDelay({ query: { ms: 1000 } }), { timeout: 100 })
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
@@ -103,7 +97,7 @@ describe('http browser runtime', () => {
       path: '/xsrf',
     })
 
-    const [error, result, response] = (await client.execute(useXsrf())) as any
+    const [error, result, response] = await client.execute(useXsrf())
 
     expect(error).toBeNull()
     expect(result).toBeUndefined()
@@ -125,7 +119,7 @@ describe('http browser runtime', () => {
       path: '/xsrf-validate',
     })
 
-    const [error, result, response] = (await client.execute(useValidate())) as any
+    const [error, result, response] = await client.execute(useValidate())
 
     expect(error).toBeNull()
     expect(result).toEqual({ ok: true })
@@ -147,7 +141,7 @@ describe('http browser runtime', () => {
       path: '/xsrf-validate',
     })
 
-    const [error, result, response] = (await client.execute(useValidate())) as any
+    const [error, result, response] = await client.execute(useValidate())
 
     expect(error).not.toBeNull()
     expect(result).toBeUndefined()

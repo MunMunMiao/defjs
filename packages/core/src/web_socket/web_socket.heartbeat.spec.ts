@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, withEndpoint, type Client } from '../client'
 import { struct } from '../struct'
-import { defineWebSocket } from './index'
+import { defineWebSocket, type SocketAwaitResult } from './index'
 
 describe('web socket runtime heartbeat', () => {
   let client: Client
@@ -14,8 +14,8 @@ describe('web socket runtime heartbeat', () => {
     // cleanup only
   })
 
-  async function run(command: unknown, options?: unknown): Promise<any> {
-    return client.execute(command as never, options)
+  async function run(command: unknown, options?: unknown): Promise<SocketAwaitResult<unknown, unknown>> {
+    return client.execute(command as never, options) as Promise<SocketAwaitResult<unknown, unknown>>
   }
 
   test('should send heartbeat messages automatically when heartbeat.message is provided', async () => {

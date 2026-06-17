@@ -1,11 +1,5 @@
 import { describe, expect, test, vi } from 'vitest'
-import {
-  createClient,
-  withEndpoint,
-  withHTTPHandle,
-  withInterceptors,
-  withQueryParamsSerializer,
-} from '../client'
+import { createClient, withEndpoint, withHTTPHandle, withInterceptors, withQueryParamsSerializer } from '../client'
 import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
 import { struct } from '../struct'
@@ -43,7 +37,7 @@ describe('request http runtime with client config', () => {
       path: '/query',
     })
 
-    const [error] = (await client.execute(useSerializedQuery({ query: { a: '1', b: '2' } }))) as any
+    const [error] = await client.execute(useSerializedQuery({ query: { a: '1', b: '2' } }))
 
     expect(error).toBeNull()
     expect(capturedRequestUrl).toBe('/query?A=1&B=2')
@@ -84,7 +78,7 @@ describe('request http runtime with client config', () => {
       path: '/query',
     })
 
-    const [error] = (await client.execute(useSerializedQuery({ query: { a: '1', b: '2' } }))) as any
+    const [error] = await client.execute(useSerializedQuery({ query: { a: '1', b: '2' } }))
 
     expect(error).toBeNull()
     expect(interceptorCalls).toBe(1)

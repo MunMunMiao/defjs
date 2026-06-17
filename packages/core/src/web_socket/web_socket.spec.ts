@@ -3,7 +3,7 @@ import { createClient, getClientConfig, withEndpoint, withInterceptors, type Cli
 import { ERR_ABORTED } from '../error'
 import { createWebSocketInterceptor } from '../interceptor'
 import { struct } from '../struct'
-import { defineWebSocket } from './index'
+import { defineWebSocket, type SocketAwaitResult } from './index'
 
 describe('web socket runtime', () => {
   let client: Client
@@ -16,8 +16,8 @@ describe('web socket runtime', () => {
     // cleanup only
   })
 
-  async function run(command: unknown, options?: unknown): Promise<any> {
-    return client.execute(command as never, options)
+  async function run(command: unknown, options?: unknown): Promise<SocketAwaitResult<unknown, unknown>> {
+    return client.execute(command as never, options) as Promise<SocketAwaitResult<unknown, unknown>>
   }
 
   test('should return transport error with invalid client', async () => {
@@ -34,7 +34,7 @@ describe('web socket runtime', () => {
       }
     }
 
-    const [error, socket, connection] = (await client.execute(useSocket())) as any
+    const [error, socket, connection] = await client.execute(useSocket())
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -89,7 +89,7 @@ describe('web socket runtime', () => {
 
   test('should resolve execute and receive typed messages', async () => {
     const useChatSocket = defineWebSocket({
-      build: (request: any, input: any) => {
+      build: (request, input) => {
         request.setQueryParams({
           roomId: input.query.roomId,
         })
@@ -361,7 +361,7 @@ describe('web socket runtime', () => {
     }
 
     const states: string[] = []
-    const unsubscribeSocketState = socket.onStateChange((state: any) => {
+    const unsubscribeSocketState = socket.onStateChange((state) => {
       states.push(state)
     })
     const unsubscribeSocketError = socket.onRuntimeError(() => {
@@ -431,9 +431,7 @@ describe('web socket runtime', () => {
       path: '/ws/basic',
     })
 
-    const [error, socket, connection] = await run(
-      useSocket({ id: 'bad' } as never),
-    )
+    const [error, socket, connection] = await run(useSocket({ id: 'bad' } as never))
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -466,7 +464,7 @@ describe('web socket runtime', () => {
     })
 
     const badClient = createClient(withEndpoint('not-a-valid-url'))
-    const [error, socket, connection] = (await badClient.execute(useSocket())) as any
+    const [error, socket, connection] = await badClient.execute(useSocket())
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -494,7 +492,7 @@ describe('web socket runtime', () => {
 
   test('should support reconnect, queued sends, and abort during reconnect delay', async () => {
     const useSocket = defineWebSocket({
-      build(request: any, input: any) {
+      build(request, input) {
         request.setQueryParams({ key: input.query.key })
       },
       input: struct.request({ query: struct.object({ key: struct.string() }) }),
@@ -547,7 +545,7 @@ describe('web socket runtime', () => {
 
   test('should abort during reconnect delay with aborted state', async () => {
     const useSocket = defineWebSocket({
-      build(request: any, input: any) {
+      build(request, input) {
         request.setQueryParams({ key: input.query.key })
       },
       input: struct.request({ query: struct.object({ key: struct.string() }) }),
@@ -580,7 +578,7 @@ describe('web socket runtime', () => {
 
   test('should reconnect immediately when delay is zero', async () => {
     const useSocket = defineWebSocket({
-      build(request: any, input: any) {
+      build(request, input) {
         request.setQueryParams({ key: input.query.key })
       },
       input: struct.request({ query: struct.object({ key: struct.string() }) }),
@@ -627,7 +625,7 @@ describe('web socket runtime', () => {
       ),
     )
 
-    const [error, socket, connection] = (await clientWithInterceptor.execute(useSocket())) as any
+    const [error, socket, connection] = await clientWithInterceptor.execute(useSocket())
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
@@ -657,7 +655,7 @@ describe('web socket runtime', () => {
       ),
     )
 
-    const [error, socket, connection] = (await clientWithInterceptor.execute(useSocket())) as any
+    const [error, socket, connection] = await clientWithInterceptor.execute(useSocket())
 
     expect(error).toBeNull()
     expect(connection?.url).toContain('roomId=from-interceptor')

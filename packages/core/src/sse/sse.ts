@@ -114,12 +114,10 @@ export interface EventStreamCommand<
 
 export type EventStreamExecuteOptions = UseEventStreamConfig & { signal?: AbortSignal }
 
-export type EventStreamCommandBuilder<
-  TInput extends AnyStruct | undefined,
-  TEvents extends EventSchemas,
-> = IsInputOptional<TInput> extends true
-  ? (input?: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
-  : (input: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
+export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEvents extends EventSchemas> =
+  IsInputOptional<TInput> extends true
+    ? (input?: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
+    : (input: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
 
 type EventStreamEndpoint<
   TInput extends AnyStruct | undefined = undefined,
@@ -160,10 +158,7 @@ function castParsedEventStreamInput<TInput extends AnyStruct | undefined>(value:
   return value as ParsedInput<TInput>
 }
 
-export async function executeEventStreamCommand<
-  TInput extends AnyStruct | undefined,
-  TEvents extends EventSchemas,
->(
+export async function executeEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
   clientConfig: ClientConfig,
   command: EventStreamCommand<TInput, TEvents>,
   options?: EventStreamExecuteOptions,

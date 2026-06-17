@@ -37,6 +37,7 @@ packages/react/
 ### Task 1: Create package configuration
 
 **Files:**
+
 - Create: `packages/react/package.json`
 - Create: `packages/react/tsconfig.json`
 - Create: `packages/react/tsconfig.build.json`
@@ -130,7 +131,14 @@ packages/react/
     "declaration": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
-  "exclude": ["test", "src/**/*.spec.ts", "src/**/*.spec.tsx", "src/**/*.type.test.ts", "src/**/*.browser.spec.ts", "src/**/*.browser.spec.tsx"]
+  "exclude": [
+    "test",
+    "src/**/*.spec.ts",
+    "src/**/*.spec.tsx",
+    "src/**/*.type.test.ts",
+    "src/**/*.browser.spec.ts",
+    "src/**/*.browser.spec.tsx"
+  ]
 }
 ```
 
@@ -158,6 +166,7 @@ git commit -m "chore(react): bootstrap package config"
 ### Task 2: Add build configuration
 
 **Files:**
+
 - Create: `packages/react/tsdown.config.ts`
 
 - [ ] **Step 1: Create `packages/react/tsdown.config.ts`**
@@ -232,6 +241,7 @@ git commit -m "chore(react): add tsdown build config"
 ### Task 3: Add test infrastructure
 
 **Files:**
+
 - Create: `packages/react/test/shared.ts`
 - Create: `packages/react/test/setup.ts`
 - Create: `packages/react/vitest.config.ts`
@@ -441,6 +451,7 @@ git commit -m "chore(react): add test infrastructure"
 ### Task 4: Write unit/integration tests for core wrapper
 
 **Files:**
+
 - Create: `packages/react/src/core.browser.spec.tsx`
 
 - [ ] **Step 1: Create the test file with imports and mount helper**
@@ -589,6 +600,7 @@ git commit -m "test(react): add failing browser tests for core wrapper"
 ### Task 5: Implement core wrapper
 
 **Files:**
+
 - Create: `packages/react/src/core.tsx`
 - Create: `packages/react/src/public_api.ts`
 - Create: `packages/react/src/index.ts`
@@ -674,6 +686,7 @@ git commit -m "feat(react): implement ClientProvider, useClient and option helpe
 ### Task 6: Write e2e tests with real React app
 
 **Files:**
+
 - Create: `packages/react/src/e2e.browser.spec.tsx`
 
 - [ ] **Step 1: Create `packages/react/src/e2e.browser.spec.tsx`**
@@ -713,7 +726,9 @@ function UserList() {
   return (
     <ul data-testid="user-list">
       {users.map((user) => (
-        <li key={user.id} data-testid={`user-${user.id}`}>{user.name}</li>
+        <li key={user.id} data-testid={`user-${user.id}`}>
+          {user.name}
+        </li>
       ))}
     </ul>
   )
@@ -737,9 +752,7 @@ describe('React wrapper e2e', () => {
     document.body.appendChild(container)
     const root = createRoot(container)
 
-    root.render(
-      <App endpoint={endpoint} />,
-    )
+    root.render(<App endpoint={endpoint} />)
 
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="user-1"]')?.textContent).toBe('John')
@@ -804,11 +817,12 @@ git commit -m "test(react): add e2e tests with real React app"
 ### Task 7: Add README
 
 **Files:**
+
 - Create: `packages/react/README.md`
 
 - [ ] **Step 1: Create `packages/react/README.md`**
 
-```markdown
+````markdown
 # @defjs/react
 
 React wrapper for [@defjs/core](https://github.com/defjs/defjs).
@@ -818,6 +832,7 @@ React wrapper for [@defjs/core](https://github.com/defjs/defjs).
 ```bash
 pnpm add @defjs/react @defjs/core react
 ```
+````
 
 ## Usage
 
@@ -827,12 +842,14 @@ import { defineRequest, struct } from '@defjs/core'
 
 function App() {
   return (
-    <ClientProvider options={[
-      withEndpoint('https://api.example.com'),
-      withInterceptors(() => ({
-        // interceptor
-      })),
-    ]}>
+    <ClientProvider
+      options={[
+        withEndpoint('https://api.example.com'),
+        withInterceptors(() => ({
+          // interceptor
+        })),
+      ]}
+    >
       <UserList />
     </ClientProvider>
   )
@@ -871,20 +888,22 @@ function UserList() {
 ## License
 
 MIT
-```
+
+````
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add packages/react/README.md
 git commit -m "docs(react): add README"
-```
+````
 
 ---
 
 ### Task 8: Verify build, typecheck, lint and tests
 
 **Files:**
+
 - Modify: may update files based on verification output
 
 - [ ] **Step 1: Run typecheck**
@@ -935,6 +954,7 @@ git commit -m "chore(react): pass verification (typecheck, lint, tests, build)"
 ### Task 9: Add workspace integration
 
 **Files:**
+
 - Modify: `pnpm-workspace.yaml` (if needed)
 - Modify: root `package.json` scripts (if needed)
 
@@ -967,18 +987,18 @@ git commit --allow-empty -m "chore(react): confirm workspace integration"
 
 ### Spec coverage
 
-| Spec section | Implementing task |
-|--------------|-------------------|
-| API: ClientProvider | Task 5 |
-| API: useClient | Task 5 |
-| API: withEndpoint | Task 5 |
-| API: withInterceptors | Task 5 |
-| SSR/RSC safety (`"use client"`) | Task 5 |
-| Unit/integration tests | Task 4 |
-| E2E tests with real React app | Task 6 |
-| Build config (tsdown) | Task 2 |
-| Test config (Vitest browser mode) | Task 3 |
-| README | Task 7 |
+| Spec section                      | Implementing task |
+| --------------------------------- | ----------------- |
+| API: ClientProvider               | Task 5            |
+| API: useClient                    | Task 5            |
+| API: withEndpoint                 | Task 5            |
+| API: withInterceptors             | Task 5            |
+| SSR/RSC safety (`"use client"`)   | Task 5            |
+| Unit/integration tests            | Task 4            |
+| E2E tests with real React app     | Task 6            |
+| Build config (tsdown)             | Task 2            |
+| Test config (Vitest browser mode) | Task 3            |
+| README                            | Task 7            |
 
 ### Placeholder scan
 

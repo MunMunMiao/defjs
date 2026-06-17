@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, withEndpoint, withQueryParamsSerializer, type Client } from '../client'
 import { struct } from '../struct'
-import { defineWebSocket } from './index'
+import { defineWebSocket, type SocketAwaitResult } from './index'
 
 describe('web socket runtime lifecycle', () => {
   let client: Client
@@ -15,8 +15,8 @@ describe('web socket runtime lifecycle', () => {
     // cleanup only
   })
 
-  async function run(command: unknown, options?: unknown): Promise<any> {
-    return client.execute(command as never, options)
+  async function run(command: unknown, options?: unknown): Promise<SocketAwaitResult<unknown, unknown>> {
+    return client.execute(command as never, options) as Promise<SocketAwaitResult<unknown, unknown>>
   }
 
   test('message listener add/remove use the same ref(no leak)', () => {
@@ -93,7 +93,7 @@ describe('web socket runtime lifecycle', () => {
     )
 
     const useBeforeConnectSocket = defineWebSocket({
-      build: (request: any, input: any) => {
+      build: (request, input) => {
         request.setQueryParams({
           token: input.query.token,
         })
@@ -110,11 +110,11 @@ describe('web socket runtime lifecycle', () => {
     let callCount = 0
 
     const command = useBeforeConnectSocket({ query: { token: 'secret-0' } })
-    const [error, socket, connection] = (await clientWithSerializer.execute(command, {
+    const [error, socket, connection] = await clientWithSerializer.execute(command, {
       beforeConnect: async () => {
         callCount += 1
       },
-    })) as any
+    })
 
     expect(error).toBeNull()
     expect(callCount).toBe(1)

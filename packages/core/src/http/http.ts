@@ -37,12 +37,10 @@ export interface HttpCommand<
 
 export type HttpExecuteOptions = UseRequestConfig & { signal?: AbortSignal }
 
-export type RequestCommandBuilder<
-  TInput extends AnyStruct | undefined,
-  TOutput extends RequestOutputShape | undefined,
-> = IsInputOptional<TInput> extends true
-  ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
-  : (input: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
+export type RequestCommandBuilder<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> =
+  IsInputOptional<TInput> extends true
+    ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
+    : (input: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
 
 type ExpandStatus<T> = T extends readonly (infer U extends number)[] ? U : T extends number ? T : never
 
@@ -146,10 +144,7 @@ export function defineRequest<TInput extends AnyStruct | undefined = undefined, 
   return ((input?: EndpointInput<TInput>) => create(input)) as RequestCommandBuilder<TInput, TOutput>
 }
 
-export async function executeHttpCommand<
-  TInput extends AnyStruct | undefined,
-  TOutput extends RequestOutputShape | undefined,
->(
+export async function executeHttpCommand<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
   clientConfig: ClientConfig,
   command: HttpCommand<TInput, TOutput>,
   options?: HttpExecuteOptions,
