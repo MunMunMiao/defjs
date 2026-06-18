@@ -1,4 +1,4 @@
-import type { NonNullableValue } from '../../internal/utility_types'
+import type { ClientXSRFConfig } from '../../client/config'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { HttpRequest } from '../../http'
 import {
@@ -30,7 +30,7 @@ function stubXsrfBrowserEnvironment(origin: string, cookieValue: string) {
   return { cookieGetter }
 }
 
-function createXsrfConfig(tokenProvider?: NonNullableValue<HttpRequest['xsrf']>['tokenProvider']): NonNullableValue<HttpRequest['xsrf']> {
+function createXsrfConfig(tokenProvider?: ClientXSRFConfig['tokenProvider']): ClientXSRFConfig {
   return {
     cookieName: 'XSRF-TOKEN',
     headerName: 'X-XSRF-TOKEN',

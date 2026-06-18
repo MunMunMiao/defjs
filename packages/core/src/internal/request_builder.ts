@@ -1,4 +1,4 @@
-import type { NonNullableValue, SelectKeys } from './utility_types'
+import type { SelectKeys } from './utility_types'
 import type { AnyStruct, RequestBodyCodec as StructRequestBodyCodec } from '../struct'
 import type { RequestDefinition } from '../struct/types'
 import { getWireKey } from '../struct/codec/common'
@@ -134,7 +134,9 @@ export type RequestBuild = {
 
 export type RequestBuildInput<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? unknown
-  : BuildInput<NonNullableValue<TInput>>
+  : TInput extends AnyStruct
+    ? BuildInput<TInput>
+    : never
 
 export type RequestBuildContext<TTransport extends RequestTransport = 'http'> = TTransport extends 'webSocket'
   ? SelectKeys<RequestBuilder, 'setPathParams' | 'setQueryParams'>
@@ -172,7 +174,7 @@ export function buildRequest<TInput extends AnyStruct | undefined, TTransport ex
 
   const owner = Symbol('buildInput')
   const plan: BuildPlanStep[] = []
-  const boundInput = createTypedBuildInput(options.input, owner)
+  const boundInput = createTypedBuildInput(options.input as TInput & AnyStruct, owner)
   build(createTypedBuildContext(plan, transport), boundInput)
   materializeBuildPlan(plan, input, state, owner)
   assertTransportBuild(state.snapshot, transport)
@@ -193,10 +195,7 @@ function createTypedBuildContext<TTransport extends RequestTransport>(
   return createBuildPlanBuilder(plan) as RequestBuildContext<TTransport>
 }
 
-function createTypedBuildInput<TInput extends AnyStruct | undefined>(
-  schema: NonNullableValue<TInput>,
-  owner: symbol,
-): RequestBuildInput<TInput> {
+function createTypedBuildInput<TInput extends AnyStruct>(schema: TInput, owner: symbol): RequestBuildInput<TInput> {
   // Type boundary: createBoundView materializes a runtime proxy from the same schema used by RequestBuildInput's conditional type.
   return createBoundView(schema as unknown as RuntimeSchema, [], owner) as RequestBuildInput<TInput>
 }

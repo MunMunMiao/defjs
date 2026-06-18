@@ -1,6 +1,5 @@
-import type { NonNullableValue, FnReturn } from '../internal/utility_types'
 import { describe, expect, test, vi } from 'vitest'
-import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait } from './reconnect'
+import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait, type NormalizedReconnectConfig } from './reconnect'
 import type { SocketLifecycleOutcome } from './web_socket'
 
 describe('reconnect config', () => {
@@ -78,7 +77,7 @@ describe('shouldReconnect', () => {
   })
 
   test('returns false when opened is false and attempts is zero on normalized config', () => {
-    const config: NonNullableValue<FnReturn<typeof normalizeReconnectConfig>> = {
+    const config: NormalizedReconnectConfig = {
       attempts: 0,
       delayMs: 1000,
       factor: 2,

@@ -1,6 +1,7 @@
-import type { FnReturn, NonNullableValue } from '../../internal/utility_types'
+import type { FnReturn } from '../../internal/utility_types'
+import type { ClientXSRFConfig } from '../../client/config'
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
-import type { HttpRequest } from '../../internal/http_request'
+import type { HttpProgressFn, HttpRequest } from '../../internal/http_request'
 import type { HttpResponse, HttpResponseBody } from '../../internal/http_response'
 import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
@@ -103,7 +104,7 @@ function normalizeXSRFToken(token: string | null | undefined): string | undefine
   return token
 }
 
-function resolveXSRFToken(request: HttpRequest, xsrf: NonNullableValue<HttpRequest['xsrf']>): string | undefined {
+function resolveXSRFToken(request: HttpRequest, xsrf: ClientXSRFConfig): string | undefined {
   if (xsrf.tokenProvider) {
     return normalizeXSRFToken(xsrf.tokenProvider({ request }))
   }
@@ -143,7 +144,7 @@ function applyXSRFHeaderIfNeeded(request: HttpRequest, headers: Headers): void {
 
 function wrapUploadProgressStream(
   stream: ReadableStream<Uint8Array>,
-  onProgress: NonNullableValue<HttpRequest['uploadProgress']>,
+  onProgress: HttpProgressFn,
   total: number,
 ): ReadableStream<Uint8Array> {
   const reader = stream.getReader()
@@ -220,7 +221,7 @@ async function parseNativeResponseBody(response: Response, responseType: HttpReq
   switch (responseType) {
     case 'json': {
       const text = await response.text()
-      return text === '' ? null : JSON.parse(text)
+      return text === '' ? null : (JSON.parse(text) as unknown)
     }
     case 'text':
       return await response.text()

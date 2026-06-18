@@ -3,7 +3,7 @@ import type { BaseCommand } from '../client/command'
 import type { ClientConfig, WebSocketBeforeConnect } from '../client/config'
 
 import type { RequestError } from '../error'
-import type { ExcludeUnion, NonNullableValue } from '../internal/utility_types'
+import type { ExcludeUnion } from '../internal/utility_types'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { WebSocketSessionLike } from '../interceptor/interceptor'
 import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors } from '../interceptor/interceptor'
@@ -180,7 +180,7 @@ export type WebSocketCommandBuilder<
 
 type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends EndpointInput<NonNullableValue<TInput>>
+  : {} extends EndpointInput<TInput>
     ? true
     : false
 

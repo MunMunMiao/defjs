@@ -1,7 +1,7 @@
 import { COMMAND_TYPE, EVENT_STREAM_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
 import type { ClientConfig } from '../client/config'
-import type { ExcludeUnion, NonNullableValue } from '../internal/utility_types'
+import type { ExcludeUnion } from '../internal/utility_types'
 import type { SSEInvalidEventContext, SSEInvalidEventHandler } from '../client/config'
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
@@ -101,7 +101,7 @@ export interface StreamRefState<TEvent> {
 
 type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends EndpointInput<NonNullableValue<TInput>>
+  : {} extends EndpointInput<TInput>
     ? true
     : false
 

@@ -9,6 +9,4 @@ export type SelectKeys<T, K extends keyof T> = { [P in K]: T[P] }
 
 export type ExcludeUnion<T, U> = T extends U ? never : T
 
-export type NonNullableValue<T> = T extends null | undefined ? never : T
-
 export type FnReturn<T> = T extends (...args: infer _P) => infer R ? R : never

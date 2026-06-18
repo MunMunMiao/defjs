@@ -1,3 +1,4 @@
+import { COMMAND_TYPE, HTTP_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
 import type { ClientConfig } from '../client/config'
 import type { RequestError } from '../error'
@@ -27,10 +28,9 @@ interface UseRequestBaseConfig {
 
 export type UseRequestConfig = UseRequestBaseConfig & UseCancellationConfig
 
-export interface HttpCommand<
-  TInput extends AnyStruct | undefined,
-  TOutput extends RequestOutputShape | undefined,
-> extends BaseCommand<'http'> {
+export interface HttpCommand<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> extends BaseCommand<
+  typeof HTTP_COMMAND
+> {
   readonly definition: RequestDefinition<TInput, TOutput>
   readonly input: EndpointInput<TInput> | undefined
 }
@@ -120,7 +120,7 @@ export type HttpAwaitResult<TSuccess = unknown, TErrorData = unknown> =
 
 type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends EndpointInput<NonNullable<TInput>>
+  : {} extends EndpointInput<TInput>
     ? true
     : false
 
@@ -134,11 +134,13 @@ export function defineRequest<TInput extends AnyStruct | undefined = undefined, 
   definition: RequestDefinition<TInput, TOutput>,
 ): RequestCommandBuilder<TInput, TOutput> {
   function create(input?: EndpointInput<TInput>): HttpCommand<TInput, TOutput> {
-    return {
-      kind: 'http',
+    const command: HttpCommand<TInput, TOutput> = {
+      [COMMAND_TYPE]: HTTP_COMMAND,
       definition,
       input,
-    } as HttpCommand<TInput, TOutput>
+    }
+
+    return command
   }
 
   return ((input?: EndpointInput<TInput>) => create(input)) as RequestCommandBuilder<TInput, TOutput>
@@ -206,7 +208,7 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
   try {
     const httpInterceptors = resolveHttpInterceptors(clientConfig.interceptors)
     const chain = makeInterceptorChain(httpInterceptors)
-    response = await chain(request, (req) => fetchHandler(req, clientConfig.http.fetch))
+    response = await chain(request, (req) => fetchHandler(req, clientConfig.http.handle))
   } catch (error) {
     const transportError = createTransportError(error)
     return fail(transportError as RequestError<RequestErrorData<TOutput>>)
