@@ -1,8 +1,9 @@
+import { COMMAND_TYPE, WEB_SOCKET_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
-import type { ClientConfig, WebSocketBeforeConnect, WebSocketHeartbeatOptions } from '../client/config'
+import type { ClientConfig, WebSocketBeforeConnect } from '../client/config'
 
 import type { RequestError } from '../error'
-import type { ExcludeUnion, ExtractUnion, NonNullableValue, OmitKeys } from '../internal/utility_types'
+import type { ExcludeUnion, ExtractUnion, NonNullableValue } from '../internal/utility_types'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { WebSocketSessionLike } from '../interceptor/interceptor'
 import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors } from '../interceptor/interceptor'
@@ -163,7 +164,7 @@ export interface WebSocketCommand<
   TInput extends AnyStruct | undefined,
   TIncoming extends SocketSchemas,
   TOutgoing extends SocketSchemas | undefined,
-> extends BaseCommand<'web-socket'> {
+> extends BaseCommand<typeof WEB_SOCKET_COMMAND> {
   readonly endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>
   readonly input: EndpointInput<TInput> | undefined
 }
@@ -187,9 +188,7 @@ type WebSocketEndpoint<
   TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketSchemas = SocketSchemas,
   TOutgoing extends SocketSchemas | undefined = undefined,
-> = WebSocketDefinition<TInput, TIncoming, TOutgoing> & {
-  readonly kind: 'web-socket'
-}
+> = WebSocketDefinition<TInput, TIncoming, TOutgoing>
 
 type SocketRefState<TIncoming, TOutgoing> = {
   connection?: WebSocketConnectionInfo
@@ -216,12 +215,11 @@ type Deferred<T> = {
 }
 
 export type { WebSocketQueueConfig, WebSocketReconnectConfig }
-export type WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> = OmitKeys<
-  WebSocketHeartbeatOptions,
-  'isAck' | 'message'
-> & {
+export interface WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> {
+  intervalMs: number
   isAck?: (message: TIncoming) => boolean
   message?: <T = TOutgoing>() => T | unknown
+  timeoutMs?: number
 }
 
 function castParsedWebSocketInput<TInput extends AnyStruct | undefined>(value: unknown): ParsedInput<TInput> {
@@ -246,15 +244,16 @@ export function defineWebSocket<
 >(definition: WebSocketDefinition<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing> {
   const endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing> = {
     ...definition,
-    kind: 'web-socket' as const,
   }
 
   function create(input?: EndpointInput<TInput>): WebSocketCommand<TInput, TIncoming, TOutgoing> {
-    return {
-      kind: 'web-socket',
+    const command: WebSocketCommand<TInput, TIncoming, TOutgoing> = {
+      [COMMAND_TYPE]: WEB_SOCKET_COMMAND,
       endpoint,
       input,
-    } as WebSocketCommand<TInput, TIncoming, TOutgoing>
+    }
+
+    return command
   }
 
   return ((input?: EndpointInput<TInput>) => create(input)) as WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
@@ -320,7 +319,7 @@ async function runWebSocketCommand<
     withCredentials: clientConfig.withCredentials,
   })
 
-  const WebSocketCtor = clientConfig.webSocket.WebSocket ?? globalThis.WebSocket
+  const WebSocketCtor = clientConfig.webSocket.handle ?? globalThis.WebSocket
   /* istanbul ignore next -- defensive: runtime support varies by environment */
   if (typeof WebSocketCtor !== 'function') {
     const transportError = createTransportError(new Error('WebSocket is not supported in current runtime'))
@@ -700,12 +699,17 @@ export async function executeWebSocketCommand<
 }
 
 function createDeferred<T>(): Deferred<T> {
-  let resolve!: Deferred<T>['resolve']
-  let reject!: Deferred<T>['reject']
+  let resolve: Deferred<T>['resolve'] | undefined
+  let reject: Deferred<T>['reject'] | undefined
   const promise = new Promise<T>((innerResolve, innerReject) => {
     resolve = innerResolve
     reject = innerReject
   })
+
+  /* istanbul ignore next -- Promise executors run synchronously */
+  if (resolve === undefined || reject === undefined) {
+    throw new Error('Deferred promise executor did not initialize synchronously')
+  }
 
   return {
     promise,
