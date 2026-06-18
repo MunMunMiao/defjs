@@ -22,11 +22,3 @@ export type ExtractUnion<T, U> = T extends U ? T : never
 export type NonNullableValue<T> = T extends null | undefined ? never : T
 
 export type FnReturn<T> = T extends (...args: infer _P) => infer R ? R : never
-
-export type AwaitedValue<T> = T extends null | undefined
-  ? T
-  : T extends object & { then(onfulfilled: infer F): unknown }
-    ? F extends (value: infer V, ...args: unknown[]) => unknown
-      ? AwaitedValue<V>
-      : never
-    : T
