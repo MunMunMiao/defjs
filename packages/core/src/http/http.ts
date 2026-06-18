@@ -20,13 +20,11 @@ import type { RequestOutputShape } from './request'
 import { createHttpRequest, normalizeOutputShape, resolveDefaultResponseType } from './request'
 import { fetchHandler } from './transport/fetch'
 
-interface UseRequestBaseConfig {
+export type UseRequestConfig = {
   context?: HttpContext
   onDownloadProgress?: HttpProgressFn
   onUploadProgress?: HttpProgressFn
-}
-
-export type UseRequestConfig = UseRequestBaseConfig & UseCancellationConfig
+} & UseCancellationConfig
 
 export interface HttpCommand<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> extends BaseCommand<
   typeof HTTP_COMMAND
@@ -38,97 +36,128 @@ export interface HttpCommand<TInput extends AnyStruct | undefined, TOutput exten
 export type HttpExecuteOptions = UseRequestConfig & { signal?: AbortSignal }
 
 export type RequestCommandBuilder<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> =
-  IsInputOptional<TInput> extends true
+  [TInput] extends [undefined]
     ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
-    : (input: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
-
-type ExpandStatus<T> = T extends readonly (infer U extends number)[] ? U : T extends number ? T : never
-
-type OutputPairs<TOutput extends RequestOutputShape> = TOutput extends readonly (infer TItem)[]
-  ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-    ? { body: TBody; status: ExpandStatus<TStatus> }
-    : never
-  : {
-      [K in keyof TOutput]: K extends `${infer TStatus extends number}`
-        ? TOutput[K] extends AnyStruct
-          ? { body: TOutput[K]; status: TStatus }
-          : never
-        : never
-    }[keyof TOutput]
-
-type SuccessSchemaOf<TOutput extends RequestOutputShape> =
-  OutputPairs<TOutput> extends infer TPair
-    ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
-      ? `${TStatus}` extends `2${string}`
-        ? TBody
-        : never
-      : never
-    : never
-
-type ErrorSchemaOf<TOutput extends RequestOutputShape> =
-  OutputPairs<TOutput> extends infer TPair
-    ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
-      ? `${TStatus}` extends `2${string}`
-        ? never
-        : TBody
-      : never
-    : never
+    : {} extends EndpointInput<TInput>
+      ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
+      : (input: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
 
 export type RequestSuccessData<TOutput extends RequestOutputShape | undefined> = [TOutput] extends [undefined]
   ? undefined
-  : [SuccessSchemaOf<NonNullable<TOutput>>] extends [never]
+  : [
+        (NonNullable<TOutput> extends readonly (infer TItem)[]
+          ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+            ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+            : never
+          : {
+              [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+                ? NonNullable<TOutput>[K] extends AnyStruct
+                  ? { body: NonNullable<TOutput>[K]; status: TStatus }
+                  : never
+                : never
+            }[keyof NonNullable<TOutput>]) extends infer TPair
+          ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
+            ? `${TStatus}` extends `2${string}`
+              ? TBody
+              : never
+            : never
+          : never
+      ] extends [never]
     ? unknown
-    : Infer<SuccessSchemaOf<NonNullable<TOutput>>>
+    : Infer<
+        (NonNullable<TOutput> extends readonly (infer TItem)[]
+          ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+            ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+            : never
+          : {
+              [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+                ? NonNullable<TOutput>[K] extends AnyStruct
+                  ? { body: NonNullable<TOutput>[K]; status: TStatus }
+                  : never
+                : never
+            }[keyof NonNullable<TOutput>]) extends infer TPair
+          ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
+            ? `${TStatus}` extends `2${string}`
+              ? TBody
+              : never
+            : never
+          : never
+      >
 
 export type RequestErrorData<TOutput extends RequestOutputShape | undefined> = [TOutput] extends [undefined]
   ? undefined
-  : [ErrorSchemaOf<NonNullable<TOutput>>] extends [never]
+  : [
+        (NonNullable<TOutput> extends readonly (infer TItem)[]
+          ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+            ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+            : never
+          : {
+              [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+                ? NonNullable<TOutput>[K] extends AnyStruct
+                  ? { body: NonNullable<TOutput>[K]; status: TStatus }
+                  : never
+                : never
+            }[keyof NonNullable<TOutput>]) extends infer TPair
+          ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
+            ? `${TStatus}` extends `2${string}`
+              ? never
+              : TBody
+            : never
+          : never
+      ] extends [never]
     ? unknown
-    : Infer<ErrorSchemaOf<NonNullable<TOutput>>>
-
-interface RequestDefinitionBase<TOutput extends RequestOutputShape | undefined = undefined> {
-  method: string
-  output?: TOutput
-  path: string
-  responseType?: HttpResponseType
-}
-
-type RequestDefinitionWithoutBuild<
-  TInput extends AnyStruct | undefined = undefined,
-  TOutput extends RequestOutputShape | undefined = undefined,
-> = RequestDefinitionBase<TOutput> & {
-  build?: never
-  input?: TInput
-}
-
-type RequestDefinitionWithBuild<
-  TInput extends AnyStruct,
-  TOutput extends RequestOutputShape | undefined = undefined,
-> = RequestDefinitionBase<TOutput> & {
-  build: RequestBuildHandler<TInput>
-  input: TInput
-}
+    : Infer<
+        (NonNullable<TOutput> extends readonly (infer TItem)[]
+          ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+            ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+            : never
+          : {
+              [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+                ? NonNullable<TOutput>[K] extends AnyStruct
+                  ? { body: NonNullable<TOutput>[K]; status: TStatus }
+                  : never
+                : never
+            }[keyof NonNullable<TOutput>]) extends infer TPair
+          ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
+            ? `${TStatus}` extends `2${string}`
+              ? never
+              : TBody
+            : never
+          : never
+      >
 
 export type RequestDefinition<
   TInput extends AnyStruct | undefined = undefined,
   TOutput extends RequestOutputShape | undefined = undefined,
-> = RequestDefinitionWithoutBuild<TInput, TOutput> | (TInput extends AnyStruct ? RequestDefinitionWithBuild<TInput, TOutput> : never)
+> =
+  | {
+      method: string
+      output?: TOutput
+      path: string
+      responseType?: HttpResponseType
+      build?: never
+      input?: TInput
+    }
+  | (TInput extends AnyStruct
+      ? {
+          method: string
+          output?: TOutput
+          path: string
+          responseType?: HttpResponseType
+          build: RequestBuildHandler<TInput>
+          input: TInput
+        }
+      : never)
 
 export type HttpAwaitResult<TSuccess = unknown, TErrorData = unknown> =
   | [error: null, result: TSuccess, response: SettledResponse<TSuccess>]
   | [error: RequestError<TErrorData>, result: undefined, response: SettledResponse<unknown> | undefined]
 
-type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
-  ? true
-  : {} extends EndpointInput<TInput>
-    ? true
-    : false
-
 export function defineRequest<TInput extends AnyStruct, TOutput extends RequestOutputShape | undefined = undefined>(
-  definition: RequestDefinitionWithBuild<TInput, TOutput>,
+  definition: RequestDefinition<TInput, TOutput>,
 ): RequestCommandBuilder<TInput, TOutput>
 export function defineRequest<TInput extends AnyStruct | undefined = undefined, TOutput extends RequestOutputShape | undefined = undefined>(
-  definition: RequestDefinitionWithoutBuild<TInput, TOutput>,
+  definition: RequestDefinition<TInput, TOutput>,
 ): RequestCommandBuilder<TInput, TOutput>
 export function defineRequest<TInput extends AnyStruct | undefined = undefined, TOutput extends RequestOutputShape | undefined = undefined>(
   definition: RequestDefinition<TInput, TOutput>,
