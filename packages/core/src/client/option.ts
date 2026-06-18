@@ -36,19 +36,19 @@ export function withQueryParamsSerializer(serializer: QueryParamsSerializer): Cl
 
 export function withHTTPHandle(fetchImpl: typeof fetch): ClientOption {
   return (config) => {
-    config.http.fetch = fetchImpl
+    config.http.handle = fetchImpl
   }
 }
 
 export function withSSEHandle(fetchImpl: typeof fetch): ClientOption {
   return (config) => {
-    config.sse.fetch = fetchImpl
+    config.sse.handle = fetchImpl
   }
 }
 
 export function withWebSocketHandle(WebSocketImpl: typeof WebSocket): ClientOption {
   return (config) => {
-    config.webSocket.WebSocket = WebSocketImpl
+    config.webSocket.handle = WebSocketImpl
   }
 }
 
@@ -92,8 +92,8 @@ export function withWebSocketReconnect(options: WebSocketReconnectOptions): Clie
 
 export function withSSEOptions(options: ClientSSEOptions): ClientOption {
   return (config) => {
-    if (options.fetch !== undefined) {
-      config.sse.fetch = options.fetch
+    if (options.handle !== undefined) {
+      config.sse.handle = options.handle
     }
     if (options.onInvalidEvent !== undefined) {
       config.sse.onInvalidEvent = options.onInvalidEvent
@@ -130,8 +130,8 @@ export function withSSEQueue(options: SSEQueueOptions): ClientOption {
 
 export function withWebSocketOptions(options: ClientWebSocketOptions): ClientOption {
   return (config) => {
-    if (options.WebSocket !== undefined) {
-      config.webSocket.WebSocket = options.WebSocket
+    if (options.handle !== undefined) {
+      config.webSocket.handle = options.handle
     }
     if (options.beforeConnect !== undefined) {
       config.webSocket.beforeConnect = options.beforeConnect

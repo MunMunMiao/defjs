@@ -22,8 +22,8 @@ import {
   withWebSocketReconnect,
   withXSRF,
 } from './index'
-import type { Client } from './resolve'
-import { getClientConfig, isClient } from './resolve'
+import type { Client } from './client'
+import { getClientConfig, isClient } from './client'
 
 describe('Client', () => {
   let baseClient: Client
@@ -38,9 +38,9 @@ describe('Client', () => {
     expect(config.endpoint).toBe('https://example.com/v1')
     expect(config.http).toEqual(DEFAULT_HTTP_OPTIONS)
     expect(config.sse).toEqual(DEFAULT_SSE_OPTIONS)
-    expect(config.webSocket).toMatchObject({ WebSocket: globalThis.WebSocket })
+    expect(config.webSocket).toMatchObject({ handle: globalThis.WebSocket })
     expect(config.queryParamsSerializer).toBe(DEFAULT_QUERY_PARAMS_SERIALIZER)
-    expect(config.http.fetch).toBe(config.sse.fetch)
+    expect(config.http.handle).toBe(config.sse.handle)
     expect(DEFAULT_QUERY_PARAMS_SERIALIZER(new URLSearchParams({ a: '1' }))).toBe('a=1')
   })
 
@@ -63,9 +63,9 @@ describe('Client', () => {
     expect(() => getClientConfig({} as never)).toThrowError()
   })
 
-  test('DEFAULT_HTTP_OPTIONS.fetch and DEFAULT_SSE_OPTIONS.fetch are bound to globalThis(detachable without losing this)', async () => {
-    const { fetch: httpDetached } = DEFAULT_HTTP_OPTIONS
-    const { fetch: sseDetached } = DEFAULT_SSE_OPTIONS
+  test('DEFAULT_HTTP_OPTIONS.handle and DEFAULT_SSE_OPTIONS.handle are bound to globalThis(detachable without losing this)', async () => {
+    const { handle: httpDetached } = DEFAULT_HTTP_OPTIONS
+    const { handle: sseDetached } = DEFAULT_SSE_OPTIONS
 
     await expect(httpDetached('about:blank').catch(() => 'caught')).resolves.toBeDefined()
     await expect(sseDetached('about:blank').catch(() => 'caught')).resolves.toBeDefined()
@@ -118,8 +118,8 @@ describe('Client', () => {
 
     expect(config.endpoint).toBe('https://api.example.com')
     expect(config.withCredentials).toBe(true)
-    expect(config.http.fetch).toBe(customFetch)
-    expect(config.sse.fetch).toBe(customFetch)
+    expect(config.http.handle).toBe(customFetch)
+    expect(config.sse.handle).toBe(customFetch)
     expect(config.interceptors).toEqual([interceptor])
     expect(config.queryParamsSerializer).toBe(serializer)
     expect(config.xsrf).toEqual({
@@ -127,7 +127,7 @@ describe('Client', () => {
       headerName: 'X-CUSTOM-XSRF-TOKEN',
       tokenProvider,
     })
-    expect(config.webSocket.WebSocket).toBe(MockWebSocket)
+    expect(config.webSocket.handle).toBe(MockWebSocket)
     expect(config.webSocket.beforeConnect).toBe(beforeConnect)
     expect(config.webSocket.protocols).toEqual(['json'])
     expect(config.webSocket.heartbeat).toEqual({
@@ -161,7 +161,7 @@ describe('Client', () => {
     const client = createClient(
       withEndpoint('https://example.com'),
       withSSEOptions({
-        fetch: customFetch,
+        handle: customFetch,
         onInvalidEvent,
         reconnect: { attempts: 3, delayMs: 2000 },
         queue: { maxSize: 64, overflow: 'drop-oldest' },
@@ -170,7 +170,7 @@ describe('Client', () => {
     )
 
     const config = getClientConfig(client).sse
-    expect(config.fetch).toBe(customFetch)
+    expect(config.handle).toBe(customFetch)
     expect(config.onInvalidEvent).toBe(onInvalidEvent)
     expect(config.reconnect).toEqual({ attempts: 3, delayMs: 2000 })
     expect(config.queue).toEqual({ maxSize: 64, overflow: 'drop-oldest' })
@@ -199,7 +199,7 @@ describe('Client', () => {
     const client = createClient(withEndpoint('https://example.com'), withSSEOptions({}))
 
     const config = getClientConfig(client).sse
-    expect(config.fetch).toBe(before.fetch)
+    expect(config.handle).toBe(before.handle)
     expect(config.onInvalidEvent).toBeUndefined()
     expect(config.reconnect).toBeUndefined()
     expect(config.queue).toBeUndefined()
@@ -219,7 +219,7 @@ describe('Client', () => {
     const client = createClient(
       withEndpoint('https://example.com'),
       withWebSocketOptions({
-        WebSocket: MockWebSocket as unknown as typeof WebSocket,
+        handle: MockWebSocket as unknown as typeof WebSocket,
         beforeConnect,
         heartbeat: { intervalMs: 100 },
         protocols: ['json'],
@@ -230,7 +230,7 @@ describe('Client', () => {
 
     const config = getClientConfig(client).webSocket
 
-    expect(config.WebSocket).toBe(MockWebSocket)
+    expect(config.handle).toBe(MockWebSocket)
     expect(config.beforeConnect).toBe(beforeConnect)
     expect(config.heartbeat).toEqual({ intervalMs: 100 })
     expect(config.protocols).toEqual(['json'])
@@ -254,7 +254,7 @@ describe('Client', () => {
 
     const next = createClient(withEndpoint('https://example.com'), withWebSocketOptions({}))
 
-    expect(getClientConfig(base).webSocket.WebSocket).toBe(MockWebSocket)
-    expect(getClientConfig(next).webSocket.WebSocket).toBe(globalThis.WebSocket)
+    expect(getClientConfig(base).webSocket.handle).toBe(MockWebSocket)
+    expect(getClientConfig(next).webSocket.handle).toBe(globalThis.WebSocket)
   })
 })

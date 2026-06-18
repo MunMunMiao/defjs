@@ -89,15 +89,15 @@ type ClientCases = Expect<Equal<typeof client, Client>>
 const options = {
   endpoint: 'https://api.example.com',
   http: {
-    fetch: customFetch,
+    handle: customFetch,
   },
   interceptors: [],
   queryParamsSerializer: serializer,
   sse: {
-    fetch: customFetch,
+    handle: customFetch,
   },
   webSocket: {
-    WebSocket: MockWebSocket as unknown as typeof WebSocket,
+    handle: MockWebSocket as unknown as typeof WebSocket,
     beforeConnect: async () => undefined,
     heartbeat: {
       intervalMs: 1_000,

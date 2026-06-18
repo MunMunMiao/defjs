@@ -1,4 +1,5 @@
 import { expectTypeOf } from 'vitest'
+import { COMMAND_TYPE, EVENT_STREAM_COMMAND } from '../client/command'
 import { defineEventStream } from './sse'
 import { struct } from '../struct'
 
@@ -8,5 +9,7 @@ const useEvents = defineEventStream({
 })
 
 const command = useEvents()
-expectTypeOf(command.kind).toEqualTypeOf<'event-stream'>()
+expectTypeOf(command[COMMAND_TYPE]).toEqualTypeOf<typeof EVENT_STREAM_COMMAND>()
 expectTypeOf(command.endpoint.path).toEqualTypeOf<string>()
+
+export type Cases = true

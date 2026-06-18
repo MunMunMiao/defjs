@@ -1,43 +1,57 @@
 import type { Command } from './command'
+import { isEventStreamCommandEntry, isHttpCommandEntry, isWebSocketCommandEntry } from './command'
 import type { ClientConfig } from './config'
 import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import type { ClientOption } from './option'
-import type { Client } from './resolve'
-import { CLIENT } from './resolve'
-import type { AnyStruct } from '../struct'
-import type { HttpCommand, HttpExecuteOptions } from '../http/http'
+import type { HttpAwaitResult, HttpCommand, HttpExecuteOptions, RequestErrorData, RequestSuccessData } from '../http/http'
 import { executeHttpCommand } from '../http/http'
 import type { RequestOutputShape } from '../http/request'
-import type { EventSchemas, EventStreamCommand, EventStreamExecuteOptions } from '../sse/sse'
+import type { EventSchemas, EventStreamCommand, EventStreamData, EventStreamExecuteOptions, StreamAwaitResult } from '../sse/sse'
 import { executeEventStreamCommand } from '../sse/sse'
-import type { SocketSchemas, WebSocketCommand, WebSocketExecuteOptions } from '../web_socket/web_socket'
+import type { AnyStruct } from '../struct'
+import type {
+  SocketAwaitResult,
+  SocketSchemas,
+  WebSocketCommand,
+  WebSocketExecuteOptions,
+  WebSocketIncomingData,
+  WebSocketOutgoingData,
+} from '../web_socket/web_socket'
 import { executeWebSocketCommand } from '../web_socket/web_socket'
 
-type DispatchHttpCommand = HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>
-type DispatchEventStreamCommand = EventStreamCommand<AnyStruct | undefined, EventSchemas>
-type DispatchWebSocketCommand = WebSocketCommand<AnyStruct | undefined, SocketSchemas, SocketSchemas | undefined>
+export const CLIENT = Symbol('Client')
 
-function dispatchCommand(config: ClientConfig, command: Command, options?: unknown): Promise<unknown> {
-  switch (command.kind) {
-    case 'http':
-      return executeHttpCommand(config, command as DispatchHttpCommand, options as HttpExecuteOptions)
-    case 'event-stream':
-      return executeEventStreamCommand(
-        config,
-        command as DispatchEventStreamCommand,
-        options as EventStreamExecuteOptions,
-      ) as Promise<unknown>
-    case 'web-socket':
-      return executeWebSocketCommand(config, command as DispatchWebSocketCommand, options as WebSocketExecuteOptions) as Promise<unknown>
-  }
-  return Promise.reject(new Error(`Unsupported command kind: ${command.kind}`))
+export type Client = {
+  readonly [CLIENT]: ClientConfig
+
+  execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
+    command: HttpCommand<TInput, TOutput>,
+    options?: HttpExecuteOptions,
+  ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>>
+
+  execute<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+    command: EventStreamCommand<TInput, TEvents>,
+    options?: EventStreamExecuteOptions,
+  ): Promise<StreamAwaitResult<EventStreamData<TEvents>>>
+
+  execute<TInput extends AnyStruct | undefined, TIncoming extends SocketSchemas, TOutgoing extends SocketSchemas | undefined>(
+    command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
+    options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+  ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
+
+  execute(command: Command, options?: unknown): Promise<unknown>
 }
 
-function createClientFromConfig(config: ClientConfig): Client {
-  return {
-    [CLIENT]: config,
-    execute: ((command: Command, options?: unknown) => dispatchCommand(config, command, options)) as Client['execute'],
+export function isClient(value: unknown): value is Client {
+  return typeof value === 'object' && value !== null && CLIENT in value
+}
+
+export function getClientConfig(client: Client): ClientConfig {
+  if (!isClient(client)) {
+    throw new TypeError('Value is not a valid Client instance')
   }
+
+  return client[CLIENT]
 }
 
 export function createClient(...options: ClientOption[]): Client {
@@ -48,7 +62,7 @@ export function createClient(...options: ClientOption[]): Client {
     queryParamsSerializer: DEFAULT_QUERY_PARAMS_SERIALIZER,
     sse: { ...DEFAULT_SSE_OPTIONS },
     webSocket: {
-      WebSocket: globalThis.WebSocket,
+      handle: globalThis.WebSocket,
       beforeConnect: undefined,
       heartbeat: undefined,
       protocols: undefined,
@@ -62,5 +76,37 @@ export function createClient(...options: ClientOption[]): Client {
     option(conf)
   }
 
-  return createClientFromConfig(conf)
+  function execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
+    command: HttpCommand<TInput, TOutput>,
+    options?: HttpExecuteOptions,
+  ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>>
+  function execute<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+    command: EventStreamCommand<TInput, TEvents>,
+    options?: EventStreamExecuteOptions,
+  ): Promise<StreamAwaitResult<EventStreamData<TEvents>>>
+  function execute<TInput extends AnyStruct | undefined, TIncoming extends SocketSchemas, TOutgoing extends SocketSchemas | undefined>(
+    command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
+    options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+  ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
+  function execute(command: Command, options?: unknown): Promise<unknown>
+  function execute(...entry: [command: Command, options?: unknown]): Promise<unknown> {
+    if (isHttpCommandEntry(entry)) {
+      return executeHttpCommand(conf, entry[0], entry[1])
+    }
+
+    if (isEventStreamCommandEntry(entry)) {
+      return executeEventStreamCommand(conf, entry[0], entry[1])
+    }
+
+    if (isWebSocketCommandEntry(entry)) {
+      return executeWebSocketCommand(conf, entry[0], entry[1])
+    }
+
+    return Promise.reject(new Error('Unsupported command'))
+  }
+
+  return {
+    [CLIENT]: conf,
+    execute,
+  }
 }

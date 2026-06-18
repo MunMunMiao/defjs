@@ -17,7 +17,7 @@ describe('Client.execute', () => {
 
   test('execute rejects for unsupported command kind', async () => {
     const client = createClient(withEndpoint('https://example.com'))
-    await expect(client.execute({ kind: 'test' } as Command)).rejects.toThrow('Unsupported command kind: test')
+    await expect(client.execute({ kind: 'test' } as unknown as Command)).rejects.toThrow('Unsupported command')
   })
 
   test('client.execute dispatches http command', async () => {

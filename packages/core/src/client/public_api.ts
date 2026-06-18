@@ -43,5 +43,5 @@ export {
   withWebSocketReconnect,
   withXSRF,
 } from './option'
-export type { Client } from './resolve'
-export { getClientConfig, isClient } from './resolve'
+export type { Client } from './client'
+export { getClientConfig, isClient } from './client'

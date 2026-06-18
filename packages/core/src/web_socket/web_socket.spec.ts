@@ -27,12 +27,11 @@ describe('web socket runtime', () => {
     })
 
     const client = createClient(withEndpoint('http://localhost'))
-    // @ts-expect-error testing runtime defensive behavior with invalid client WebSocket constructor
-    getClientConfig(client).webSocket.WebSocket = class {
+    getClientConfig(client).webSocket.handle = class {
       constructor() {
         throw new Error('invalid client')
       }
-    }
+    } as unknown as typeof WebSocket
 
     const [error, socket, connection] = await client.execute(useSocket())
 
