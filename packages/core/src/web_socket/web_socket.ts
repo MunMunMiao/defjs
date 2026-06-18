@@ -3,7 +3,6 @@ import type { BaseCommand } from '../client/command'
 import type { ClientConfig, WebSocketBeforeConnect, WebSocketReconnectOptions, WebSocketQueueOptions } from '../client/config'
 
 import type { RequestError } from '../error'
-import type { ExcludeUnion } from '../internal/utility_types'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { WebSocketSessionLike } from '../interceptor/interceptor'
 import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors } from '../interceptor/interceptor'
@@ -54,15 +53,13 @@ type SocketSendMessage<TKey extends string, TPayload> = TPayload extends { [key:
       type: TKey
     }
 
-type KnownSocketKey<TMessages extends SocketSchemas> = ExcludeUnion<keyof TMessages & string, 'default'>
-
 type KnownIncomingSocketUnion<TIncoming extends SocketSchemas> = {
   [K in keyof TIncoming & string as K extends 'default' ? never : K]: NormalizeSocketMessage<K, Infer<TIncoming[K]>>
-}[KnownSocketKey<TIncoming>]
+} extends infer O ? O[keyof O] : never
 
 type KnownOutgoingSocketUnion<TOutgoing extends SocketSchemas> = {
   [K in keyof TOutgoing & string as K extends 'default' ? never : K]: SocketSendMessage<K, EndpointInput<TOutgoing[K]>>
-}[KnownSocketKey<TOutgoing>]
+} extends infer O ? O[keyof O] : never
 
 type DefaultIncomingSocketUnion<TIncoming extends SocketSchemas> = 'default' extends keyof TIncoming
   ? NormalizeSocketMessage<string, Infer<TIncoming['default']>>

@@ -1,7 +1,6 @@
 import { COMMAND_TYPE, EVENT_STREAM_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
 import type { ClientConfig } from '../client/config'
-import type { ExcludeUnion } from '../internal/utility_types'
 import type { SSEInvalidEventContext, SSEInvalidEventHandler } from '../client/config'
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
@@ -25,11 +24,7 @@ interface UseEventStreamBaseConfig {
   context?: HttpContext
 }
 
-export type UseEventStreamConfig = UseEventStreamBaseConfig & UseCancellationConfig
-
 export type EventSchemas = { [key: string]: AnyStruct }
-
-type KnownEventKey<TEvents extends EventSchemas> = ExcludeUnion<keyof TEvents & string, 'default'>
 
 type KnownEventUnion<TEvents extends EventSchemas> = {
   [K in keyof TEvents & string as K extends 'default' ? never : K]: {
@@ -38,7 +33,7 @@ type KnownEventUnion<TEvents extends EventSchemas> = {
     id?: string
     retry?: number
   }
-}[KnownEventKey<TEvents>]
+} extends infer O ? O[keyof O] : never
 
 type DefaultEventUnion<TEvents extends EventSchemas> = 'default' extends keyof TEvents
   ? {
@@ -112,7 +107,7 @@ export interface EventStreamCommand<TInput extends AnyStruct | undefined, TEvent
   readonly input: EndpointInput<TInput> | undefined
 }
 
-export type EventStreamExecuteOptions = UseEventStreamConfig & { signal?: AbortSignal }
+export type EventStreamExecuteOptions = UseEventStreamBaseConfig & UseCancellationConfig & { signal?: AbortSignal }
 
 export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEvents extends EventSchemas> =
   IsInputOptional<TInput> extends true

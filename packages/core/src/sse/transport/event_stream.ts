@@ -357,11 +357,7 @@ function createOpenInfo(response: Response): EventStreamOpenInfo {
   }
 }
 
-type RequestInitWithDuplex = RequestInit & {
-  duplex?: 'half'
-}
-
-function createEventStreamRequestInit(request: HttpRequest, headers: Headers, abort?: AbortSignal): RequestInitWithDuplex {
+function createEventStreamRequestInit(request: HttpRequest, headers: Headers, abort?: AbortSignal): RequestInit & { duplex?: 'half' } {
   /* istanbul ignore next -- unreachable: Accept is always set in fetchEventStream */
   if (!headers.has('Accept')) {
     headers.set('Accept', EVENT_STREAM_CONTENT_TYPE)
@@ -373,7 +369,7 @@ function createEventStreamRequestInit(request: HttpRequest, headers: Headers, ab
   }
 
   const body = serializeHttpBody(request.body)
-  const init: RequestInitWithDuplex = {
+  const init: RequestInit & { duplex?: 'half' } = {
     body,
     credentials,
     headers,
