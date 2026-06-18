@@ -1,7 +1,7 @@
 import { COMMAND_TYPE, EVENT_STREAM_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
 import type { ClientConfig } from '../client/config'
-import type { ExcludeUnion, ExtractUnion, NonNullableValue } from '../internal/utility_types'
+import type { ExcludeUnion, NonNullableValue } from '../internal/utility_types'
 import type { SSEInvalidEventContext, SSEInvalidEventHandler } from '../client/config'
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
@@ -29,10 +29,10 @@ export type UseEventStreamConfig = UseEventStreamBaseConfig & UseCancellationCon
 
 export type EventSchemas = { [key: string]: AnyStruct }
 
-type KnownEventKey<TEvents extends EventSchemas> = ExcludeUnion<ExtractUnion<keyof TEvents, string>, 'default'>
+type KnownEventKey<TEvents extends EventSchemas> = ExcludeUnion<keyof TEvents & string, 'default'>
 
 type KnownEventUnion<TEvents extends EventSchemas> = {
-  [K in KnownEventKey<TEvents>]: {
+  [K in keyof TEvents & string as K extends 'default' ? never : K]: {
     data: Infer<TEvents[K]>
     event: K
     id?: string

@@ -1,12 +1,13 @@
-import type { NonNullableValue, SelectKeys, ExtractUnion } from './utility_types'
+import type { NonNullableValue, SelectKeys } from './utility_types'
 import type { AnyStruct, RequestBodyCodec as StructRequestBodyCodec } from '../struct'
+import type { RequestDefinition } from '../struct/types'
 import { getWireKey } from '../struct/codec/common'
 import { encodeValue } from '../struct/encode'
 import { getStructFields } from '../struct/introspection'
 import { resolveObjectShape } from '../struct/shape'
 import { DEFINITION } from '../struct/symbols'
 import { HeaderTag, JsonTag, MultipartTag, QueryTag, UriTag, UrlencodedTag } from '../struct/tag'
-import type { RuntimeSchema, SchemaDefinition, SchemaLike } from '../struct/types'
+import type { RuntimeSchema, SchemaLike } from '../struct/types'
 import { hasOwnKey, isPlainObject } from '../struct/utils'
 import type { HttpRequest } from './http_request'
 import type {
@@ -205,7 +206,7 @@ function buildDefaultRequest<TInput>(input: TInput, options: RequestAutoBuildOpt
     return {}
   }
 
-  const runtime = options.input as unknown as RuntimeSchema
+  const runtime = options.input as RuntimeSchema
   const definition = runtime[DEFINITION]
 
   if (definition.kind === 'request') {
@@ -217,7 +218,7 @@ function buildDefaultRequest<TInput>(input: TInput, options: RequestAutoBuildOpt
 
 function buildRequestShape<TInput>(
   input: TInput,
-  definition: ExtractUnion<SchemaDefinition, { kind: 'request' }>,
+  definition: RequestDefinition,
   transport: RequestTransport,
 ): RequestBuild {
   assertRequestShapeTransport(definition, transport)
@@ -228,13 +229,13 @@ function buildRequestShape<TInput>(
   const requestInput: { [key: string]: unknown } = isPlainObject(input) ? input : {}
 
   if (definition.path) {
-    setPathParamsState(state, encodeFlatRecord(definition.path as unknown as RuntimeSchema, requestInput['path'], 'path'))
+    setPathParamsState(state, encodeFlatRecord(definition.path as RuntimeSchema, requestInput['path'], 'path'))
   }
   if (definition.query) {
-    setQueryParamsState(state, encodeFlatRecord(definition.query as unknown as RuntimeSchema, requestInput['query'], 'query'))
+    setQueryParamsState(state, encodeFlatRecord(definition.query as RuntimeSchema, requestInput['query'], 'query'))
   }
   if (definition.headers) {
-    setHeadersState(state, encodeFlatRecord(definition.headers as unknown as RuntimeSchema, requestInput['headers'], 'headers'))
+    setHeadersState(state, encodeFlatRecord(definition.headers as RuntimeSchema, requestInput['headers'], 'headers'))
   }
   if (definition.body) {
     setRequestShapeBody(state, definition.body as RuntimeSchema, requestInput['body'])
@@ -770,7 +771,7 @@ function isArrayProjection(value: unknown): value is ArrayProjection {
   return isPlainObject(value) && ARRAY_PROJECTION in value
 }
 
-function assertRequestShapeTransport(definition: ExtractUnion<SchemaDefinition, { kind: 'request' }>, transport: RequestTransport): void {
+function assertRequestShapeTransport(definition: RequestDefinition, transport: RequestTransport): void {
   if (transport === 'sse' && definition.body) {
     throw new Error('SSE request input does not support body section')
   }

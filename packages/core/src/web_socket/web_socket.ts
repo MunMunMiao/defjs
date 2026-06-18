@@ -3,7 +3,7 @@ import type { BaseCommand } from '../client/command'
 import type { ClientConfig, WebSocketBeforeConnect } from '../client/config'
 
 import type { RequestError } from '../error'
-import type { ExcludeUnion, ExtractUnion, NonNullableValue } from '../internal/utility_types'
+import type { ExcludeUnion, NonNullableValue } from '../internal/utility_types'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { WebSocketSessionLike } from '../interceptor/interceptor'
 import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors } from '../interceptor/interceptor'
@@ -34,8 +34,6 @@ export type WebSocketState = 'aborted' | 'closed' | 'closing' | 'connecting' | '
 
 export type SocketSchemas = { [key: string]: AnyStruct }
 
-type KnownSocketKey<TMessages extends SocketSchemas> = ExcludeUnion<ExtractUnion<keyof TMessages, string>, 'default'>
-
 type SimplifySocket<T> = { [K in keyof T]: T[K] } & {}
 
 type NormalizeSocketMessage<TKey extends string, TPayload> = TPayload extends { [key: string]: unknown }
@@ -57,9 +55,15 @@ type SocketSendMessage<TKey extends string, TPayload> = TPayload extends { [key:
       type: TKey
     }
 
+type KnownSocketKey<TMessages extends SocketSchemas> = ExcludeUnion<keyof TMessages & string, 'default'>
+
 type KnownIncomingSocketUnion<TIncoming extends SocketSchemas> = {
-  [K in KnownSocketKey<TIncoming>]: NormalizeSocketMessage<K, Infer<TIncoming[K]>>
+  [K in keyof TIncoming & string as K extends 'default' ? never : K]: NormalizeSocketMessage<K, Infer<TIncoming[K]>>
 }[KnownSocketKey<TIncoming>]
+
+type KnownOutgoingSocketUnion<TOutgoing extends SocketSchemas> = {
+  [K in keyof TOutgoing & string as K extends 'default' ? never : K]: SocketSendMessage<K, EndpointInput<TOutgoing[K]>>
+}[KnownSocketKey<TOutgoing>]
 
 type DefaultIncomingSocketUnion<TIncoming extends SocketSchemas> = 'default' extends keyof TIncoming
   ? NormalizeSocketMessage<string, Infer<TIncoming['default']>>
@@ -70,10 +74,6 @@ export type WebSocketIncomingData<TIncoming extends SocketSchemas> = [
 ] extends [never]
   ? never
   : KnownIncomingSocketUnion<TIncoming> | DefaultIncomingSocketUnion<TIncoming>
-
-type KnownOutgoingSocketUnion<TOutgoing extends SocketSchemas> = {
-  [K in KnownSocketKey<TOutgoing>]: SocketSendMessage<K, EndpointInput<TOutgoing[K]>>
-}[KnownSocketKey<TOutgoing>]
 
 export type WebSocketOutgoingData<TOutgoing extends SocketSchemas | undefined> = TOutgoing extends SocketSchemas
   ? [KnownOutgoingSocketUnion<TOutgoing>] extends [never]
