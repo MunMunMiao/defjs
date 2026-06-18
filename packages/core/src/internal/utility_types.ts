@@ -5,8 +5,6 @@
  * (Partial, Pick, Record, etc.) in favor of explicit equivalents.
  */
 
-export type Optional<T> = { [K in keyof T]?: T[K] }
-
 export type RequireAll<T> = { [K in keyof T]-?: T[K] }
 
 export type SelectKeys<T, K extends keyof T> = { [P in K]: T[P] }
