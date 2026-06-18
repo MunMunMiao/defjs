@@ -1,5 +1,6 @@
 import { expectTypeOf } from 'vitest'
-import { COMMAND_TYPE, WEB_SOCKET_COMMAND } from '../client/command'
+import type { WEB_SOCKET_COMMAND } from '../client/command'
+import { COMMAND_TYPE } from '../client/command'
 import { defineWebSocket } from './web_socket'
 import { struct } from '../struct'
 

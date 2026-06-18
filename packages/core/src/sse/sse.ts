@@ -32,7 +32,9 @@ type KnownEventUnion<TEvents extends EventSchemas> = {
     id?: string
     retry?: number
   }
-} extends infer O ? O[keyof O] : never
+} extends infer O
+  ? O[keyof O]
+  : never
 
 type DefaultEventUnion<TEvents extends EventSchemas> = 'default' extends keyof TEvents
   ? {
@@ -321,11 +323,13 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
 }
 
 async function notifyInvalidEvent(
-  onInvalidEvent: ((context: {
-    reason: 'missing-schema' | 'validation-failed'
-    message: { id: string; event: string; data: string; retry?: number }
-    cause?: unknown
-  }) => void | Promise<void>) | undefined,
+  onInvalidEvent:
+    | ((context: {
+        reason: 'missing-schema' | 'validation-failed'
+        message: { id: string; event: string; data: string; retry?: number }
+        cause?: unknown
+      }) => void | Promise<void>)
+    | undefined,
   context: {
     reason: 'missing-schema' | 'validation-failed'
     message: { id: string; event: string; data: string; retry?: number }

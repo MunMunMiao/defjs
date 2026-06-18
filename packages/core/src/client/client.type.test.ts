@@ -118,8 +118,12 @@ const options = {
 
 type OptionsCases = Expect<Equal<typeof options.endpoint, string>>
 
-type XsrfOptionsCases = Expect<Equal<ClientOptions['xsrf'], { cookieName?: string; headerName?: string; tokenProvider?: XSRFTokenProvider } | undefined>>
-type XsrfConfigCases = Expect<Equal<ClientConfig['xsrf'], { cookieName: string; headerName: string; tokenProvider?: XSRFTokenProvider } | undefined>>
+type XsrfOptionsCases = Expect<
+  Equal<ClientOptions['xsrf'], { cookieName?: string; headerName?: string; tokenProvider?: XSRFTokenProvider } | undefined>
+>
+type XsrfConfigCases = Expect<
+  Equal<ClientConfig['xsrf'], { cookieName: string; headerName: string; tokenProvider?: XSRFTokenProvider } | undefined>
+>
 
 // @ts-expect-error withEndpoint expects a string
 createClient(withEndpoint(1))
@@ -160,10 +164,4 @@ createClient(withEndpoint('https://api.example.com'), withXSRF({ cookieName: 1 }
 // @ts-expect-error withXSRF tokenProvider must be synchronous and return a token or nullish value
 createClient(withEndpoint('https://api.example.com'), withXSRF({ tokenProvider: async () => 'token' }))
 
-export type Cases =
-  | ClientCases
-  | OptionsCases
-  | SerializerCases
-  | XsrfTokenProviderCases
-  | XsrfOptionsCases
-  | XsrfConfigCases
+export type Cases = ClientCases | OptionsCases | SerializerCases | XsrfTokenProviderCases | XsrfOptionsCases | XsrfConfigCases

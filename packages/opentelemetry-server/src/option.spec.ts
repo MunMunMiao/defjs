@@ -17,11 +17,11 @@ function makeConfig(): ClientConfig {
 
   return {
     endpoint: 'https://api.example.com',
-    http: { fetch: sharedFetch },
+    http: { handle: sharedFetch },
     interceptors: [],
     queryParamsSerializer: (params) => params.toString(),
-    sse: { fetch: sharedFetch },
-    webSocket: { WebSocket: globalThis.WebSocket },
+    sse: { handle: sharedFetch },
+    webSocket: { handle: globalThis.WebSocket },
   }
 }
 
@@ -115,7 +115,7 @@ describe('withOpenTelemetryServer', () => {
     option(config)
 
     expect(config.interceptors).toHaveLength(3)
-    expect(config.http.fetch).toBe(config.sse.fetch)
+    expect(config.http.handle).toBe(config.sse.handle)
   })
 
   test('should disable all interceptors when all transports are disabled', () => {

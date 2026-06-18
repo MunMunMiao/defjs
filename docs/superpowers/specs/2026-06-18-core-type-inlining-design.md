@@ -20,77 +20,77 @@
 
 ### 第一波：零风险清理
 
-| 类型 | 文件 | 操作 |
-|---|---|---|
-| `CommandEntry` | `client/command.ts` | 删除（死代码） |
-| `HttpRequestBuildContext` | `internal/request_builder.ts` | 内联为 `RequestBuilder` |
-| `WebSocketQueueConfig` | `web_socket/queue.ts` | 内联为 `WebSocketQueueOptions` |
-| `WebSocketReconnectConfig` | `web_socket/reconnect.ts` | 内联为 `WebSocketReconnectOptions` |
-| `HttpResponseBody` | `internal/http_response.ts` | 内联为 `unknown` |
-| `ScalarRequestBuildValue` | `struct/codec/query.ts` | 内联为 `boolean \| null \| number \| string` |
-| `EncodeChild` | `struct/encode.ts` | 内联函数签名 |
-| `TaggedObject` | `struct/codec/common.ts` | 内联为 `{ [key: string]: unknown }` 或 `Record<string, unknown>` |
-| `TagObjectOptions` | `struct/codec/common.ts` | 内联为 `{ requireTag?: boolean }` |
+| 类型                       | 文件                          | 操作                                                             |
+| -------------------------- | ----------------------------- | ---------------------------------------------------------------- |
+| `CommandEntry`             | `client/command.ts`           | 删除（死代码）                                                   |
+| `HttpRequestBuildContext`  | `internal/request_builder.ts` | 内联为 `RequestBuilder`                                          |
+| `WebSocketQueueConfig`     | `web_socket/queue.ts`         | 内联为 `WebSocketQueueOptions`                                   |
+| `WebSocketReconnectConfig` | `web_socket/reconnect.ts`     | 内联为 `WebSocketReconnectOptions`                               |
+| `HttpResponseBody`         | `internal/http_response.ts`   | 内联为 `unknown`                                                 |
+| `ScalarRequestBuildValue`  | `struct/codec/query.ts`       | 内联为 `boolean \| null \| number \| string`                     |
+| `EncodeChild`              | `struct/encode.ts`            | 内联函数签名                                                     |
+| `TaggedObject`             | `struct/codec/common.ts`      | 内联为 `{ [key: string]: unknown }` 或 `Record<string, unknown>` |
+| `TagObjectOptions`         | `struct/codec/common.ts`      | 内联为 `{ requireTag?: boolean }`                                |
 
 ### 第二波：HTTP 局部推导链内联
 
 在 `http/http.ts` 中内联：
 
-| 类型 | 操作 |
-|---|---|
-| `UseRequestBaseConfig` | 展开到 `UseRequestConfig` |
-| `ExpandStatus` | 展开到 `OutputPairs` |
-| `OutputPairs` | 展开到 `SuccessSchemaOf` / `ErrorSchemaOf` |
-| `SuccessSchemaOf` | 展开到 `RequestSuccessData` |
-| `ErrorSchemaOf` | 展开到 `RequestErrorData` |
-| `RequestDefinitionBase` | 展开到 `RequestDefinitionWithoutBuild` / `RequestDefinitionWithBuild` |
-| `RequestDefinitionWithoutBuild` / `RequestDefinitionWithBuild` | 展开到 `RequestDefinition` 联合类型和 `defineRequest` 重载 |
-| `IsInputOptional` | 展开到 `RequestCommandBuilder` 条件类型 |
+| 类型                                                           | 操作                                                                  |
+| -------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `UseRequestBaseConfig`                                         | 展开到 `UseRequestConfig`                                             |
+| `ExpandStatus`                                                 | 展开到 `OutputPairs`                                                  |
+| `OutputPairs`                                                  | 展开到 `SuccessSchemaOf` / `ErrorSchemaOf`                            |
+| `SuccessSchemaOf`                                              | 展开到 `RequestSuccessData`                                           |
+| `ErrorSchemaOf`                                                | 展开到 `RequestErrorData`                                             |
+| `RequestDefinitionBase`                                        | 展开到 `RequestDefinitionWithoutBuild` / `RequestDefinitionWithBuild` |
+| `RequestDefinitionWithoutBuild` / `RequestDefinitionWithBuild` | 展开到 `RequestDefinition` 联合类型和 `defineRequest` 重载            |
+| `IsInputOptional`                                              | 展开到 `RequestCommandBuilder` 条件类型                               |
 
 ### 第三波：SSE / WebSocket 配置链内联
 
-| 类型 | 文件 | 操作 |
-|---|---|---|
-| `UseEventStreamConfig` | `sse/sse.ts` | 展开为 `UseEventStreamBaseConfig & UseCancellationConfig` |
-| `EventStreamExecuteOptions` | `sse/sse.ts` | 展开为完整形式 |
-| `KnownEventKey` | `sse/sse.ts` | 在映射类型中用 `as K extends 'default' ? never : K` 过滤 |
-| `KnownSocketKey` | `web_socket/web_socket.ts` | 同上 |
-| `RequestInitWithDuplex` | `http/transport/fetch.ts` | 内联为 `RequestInit & { duplex?: 'half' }` |
-| `RequestInitWithDuplex` | `sse/transport/event_stream.ts` | 同上 |
+| 类型                        | 文件                            | 操作                                                      |
+| --------------------------- | ------------------------------- | --------------------------------------------------------- |
+| `UseEventStreamConfig`      | `sse/sse.ts`                    | 展开为 `UseEventStreamBaseConfig & UseCancellationConfig` |
+| `EventStreamExecuteOptions` | `sse/sse.ts`                    | 展开为完整形式                                            |
+| `KnownEventKey`             | `sse/sse.ts`                    | 在映射类型中用 `as K extends 'default' ? never : K` 过滤  |
+| `KnownSocketKey`            | `web_socket/web_socket.ts`      | 同上                                                      |
+| `RequestInitWithDuplex`     | `http/transport/fetch.ts`       | 内联为 `RequestInit & { duplex?: 'half' }`                |
+| `RequestInitWithDuplex`     | `sse/transport/event_stream.ts` | 同上                                                      |
 
 ### 第四波：Command 元组链内联
 
 在 `client/command.ts` 中：
 
-| 类型 | 操作 |
-|---|---|
-| `HttpDispatchCommand` | 内联为 `HttpCommand<AnyStruct \| undefined, RequestOutputShape \| undefined>` |
-| `EventStreamDispatchCommand` | 内联为 `EventStreamCommand<AnyStruct \| undefined, EventSchemas>` |
-| `WebSocketDispatchCommand` | 内联为 `WebSocketCommand<...>` |
-| `HttpCommandEntry` | 内联为元组 `[command: HttpCommand<...>, options?: HttpExecuteOptions]` |
-| `EventStreamCommandEntry` | 内联为元组 |
-| `WebSocketCommandEntry` | 内联为元组 |
-| `UnknownCommandEntry` | 内联为 `[command: Command, options?: unknown]` |
+| 类型                         | 操作                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| `HttpDispatchCommand`        | 内联为 `HttpCommand<AnyStruct \| undefined, RequestOutputShape \| undefined>` |
+| `EventStreamDispatchCommand` | 内联为 `EventStreamCommand<AnyStruct \| undefined, EventSchemas>`             |
+| `WebSocketDispatchCommand`   | 内联为 `WebSocketCommand<...>`                                                |
+| `HttpCommandEntry`           | 内联为元组 `[command: HttpCommand<...>, options?: HttpExecuteOptions]`        |
+| `EventStreamCommandEntry`    | 内联为元组                                                                    |
+| `WebSocketCommandEntry`      | 内联为元组                                                                    |
+| `UnknownCommandEntry`        | 内联为 `[command: Command, options?: unknown]`                                |
 
 ### 第五波：public API 配置类型内联
 
 在 `client/config.ts` 中内联，并更新 `client/public_api.ts`：
 
-| 类型 | 操作 |
-|---|---|
-| `ClientHttpOptions` / `ClientHttpConfig` | 内联到 `ClientOptions.http` / `ClientConfig.http` |
-| `WebSocketBeforeConnect` | 内联为 `() => void \| Promise<void>` |
-| `WebSocketHeartbeatOptions` | 内联到 `ClientWebSocketOptions.heartbeat` 和 `withWebSocketHeartbeat` |
-| `WebSocketQueueOptions` | 内联到 `ClientWebSocketOptions.queue` 和 `withWebSocketQueue` |
-| `WebSocketReconnectOptions` | 内联到 `ClientWebSocketOptions.reconnect` 和 `withWebSocketReconnect` |
-| `SSEInvalidEventReason` | 内联为字符串字面量联合 |
-| `SSEInvalidEventMessage` | 内联为对象字面量 |
-| `SSEInvalidEventContext` | 内联到 `SSEInvalidEventHandler` |
-| `SSEInvalidEventHandler` | 内联为完整函数类型 |
-| `SSEReconnectOptions` | 内联到 `ClientSSEOptions.reconnect` 和 `withSSEReconnect` |
-| `SSEQueueOptions` | 内联到 `ClientSSEOptions.queue` 和 `withSSEQueue` |
-| `XSRFTokenProviderContext` | 内联为 `{ request: HttpRequest }` |
-| `XSRFTokenProvider` | 内联为完整函数类型 |
+| 类型                                     | 操作                                                                  |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| `ClientHttpOptions` / `ClientHttpConfig` | 内联到 `ClientOptions.http` / `ClientConfig.http`                     |
+| `WebSocketBeforeConnect`                 | 内联为 `() => void \| Promise<void>`                                  |
+| `WebSocketHeartbeatOptions`              | 内联到 `ClientWebSocketOptions.heartbeat` 和 `withWebSocketHeartbeat` |
+| `WebSocketQueueOptions`                  | 内联到 `ClientWebSocketOptions.queue` 和 `withWebSocketQueue`         |
+| `WebSocketReconnectOptions`              | 内联到 `ClientWebSocketOptions.reconnect` 和 `withWebSocketReconnect` |
+| `SSEInvalidEventReason`                  | 内联为字符串字面量联合                                                |
+| `SSEInvalidEventMessage`                 | 内联为对象字面量                                                      |
+| `SSEInvalidEventContext`                 | 内联到 `SSEInvalidEventHandler`                                       |
+| `SSEInvalidEventHandler`                 | 内联为完整函数类型                                                    |
+| `SSEReconnectOptions`                    | 内联到 `ClientSSEOptions.reconnect` 和 `withSSEReconnect`             |
+| `SSEQueueOptions`                        | 内联到 `ClientSSEOptions.queue` 和 `withSSEQueue`                     |
+| `XSRFTokenProviderContext`               | 内联为 `{ request: HttpRequest }`                                     |
+| `XSRFTokenProvider`                      | 内联为完整函数类型                                                    |
 
 ## 验证策略
 

@@ -1,5 +1,6 @@
 import { expectTypeOf } from 'vitest'
-import { COMMAND_TYPE, EVENT_STREAM_COMMAND } from '../client/command'
+import type { EVENT_STREAM_COMMAND } from '../client/command'
+import { COMMAND_TYPE } from '../client/command'
 import { defineEventStream } from './sse'
 import { struct } from '../struct'
 

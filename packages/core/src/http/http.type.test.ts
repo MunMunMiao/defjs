@@ -1,5 +1,6 @@
 import { expectTypeOf } from 'vitest'
-import { COMMAND_TYPE, HTTP_COMMAND } from '../client/command'
+import type { HTTP_COMMAND } from '../client/command'
+import { COMMAND_TYPE } from '../client/command'
 import { defineRequest } from './http'
 import { struct } from '../struct'
 

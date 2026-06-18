@@ -6,7 +6,6 @@ import { resolveRequestUrl } from '../../internal/url'
 import { applyRequestContentType, serializeHttpBody } from './body'
 import { concatChunks, getContentLength, getContentType, parseBody } from './utils'
 
-
 export const ERR_STREAMING_REQUEST_UNSUPPORTED = new Error('ERR_STREAMING_REQUEST_UNSUPPORTED')
 
 const XSRF_MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -99,11 +98,14 @@ function normalizeXSRFToken(token: string | null | undefined): string | undefine
   return token
 }
 
-function resolveXSRFToken(request: HttpRequest, xsrf: {
-  cookieName: string
-  headerName: string
-  tokenProvider?: (context: { request: HttpRequest }) => string | null | undefined
-}): string | undefined {
+function resolveXSRFToken(
+  request: HttpRequest,
+  xsrf: {
+    cookieName: string
+    headerName: string
+    tokenProvider?: (context: { request: HttpRequest }) => string | null | undefined
+  },
+): string | undefined {
   if (xsrf.tokenProvider) {
     return normalizeXSRFToken(xsrf.tokenProvider({ request }))
   }

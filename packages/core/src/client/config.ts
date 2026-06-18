@@ -22,13 +22,7 @@ export interface ClientWebSocketOptions {
     factor?: number
     jitter?: number
     maxDelayMs?: number
-    shouldReconnect?: (context: {
-      attempt: number
-      cause?: unknown
-      code?: number
-      reason?: string
-      wasClean?: boolean
-    }) => boolean
+    shouldReconnect?: (context: { attempt: number; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }) => boolean
   }
 }
 

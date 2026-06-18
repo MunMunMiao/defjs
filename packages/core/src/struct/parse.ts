@@ -403,9 +403,7 @@ function buildMissingValue(schema: RuntimeSchema, path: Path, mode: ParseMode): 
 
 type RequestSectionKey = 'body' | 'headers' | 'path' | 'query'
 
-function getRequestSections(
-  definition: RequestDefinition,
-): [RequestSectionKey, RuntimeSchema][] {
+function getRequestSections(definition: RequestDefinition): [RequestSectionKey, RuntimeSchema][] {
   const sections: [RequestSectionKey, RuntimeSchema][] = []
   if (definition.path) {
     sections.push(['path', definition.path as RuntimeSchema])

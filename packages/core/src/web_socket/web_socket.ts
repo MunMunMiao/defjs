@@ -55,11 +55,15 @@ type SocketSendMessage<TKey extends string, TPayload> = TPayload extends { [key:
 
 type KnownIncomingSocketUnion<TIncoming extends SocketSchemas> = {
   [K in keyof TIncoming & string as K extends 'default' ? never : K]: NormalizeSocketMessage<K, Infer<TIncoming[K]>>
-} extends infer O ? O[keyof O] : never
+} extends infer O
+  ? O[keyof O]
+  : never
 
 type KnownOutgoingSocketUnion<TOutgoing extends SocketSchemas> = {
   [K in keyof TOutgoing & string as K extends 'default' ? never : K]: SocketSendMessage<K, EndpointInput<TOutgoing[K]>>
-} extends infer O ? O[keyof O] : never
+} extends infer O
+  ? O[keyof O]
+  : never
 
 type DefaultIncomingSocketUnion<TIncoming extends SocketSchemas> = 'default' extends keyof TIncoming
   ? NormalizeSocketMessage<string, Infer<TIncoming['default']>>

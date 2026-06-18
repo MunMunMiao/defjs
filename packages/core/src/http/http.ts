@@ -35,47 +35,52 @@ export interface HttpCommand<TInput extends AnyStruct | undefined, TOutput exten
 
 export type HttpExecuteOptions = UseRequestConfig & { signal?: AbortSignal }
 
-export type RequestCommandBuilder<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> =
-  [TInput] extends [undefined]
+export type RequestCommandBuilder<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> = [TInput] extends [
+  undefined,
+]
+  ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
+  : {} extends EndpointInput<TInput>
     ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
-    : {} extends EndpointInput<TInput>
-      ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
-      : (input: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
+    : (input: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
 
 export type RequestSuccessData<TOutput extends RequestOutputShape | undefined> = [TOutput] extends [undefined]
   ? undefined
   : [
-        (NonNullable<TOutput> extends readonly (infer TItem)[]
-          ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-            ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
-            : never
-          : {
-              [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
-                ? NonNullable<TOutput>[K] extends AnyStruct
-                  ? { body: NonNullable<TOutput>[K]; status: TStatus }
+        (
+          NonNullable<TOutput> extends readonly (infer TItem)[]
+            ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+              ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+              : never
+            : {
+                [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+                  ? NonNullable<TOutput>[K] extends AnyStruct
+                    ? { body: NonNullable<TOutput>[K]; status: TStatus }
+                    : never
                   : never
-                : never
-            }[keyof NonNullable<TOutput>]) extends infer TPair
+              }[keyof NonNullable<TOutput>]
+        ) extends infer TPair
           ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
             ? `${TStatus}` extends `2${string}`
               ? TBody
               : never
             : never
-          : never
+          : never,
       ] extends [never]
     ? unknown
     : Infer<
-        (NonNullable<TOutput> extends readonly (infer TItem)[]
-          ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-            ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
-            : never
-          : {
-              [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
-                ? NonNullable<TOutput>[K] extends AnyStruct
-                  ? { body: NonNullable<TOutput>[K]; status: TStatus }
+        (
+          NonNullable<TOutput> extends readonly (infer TItem)[]
+            ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+              ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+              : never
+            : {
+                [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+                  ? NonNullable<TOutput>[K] extends AnyStruct
+                    ? { body: NonNullable<TOutput>[K]; status: TStatus }
+                    : never
                   : never
-                : never
-            }[keyof NonNullable<TOutput>]) extends infer TPair
+              }[keyof NonNullable<TOutput>]
+        ) extends infer TPair
           ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
             ? `${TStatus}` extends `2${string}`
               ? TBody
@@ -87,37 +92,41 @@ export type RequestSuccessData<TOutput extends RequestOutputShape | undefined> =
 export type RequestErrorData<TOutput extends RequestOutputShape | undefined> = [TOutput] extends [undefined]
   ? undefined
   : [
-        (NonNullable<TOutput> extends readonly (infer TItem)[]
-          ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-            ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
-            : never
-          : {
-              [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
-                ? NonNullable<TOutput>[K] extends AnyStruct
-                  ? { body: NonNullable<TOutput>[K]; status: TStatus }
+        (
+          NonNullable<TOutput> extends readonly (infer TItem)[]
+            ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+              ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+              : never
+            : {
+                [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+                  ? NonNullable<TOutput>[K] extends AnyStruct
+                    ? { body: NonNullable<TOutput>[K]; status: TStatus }
+                    : never
                   : never
-                : never
-            }[keyof NonNullable<TOutput>]) extends infer TPair
+              }[keyof NonNullable<TOutput>]
+        ) extends infer TPair
           ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
             ? `${TStatus}` extends `2${string}`
               ? never
               : TBody
             : never
-          : never
+          : never,
       ] extends [never]
     ? unknown
     : Infer<
-        (NonNullable<TOutput> extends readonly (infer TItem)[]
-          ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-            ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
-            : never
-          : {
-              [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
-                ? NonNullable<TOutput>[K] extends AnyStruct
-                  ? { body: NonNullable<TOutput>[K]; status: TStatus }
+        (
+          NonNullable<TOutput> extends readonly (infer TItem)[]
+            ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+              ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+              : never
+            : {
+                [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+                  ? NonNullable<TOutput>[K] extends AnyStruct
+                    ? { body: NonNullable<TOutput>[K]; status: TStatus }
+                    : never
                   : never
-                : never
-            }[keyof NonNullable<TOutput>]) extends infer TPair
+              }[keyof NonNullable<TOutput>]
+        ) extends infer TPair
           ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
             ? `${TStatus}` extends `2${string}`
               ? never

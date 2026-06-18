@@ -26,10 +26,7 @@ export type Command =
   | EventStreamCommand<AnyStruct | undefined, EventSchemas>
   | WebSocketCommand<AnyStruct | undefined, SocketSchemas, SocketSchemas | undefined>
 
-export type HttpCommandEntry = [
-  command: HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>,
-  options?: HttpExecuteOptions,
-]
+export type HttpCommandEntry = [command: HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>, options?: HttpExecuteOptions]
 export type EventStreamCommandEntry = [
   command: EventStreamCommand<AnyStruct | undefined, EventSchemas>,
   options?: EventStreamExecuteOptions,
@@ -39,7 +36,6 @@ export type WebSocketCommandEntry = [
   options?: WebSocketExecuteOptions<WebSocketIncomingData<SocketSchemas>, WebSocketOutgoingData<SocketSchemas | undefined>>,
 ]
 export type UnknownCommandEntry = [command: Command, options?: unknown]
-
 
 function commandTypeOf(value: unknown): unknown {
   if (typeof value !== 'object' || value === null || !(COMMAND_TYPE in value)) {

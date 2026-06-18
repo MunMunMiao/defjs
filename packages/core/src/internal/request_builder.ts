@@ -226,11 +226,7 @@ function buildDefaultRequest<TInput>(input: TInput, options: RequestAutoBuildOpt
   return {}
 }
 
-function buildRequestShape<TInput>(
-  input: TInput,
-  definition: RequestDefinition,
-  transport: RequestTransport,
-): RequestBuild {
+function buildRequestShape<TInput>(input: TInput, definition: RequestDefinition, transport: RequestTransport): RequestBuild {
   assertRequestShapeTransport(definition, transport)
 
   const state: RequestBuilderState = {
