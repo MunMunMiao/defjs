@@ -1,4 +1,3 @@
-import type { RequireAll } from '../internal/utility_types'
 import type { Interceptor } from '../interceptor/interceptor'
 import type { HttpRequest } from '../internal/http_request'
 
@@ -30,7 +29,11 @@ export interface WebSocketQueueOptions {
 }
 
 export interface ClientHttpOptions {
-  fetch?: typeof fetch
+  handle?: typeof fetch
+}
+
+export interface ClientHttpConfig {
+  handle: typeof fetch
 }
 
 export interface XSRFTokenProviderContext {
@@ -88,7 +91,7 @@ export interface SSEQueueOptions {
 }
 
 export interface ClientSSEOptions {
-  fetch?: typeof fetch
+  handle?: typeof fetch
   onInvalidEvent?: SSEInvalidEventHandler
   reconnect?: SSEReconnectOptions
   queue?: SSEQueueOptions
@@ -96,7 +99,7 @@ export interface ClientSSEOptions {
 }
 
 export interface ClientSSEConfig {
-  fetch: typeof fetch
+  handle: typeof fetch
   onInvalidEvent?: SSEInvalidEventHandler
   reconnect?: SSEReconnectOptions
   queue?: SSEQueueOptions
@@ -104,7 +107,7 @@ export interface ClientSSEConfig {
 }
 
 export interface ClientWebSocketOptions {
-  WebSocket?: typeof WebSocket
+  handle?: typeof WebSocket
   beforeConnect?: WebSocketBeforeConnect
   heartbeat?: WebSocketHeartbeatOptions
   protocols?: readonly string[]
@@ -125,7 +128,7 @@ export interface ClientOptions {
 
 export interface ClientConfig {
   endpoint: string
-  http: RequireAll<ClientHttpOptions>
+  http: ClientHttpConfig
   interceptors: Interceptor[]
   queryParamsSerializer: QueryParamsSerializer
   sse: ClientSSEConfig
@@ -136,12 +139,12 @@ export interface ClientConfig {
 
 const DEFAULT_FETCH = globalThis.fetch.bind(globalThis) as typeof fetch
 
-export const DEFAULT_HTTP_OPTIONS: RequireAll<ClientHttpOptions> = {
-  fetch: DEFAULT_FETCH,
+export const DEFAULT_HTTP_OPTIONS: ClientHttpConfig = {
+  handle: DEFAULT_FETCH,
 }
 
 export const DEFAULT_SSE_OPTIONS: ClientSSEConfig = {
-  fetch: DEFAULT_FETCH,
+  handle: DEFAULT_FETCH,
   onInvalidEvent: undefined,
   reconnect: undefined,
   queue: undefined,
