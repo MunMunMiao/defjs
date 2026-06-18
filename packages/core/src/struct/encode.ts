@@ -3,10 +3,8 @@ import { DEFINITION } from './symbols'
 import type { RuntimeSchema, SchemaDefinition } from './types'
 import { hasOwnKey, isPlainObject } from './utils'
 
-export type EncodeChild = (schema: RuntimeSchema, value: unknown) => unknown
-
 export interface EncodeOptions {
-  encodeObject?: (schema: RuntimeSchema, value: { [key: string]: unknown }, encodeChild: EncodeChild) => unknown
+  encodeObject?: (schema: RuntimeSchema, value: { [key: string]: unknown }, encodeChild: (schema: RuntimeSchema, value: unknown) => unknown) => unknown
 }
 
 export function encodeValue(schema: RuntimeSchema, value: unknown, options: EncodeOptions = {}): unknown {

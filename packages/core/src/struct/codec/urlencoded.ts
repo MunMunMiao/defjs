@@ -3,8 +3,6 @@ import { UrlencodedTag } from '../tag'
 import type { SchemaLike } from '../types'
 import { assertPlainObject, getWireKey } from './common'
 
-export type SearchParamScalar = boolean | null | number | string
-
 export function encodeUrlencoded(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): URLSearchParams {
   if (!isObjectStruct(struct)) {
     throw new TypeError('urlencoded encode expects object struct')
@@ -51,10 +49,10 @@ function appendSearchParamItem(params: URLSearchParams, key: string, value: unkn
   throw new TypeError(`urlencoded value for "${key}" requires an explicit serializer`)
 }
 
-export function isSearchParamScalar(value: unknown): value is SearchParamScalar {
+export function isSearchParamScalar(value: unknown): value is boolean | null | number | string {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null
 }
 
-export function stringifySearchParamScalar(value: SearchParamScalar): string {
+export function stringifySearchParamScalar(value: boolean | null | number | string): string {
   return value === null ? 'null' : String(value)
 }

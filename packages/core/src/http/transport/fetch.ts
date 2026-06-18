@@ -1,22 +1,18 @@
-import type { FnReturn } from '../../internal/utility_types'
 import type { ClientXSRFConfig } from '../../client/config'
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
 import type { HttpProgressFn, HttpRequest } from '../../internal/http_request'
-import type { HttpResponse, HttpResponseBody } from '../../internal/http_response'
+import type { HttpResponse } from '../../internal/http_response'
 import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
 import { applyRequestContentType, serializeHttpBody } from './body'
 import { concatChunks, getContentLength, getContentType, parseBody } from './utils'
 
-type RequestInitWithDuplex = RequestInit & {
-  duplex?: 'half'
-}
 
 export const ERR_STREAMING_REQUEST_UNSUPPORTED = new Error('ERR_STREAMING_REQUEST_UNSUPPORTED')
 
 const XSRF_MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
-export function isReadableStreamBody(body: HttpRequest['body'] | FnReturn<typeof serializeHttpBody>): body is ReadableStream<Uint8Array> {
+export function isReadableStreamBody(body: HttpRequest['body'] | unknown): body is ReadableStream<Uint8Array> {
   return typeof ReadableStream !== 'undefined' && body instanceof ReadableStream
 }
 
@@ -42,7 +38,7 @@ export function supportsStreamingRequestBody(): boolean {
       body: stream,
       duplex: 'half',
       method: 'POST',
-    } as RequestInitWithDuplex)
+    } as RequestInit & { duplex?: 'half' })
 
     streamingRequestBodySupport = request.body !== null
     return streamingRequestBodySupport
@@ -177,7 +173,7 @@ function wrapUploadProgressStream(
   })
 }
 
-export function createFetchRequestInit(request: HttpRequest): RequestInitWithDuplex {
+export function createFetchRequestInit(request: HttpRequest): RequestInit & { duplex?: 'half' } {
   const headers = new Headers(request.headers)
   applyRequestContentType(request, headers)
   applyXSRFHeaderIfNeeded(request, headers)
@@ -188,7 +184,7 @@ export function createFetchRequestInit(request: HttpRequest): RequestInitWithDup
 
   const credentials = request.withCredentials ? 'include' : undefined
   let body = serializeHttpBody(request.body)
-  const init: RequestInitWithDuplex = {
+  const init: RequestInit & { duplex?: 'half' } = {
     headers,
     method: request.method,
     body,
@@ -217,7 +213,7 @@ export function createFetchRequest(request: HttpRequest): Request {
   return new Request(url, createFetchRequestInit(request))
 }
 
-async function parseNativeResponseBody(response: Response, responseType: HttpRequest['responseType']): Promise<HttpResponseBody> {
+async function parseNativeResponseBody(response: Response, responseType: HttpRequest['responseType']): Promise<unknown> {
   switch (responseType) {
     case 'json': {
       const text = await response.text()
@@ -263,7 +259,7 @@ export async function fetchHandler(
   const { headers, status, statusText, url } = response
   const contentLength = getContentLength(headers)
   const contentType = getContentType(headers)
-  let body: HttpResponseBody = null
+  let body: unknown = null
 
   /* istanbul ignore if -- @preserve */
   if (response.body) {

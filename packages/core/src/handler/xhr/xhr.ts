@@ -1,6 +1,6 @@
 import type { HttpRequest } from '../../request'
 import { __detectContentTypeHeader, __serializeBody } from '../../request'
-import type { HttpResponse, HttpResponseBody } from '../../response'
+import type { HttpResponse } from '../../response'
 import { __makeResponse, ERR_ABORTED, ERR_NETWORK, ERR_TIMEOUT, ERR_UNKNOWN } from '../../response'
 import { __getContentType, __parseBody } from '../util'
 
@@ -68,7 +68,7 @@ export function xhrHandler(httpRequest: HttpRequest): Promise<HttpResponse<unkno
       const { status, statusText, responseURL, response } = xhr
       const headers = extractHeaders(xhr.getAllResponseHeaders())
       const contentType = __getContentType(headers)
-      let body: HttpResponseBody = null
+      let body: unknown = null
 
       try {
         body = __parseBody({

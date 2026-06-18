@@ -1,5 +1,3 @@
-export type HttpResponseBody = unknown
-
 export type HttpResponse<R> = {
   readonly url: string
   readonly status: number

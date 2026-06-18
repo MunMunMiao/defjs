@@ -1,7 +1,5 @@
 import type { WebSocketQueueOptions } from '../client/config'
 
-export type WebSocketQueueConfig = WebSocketQueueOptions
-
 export type SendQueue = {
   clear(): void
   enqueue(serialized: string): void
@@ -13,7 +11,7 @@ type QueueNode = {
   value: string
 }
 
-export function createSendQueue(config?: WebSocketQueueConfig): SendQueue {
+export function createSendQueue(config?: WebSocketQueueOptions): SendQueue {
   let head: QueueNode | undefined
   let tail: QueueNode | undefined
   let size = 0

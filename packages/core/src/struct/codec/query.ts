@@ -6,8 +6,6 @@ import type { SchemaLike } from '../types'
 import { assertPlainObject, getWireKey } from './common'
 import { isSearchParamScalar } from './urlencoded'
 
-type ScalarRequestBuildValue = boolean | null | number | string
-
 export interface QueryCodecOptions {
   allowComplex?: boolean
 }
@@ -68,7 +66,7 @@ function normalizeRecordValue(label: string, key: string, value: unknown, option
   return normalizeScalarRecordValue(label, key, value)
 }
 
-function normalizeScalarRecordValue(label: string, key: string, value: unknown): ScalarRequestBuildValue {
+function normalizeScalarRecordValue(label: string, key: string, value: unknown): boolean | null | number | string {
   if (isSearchParamScalar(value)) {
     return value
   }

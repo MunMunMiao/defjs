@@ -6,17 +6,11 @@ import type { FieldTag, TagNamespace } from '../tag'
 import type { Path, RuntimeSchema, SchemaLike } from '../types'
 import { hasOwnKey, isPlainObject } from '../utils'
 
-export type TaggedObject = { [key: string]: unknown }
-
-export type TagObjectOptions = {
-  requireTag?: boolean
-}
-
 export function encodeObjectByTag(
   struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
-  options: TagObjectOptions = {},
+  options: { requireTag?: boolean } = {},
 ): unknown {
   if (!isObjectStruct(struct)) {
     return encodeTaggedField(struct, value, namespace, options)
@@ -24,7 +18,7 @@ export function encodeObjectByTag(
 
   assertPlainObject(value, `${namespace.name} encode expects object value`)
 
-  const output: TaggedObject = Object.create(null)
+  const output: { [key: string]: unknown } = Object.create(null)
   for (const field of getStructFields(struct)) {
     const fieldTag = field.tags.get(namespace.kind)
     if (options.requireTag && !fieldTag) {
@@ -50,7 +44,7 @@ export function decodeObjectByTag(
   struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
-  options: TagObjectOptions = {},
+  options: { requireTag?: boolean } = {},
 ): unknown {
   if (!isObjectStruct(struct)) {
     return parseStructValue(struct, decodeTaggedField(struct, value, namespace, options, []))
@@ -63,12 +57,12 @@ function normalizeObjectByTag(
   struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
-  options: TagObjectOptions,
+  options: { requireTag?: boolean },
   path: Path,
-): TaggedObject {
+): { [key: string]: unknown } {
   assertPlainObject(value, `${namespace.name} decode expects object value`)
 
-  const normalized: TaggedObject = Object.create(null)
+  const normalized: { [key: string]: unknown } = Object.create(null)
   for (const field of getStructFields(struct)) {
     const fieldTag = field.tags.get(namespace.kind)
     if (options.requireTag && !fieldTag) {
@@ -94,7 +88,7 @@ export function getWireKey(fieldKey: string, fieldTag: FieldTag | undefined): st
   return fieldKey
 }
 
-export function assertPlainObject(value: unknown, message: string): asserts value is TaggedObject {
+export function assertPlainObject(value: unknown, message: string): asserts value is { [key: string]: unknown } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError(message)
   }
@@ -104,7 +98,7 @@ function encodeTaggedField(
   struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
-  options: TagObjectOptions,
+  options: { requireTag?: boolean },
 ): unknown {
   if (isObjectStruct(struct)) {
     return encodeObjectByTag(struct, value, namespace, options)
@@ -112,7 +106,7 @@ function encodeTaggedField(
 
   return encodeValue(struct as unknown as RuntimeSchema, value, {
     encodeObject: (objectStruct, objectValue, encodeChild) => {
-      const output: TaggedObject = Object.create(null)
+      const output: { [key: string]: unknown } = Object.create(null)
       for (const field of getStructFields(objectStruct)) {
         const fieldTag = field.tags.get(namespace.kind)
         if (options.requireTag && !fieldTag) {
@@ -139,7 +133,7 @@ function decodeTaggedField(
   struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
-  options: TagObjectOptions,
+  options: { requireTag?: boolean },
   path: Path,
 ): unknown {
   const runtime = resolveRuntimeSchema(struct as unknown as RuntimeSchema)
@@ -166,7 +160,7 @@ function decodeTaggedField(
       if (!isPlainObject(value)) {
         return value
       }
-      const output: TaggedObject = Object.create(null)
+      const output: { [key: string]: unknown } = Object.create(null)
       for (const [key, entry] of Object.entries(value)) {
         output[key] = decodeTaggedField(definition.value, entry, namespace, options, [...path, key])
       }
@@ -207,7 +201,7 @@ function tryDecodeTaggedField(
   struct: SchemaLike<unknown, unknown, boolean>,
   value: unknown,
   namespace: TagNamespace,
-  options: TagObjectOptions,
+  options: { requireTag?: boolean },
   path: Path,
 ): { ok: true; value: unknown } | { ok: false } {
   try {

@@ -134,8 +134,6 @@ export interface SSERequestBuildContext {
   setQueryParams(projection: BuildRecordProjection): void
 }
 
-export type HttpRequestBuildContext = RequestBuilder
-
 export type RequestBuild = {
   body?: HttpRequest['body']
   bodyContentType?: string | null
@@ -155,7 +153,7 @@ export type RequestBuildContext<TTransport extends RequestTransport = 'http'> = 
   ? WebSocketRequestBuildContext
   : TTransport extends 'sse'
     ? SSERequestBuildContext
-    : HttpRequestBuildContext
+    : RequestBuilder
 
 export type RequestBuildHandler<TInput extends AnyStruct | undefined, TTransport extends RequestTransport = 'http'> = (
   request: RequestBuildContext<TTransport>,

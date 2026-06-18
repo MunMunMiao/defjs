@@ -1,6 +1,6 @@
 import { COMMAND_TYPE, WEB_SOCKET_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
-import type { ClientConfig, WebSocketBeforeConnect } from '../client/config'
+import type { ClientConfig, WebSocketBeforeConnect, WebSocketReconnectOptions, WebSocketQueueOptions } from '../client/config'
 
 import type { RequestError } from '../error'
 import type { ExcludeUnion } from '../internal/utility_types'
@@ -25,9 +25,8 @@ import {
 } from './codec'
 import type { HeartbeatRuntime } from './heartbeat'
 import { startHeartbeat, stopHeartbeat } from './heartbeat'
-import type { SendQueue, WebSocketQueueConfig } from './queue'
+import type { SendQueue } from './queue'
 import { createSendQueue } from './queue'
-import type { WebSocketReconnectConfig } from './reconnect'
 import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait } from './reconnect'
 
 export type WebSocketState = 'aborted' | 'closed' | 'closing' | 'connecting' | 'error' | 'idle' | 'open' | 'reconnecting'
@@ -149,8 +148,8 @@ interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
   beforeConnect?: WebSocketBeforeConnect
   heartbeat?: WebSocketHeartbeatConfig<TIncoming, TOutgoing>
   protocols?: readonly string[]
-  queue?: WebSocketQueueConfig
-  reconnect?: WebSocketReconnectConfig
+  queue?: WebSocketQueueOptions
+  reconnect?: WebSocketReconnectOptions
 }
 
 export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketBaseConfig<TIncoming, TOutgoing> &
@@ -214,7 +213,7 @@ type Deferred<T> = {
   resolve: (value: T | PromiseLike<T>) => void
 }
 
-export type { WebSocketQueueConfig, WebSocketReconnectConfig }
+export type { WebSocketQueueOptions, WebSocketReconnectOptions }
 export interface WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> {
   intervalMs: number
   isAck?: (message: TIncoming) => boolean

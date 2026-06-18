@@ -1,6 +1,6 @@
 import type { HttpRequest } from '../../request'
 import { __detectContentTypeHeader, __serializeBody } from '../../request'
-import type { HttpResponse, HttpResponseBody } from '../../response'
+import type { HttpResponse } from '../../response'
 import { __makeResponse, ERR_ABORTED, ERR_TIMEOUT } from '../../response'
 import { __concatChunks, __getContentLength, __getContentType, __parseBody } from '../util'
 
@@ -60,7 +60,7 @@ export async function fetchHandler(httpRequest: HttpRequest): Promise<HttpRespon
   const { headers, status, statusText, url } = response
   const contentLength = __getContentLength(headers)
   const contentType = __getContentType(headers)
-  let body: HttpResponseBody = null
+  let body: unknown = null
 
   /* istanbul ignore if -- @preserve */
   if (response.body) {
