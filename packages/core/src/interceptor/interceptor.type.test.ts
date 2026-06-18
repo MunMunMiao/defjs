@@ -1,4 +1,4 @@
-import type { FnReturn, FnParams } from '../internal/utility_types'
+import type { FnReturn } from '../internal/utility_types'
 import type { HttpRequest } from '../internal/http_request'
 import type { HttpResponse } from '../internal/http_response'
 import type { EventStreamHandle } from '../sse/transport/event_stream'
@@ -18,6 +18,8 @@ import type { HttpInterceptor, SSEInterceptor } from './index'
 import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './index'
 
 type IsAny<T> = 0 extends 1 & T ? true : false
+type ParametersOf<T> = T extends (...args: infer P) => unknown ? P : never
+type SecondParameter<T> = ParametersOf<T> extends [unknown, infer P, ...unknown[]] ? P : never
 type ContainsAny<T> =
   IsAny<T> extends true
     ? true
@@ -64,15 +66,15 @@ type MakeHttpChainCase = Expect<StrictEqual<FnReturn<typeof makeInterceptorChain
 type MakeSSEChainCase = Expect<StrictEqual<FnReturn<typeof makeSSEInterceptorChain>, SSEInterceptorFn>>
 type MakeWebSocketChainCase = Expect<StrictEqual<FnReturn<typeof makeWebSocketInterceptorChain>, WebSocketInterceptorFn>>
 
-type HttpChainParametersCase = Expect<StrictEqual<FnParams<FnReturn<typeof makeInterceptorChain>>, [HttpRequest, HttpInterceptorNext]>>
-type SSEChainParametersCase = Expect<StrictEqual<FnParams<FnReturn<typeof makeSSEInterceptorChain>>, [HttpRequest, SSEHandler]>>
+type HttpChainParametersCase = Expect<StrictEqual<ParametersOf<FnReturn<typeof makeInterceptorChain>>, [HttpRequest, HttpInterceptorNext]>>
+type SSEChainParametersCase = Expect<StrictEqual<ParametersOf<FnReturn<typeof makeSSEInterceptorChain>>, [HttpRequest, SSEHandler]>>
 type WebSocketChainParametersCase = Expect<
-  StrictEqual<FnParams<FnReturn<typeof makeWebSocketInterceptorChain>>, [HttpRequest, WebSocketHandler]>
+  StrictEqual<ParametersOf<FnReturn<typeof makeWebSocketInterceptorChain>>, [HttpRequest, WebSocketHandler]>
 >
 
-type HttpChainNextCase = Expect<StrictEqual<FnParams<FnReturn<typeof makeInterceptorChain>>[1], HttpInterceptorNext>>
-type SSEChainNextCase = Expect<StrictEqual<FnParams<FnReturn<typeof makeSSEInterceptorChain>>[1], SSEHandler>>
-type WebSocketChainNextCase = Expect<StrictEqual<FnParams<FnReturn<typeof makeWebSocketInterceptorChain>>[1], WebSocketHandler>>
+type HttpChainNextCase = Expect<StrictEqual<SecondParameter<FnReturn<typeof makeInterceptorChain>>, HttpInterceptorNext>>
+type SSEChainNextCase = Expect<StrictEqual<SecondParameter<FnReturn<typeof makeSSEInterceptorChain>>, SSEHandler>>
+type WebSocketChainNextCase = Expect<StrictEqual<SecondParameter<FnReturn<typeof makeWebSocketInterceptorChain>>, WebSocketHandler>>
 
 type HttpChainResultCase = Expect<StrictEqual<FnReturn<FnReturn<typeof makeInterceptorChain>>, Promise<HttpResponse<unknown>>>>
 type SSEChainResultCase = Expect<StrictEqual<FnReturn<FnReturn<typeof makeSSEInterceptorChain>>, Promise<EventStreamHandle<unknown>>>>

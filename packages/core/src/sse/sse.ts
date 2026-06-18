@@ -1,7 +1,8 @@
+import { COMMAND_TYPE, EVENT_STREAM_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
 import type { ClientConfig } from '../client/config'
-import type { ExcludeUnion, ExtractUnion, NonNullableValue, FnParams } from '../internal/utility_types'
-import type { SSEInvalidEventHandler } from '../client/config'
+import type { ExcludeUnion, ExtractUnion, NonNullableValue } from '../internal/utility_types'
+import type { SSEInvalidEventContext, SSEInvalidEventHandler } from '../client/config'
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { SSEHandler } from '../interceptor/interceptor'
@@ -104,10 +105,9 @@ type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [u
     ? true
     : false
 
-export interface EventStreamCommand<
-  TInput extends AnyStruct | undefined,
-  TEvents extends EventSchemas,
-> extends BaseCommand<'event-stream'> {
+export interface EventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas> extends BaseCommand<
+  typeof EVENT_STREAM_COMMAND
+> {
   readonly endpoint: EventStreamEndpoint<TInput, TEvents>
   readonly input: EndpointInput<TInput> | undefined
 }
@@ -123,7 +123,6 @@ type EventStreamEndpoint<
   TInput extends AnyStruct | undefined = undefined,
   TEvents extends EventSchemas = EventSchemas,
 > = EventStreamDefinition<TInput, TEvents> & {
-  readonly kind: 'event-stream'
   readonly method: string
 }
 
@@ -138,16 +137,17 @@ export function defineEventStream<TInput extends AnyStruct | undefined = undefin
 ): EventStreamCommandBuilder<TInput, TEvents> {
   const endpoint: EventStreamEndpoint<TInput, TEvents> = {
     ...definition,
-    kind: 'event-stream' as const,
     method: definition.method ?? 'GET',
   }
 
   function create(input?: EndpointInput<TInput>): EventStreamCommand<TInput, TEvents> {
-    return {
-      kind: 'event-stream',
+    const command: EventStreamCommand<TInput, TEvents> = {
+      [COMMAND_TYPE]: EVENT_STREAM_COMMAND,
       endpoint,
       input,
-    } as EventStreamCommand<TInput, TEvents>
+    }
+
+    return command
   }
 
   return ((input?: EndpointInput<TInput>) => create(input)) as EventStreamCommandBuilder<TInput, TEvents>
@@ -229,7 +229,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
     const sseHandler: SSEHandler = (req) =>
       // Type boundary: SSEHandler returns EventStreamHandle<unknown>; the concrete type is narrowed by the interceptor chain.
       fetchEventStream(req, {
-        fetch: clientConfig.sse.fetch,
+        fetch: clientConfig.sse.handle,
         async transformMessage(message) {
           return await transformStreamMessage(endpoint.events, message, clientConfig.sse.onInvalidEvent)
         },
@@ -324,7 +324,7 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
 
 async function notifyInvalidEvent(
   onInvalidEvent: SSEInvalidEventHandler | undefined,
-  context: FnParams<SSEInvalidEventHandler>[0],
+  context: SSEInvalidEventContext,
 ): Promise<void> {
   if (!onInvalidEvent) {
     return
@@ -361,7 +361,7 @@ function decodeEventData(data: string): unknown {
   }
 
   try {
-    return JSON.parse(data)
+    return JSON.parse(data) as unknown
   } catch {
     return data
   }
