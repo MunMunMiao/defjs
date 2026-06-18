@@ -1,4 +1,3 @@
-import type { SelectKeys } from '../internal/utility_types'
 import { issue } from './errors'
 import { resolveObjectShape } from './shape'
 import { DEFINITION, OMIT } from './symbols'
@@ -402,21 +401,23 @@ function buildMissingValue(schema: RuntimeSchema, path: Path, mode: ParseMode): 
   return buildZeroValue(schema, path)
 }
 
+type RequestSectionKey = 'body' | 'headers' | 'path' | 'query'
+
 function getRequestSections(
   definition: RequestDefinition,
-): [keyof SelectKeys<RequestDefinition, 'body' | 'headers' | 'path' | 'query'>, RuntimeSchema][] {
-  const sections: [keyof SelectKeys<RequestDefinition, 'body' | 'headers' | 'path' | 'query'>, RuntimeSchema][] = []
+): [RequestSectionKey, RuntimeSchema][] {
+  const sections: [RequestSectionKey, RuntimeSchema][] = []
   if (definition.path) {
-    sections.push(['path', definition.path as unknown as RuntimeSchema])
+    sections.push(['path', definition.path as RuntimeSchema])
   }
   if (definition.query) {
-    sections.push(['query', definition.query as unknown as RuntimeSchema])
+    sections.push(['query', definition.query as RuntimeSchema])
   }
   if (definition.headers) {
-    sections.push(['headers', definition.headers as unknown as RuntimeSchema])
+    sections.push(['headers', definition.headers as RuntimeSchema])
   }
   if (definition.body) {
-    sections.push(['body', definition.body as unknown as RuntimeSchema])
+    sections.push(['body', definition.body as RuntimeSchema])
   }
   return sections
 }

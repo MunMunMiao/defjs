@@ -5,8 +5,6 @@
  * (Partial, Pick, Record, etc.) in favor of explicit equivalents.
  */
 
-export type SelectKeys<T, K extends keyof T> = { [P in K]: T[P] }
-
 export type ExcludeUnion<T, U> = T extends U ? never : T
 
 export type FnReturn<T> = T extends (...args: infer _P) => infer R ? R : never

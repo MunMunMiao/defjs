@@ -1,4 +1,3 @@
-import type { SelectKeys } from './utility_types'
 import type { AnyStruct, RequestBodyCodec as StructRequestBodyCodec } from '../struct'
 import type { RequestDefinition } from '../struct/types'
 import { getWireKey } from '../struct/codec/common'
@@ -123,6 +122,20 @@ export interface RequestBuilder {
   setText(value: BuildBoundRef<string>, options?: RequestBodyOptions): void
 }
 
+export interface WebSocketRequestBuildContext {
+  setPathParams(projection: BuildRecordProjection): void
+  setQueryParams(projection: BuildRecordProjection): void
+}
+
+export interface SSERequestBuildContext {
+  addHeaders(projection: BuildRecordProjection): void
+  setHeaders(projection: BuildRecordProjection): void
+  setPathParams(projection: BuildRecordProjection): void
+  setQueryParams(projection: BuildRecordProjection): void
+}
+
+export type HttpRequestBuildContext = RequestBuilder
+
 export type RequestBuild = {
   body?: HttpRequest['body']
   bodyContentType?: string | null
@@ -139,10 +152,10 @@ export type RequestBuildInput<TInput extends AnyStruct | undefined> = [TInput] e
     : never
 
 export type RequestBuildContext<TTransport extends RequestTransport = 'http'> = TTransport extends 'webSocket'
-  ? SelectKeys<RequestBuilder, 'setPathParams' | 'setQueryParams'>
+  ? WebSocketRequestBuildContext
   : TTransport extends 'sse'
-    ? SelectKeys<RequestBuilder, 'setHeaders' | 'addHeaders' | 'setPathParams' | 'setQueryParams'>
-    : RequestBuilder
+    ? SSERequestBuildContext
+    : HttpRequestBuildContext
 
 export type RequestBuildHandler<TInput extends AnyStruct | undefined, TTransport extends RequestTransport = 'http'> = (
   request: RequestBuildContext<TTransport>,
