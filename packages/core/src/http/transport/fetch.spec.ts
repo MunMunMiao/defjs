@@ -1,4 +1,3 @@
-import type { ClientXSRFConfig } from '../../client/config'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { HttpRequest } from '../../http'
 import {
@@ -30,7 +29,13 @@ function stubXsrfBrowserEnvironment(origin: string, cookieValue: string) {
   return { cookieGetter }
 }
 
-function createXsrfConfig(tokenProvider?: ClientXSRFConfig['tokenProvider']): ClientXSRFConfig {
+type XSRFConfig = {
+  cookieName: string
+  headerName: string
+  tokenProvider?: (context: { request: HttpRequest }) => string | null | undefined
+}
+
+function createXsrfConfig(tokenProvider?: XSRFConfig['tokenProvider']): XSRFConfig {
   return {
     cookieName: 'XSRF-TOKEN',
     headerName: 'X-XSRF-TOKEN',

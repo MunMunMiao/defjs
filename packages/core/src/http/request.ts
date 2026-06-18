@@ -1,4 +1,4 @@
-import type { ClientXSRFConfig, QueryParamsSerializer } from '../client/config'
+import type { QueryParamsSerializer } from '../client/config'
 import { DEFAULT_QUERY_PARAMS_SERIALIZER } from '../client/config'
 import type { HttpContext } from '../internal/context'
 import type { HttpProgressFn, HttpRequest, HttpResponseType } from '../internal/http_request'
@@ -31,7 +31,11 @@ export function createHttpRequest<TInput extends AnyStruct | undefined>(
     timeout?: number
     uploadProgress?: HttpProgressFn
     withCredentials?: boolean
-    xsrf?: ClientXSRFConfig
+    xsrf?: {
+      cookieName: string
+      headerName: string
+      tokenProvider?: (context: { request: HttpRequest }) => string | null | undefined
+    }
   },
 ): HttpRequest {
   const built = buildRequest(input, build, {

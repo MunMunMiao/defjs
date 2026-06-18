@@ -1,4 +1,4 @@
-import type { WebSocketQueueOptions } from '../client/config'
+import type { ClientWebSocketOptions } from '../client/config'
 
 export type SendQueue = {
   clear(): void
@@ -11,7 +11,7 @@ type QueueNode = {
   value: string
 }
 
-export function createSendQueue(config?: WebSocketQueueOptions): SendQueue {
+export function createSendQueue(config?: ClientWebSocketOptions['queue']): SendQueue {
   let head: QueueNode | undefined
   let tail: QueueNode | undefined
   let size = 0

@@ -1,13 +1,5 @@
-import type {
-  Client,
-  ClientConfig,
-  ClientOptions,
-  ClientXSRFConfig,
-  ClientXSRFOptions,
-  QueryParamsSerializer,
-  XSRFTokenProvider,
-  XSRFTokenProviderContext,
-} from './index'
+import type { HttpRequest } from '../internal/http_request'
+import type { Client, ClientConfig, ClientOptions, QueryParamsSerializer } from './index'
 import {
   createClient,
   withCredentials,
@@ -29,6 +21,9 @@ type Expect<T extends true> = T
 
 const serializer: QueryParamsSerializer = (params) => params.toString()
 type SerializerCases = Expect<Equal<typeof serializer, (params: URLSearchParams, rawParams?: { [key: string]: unknown }) => string>>
+
+type XSRFTokenProvider = (context: { request: HttpRequest }) => string | null | undefined
+type XSRFTokenProviderContext = Parameters<XSRFTokenProvider>[0]
 
 const xsrfTokenProvider: XSRFTokenProvider = ({ request }: XSRFTokenProviderContext) => {
   void request
@@ -123,9 +118,8 @@ const options = {
 
 type OptionsCases = Expect<Equal<typeof options.endpoint, string>>
 
-type XsrfOptionsCases = Expect<Equal<ClientXSRFOptions, { cookieName?: string; headerName?: string; tokenProvider?: XSRFTokenProvider }>>
-type XsrfConfigCases = Expect<Equal<ClientXSRFConfig, { cookieName: string; headerName: string; tokenProvider?: XSRFTokenProvider }>>
-type ClientConfigXsrfCases = Expect<Equal<ClientConfig['xsrf'], ClientXSRFConfig | undefined>>
+type XsrfOptionsCases = Expect<Equal<ClientOptions['xsrf'], { cookieName?: string; headerName?: string; tokenProvider?: XSRFTokenProvider } | undefined>>
+type XsrfConfigCases = Expect<Equal<ClientConfig['xsrf'], { cookieName: string; headerName: string; tokenProvider?: XSRFTokenProvider } | undefined>>
 
 // @ts-expect-error withEndpoint expects a string
 createClient(withEndpoint(1))
@@ -173,4 +167,3 @@ export type Cases =
   | XsrfTokenProviderCases
   | XsrfOptionsCases
   | XsrfConfigCases
-  | ClientConfigXsrfCases

@@ -1,4 +1,3 @@
-import type { ClientXSRFConfig } from '../../client/config'
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
 import type { HttpProgressFn, HttpRequest } from '../../internal/http_request'
 import type { HttpResponse } from '../../internal/http_response'
@@ -100,7 +99,11 @@ function normalizeXSRFToken(token: string | null | undefined): string | undefine
   return token
 }
 
-function resolveXSRFToken(request: HttpRequest, xsrf: ClientXSRFConfig): string | undefined {
+function resolveXSRFToken(request: HttpRequest, xsrf: {
+  cookieName: string
+  headerName: string
+  tokenProvider?: (context: { request: HttpRequest }) => string | null | undefined
+}): string | undefined {
   if (xsrf.tokenProvider) {
     return normalizeXSRFToken(xsrf.tokenProvider({ request }))
   }

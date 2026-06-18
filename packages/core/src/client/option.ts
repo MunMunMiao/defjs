@@ -1,17 +1,10 @@
 import type { Interceptor } from '../interceptor/interceptor'
 import type {
   ClientConfig,
+  ClientOptions,
   ClientSSEOptions,
   ClientWebSocketOptions,
-  ClientXSRFOptions,
   QueryParamsSerializer,
-  SSEInvalidEventHandler,
-  SSEQueueOptions,
-  SSEReconnectOptions,
-  WebSocketBeforeConnect,
-  WebSocketHeartbeatOptions,
-  WebSocketQueueOptions,
-  WebSocketReconnectOptions,
 } from './config'
 
 export type ClientOption = (config: ClientConfig) => void
@@ -52,7 +45,7 @@ export function withWebSocketHandle(WebSocketImpl: typeof WebSocket): ClientOpti
   }
 }
 
-export function withWebSocketBeforeConnect(beforeConnect: WebSocketBeforeConnect): ClientOption {
+export function withWebSocketBeforeConnect(beforeConnect: ClientWebSocketOptions['beforeConnect']): ClientOption {
   return (config) => {
     config.webSocket.beforeConnect = beforeConnect
   }
@@ -72,19 +65,19 @@ export function withWebSocketProtocols(protocols: readonly string[]): ClientOpti
   }
 }
 
-export function withWebSocketHeartbeat(options: WebSocketHeartbeatOptions): ClientOption {
+export function withWebSocketHeartbeat(options: ClientWebSocketOptions['heartbeat']): ClientOption {
   return (config) => {
     config.webSocket.heartbeat = options
   }
 }
 
-export function withWebSocketQueue(options: WebSocketQueueOptions): ClientOption {
+export function withWebSocketQueue(options: ClientWebSocketOptions['queue']): ClientOption {
   return (config) => {
     config.webSocket.queue = options
   }
 }
 
-export function withWebSocketReconnect(options: WebSocketReconnectOptions): ClientOption {
+export function withWebSocketReconnect(options: ClientWebSocketOptions['reconnect']): ClientOption {
   return (config) => {
     config.webSocket.reconnect = options
   }
@@ -110,19 +103,19 @@ export function withSSEOptions(options: ClientSSEOptions): ClientOption {
   }
 }
 
-export function withSSEOnInvalidEvent(handler: SSEInvalidEventHandler): ClientOption {
+export function withSSEOnInvalidEvent(handler: ClientSSEOptions['onInvalidEvent']): ClientOption {
   return (config) => {
     config.sse.onInvalidEvent = handler
   }
 }
 
-export function withSSEReconnect(options: SSEReconnectOptions): ClientOption {
+export function withSSEReconnect(options: ClientSSEOptions['reconnect']): ClientOption {
   return (config) => {
     config.sse.reconnect = options
   }
 }
 
-export function withSSEQueue(options: SSEQueueOptions): ClientOption {
+export function withSSEQueue(options: ClientSSEOptions['queue']): ClientOption {
   return (config) => {
     config.sse.queue = options
   }
@@ -151,7 +144,7 @@ export function withWebSocketOptions(options: ClientWebSocketOptions): ClientOpt
   }
 }
 
-export function withXSRF(options: ClientXSRFOptions = {}): ClientOption {
+export function withXSRF(options: ClientOptions['xsrf'] = {}): ClientOption {
   return (config) => {
     config.xsrf = {
       cookieName: options.cookieName ?? 'XSRF-TOKEN',

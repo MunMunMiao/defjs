@@ -5,141 +5,114 @@ export type QueryParamsSerializer = (params: URLSearchParams, rawParams?: { [key
 
 export const DEFAULT_QUERY_PARAMS_SERIALIZER: QueryParamsSerializer = (params) => params.toString()
 
-export type WebSocketBeforeConnect = () => void | Promise<void>
-
-export interface WebSocketReconnectOptions {
-  attempts?: number
-  delayMs?: number
-  factor?: number
-  jitter?: number
-  maxDelayMs?: number
-  shouldReconnect?: (context: { attempt: number; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }) => boolean
-}
-
-export interface WebSocketHeartbeatOptions {
-  intervalMs: number
-  isAck?: (message: unknown) => boolean
-  message?: <T = unknown>() => T | unknown
-  timeoutMs?: number
-}
-
-export interface WebSocketQueueOptions {
-  maxSize?: number
-  overflow?: 'drop-newest' | 'drop-oldest' | 'error'
-}
-
-export interface ClientHttpOptions {
-  handle?: typeof fetch
-}
-
-export interface ClientHttpConfig {
-  handle: typeof fetch
-}
-
-export interface XSRFTokenProviderContext {
-  request: HttpRequest
-}
-
-export type XSRFTokenProvider = (context: XSRFTokenProviderContext) => string | null | undefined
-
-export interface ClientXSRFOptions {
-  cookieName?: string
-  headerName?: string
-  tokenProvider?: XSRFTokenProvider
-}
-
-export interface ClientXSRFConfig {
-  cookieName: string
-  headerName: string
-  tokenProvider?: XSRFTokenProvider
-}
-
-export type SSEInvalidEventReason = 'missing-schema' | 'validation-failed'
-
-export interface SSEInvalidEventMessage {
-  id: string
-  event: string
-  data: string
-  retry?: number
-}
-
-export interface SSEInvalidEventContext {
-  reason: SSEInvalidEventReason
-  message: SSEInvalidEventMessage
-  cause?: unknown
-}
-
-export type SSEInvalidEventHandler = (context: SSEInvalidEventContext) => void | Promise<void>
-
-export interface SSEReconnectOptions {
-  attempts?: number
-  delayMs?: number
-  factor?: number
-  jitter?: number
-  maxDelayMs?: number
-  shouldReconnect?: (context: {
-    attempt: number
-    cause?: unknown
-    lastEventId: string
-    open?: { response: { status: number; statusText: string; url: string }; url: string }
-  }) => boolean | Promise<boolean>
-}
-
-export interface SSEQueueOptions {
-  maxSize?: number
-  overflow?: 'drop-newest' | 'drop-oldest' | 'error'
+export interface ClientWebSocketOptions {
+  handle?: typeof WebSocket
+  beforeConnect?: () => void | Promise<void>
+  heartbeat?: {
+    intervalMs: number
+    isAck?: (message: unknown) => boolean
+    message?: <T = unknown>() => T | unknown
+    timeoutMs?: number
+  }
+  protocols?: readonly string[]
+  queue?: { maxSize?: number; overflow?: 'drop-newest' | 'drop-oldest' | 'error' }
+  reconnect?: {
+    attempts?: number
+    delayMs?: number
+    factor?: number
+    jitter?: number
+    maxDelayMs?: number
+    shouldReconnect?: (context: {
+      attempt: number
+      cause?: unknown
+      code?: number
+      reason?: string
+      wasClean?: boolean
+    }) => boolean
+  }
 }
 
 export interface ClientSSEOptions {
   handle?: typeof fetch
-  onInvalidEvent?: SSEInvalidEventHandler
-  reconnect?: SSEReconnectOptions
-  queue?: SSEQueueOptions
+  onInvalidEvent?: (context: {
+    reason: 'missing-schema' | 'validation-failed'
+    message: { id: string; event: string; data: string; retry?: number }
+    cause?: unknown
+  }) => void | Promise<void>
+  reconnect?: {
+    attempts?: number
+    delayMs?: number
+    factor?: number
+    jitter?: number
+    maxDelayMs?: number
+    shouldReconnect?: (context: {
+      attempt: number
+      cause?: unknown
+      lastEventId: string
+      open?: { response: { status: number; statusText: string; url: string }; url: string }
+    }) => boolean | Promise<boolean>
+  }
+  queue?: { maxSize?: number; overflow?: 'drop-newest' | 'drop-oldest' | 'error' }
   maxBufferSize?: number
 }
 
 export interface ClientSSEConfig {
   handle: typeof fetch
-  onInvalidEvent?: SSEInvalidEventHandler
-  reconnect?: SSEReconnectOptions
-  queue?: SSEQueueOptions
+  onInvalidEvent?: (context: {
+    reason: 'missing-schema' | 'validation-failed'
+    message: { id: string; event: string; data: string; retry?: number }
+    cause?: unknown
+  }) => void | Promise<void>
+  reconnect?: {
+    attempts?: number
+    delayMs?: number
+    factor?: number
+    jitter?: number
+    maxDelayMs?: number
+    shouldReconnect?: (context: {
+      attempt: number
+      cause?: unknown
+      lastEventId: string
+      open?: { response: { status: number; statusText: string; url: string }; url: string }
+    }) => boolean | Promise<boolean>
+  }
+  queue?: { maxSize?: number; overflow?: 'drop-newest' | 'drop-oldest' | 'error' }
   maxBufferSize?: number
-}
-
-export interface ClientWebSocketOptions {
-  handle?: typeof WebSocket
-  beforeConnect?: WebSocketBeforeConnect
-  heartbeat?: WebSocketHeartbeatOptions
-  protocols?: readonly string[]
-  queue?: WebSocketQueueOptions
-  reconnect?: WebSocketReconnectOptions
 }
 
 export interface ClientOptions {
   endpoint: string
-  http?: ClientHttpOptions
+  http?: { handle?: typeof fetch }
   interceptors?: Interceptor[]
   queryParamsSerializer?: QueryParamsSerializer
   sse?: ClientSSEOptions
   webSocket?: ClientWebSocketOptions
-  xsrf?: ClientXSRFOptions
+  xsrf?: {
+    cookieName?: string
+    headerName?: string
+    tokenProvider?: (context: { request: HttpRequest }) => string | null | undefined
+  }
   withCredentials?: boolean
 }
 
 export interface ClientConfig {
   endpoint: string
-  http: ClientHttpConfig
+  http: { handle: typeof fetch }
   interceptors: Interceptor[]
   queryParamsSerializer: QueryParamsSerializer
   sse: ClientSSEConfig
   webSocket: ClientWebSocketOptions
-  xsrf?: ClientXSRFConfig
+  xsrf?: {
+    cookieName: string
+    headerName: string
+    tokenProvider?: (context: { request: HttpRequest }) => string | null | undefined
+  }
   withCredentials?: boolean
 }
 
 const DEFAULT_FETCH = globalThis.fetch.bind(globalThis) as typeof fetch
 
-export const DEFAULT_HTTP_OPTIONS: ClientHttpConfig = {
+export const DEFAULT_HTTP_OPTIONS: { handle: typeof fetch } = {
   handle: DEFAULT_FETCH,
 }
 

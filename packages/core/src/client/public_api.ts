@@ -1,26 +1,11 @@
 export { createClient } from './client'
 export type {
   ClientConfig,
-  ClientHttpOptions,
   ClientOptions,
   ClientSSEConfig,
   ClientSSEOptions,
   ClientWebSocketOptions,
-  ClientXSRFConfig,
-  ClientXSRFOptions,
   QueryParamsSerializer,
-  SSEInvalidEventContext,
-  SSEInvalidEventHandler,
-  SSEInvalidEventMessage,
-  SSEInvalidEventReason,
-  SSEQueueOptions,
-  SSEReconnectOptions,
-  WebSocketBeforeConnect,
-  WebSocketHeartbeatOptions,
-  WebSocketQueueOptions,
-  WebSocketReconnectOptions,
-  XSRFTokenProvider,
-  XSRFTokenProviderContext,
 } from './config'
 export type { ClientOption } from './option'
 export {

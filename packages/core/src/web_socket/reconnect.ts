@@ -1,4 +1,4 @@
-import type { WebSocketReconnectOptions } from '../client/config'
+import type { ClientWebSocketOptions } from '../client/config'
 import type { SocketLifecycleOutcome } from './web_socket'
 
 export type NormalizedReconnectConfig = {
@@ -10,7 +10,7 @@ export type NormalizedReconnectConfig = {
   shouldReconnect: (outcome: SocketLifecycleOutcome, attempt: number) => boolean
 }
 
-export function normalizeReconnectConfig(config: WebSocketReconnectOptions | undefined): NormalizedReconnectConfig | undefined {
+export function normalizeReconnectConfig(config: ClientWebSocketOptions['reconnect'] | undefined): NormalizedReconnectConfig | undefined {
   if (!config) {
     return undefined
   }

@@ -1,6 +1,6 @@
 import { COMMAND_TYPE, WEB_SOCKET_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
-import type { ClientConfig, WebSocketBeforeConnect, WebSocketReconnectOptions, WebSocketQueueOptions } from '../client/config'
+import type { ClientConfig, ClientWebSocketOptions } from '../client/config'
 
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
@@ -142,11 +142,11 @@ export type SocketAwaitResult<TIncoming, TOutgoing = never> =
   | [error: RequestError<unknown>, socket: undefined, connection: WebSocketConnectionInfo | undefined]
 
 interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
-  beforeConnect?: WebSocketBeforeConnect
+  beforeConnect?: ClientWebSocketOptions['beforeConnect']
   heartbeat?: WebSocketHeartbeatConfig<TIncoming, TOutgoing>
   protocols?: readonly string[]
-  queue?: WebSocketQueueOptions
-  reconnect?: WebSocketReconnectOptions
+  queue?: ClientWebSocketOptions['queue']
+  reconnect?: ClientWebSocketOptions['reconnect']
 }
 
 export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketBaseConfig<TIncoming, TOutgoing> &
@@ -210,7 +210,6 @@ type Deferred<T> = {
   resolve: (value: T | PromiseLike<T>) => void
 }
 
-export type { WebSocketQueueOptions, WebSocketReconnectOptions }
 export interface WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> {
   intervalMs: number
   isAck?: (message: TIncoming) => boolean

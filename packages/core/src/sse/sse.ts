@@ -1,7 +1,6 @@
 import { COMMAND_TYPE, EVENT_STREAM_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
 import type { ClientConfig } from '../client/config'
-import type { SSEInvalidEventContext, SSEInvalidEventHandler } from '../client/config'
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { SSEHandler } from '../interceptor/interceptor'
@@ -275,7 +274,11 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
 async function transformStreamMessage<TEvents extends EventSchemas>(
   events: TEvents,
   message: EventStreamMessage,
-  onInvalidEvent?: SSEInvalidEventHandler,
+  onInvalidEvent?: (context: {
+    reason: 'missing-schema' | 'validation-failed'
+    message: { id: string; event: string; data: string; retry?: number }
+    cause?: unknown
+  }) => void | Promise<void>,
 ): Promise<EventStreamData<TEvents> | undefined> {
   const eventName = message.event || 'message'
   const eventSchema = resolveEventSchema(events, eventName)
@@ -318,8 +321,16 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
 }
 
 async function notifyInvalidEvent(
-  onInvalidEvent: SSEInvalidEventHandler | undefined,
-  context: SSEInvalidEventContext,
+  onInvalidEvent: ((context: {
+    reason: 'missing-schema' | 'validation-failed'
+    message: { id: string; event: string; data: string; retry?: number }
+    cause?: unknown
+  }) => void | Promise<void>) | undefined,
+  context: {
+    reason: 'missing-schema' | 'validation-failed'
+    message: { id: string; event: string; data: string; retry?: number }
+    cause?: unknown
+  },
 ): Promise<void> {
   if (!onInvalidEvent) {
     return
