@@ -1,25 +1,29 @@
 import { describe, expect, test } from 'vitest'
-import { StructError, struct, tag } from './index'
-import { parseStructTuple as parse } from './introspection'
+import { isStruct } from './guards'
+import { StructError, struct } from './index'
+import { getStructFields, parseStructTuple as parse } from './introspection'
+import { resolveObjectShape, resolveRuntimeStruct } from './shape'
+import { DEFINITION } from './symbols'
+import type { RuntimeStruct } from './types'
 
 describe('runtime.ts chain methods', () => {
   test('null, nullish and optional only adjust missing value behavior', () => {
-    const schema = struct.object({
+    const testStruct = struct.object({
       a: struct.string().optional(),
       b: struct.string().null(),
       c: struct.string().nullish(),
     })
 
-    const [err, val] = parse(schema, {})
+    const [err, val] = parse(testStruct, {})
     if (err) {
       throw err
     }
-    expect(val).toEqual({ b: null })
+    expect(val).toEqual({ b: null, c: null })
   })
 
-  test('tag stores metadata without changing parse output', () => {
+  test('alias stores wire names without changing parse output', () => {
     const user = struct.object({
-      name: struct.string().tag(tag.json('full_name')),
+      name: struct.string().alias('full_name'),
     })
 
     const [err, val] = parse(user, { name: 'Miao' })
@@ -27,6 +31,142 @@ describe('runtime.ts chain methods', () => {
       throw err
     }
     expect(val).toEqual({ name: 'Miao' })
+  })
+
+  test('alias requires a string name', () => {
+    expect(() => struct.string().alias(null as never)).toThrow('alias() requires a string name')
+  })
+
+  test('removed tag method is absent from struct runtime surface', () => {
+    expect('tag' in struct.string()).toBe(false)
+  })
+
+  test('introspection exposes aliases instead of tags', () => {
+    const user = struct.object({
+      name: struct.string().alias('user_name'),
+      nickname: struct.string(),
+    })
+
+    expect(getStructFields(user).map((field) => ({ alias: field.alias, key: field.key }))).toEqual([
+      { alias: 'user_name', key: 'name' },
+      { alias: undefined, key: 'nickname' },
+    ])
+  })
+
+  test('getStructFields exposes a readonly public field view', () => {
+    const fields = getStructFields(
+      struct.object({
+        name: struct.string().alias('user_name'),
+      }),
+    )
+
+    expect(Object.isFrozen(fields)).toBe(true)
+    expect(Object.isFrozen(fields[0])).toBe(true)
+  })
+
+  test('shares lazy object shape and fields cache across pre-created struct derivations', () => {
+    let reads = 0
+    const User = struct.object({
+      get name() {
+        reads += 1
+        return struct.string()
+      },
+    })
+    const Alias = User.alias('user')
+    const Optional = User.optional()
+    const Nullish = User.nullish()
+    const baseRuntime = resolveRuntimeStruct(User as unknown as RuntimeStruct)
+    const aliasRuntime = resolveRuntimeStruct(Alias as unknown as RuntimeStruct)
+    const optionalRuntime = resolveRuntimeStruct(Optional as unknown as RuntimeStruct)
+    const nullishRuntime = resolveRuntimeStruct(Nullish as unknown as RuntimeStruct)
+    const baseDefinition = baseRuntime[DEFINITION]
+    const aliasDefinition = aliasRuntime[DEFINITION]
+    const optionalDefinition = optionalRuntime[DEFINITION]
+    const nullishDefinition = nullishRuntime[DEFINITION]
+
+    if (
+      baseDefinition.kind !== 'object' ||
+      aliasDefinition.kind !== 'object' ||
+      optionalDefinition.kind !== 'object' ||
+      nullishDefinition.kind !== 'object'
+    ) {
+      throw new Error('expected object definition')
+    }
+
+    expect(aliasDefinition.cache).toBe(baseDefinition.cache)
+    expect(optionalDefinition.cache).toBe(baseDefinition.cache)
+    expect(nullishDefinition.cache).toBe(baseDefinition.cache)
+
+    getStructFields(Alias)
+    const cachedFields = baseDefinition.cache.fields
+
+    getStructFields(Optional)
+    getStructFields(User)
+    getStructFields(Nullish)
+
+    expect(reads).toBe(1)
+    expect(cachedFields).toBeDefined()
+    expect(optionalDefinition.cache.fields).toBe(cachedFields)
+    expect(aliasDefinition.cache.fields).toBe(cachedFields)
+    expect(nullishDefinition.cache.fields).toBe(cachedFields)
+  })
+
+  test('rejects duplicate wire keys in the same object shape', () => {
+    const User = struct.object({
+      name: struct.string(),
+      displayName: struct.string().alias('name'),
+    })
+
+    expect(() => getStructFields(User)).toThrow('duplicate wire key "name"')
+  })
+
+  test('rejects duplicate aliases in the same object shape', () => {
+    const User = struct.object({
+      firstName: struct.string().alias('name'),
+      displayName: struct.string().alias('name'),
+    })
+
+    expect(() => getStructFields(User)).toThrow('duplicate wire key "name"')
+  })
+
+  test('rejects duplicate empty wire keys', () => {
+    const User = struct.object({
+      firstName: struct.string().alias(''),
+      secondName: struct.string().alias(''),
+    })
+
+    expect(() => getStructFields(User)).toThrow('duplicate wire key ""')
+  })
+
+  test('keeps duplicate wire key failures stable across repeated object shape resolution', () => {
+    const User = struct.object({
+      firstName: struct.string().alias('name'),
+      displayName: struct.string().alias('name'),
+    })
+    const runtime = resolveRuntimeStruct(User as unknown as RuntimeStruct)
+    const definition = runtime[DEFINITION]
+
+    if (definition.kind !== 'object') {
+      throw new Error('expected object definition')
+    }
+
+    expect(() => resolveObjectShape(runtime, definition)).toThrow('duplicate wire key "name"')
+    expect(() => resolveObjectShape(runtime, definition)).toThrow('duplicate wire key "name"')
+    expect(() => getStructFields(User)).toThrow('duplicate wire key "name"')
+    expect(() => getStructFields(User)).toThrow('duplicate wire key "name"')
+  })
+
+  test('does not accept inherited struct definition brand', () => {
+    const base = struct.string() as object
+    const fake = Object.create(base)
+
+    expect(isStruct(fake)).toBe(false)
+  })
+
+  test('does not accept malformed struct definition brand', () => {
+    const fake = { [DEFINITION]: { kind: 'object' } }
+
+    expect(isStruct(fake)).toBe(false)
   })
 
   test('invalid primitive parse returns StructError and zero value', () => {

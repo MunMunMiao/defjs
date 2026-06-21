@@ -8,12 +8,12 @@ export type EndpointInput<TInput extends AnyStruct | undefined> = TInput extends
 export type ParsedInput<TInput extends AnyStruct | undefined> = TInput extends AnyStruct ? Infer<TInput> : unknown
 
 export async function parseEndpointInput<TInput extends AnyStruct | undefined>(
-  schema: TInput,
+  struct: TInput,
   input: EndpointInput<TInput> | undefined,
 ): Promise<ParsedInput<TInput>> {
-  if (!schema) {
+  if (!struct) {
     return input as ParsedInput<TInput>
   }
 
-  return parseStructValue(schema, input) as ParsedInput<TInput>
+  return parseStructValue(struct, input) as ParsedInput<TInput>
 }

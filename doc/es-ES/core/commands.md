@@ -72,15 +72,15 @@ const command = ListUsers() // No se necesitan argumentos
 ```typescript
 // Forma de matriz (recomendada)
 output: [
-  { status: 200, body: UserSchema },
-  { status: [401, 403], body: AuthErrorSchema },
+  { status: 200, body: UserStruct },
+  { status: [401, 403], body: AuthErrorStruct },
 ]
 
 // Forma de objeto
 output: {
-  200: UserSchema,
-  '401': AuthErrorSchema,
-  '403': AuthErrorSchema,
+  200: UserStruct,
+  '401': AuthErrorStruct,
+  '403': AuthErrorStruct,
 }
 ```
 

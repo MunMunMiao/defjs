@@ -102,7 +102,7 @@ console.log(user.name)
 Вот сквозной пример с валидацией входных данных, валидацией выходных данных, обработкой ошибок и перехватчиком:
 
 ```typescript
-import { createClient, defineRequest, struct, tag, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
 
 // 1. Создать клиент
 const client = createClient(
@@ -122,7 +122,7 @@ const createPost = defineRequest({
   input: struct.object({
     title: struct.string(),
     body: struct.string(),
-    'X-Request-ID': tag(struct.string(), { kind: 'header' }),
+    'X-Request-ID': struct.string(),
   }),
   build: (input) => ({
     body: { title: input.title, body: input.body },
@@ -179,11 +179,11 @@ async function createPost() {
 | API                    | Описание                          | Типичное использование                                                         |
 | ---------------------- | --------------------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | Создать клиент запросов           | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | Определить HTTP-ендпоинт          | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserSchema } })` |
+| `defineRequest`        | Определить HTTP-ендпоинт          | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
 | `defineEventStream`    | Определить SSE-ендпоинт           | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | Определить WebSocket-ендпоинт     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | Конструктор схем                  | `struct.object({ id: struct.number() })`                                       |
-| `tag`                  | Метаданные для полей              | `tag(struct.string(), { kind: 'header' })`                                     |
+| `.alias(name)`         | Alias wire-имени для полей        | `struct.string().alias('user_name')`                                           |
 | `withEndpoint`         | Задать базовый URL                | `withEndpoint('https://api.example.com')`                                      |
 | `withInterceptors`     | Зарегистрировать перехватчики     | `withInterceptors([...interceptors])`                                          |
 | `withCredentials`      | Включить cross-origin credentials | `withCredentials(true)`                                                        |

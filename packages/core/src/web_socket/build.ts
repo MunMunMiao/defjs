@@ -9,10 +9,10 @@ import type { AnyStruct } from '../struct'
 export function createWebSocketBuild<TInput extends AnyStruct | undefined>(
   input: unknown,
   build: RequestBuildHandler<TInput, 'webSocket'> | undefined,
-  inputSchema?: TInput,
+  inputStruct?: TInput,
 ): RequestBuild {
   return buildRequest(input, build, {
-    input: inputSchema,
+    input: inputStruct,
     transport: 'webSocket',
   })
 }

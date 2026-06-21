@@ -4,7 +4,7 @@
 
 **Goal:** Remove or explicitly justify every audited TypeScript type-safety escape hatch in production code, tests, configuration scripts, and documentation examples.
 
-**Architecture:** The work replaces scattered assertions with typed runtime schema definitions, discriminated command builders, typed mocks, runtime guards, and type-level negative assertions. Truly intentional public type boundaries are moved into small named helpers with comments and tests so unsafe constructs do not leak across the codebase.
+**Architecture:** The work replaces scattered assertions with typed runtime struct definitions, discriminated command builders, typed mocks, runtime guards, and type-level negative assertions. Truly intentional public type boundaries are moved into small named helpers with comments and tests so unsafe constructs do not leak across the codebase.
 
 **Tech Stack:** TypeScript 6, pnpm 11, Vitest, Oxlint/Oxfmt, tsdown, VitePress/Twoslash, React, Vue, Angular.
 
@@ -16,21 +16,21 @@
 - Treat `docs/superpowers/plans/**`, `docs/superpowers/specs/**`, and `packages/core/research/**` as historical text: update code blocks only when they are intended as reusable examples; otherwise add explicit `<!-- historical-unsafe-example -->` markers and exclude them from executable docs checks.
 - Keep `as const` and `satisfies`; they are not part of the unsafe audit.
 - Each implementation task must end with `pnpm --filter <package> typecheck` or the nearest available package typecheck plus the focused Vitest command listed in the task.
-- Any task touching `SchemaLike`, `Infer`, `EndpointInput`, command builders, `Client.execute()`, or wrapper hook generics must also run Vitest type tests with `--typecheck.only`; `pnpm typecheck` alone is not enough for this plan.
+- Any task touching `StructLike`, `Infer`, `EndpointInput`, command builders, `Client.execute()`, or wrapper hook generics must also run Vitest type tests with `--typecheck.only`; `pnpm typecheck` alone is not enough for this plan.
 - The exhaustive checklist in Appendix A contains 852 unchecked modification points generated from the verified audit. Mark an item complete only after the corresponding source line is removed, replaced, or explicitly reclassified in the plan.
 
 ## Type Inference Preservation Contract
 
 These rules override any mechanical “修复后目标” snippet in Appendix A. If a proposed unsafe-code cleanup conflicts with these rules, keep the inference-preserving boundary and document it as an intentional type boundary instead of forcing a cosmetic removal.
 
-- Do not weaken or optionalize the public phantom generic surface: `SchemaLike<I, O, OO>`, `Schema<Input, Output, OptionalOut>`, `[TYPES]`, and `_struct` must keep carrying exact `input`, `output`, and `optionalOut` types.
+- Do not weaken or optionalize the public phantom generic surface: `StructLike<I, O, OO>`, `Struct<Input, Output, OptionalOut>`, `[TYPES]`, and `_struct` must keep carrying exact `input`, `output`, and `optionalOut` types.
 - Do not change `Infer<T>`, `FieldOutput<S>`, `ObjectInput<T>`, `ObjectOutput<T>`, `TupleOutput<T>`, `UnionOutput<T>`, `RequestInput<T>`, or `RequestOutput<T>` unless a type test proves the exact inferred type before and after.
-- Do not replace `AnySchema = Schema<any, any, boolean>` or `createAnySchema(): Schema<unknown, any>` with `unknown`. `struct.any()` intentionally means “decoded value has no static type information”; this `any` is an allowed public API boundary.
+- Do not replace `AnyStruct = Struct<any, any, boolean>` or `createAnyStruct(): Struct<unknown, any>` with `unknown`. `struct.any()` intentionally means “decoded value has no static type information”; this `any` is an allowed public API boundary.
 - Do not blindly replace `ObjectShape = { [key: string]: any }` if it changes object-literal inference. Prefer adding a separate runtime-only `RuntimeObjectShape` while keeping the public `ObjectShape` alias stable until the type matrix below passes.
-- Do not widen const tuples to arrays. Enum values, tuple schemas, union options, and discriminated-union options must preserve `const T extends readonly [...]` inference.
+- Do not widen const tuples to arrays. Enum values, tuple structs, union options, and discriminated-union options must preserve `const T extends readonly [...]` inference.
 - Do not remove overload/conditional call signatures from `defineRequest()`, `defineEventStream()`, `defineWebSocket()`, `Client['execute']`, or framework wrappers. A single broad implementation signature is acceptable only behind the existing public overload surface.
 - Do not replace type-test `@ts-expect-error` directives with indirect conditional-type checks. Negative public API tests should keep `@ts-expect-error` when the directive is the thing proving the expression does not typecheck.
-- A small number of named type boundaries are allowed when TypeScript cannot connect runtime validation with generic inference: `castSchema()`, `toRuntimeSchema()`, builder implementation casts, `parseEndpointInput()` output casts, and test-only invalid fixtures. Each must remain localized, named, commented, and covered by type tests.
+- A small number of named type boundaries are allowed when TypeScript cannot connect runtime validation with generic inference: `castStruct()`, `toRuntimeStruct()`, builder implementation casts, `parseEndpointInput()` output casts, and test-only invalid fixtures. Each must remain localized, named, commented, and covered by type tests.
 
 ## Required Type Inference Matrix
 
@@ -45,18 +45,18 @@ import { defineEventStream } from '../sse'
 import { defineWebSocket } from '../web_socket'
 import { struct, type Infer } from '../struct'
 
-const objectSchema = struct.object({
+const objectStruct = struct.object({
   id: struct.string(),
   nickname: struct.string().optional(),
   count: struct.number(),
 })
-expectTypeOf<Infer<typeof objectSchema>>().toEqualTypeOf<{ id: string; nickname?: string; count: number }>()
+expectTypeOf<Infer<typeof objectStruct>>().toEqualTypeOf<{ id: string; nickname?: string; count: number }>()
 
-const tupleSchema = struct.tuple([struct.literal('ok'), struct.number()] as const)
-expectTypeOf<Infer<typeof tupleSchema>>().toEqualTypeOf<['ok', number]>()
+const tupleStruct = struct.tuple([struct.literal('ok'), struct.number()] as const)
+expectTypeOf<Infer<typeof tupleStruct>>().toEqualTypeOf<['ok', number]>()
 
-const unionSchema = struct.or(struct.literal('a'), struct.literal('b'), struct.number())
-expectTypeOf<Infer<typeof unionSchema>>().toEqualTypeOf<'a' | 'b' | number>()
+const unionStruct = struct.or(struct.literal('a'), struct.literal('b'), struct.number())
+expectTypeOf<Infer<typeof unionStruct>>().toEqualTypeOf<'a' | 'b' | number>()
 
 const request = defineRequest({
   method: 'GET',
@@ -152,17 +152,17 @@ Suggested package scripts:
 
 ## File Structure Map
 
-### Core schema/runtime files
+### Core struct/runtime files
 
-- Modify: `packages/core/src/struct/types.ts` — introduce runtime-only schema definition types and remove avoidable public `any`.
-- Modify: `packages/core/src/struct/guards.ts` — make `isStruct()` narrow to `RuntimeSchema` instead of `AnySchema`.
-- Modify: `packages/core/src/struct/shape.ts` — make object-shape resolution return runtime schemas without double assertions.
+- Modify: `packages/core/src/struct/types.ts` — introduce runtime-only struct definition types and remove avoidable public `any`.
+- Modify: `packages/core/src/struct/guards.ts` — make `isStruct()` narrow to `RuntimeStruct` instead of `AnyStruct`.
+- Modify: `packages/core/src/struct/shape.ts` — make object-shape resolution return runtime structs without double assertions.
 - Modify: `packages/core/src/struct/runtime.ts` — move phantom type fields behind one named helper or remove runtime phantom assignment.
 - Modify: `packages/core/src/struct/constructors.ts` — build runtime definitions with typed tuple/object helpers.
-- Modify: `packages/core/src/struct/parse.ts` — consume typed runtime definitions without `as RuntimeSchema`.
+- Modify: `packages/core/src/struct/parse.ts` — consume typed runtime definitions without `as RuntimeStruct`.
 - Modify: `packages/core/src/struct/encode.ts` — consume typed runtime definitions and add typed enum/primitive helpers.
-- Modify: `packages/core/src/struct/introspection.ts` — use `RuntimeSchema` guards and typed `parseStructValue` output.
-- Modify: `packages/core/src/struct/codec/*.ts` — replace schema double assertions with runtime definition helpers.
+- Modify: `packages/core/src/struct/introspection.ts` — use `RuntimeStruct` guards and typed `parseStructValue` output.
+- Modify: `packages/core/src/struct/codec/*.ts` — replace struct double assertions with runtime definition helpers.
 - Modify: `packages/core/src/struct/utils.ts` — replace generic clone casts with overloads.
 
 ### Client / HTTP / SSE / WebSocket files
@@ -188,7 +188,7 @@ Suggested package scripts:
 
 ---
 
-## Task 1: Create typed runtime-schema boundaries
+## Task 1: Create typed runtime-struct boundaries
 
 **Files:**
 
@@ -200,9 +200,9 @@ Suggested package scripts:
 
 **Interfaces:**
 
-- Produces: `RuntimeObjectShape`, `RuntimeRequestShape`, and `isStruct(value): value is RuntimeSchema`.
-- Produces: `assertSchema(value, label): asserts value is RuntimeSchema`.
-- Consumes: existing `SchemaLike`, `RuntimeSchema`, `SchemaDefinition`, `DEFINITION`, and `TYPES` symbols.
+- Produces: `RuntimeObjectShape`, `RuntimeRequestShape`, and `isStruct(value): value is RuntimeStruct`.
+- Produces: `assertStruct(value, label): asserts value is RuntimeStruct`.
+- Consumes: existing `StructLike`, `RuntimeStruct`, `StructDefinition`, `DEFINITION`, and `TYPES` symbols.
 
 - [ ] **Step 1: Preserve public `ObjectShape` inference and add a separate runtime shape**
 
@@ -216,29 +216,29 @@ After:
 
 ```ts
 // Type boundary: ObjectShape is a public generic inference surface. The `any` keeps object-literal fields
-// indexable as their exact schema types in ObjectInput/ObjectOutput; do not replace it with `unknown`.
+// indexable as their exact struct types in ObjectInput/ObjectOutput; do not replace it with `unknown`.
 // oxlint-disable-next-line typescript/no-explicit-any
 export type ObjectShape = { [key: string]: any }
 
-// Runtime-only shape used after constructors have validated every field as a RuntimeSchema.
-export type RuntimeObjectShape = { [key: string]: RuntimeSchema }
+// Runtime-only shape used after constructors have validated every field as a RuntimeStruct.
+export type RuntimeObjectShape = { [key: string]: RuntimeStruct }
 ```
 
 Validation required before this step is checked:
 
 ```ts
-const schema = struct.object({ id: struct.string(), nickname: struct.string().optional() })
-expectTypeOf<Infer<typeof schema>>().toEqualTypeOf<{ id: string; nickname?: string }>()
+const struct = struct.object({ id: struct.string(), nickname: struct.string().optional() })
+expectTypeOf<Infer<typeof struct>>().toEqualTypeOf<{ id: string; nickname?: string }>()
 ```
 
-- [ ] **Step 2: Make runtime definitions store runtime schemas**
+- [ ] **Step 2: Make runtime definitions store runtime structs**
 
 Before:
 
 ```ts
 export type ArrayDefinition = BaseDefinition & {
   kind: 'array'
-  item: SchemaLike<unknown, unknown, boolean>
+  item: StructLike<unknown, unknown, boolean>
 }
 ```
 
@@ -247,20 +247,20 @@ After:
 ```ts
 export type ArrayDefinition = BaseDefinition & {
   kind: 'array'
-  item: RuntimeSchema
+  item: RuntimeStruct
 }
 ```
 
-Apply the same change to `ObjectDefinition.shape`, `RequestBodyDefinition.schema`, `RequestDefinition.path`, `RequestDefinition.query`, `RequestDefinition.headers`, `RequestDefinition.body`, `RecordDefinition.value`, `TupleDefinition.items`, `UnionDefinition.options`, `DiscriminatedUnionDefinition.map`, `DiscriminatedUnionDefinition.options`, and `IntersectionDefinition.left/right`.
+Apply the same change to `ObjectDefinition.shape`, `RequestBodyDefinition.struct`, `RequestDefinition.path`, `RequestDefinition.query`, `RequestDefinition.headers`, `RequestDefinition.body`, `RecordDefinition.value`, `TupleDefinition.items`, `UnionDefinition.options`, `DiscriminatedUnionDefinition.map`, `DiscriminatedUnionDefinition.options`, and `IntersectionDefinition.left/right`.
 
-- [ ] **Step 3: Narrow `isStruct()` to `RuntimeSchema`**
+- [ ] **Step 3: Narrow `isStruct()` to `RuntimeStruct`**
 
 Before (`packages/core/src/struct/guards.ts`):
 
 ```ts
-import type { AnySchema } from './types'
+import type { AnyStruct } from './types'
 
-export function isStruct(value: unknown): value is AnySchema {
+export function isStruct(value: unknown): value is AnyStruct {
   return typeof value === 'object' && value !== null && DEFINITION in value
 }
 ```
@@ -268,21 +268,21 @@ export function isStruct(value: unknown): value is AnySchema {
 After:
 
 ```ts
-import type { RuntimeSchema } from './types'
+import type { RuntimeStruct } from './types'
 
-export function isStruct(value: unknown): value is RuntimeSchema {
+export function isStruct(value: unknown): value is RuntimeStruct {
   return typeof value === 'object' && value !== null && DEFINITION in value
 }
 ```
 
-- [ ] **Step 4: Make `assertSchema()` return a runtime schema**
+- [ ] **Step 4: Make `assertStruct()` return a runtime struct**
 
 Before (`packages/core/src/struct/shape.ts`):
 
 ```ts
-export function assertSchema(value: unknown, label: string): asserts value is SchemaLike<unknown, unknown, boolean> {
+export function assertStruct(value: unknown, label: string): asserts value is StructLike<unknown, unknown, boolean> {
   if (!isStruct(value)) {
-    throw new TypeError(`${label} must be a schema`)
+    throw new TypeError(`${label} must be a struct`)
   }
 }
 ```
@@ -290,9 +290,9 @@ export function assertSchema(value: unknown, label: string): asserts value is Sc
 After:
 
 ```ts
-export function assertSchema(value: unknown, label: string): asserts value is RuntimeSchema {
+export function assertStruct(value: unknown, label: string): asserts value is RuntimeStruct {
   if (!isStruct(value)) {
-    throw new TypeError(`${label} must be a schema`)
+    throw new TypeError(`${label} must be a struct`)
   }
 }
 ```
@@ -325,7 +325,7 @@ export function readObjectShape(shape: ObjectShape): RuntimeObjectShape {
 
   for (const [key, descriptor] of Object.entries(descriptors)) {
     const value = typeof descriptor.get === 'function' ? descriptor.get.call(shape) : descriptor.value
-    assertSchema(value, `object field "${key}"`)
+    assertStruct(value, `object field "${key}"`)
     output[key] = value
   }
 
@@ -338,7 +338,7 @@ export function readObjectShape(shape: ObjectShape): RuntimeObjectShape {
 Before (`packages/core/src/struct/runtime.ts`):
 
 ```ts
-const schema: RuntimeSchema = {
+const struct: RuntimeStruct = {
   [DEFINITION]: definition,
   [TYPES]: undefined as never,
   _struct: undefined as never,
@@ -350,14 +350,14 @@ After target:
 ```ts
 const TYPE_BRAND = undefined as never
 
-const schema: RuntimeSchema = {
+const struct: RuntimeStruct = {
   [DEFINITION]: definition,
   [TYPES]: TYPE_BRAND,
   _struct: TYPE_BRAND,
   null() {
 ```
 
-Do not make `[TYPES]` or `_struct` optional and do not widen them to `SchemaTypes<unknown, unknown, boolean> | undefined` on the public `SchemaLike` surface. If TypeScript cannot express this runtime phantom field without one assertion, keep the assertion in this single `TYPE_BRAND` constant with a Type boundary comment and remove duplicate `undefined as never` occurrences elsewhere.
+Do not make `[TYPES]` or `_struct` optional and do not widen them to `StructTypes<unknown, unknown, boolean> | undefined` on the public `StructLike` surface. If TypeScript cannot express this runtime phantom field without one assertion, keep the assertion in this single `TYPE_BRAND` constant with a Type boundary comment and remove duplicate `undefined as never` occurrences elsewhere.
 
 - [ ] **Step 7: Run focused typecheck**
 
@@ -367,9 +367,9 @@ Run:
 pnpm --filter @defjs/core typecheck
 ```
 
-Expected: type errors now point to the call sites that still pass `SchemaLike` where `RuntimeSchema` is required. Fix those call sites in Tasks 2-4, not by reintroducing double assertions.
+Expected: type errors now point to the call sites that still pass `StructLike` where `RuntimeStruct` is required. Fix those call sites in Tasks 2-4, not by reintroducing double assertions.
 
-## Task 2: Rewrite schema constructors, parser, encoder, and codec internals
+## Task 2: Rewrite struct constructors, parser, encoder, and codec internals
 
 **Files:**
 
@@ -384,7 +384,7 @@ Expected: type errors now point to the call sites that still pass `SchemaLike` w
 
 **Interfaces:**
 
-- Consumes: `RuntimeObjectShape`, runtime schema definitions from Task 1.
+- Consumes: `RuntimeObjectShape`, runtime struct definitions from Task 1.
 - Produces: assertion-free `parseValue()`, `encodeValue()`, and `matchesDefinition()` internals.
 
 - [ ] **Step 1: Preserve const tuple inference while localizing tuple-copy boundaries**
@@ -400,15 +400,15 @@ const enumValues = [...values] as unknown as T
 After target:
 
 ```ts
-const tupleItems = copySchemaTuple(items)
-const unionOptions = copySchemaTuple(options)
+const tupleItems = copyStructTuple(items)
+const unionOptions = copyStructTuple(options)
 const enumValues = copyStringTuple(values)
 ```
 
 Helpers:
 
 ```ts
-function copySchemaTuple<const T extends readonly [SchemaLike<unknown, unknown, boolean>, ...SchemaLike<unknown, unknown, boolean>[]]>(
+function copyStructTuple<const T extends readonly [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]]>(
   items: T,
 ): T {
   // Type boundary: Array.prototype.map/slice cannot preserve variadic tuple length; callers need exact T for Infer<>.
@@ -423,19 +423,19 @@ function copyStringTuple<const T extends readonly [string, ...string[]]>(items: 
 
 Do not replace these with `satisfies T`: `satisfies` checks assignability but does not convert a copied array back into the original variadic tuple type.
 
-- [ ] **Step 2: Replace runtime schema reads in constructors**
+- [ ] **Step 2: Replace runtime struct reads in constructors**
 
 Before:
 
 ```ts
-const definition = (schema as unknown as RuntimeSchema)[DEFINITION]
+const definition = (struct as unknown as RuntimeStruct)[DEFINITION]
 ```
 
 After:
 
 ```ts
-assertSchema(schema, 'schema')
-const definition = schema[DEFINITION]
+assertStruct(struct, 'struct')
+const definition = struct[DEFINITION]
 ```
 
 - [ ] **Step 3: Replace bigint/date primitive casts**
@@ -454,12 +454,12 @@ return success(BigInt(input))
 const date = input instanceof Date ? input : new Date(input)
 ```
 
-- [ ] **Step 4: Remove parser `as RuntimeSchema` calls after Task 1 definition changes**
+- [ ] **Step 4: Remove parser `as RuntimeStruct` calls after Task 1 definition changes**
 
 Before:
 
 ```ts
-const result = parseValue(definition.item as RuntimeSchema, input[index], [...path, index], 'value')
+const result = parseValue(definition.item as RuntimeStruct, input[index], [...path, index], 'value')
 ```
 
 After:
@@ -468,7 +468,7 @@ After:
 const result = parseValue(definition.item, input[index], [...path, index], 'value')
 ```
 
-Apply the same pattern to request sections, tuple items, union options, intersections, record values, and request body schema.
+Apply the same pattern to request sections, tuple items, union options, intersections, record values, and request body struct.
 
 - [ ] **Step 5: Replace encoder primitive `as never` with a narrowed helper**
 
@@ -586,9 +586,9 @@ pnpm --filter @defjs/core test -- --run packages/core/src/struct
 pnpm --filter @defjs/core typecheck
 ```
 
-Expected: all struct parser/encoder/constructor tests pass; no `as unknown as RuntimeSchema` remains in `packages/core/src/struct/**`.
+Expected: all struct parser/encoder/constructor tests pass; no `as unknown as RuntimeStruct` remains in `packages/core/src/struct/**`.
 
-## Task 3: Remove request builder schema/body casts
+## Task 3: Remove request builder struct/body casts
 
 **Files:**
 
@@ -598,29 +598,29 @@ Expected: all struct parser/encoder/constructor tests pass; no `as unknown as Ru
 
 **Interfaces:**
 
-- Consumes: runtime schema definitions and `assertSchema()` from Task 1.
+- Consumes: runtime struct definitions and `assertStruct()` from Task 1.
 - Produces: typed `RequestBuildInput<TInput>` and body materialization helpers.
 
-- [ ] **Step 1: Replace input schema double assertion**
+- [ ] **Step 1: Replace input struct double assertion**
 
 Before:
 
 ```ts
-return createBoundView(schema as unknown as RuntimeSchema, [], owner) as RequestBuildInput<TInput>
+return createBoundView(struct as unknown as RuntimeStruct, [], owner) as RequestBuildInput<TInput>
 ```
 
 After:
 
 ```ts
-assertSchema(schema, 'request input')
-return createBoundInputView<TInput>(schema, owner)
+assertStruct(struct, 'request input')
+return createBoundInputView<TInput>(struct, owner)
 ```
 
 Add:
 
 ```ts
-function createBoundInputView<TInput extends AnyStruct>(schema: RuntimeSchema, owner: RequestBuildOwner): RequestBuildInput<TInput> {
-  return createBoundView(schema, [], owner)
+function createBoundInputView<TInput extends AnyStruct>(struct: RuntimeStruct, owner: RequestBuildOwner): RequestBuildInput<TInput> {
+  return createBoundView(struct, [], owner)
 }
 ```
 
@@ -629,7 +629,7 @@ function createBoundInputView<TInput extends AnyStruct>(schema: RuntimeSchema, o
 Before:
 
 ```ts
-setPathParamsState(state, encodeFlatRecord(definition.path as unknown as RuntimeSchema, requestInput['path'], 'path'))
+setPathParamsState(state, encodeFlatRecord(definition.path as unknown as RuntimeStruct, requestInput['path'], 'path'))
 ```
 
 After:
@@ -643,20 +643,20 @@ setPathParamsState(state, encodeFlatRecord(definition.path, requestInput['path']
 Before:
 
 ```ts
-setFormDataBody(state, encodeFlatRecord(body.schema, bodyValue, 'formData') as { [key: string]: RequestFormDataValue })
+setFormDataBody(state, encodeFlatRecord(body.struct, bodyValue, 'formData') as { [key: string]: RequestFormDataValue })
 ```
 
 After:
 
 ```ts
-setFormDataBody(state, encodeFormDataRecord(body.schema, bodyValue))
+setFormDataBody(state, encodeFormDataRecord(body.struct, bodyValue))
 ```
 
 Add:
 
 ```ts
-function encodeFormDataRecord(schema: RuntimeSchema, value: unknown): { [key: string]: RequestFormDataValue } {
-  const encoded = encodeFlatRecord(schema, value, 'formData')
+function encodeFormDataRecord(struct: RuntimeStruct, value: unknown): { [key: string]: RequestFormDataValue } {
+  const encoded = encodeFlatRecord(struct, value, 'formData')
   return normalizeFormDataRecord(encoded)
 }
 ```
@@ -666,13 +666,13 @@ function encodeFormDataRecord(schema: RuntimeSchema, value: unknown): { [key: st
 Before:
 
 ```ts
-setRawBody(state, encodeValue(body.schema, bodyValue) as HttpRequest['body'])
+setRawBody(state, encodeValue(body.struct, bodyValue) as HttpRequest['body'])
 ```
 
 After:
 
 ```ts
-setRawBody(state, normalizeHttpRequestBody(encodeValue(body.schema, bodyValue)))
+setRawBody(state, normalizeHttpRequestBody(encodeValue(body.struct, bodyValue)))
 ```
 
 Add:
@@ -725,7 +725,7 @@ pnpm --filter @defjs/core test -- --run packages/core/src/internal/request_build
 pnpm --filter @defjs/core typecheck
 ```
 
-Expected: request builder behavior remains unchanged and no `as unknown as RuntimeSchema` remains in `packages/core/src/internal/request_builder.ts`.
+Expected: request builder behavior remains unchanged and no `as unknown as RuntimeStruct` remains in `packages/core/src/internal/request_builder.ts`.
 
 ## Task 4: Remove command builder and execute-path casts
 
@@ -1135,13 +1135,13 @@ function createMockWebSocketConstructor(): typeof WebSocket {
 Before:
 
 ```ts
-expect(() => struct.object(null as never)).toThrow('object schema requires a plain object')
+expect(() => struct.object(null as never)).toThrow('object struct requires a plain object')
 ```
 
 After:
 
 ```ts
-expect(() => callRuntimeOnly(struct.object, null)).toThrow('object schema requires a plain object')
+expect(() => callRuntimeOnly(struct.object, null)).toThrow('object struct requires a plain object')
 ```
 
 Helper:
@@ -1291,7 +1291,7 @@ After:
 users.value = result
 ```
 
-This requires the preceding command definition to declare the response schema so `execute()` infers `Users`.
+This requires the preceding command definition to declare the response struct so `execute()` infers `Users`.
 
 - [ ] **Step 3: Mark historical unsafe snippets instead of pretending they are current guidance**
 
@@ -1906,13 +1906,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return parseStructValue(schema, input) as ParsedInput<TInput>
+  return parseStructValue(struct, input) as ParsedInput<TInput>
   ```
 
   修复后目标：
 
   ```ts
-  return parseStructValue(schema, input)
+  return parseStructValue(struct, input)
   ```
 
 #### `packages/core/src/internal/request_builder.ts`
@@ -1947,33 +1947,33 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return createBoundView(schema as unknown as RuntimeSchema, [], owner) as RequestBuildInput<TInput>
+  return createBoundView(struct as unknown as RuntimeStruct, [], owner) as RequestBuildInput<TInput>
   ```
 
   修复后目标：
 
   ```ts
-  return createBoundView(schema as unknown, [], owner) as RequestBuildInput<TInput>
+  return createBoundView(struct as unknown, [], owner) as RequestBuildInput<TInput>
   ```
 
 - [ ] `packages/core/src/internal/request_builder.ts:200:26` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  return createBoundView(schema as unknown as RuntimeSchema, [], owner) as RequestBuildInput<TInput>
+  return createBoundView(struct as unknown as RuntimeStruct, [], owner) as RequestBuildInput<TInput>
   ```
 
   修复后目标：
 
   ```ts
-  return createBoundView(schema, [], owner) as RequestBuildInput<TInput>
+  return createBoundView(struct, [], owner) as RequestBuildInput<TInput>
   ```
 
 - [ ] `packages/core/src/internal/request_builder.ts:208:19` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  const runtime = options.input as unknown as RuntimeSchema
+  const runtime = options.input as unknown as RuntimeStruct
   ```
 
   修复后目标：
@@ -1986,7 +1986,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  setPathParamsState(state, encodeFlatRecord(definition.path as unknown as RuntimeSchema, requestInput['path'], 'path'))
+  setPathParamsState(state, encodeFlatRecord(definition.path as unknown as RuntimeStruct, requestInput['path'], 'path'))
   ```
 
   修复后目标：
@@ -1999,7 +1999,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  setQueryParamsState(state, encodeFlatRecord(definition.query as unknown as RuntimeSchema, requestInput['query'], 'query'))
+  setQueryParamsState(state, encodeFlatRecord(definition.query as unknown as RuntimeStruct, requestInput['query'], 'query'))
   ```
 
   修复后目标：
@@ -2012,7 +2012,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  setHeadersState(state, encodeFlatRecord(definition.headers as unknown as RuntimeSchema, requestInput['headers'], 'headers'))
+  setHeadersState(state, encodeFlatRecord(definition.headers as unknown as RuntimeStruct, requestInput['headers'], 'headers'))
   ```
 
   修复后目标：
@@ -2025,7 +2025,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  setRequestShapeBody(state, definition.body as RuntimeSchema, requestInput['body'])
+  setRequestShapeBody(state, definition.body as RuntimeStruct, requestInput['body'])
   ```
 
   修复后目标：
@@ -2038,26 +2038,26 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  setFormDataBody(state, encodeFlatRecord(body.schema, bodyValue, 'formData') as { [key: string]: RequestFormDataValue })
+  setFormDataBody(state, encodeFlatRecord(body.struct, bodyValue, 'formData') as { [key: string]: RequestFormDataValue })
   ```
 
   修复后目标：
 
   ```ts
-  setFormDataBody(state, encodeFlatRecord(body.schema, bodyValue, 'formData') satisfies { [key: string]: RequestFormDataValue })
+  setFormDataBody(state, encodeFlatRecord(body.struct, bodyValue, 'formData') satisfies { [key: string]: RequestFormDataValue })
   ```
 
 - [ ] `packages/core/src/internal/request_builder.ts:264:25` — `type-assertion` — `source`
       修复前：
 
   ```ts
-  setRawBody(state, encodeValue(body.schema, bodyValue) as HttpRequest['body'])
+  setRawBody(state, encodeValue(body.struct, bodyValue) as HttpRequest['body'])
   ```
 
   修复后目标：
 
   ```ts
-  setRawBody(state, encodeValue(body.schema, bodyValue) satisfies HttpRequest['body'])
+  setRawBody(state, encodeValue(body.struct, bodyValue) satisfies HttpRequest['body'])
   ```
 
 - [ ] `packages/core/src/internal/request_builder.ts:270:18` — `type-assertion` — `source`
@@ -2116,20 +2116,20 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return createBoundView(definition.schema as RuntimeSchema, path, owner)
+  return createBoundView(definition.struct as RuntimeStruct, path, owner)
   ```
 
   修复后目标：
 
   ```ts
-  return createBoundView(definition.schema, path, owner)
+  return createBoundView(definition.struct, path, owner)
   ```
 
 - [ ] `packages/core/src/internal/request_builder.ts:484:36` — `type-assertion` — `source`
       修复前：
 
   ```ts
-  get: () => createBoundView(field as RuntimeSchema, [...path, key], owner),
+  get: () => createBoundView(field as RuntimeStruct, [...path, key], owner),
   ```
 
   修复后目标：
@@ -2142,7 +2142,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const itemView = createBoundView(definition.item as RuntimeSchema, [itemToken], owner)
+  const itemView = createBoundView(definition.item as RuntimeStruct, [itemToken], owner)
   ```
 
   修复后目标：
@@ -2168,13 +2168,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  get: () => createBoundView(schema as RuntimeSchema, [...path, key], owner),
+  get: () => createBoundView(struct as RuntimeStruct, [...path, key], owner),
   ```
 
   修复后目标：
 
   ```ts
-  get: () => createBoundView(schema, [...path, key], owner),
+  get: () => createBoundView(struct, [...path, key], owner),
   ```
 
 - [ ] `packages/core/src/internal/request_builder.ts:556:21` — `type-assertion` — `source`
@@ -2207,7 +2207,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  output[getWireKey(field.key, field.tags.get(JsonTag.kind))] = encodeChild(field.struct as RuntimeSchema, fieldValue)
+  output[getWireKey(field.key, field.tags.get(JsonTag.kind))] = encodeChild(field.struct as RuntimeStruct, fieldValue)
   ```
 
   修复后目标：
@@ -2220,7 +2220,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const encoded = encodeValue(field.struct as RuntimeSchema, value[field.key])
+  const encoded = encodeValue(field.struct as RuntimeStruct, value[field.key])
   ```
 
   修复后目标：
@@ -2246,13 +2246,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  schema: definition.schema as RuntimeSchema,
+  struct: definition.struct as RuntimeStruct,
   ```
 
   修复后目标：
 
   ```ts
-  schema: definition.schema,
+  struct: definition.struct,
   ```
 
 - [ ] `packages/core/src/internal/request_builder.ts:848:48` — `type-assertion` — `source`
@@ -2449,7 +2449,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return encodeValue(struct as unknown as RuntimeSchema, value, {
+  return encodeValue(struct as unknown as RuntimeStruct, value, {
   ```
 
   修复后目标：
@@ -2462,7 +2462,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  output[getWireKey(field.key, fieldTag)] = encodeChild(field.struct as unknown as RuntimeSchema, fieldValue)
+  output[getWireKey(field.key, fieldTag)] = encodeChild(field.struct as unknown as RuntimeStruct, fieldValue)
   ```
 
   修复后目标：
@@ -2475,26 +2475,26 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const runtime = resolveRuntimeSchema(struct as unknown as RuntimeSchema)
+  const runtime = resolveRuntimeStruct(struct as unknown as RuntimeStruct)
   ```
 
   修复后目标：
 
   ```ts
-  const runtime = resolveRuntimeSchema(struct)
+  const runtime = resolveRuntimeStruct(struct)
   ```
 
 - [ ] `packages/core/src/struct/codec/common.ts:182:52` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  const optionRuntime = resolveRuntimeSchema(option as unknown as RuntimeSchema)
+  const optionRuntime = resolveRuntimeStruct(option as unknown as RuntimeStruct)
   ```
 
   修复后目标：
 
   ```ts
-  const optionRuntime = resolveRuntimeSchema(option)
+  const optionRuntime = resolveRuntimeStruct(option)
   ```
 
 #### `packages/core/src/struct/codec/query.ts`
@@ -2518,26 +2518,26 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  export function createAnySchema(): Schema<unknown, any> {
+  export function createAnyStruct(): Struct<unknown, any> {
   ```
 
   修复后目标：
 
   ```ts
-  export function createAnySchema(): Schema<unknown, any> {
+  export function createAnyStruct(): Struct<unknown, any> {
   ```
 
 - [ ] `packages/core/src/struct/constructors.ts:74:37` — `explicit-any` — `source`
       修复前：
 
   ```ts
-  return castSchema<Schema<unknown, any>>(
+  return castStruct<Struct<unknown, any>>(
   ```
 
   修复后目标：
 
   ```ts
-  return castSchema<Schema<unknown, any>>(
+  return castStruct<Struct<unknown, any>>(
   ```
 
 - [ ] `packages/core/src/struct/constructors.ts:103:22` — `double-assertion` — `source`
@@ -2570,13 +2570,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const definition = (schema as unknown as RuntimeSchema)[DEFINITION]
+  const definition = (struct as unknown as RuntimeStruct)[DEFINITION]
   ```
 
   修复后目标：
 
   ```ts
-  const definition = schema[DEFINITION]
+  const definition = struct[DEFINITION]
   ```
 
 - [ ] `packages/core/src/struct/constructors.ts:255:22` — `double-assertion` — `source`
@@ -2589,7 +2589,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
   修复后目标：
 
   ```ts
-  const tupleItems = copySchemaTuple(items)
+  const tupleItems = copyStructTuple(items)
   ```
 
 - [ ] `packages/core/src/struct/constructors.ts:272:24` — `double-assertion` — `source`
@@ -2602,7 +2602,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
   修复后目标：
 
   ```ts
-  const unionOptions = copySchemaTuple(options)
+  const unionOptions = copyStructTuple(options)
   ```
 
 - [ ] `packages/core/src/struct/constructors.ts:290:24` — `double-assertion` — `source`
@@ -2615,14 +2615,14 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
   修复后目标：
 
   ```ts
-  const unionOptions = copySchemaTuple(options)
+  const unionOptions = copyStructTuple(options)
   ```
 
 - [ ] `packages/core/src/struct/constructors.ts:296:24` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  const optionDef = (option as unknown as RuntimeSchema)[DEFINITION]
+  const optionDef = (option as unknown as RuntimeStruct)[DEFINITION]
   ```
 
   修复后目标：
@@ -2635,13 +2635,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const fieldSchema = optionDef.shape[discriminator] as unknown as RuntimeSchema | undefined
+  const fieldStruct = optionDef.shape[discriminator] as unknown as RuntimeStruct | undefined
   ```
 
   修复后目标：
 
   ```ts
-  const fieldSchema = optionDef.shape[discriminator] | undefined
+  const fieldStruct = optionDef.shape[discriminator] | undefined
   ```
 
 - [ ] `packages/core/src/struct/constructors.ts:332:10` — `type-assertion` — `source`
@@ -2661,13 +2661,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return createPrimitiveSchema({
+  return createPrimitiveStruct({
   ```
 
   修复后目标：
 
   ```ts
-  return createPrimitiveSchema({
+  return createPrimitiveStruct({
   ```
 
 - [ ] `packages/core/src/struct/constructors.ts:351:31` — `type-assertion` — `source`
@@ -2687,13 +2687,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return createPrimitiveSchema({
+  return createPrimitiveStruct({
   ```
 
   修复后目标：
 
   ```ts
-  return createPrimitiveSchema({
+  return createPrimitiveStruct({
   ```
 
 - [ ] `packages/core/src/struct/constructors.ts:367:61` — `as-never` — `source`
@@ -2713,7 +2713,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  if ((value as unknown as RuntimeSchema)[DEFINITION].kind !== 'object') {
+  if ((value as unknown as RuntimeStruct)[DEFINITION].kind !== 'object') {
   ```
 
   修复后目标：
@@ -2741,7 +2741,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return Array.isArray(value) ? value.map((item) => encodeValue(definition.item as unknown as RuntimeSchema, item, options)) : value
+  return Array.isArray(value) ? value.map((item) => encodeValue(definition.item as unknown as RuntimeStruct, item, options)) : value
   ```
 
   修复后目标：
@@ -2754,7 +2754,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  index < definition.items.length ? encodeValue(definition.items[index] as unknown as RuntimeSchema, item, options) : item,
+  index < definition.items.length ? encodeValue(definition.items[index] as unknown as RuntimeStruct, item, options) : item,
   ```
 
   修复后目标：
@@ -2767,7 +2767,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  output[key] = encodeValue(definition.value as unknown as RuntimeSchema, entry, options)
+  output[key] = encodeValue(definition.value as unknown as RuntimeStruct, entry, options)
   ```
 
   修复后目标：
@@ -2780,20 +2780,20 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  output[key] = encodeValue(fieldSchema as unknown as RuntimeSchema, value[key], options)
+  output[key] = encodeValue(fieldStruct as unknown as RuntimeStruct, value[key], options)
   ```
 
   修复后目标：
 
   ```ts
-  output[key] = encodeValue(fieldSchema, value[key], options)
+  output[key] = encodeValue(fieldStruct, value[key], options)
   ```
 
 - [ ] `packages/core/src/struct/encode.ts:78:38` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  output['path'] = encodeValue(definition.path as unknown as RuntimeSchema, value['path'], options)
+  output['path'] = encodeValue(definition.path as unknown as RuntimeStruct, value['path'], options)
   ```
 
   修复后目标：
@@ -2806,7 +2806,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  output['query'] = encodeValue(definition.query as unknown as RuntimeSchema, value['query'], options)
+  output['query'] = encodeValue(definition.query as unknown as RuntimeStruct, value['query'], options)
   ```
 
   修复后目标：
@@ -2819,7 +2819,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  output['headers'] = encodeValue(definition.headers as unknown as RuntimeSchema, value['headers'], options)
+  output['headers'] = encodeValue(definition.headers as unknown as RuntimeStruct, value['headers'], options)
   ```
 
   修复后目标：
@@ -2832,7 +2832,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  output['body'] = encodeValue(definition.body as unknown as RuntimeSchema, value['body'], options)
+  output['body'] = encodeValue(definition.body as unknown as RuntimeStruct, value['body'], options)
   ```
 
   修复后目标：
@@ -2845,20 +2845,20 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return encodeValue(definition.schema as unknown as RuntimeSchema, value, options)
+  return encodeValue(definition.struct as unknown as RuntimeStruct, value, options)
   ```
 
   修复后目标：
 
   ```ts
-  return encodeValue(definition.schema, value, options)
+  return encodeValue(definition.struct, value, options)
   ```
 
 - [ ] `packages/core/src/struct/encode.ts:97:25` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  const optDef = (opt as unknown as RuntimeSchema)[DEFINITION]
+  const optDef = (opt as unknown as RuntimeStruct)[DEFINITION]
   ```
 
   修复后目标：
@@ -2871,7 +2871,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  if (matchesDefinition(optDef, value, opt as unknown as RuntimeSchema)) {
+  if (matchesDefinition(optDef, value, opt as unknown as RuntimeStruct)) {
   ```
 
   修复后目标：
@@ -2884,7 +2884,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return encodeValue(opt as unknown as RuntimeSchema, value, options)
+  return encodeValue(opt as unknown as RuntimeStruct, value, options)
   ```
 
   修复后目标：
@@ -2910,7 +2910,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return encodeValue(matched as unknown as RuntimeSchema, value, options)
+  return encodeValue(matched as unknown as RuntimeStruct, value, options)
   ```
 
   修复后目标：
@@ -2923,7 +2923,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return encodeValue(definition.right as unknown as RuntimeSchema, value, options)
+  return encodeValue(definition.right as unknown as RuntimeStruct, value, options)
   ```
 
   修复后目标：
@@ -2949,20 +2949,20 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const itemSchema = definition.item as unknown as RuntimeSchema
+  const itemStruct = definition.item as unknown as RuntimeStruct
   ```
 
   修复后目标：
 
   ```ts
-  const itemSchema = definition.item
+  const itemStruct = definition.item
   ```
 
 - [ ] `packages/core/src/struct/encode.ts:167:32` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  if (!matchesFieldValue(definition.items[index] as unknown as RuntimeSchema, value[index])) {
+  if (!matchesFieldValue(definition.items[index] as unknown as RuntimeStruct, value[index])) {
   ```
 
   修复后目标：
@@ -2975,33 +2975,33 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return matchesFieldValue(definition.schema as unknown as RuntimeSchema, value)
+  return matchesFieldValue(definition.struct as unknown as RuntimeStruct, value)
   ```
 
   修复后目标：
 
   ```ts
-  return matchesFieldValue(definition.schema, value)
+  return matchesFieldValue(definition.struct, value)
   ```
 
 - [ ] `packages/core/src/struct/encode.ts:188:27` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  const valueSchema = definition.value as unknown as RuntimeSchema
+  const valueStruct = definition.value as unknown as RuntimeStruct
   ```
 
   修复后目标：
 
   ```ts
-  const valueSchema = definition.value
+  const valueStruct = definition.value
   ```
 
 - [ ] `packages/core/src/struct/encode.ts:198:28` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  matchesDefinition((opt as unknown as RuntimeSchema)[DEFINITION], value, opt as unknown as RuntimeSchema),
+  matchesDefinition((opt as unknown as RuntimeStruct)[DEFINITION], value, opt as unknown as RuntimeStruct),
   ```
 
   修复后目标：
@@ -3014,7 +3014,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  matchesDefinition((opt as unknown as RuntimeSchema)[DEFINITION], value, opt as unknown as RuntimeSchema),
+  matchesDefinition((opt as unknown as RuntimeStruct)[DEFINITION], value, opt as unknown as RuntimeStruct),
   ```
 
   修复后目标：
@@ -3040,7 +3040,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  matchesDefinition((definition.left as unknown as RuntimeSchema)[DEFINITION], value, definition.left as unknown as RuntimeSchema) &&
+  matchesDefinition((definition.left as unknown as RuntimeStruct)[DEFINITION], value, definition.left as unknown as RuntimeStruct) &&
   ```
 
   修复后目标：
@@ -3053,7 +3053,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  matchesDefinition((definition.left as unknown as RuntimeSchema)[DEFINITION], value, definition.left as unknown as RuntimeSchema) &&
+  matchesDefinition((definition.left as unknown as RuntimeStruct)[DEFINITION], value, definition.left as unknown as RuntimeStruct) &&
   ```
 
   修复后目标：
@@ -3066,7 +3066,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  matchesDefinition((definition.right as unknown as RuntimeSchema)[DEFINITION], value, definition.right as unknown as RuntimeSchema)
+  matchesDefinition((definition.right as unknown as RuntimeStruct)[DEFINITION], value, definition.right as unknown as RuntimeStruct)
   ```
 
   修复后目标：
@@ -3079,7 +3079,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  matchesDefinition((definition.right as unknown as RuntimeSchema)[DEFINITION], value, definition.right as unknown as RuntimeSchema)
+  matchesDefinition((definition.right as unknown as RuntimeStruct)[DEFINITION], value, definition.right as unknown as RuntimeStruct)
   ```
 
   修复后目标：
@@ -3092,13 +3092,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const fieldDefinition = (fieldSchema as unknown as RuntimeSchema)[DEFINITION]
+  const fieldDefinition = (fieldStruct as unknown as RuntimeStruct)[DEFINITION]
   ```
 
   修复后目标：
 
   ```ts
-  const fieldDefinition = fieldSchema[DEFINITION]
+  const fieldDefinition = fieldStruct[DEFINITION]
   ```
 
 - [ ] `packages/core/src/struct/encode.ts:230:77` — `as-never` — `source`
@@ -3118,13 +3118,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  if (!matchesFieldValue(fieldSchema as unknown as RuntimeSchema, fieldValue)) {
+  if (!matchesFieldValue(fieldStruct as unknown as RuntimeStruct, fieldValue)) {
   ```
 
   修复后目标：
 
   ```ts
-  if (!matchesFieldValue(fieldSchema, fieldValue)) {
+  if (!matchesFieldValue(fieldStruct, fieldValue)) {
   ```
 
 #### `packages/core/src/struct/facade.ts`
@@ -3133,26 +3133,26 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return createEnumSchema(value as readonly [string, ...string[]])
+  return createEnumStruct(value as readonly [string, ...string[]])
   ```
 
   修复后目标：
 
   ```ts
-  return createEnumSchema(value satisfies readonly [string, ...string[]])
+  return createEnumStruct(value satisfies readonly [string, ...string[]])
   ```
 
 - [ ] `packages/core/src/struct/facade.ts:44:33` — `type-assertion` — `source`
       修复前：
 
   ```ts
-  return createObjectEnumSchema(value as { [key: string]: number | string })
+  return createObjectEnumStruct(value as { [key: string]: number | string })
   ```
 
   修复后目标：
 
   ```ts
-  return createObjectEnumSchema(value satisfies { [key: string]: number | string })
+  return createObjectEnumStruct(value satisfies { [key: string]: number | string })
   ```
 
 #### `packages/core/src/struct/introspection.ts`
@@ -3161,7 +3161,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const definition = (field as unknown as RuntimeSchema)[DEFINITION]
+  const definition = (field as unknown as RuntimeStruct)[DEFINITION]
   ```
 
   修复后目标：
@@ -3174,59 +3174,59 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return isStruct(value) && resolveRuntimeSchema(value as unknown as RuntimeSchema)[DEFINITION].kind === 'object'
+  return isStruct(value) && resolveRuntimeStruct(value as unknown as RuntimeStruct)[DEFINITION].kind === 'object'
   ```
 
   修复后目标：
 
   ```ts
-  return isStruct(value) && resolveRuntimeSchema(value)[DEFINITION].kind === 'object'
+  return isStruct(value) && resolveRuntimeStruct(value)[DEFINITION].kind === 'object'
   ```
 
 - [ ] `packages/core/src/struct/introspection.ts:33:40` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  const runtime = resolveRuntimeSchema(struct as unknown as RuntimeSchema)
+  const runtime = resolveRuntimeStruct(struct as unknown as RuntimeStruct)
   ```
 
   修复后目标：
 
   ```ts
-  const runtime = resolveRuntimeSchema(struct)
+  const runtime = resolveRuntimeStruct(struct)
   ```
 
 - [ ] `packages/core/src/struct/introspection.ts:42:13` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  struct: field as unknown as SchemaLike<unknown, unknown, boolean>,
+  struct: field as unknown as StructLike<unknown, unknown, boolean>,
   ```
 
   修复后目标：
 
   ```ts
-  struct: field satisfies SchemaLike<unknown, unknown, boolean>,
+  struct: field satisfies StructLike<unknown, unknown, boolean>,
   ```
 
 - [ ] `packages/core/src/struct/introspection.ts:43:24` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  tags: getFieldTags(field as unknown as SchemaLike<unknown, unknown, boolean>, key),
+  tags: getFieldTags(field as unknown as StructLike<unknown, unknown, boolean>, key),
   ```
 
   修复后目标：
 
   ```ts
-  tags: getFieldTags(field satisfies SchemaLike<unknown, unknown, boolean>, key),
+  tags: getFieldTags(field satisfies StructLike<unknown, unknown, boolean>, key),
   ```
 
 - [ ] `packages/core/src/struct/introspection.ts:49:22` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  return encodeValue(struct as unknown as RuntimeSchema, value)
+  return encodeValue(struct as unknown as RuntimeStruct, value)
   ```
 
   修复后目标：
@@ -3239,7 +3239,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const runtime = struct as unknown as RuntimeSchema
+  const runtime = struct as unknown as RuntimeStruct
   ```
 
   修复后目标：
@@ -3293,7 +3293,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const result = parseValue(definition.item as RuntimeSchema, input[index], [...path, index], 'value')
+  const result = parseValue(definition.item as RuntimeStruct, input[index], [...path, index], 'value')
   ```
 
   修复后目标：
@@ -3306,20 +3306,20 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const result = parseValue(itemSchema as RuntimeSchema, hasOwnInput ? input[key] : undefined, [...path, key], 'field')
+  const result = parseValue(itemStruct as RuntimeStruct, hasOwnInput ? input[key] : undefined, [...path, key], 'field')
   ```
 
   修复后目标：
 
   ```ts
-  const result = parseValue(itemSchema, hasOwnInput ? input[key] : undefined, [...path, key], 'field')
+  const result = parseValue(itemStruct, hasOwnInput ? input[key] : undefined, [...path, key], 'field')
   ```
 
 - [ ] `packages/core/src/struct/parse.ts:199:31` — `type-assertion` — `source`
       修复前：
 
   ```ts
-  const result = parseValue(definition.value as RuntimeSchema, value, [...path, key], 'field')
+  const result = parseValue(definition.value as RuntimeStruct, value, [...path, key], 'field')
   ```
 
   修复后目标：
@@ -3345,20 +3345,20 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return parseValue(definition.schema as RuntimeSchema, input, path, mode)
+  return parseValue(definition.struct as RuntimeStruct, input, path, mode)
   ```
 
   修复后目标：
 
   ```ts
-  return parseValue(definition.schema, input, path, mode)
+  return parseValue(definition.struct, input, path, mode)
   ```
 
 - [ ] `packages/core/src/struct/parse.ts:249:31` — `type-assertion` — `source`
       修复前：
 
   ```ts
-  const result = parseValue(definition.items[index] as RuntimeSchema, input[index], [...path, index], 'value')
+  const result = parseValue(definition.items[index] as RuntimeStruct, input[index], [...path, index], 'value')
   ```
 
   修复后目标：
@@ -3371,7 +3371,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const result = parseValue(option as RuntimeSchema, input, path, 'value')
+  const result = parseValue(option as RuntimeStruct, input, path, 'value')
   ```
 
   修复后目标：
@@ -3384,7 +3384,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return parseValue(target as RuntimeSchema, input, path, 'value')
+  return parseValue(target as RuntimeStruct, input, path, 'value')
   ```
 
   修复后目标：
@@ -3397,7 +3397,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const leftResult = parseValue(definition.left as RuntimeSchema, input, path, 'value')
+  const leftResult = parseValue(definition.left as RuntimeStruct, input, path, 'value')
   ```
 
   修复后目标：
@@ -3410,7 +3410,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const rightResult = parseValue(definition.right as RuntimeSchema, input, path, 'value')
+  const rightResult = parseValue(definition.right as RuntimeStruct, input, path, 'value')
   ```
 
   修复后目标：
@@ -3423,7 +3423,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const leftZero = buildZeroValue(definition.left as RuntimeSchema, path)
+  const leftZero = buildZeroValue(definition.left as RuntimeStruct, path)
   ```
 
   修复后目标：
@@ -3436,7 +3436,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const rightZero = buildZeroValue(definition.right as RuntimeSchema, path)
+  const rightZero = buildZeroValue(definition.right as RuntimeStruct, path)
   ```
 
   修复后目标：
@@ -3449,20 +3449,20 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const value = buildMissingValue(itemSchema as RuntimeSchema, [...path, key], 'field')
+  const value = buildMissingValue(itemStruct as RuntimeStruct, [...path, key], 'field')
   ```
 
   修复后目标：
 
   ```ts
-  const value = buildMissingValue(itemSchema, [...path, key], 'field')
+  const value = buildMissingValue(itemStruct, [...path, key], 'field')
   ```
 
 - [ ] `packages/core/src/struct/parse.ts:355:32` — `type-assertion` — `source`
       修复前：
 
   ```ts
-  return buildMissingValue(definition.options[0] as RuntimeSchema, path, 'value')
+  return buildMissingValue(definition.options[0] as RuntimeStruct, path, 'value')
   ```
 
   修复后目标：
@@ -3475,7 +3475,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return buildMissingValue(definition.options[0] as RuntimeSchema, path, 'value')
+  return buildMissingValue(definition.options[0] as RuntimeStruct, path, 'value')
   ```
 
   修复后目标：
@@ -3488,20 +3488,20 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return buildMissingValue(definition.schema as RuntimeSchema, path, 'value')
+  return buildMissingValue(definition.struct as RuntimeStruct, path, 'value')
   ```
 
   修复后目标：
 
   ```ts
-  return buildMissingValue(definition.schema, path, 'value')
+  return buildMissingValue(definition.struct, path, 'value')
   ```
 
 - [ ] `packages/core/src/struct/parse.ts:380:43` — `type-assertion` — `source`
       修复前：
 
   ```ts
-  output[index] = buildMissingValue(definition.items[index] as RuntimeSchema, [...path, index], 'value')
+  output[index] = buildMissingValue(definition.items[index] as RuntimeStruct, [...path, index], 'value')
   ```
 
   修复后目标：
@@ -3514,7 +3514,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  sections.push(['path', definition.path as unknown as RuntimeSchema])
+  sections.push(['path', definition.path as unknown as RuntimeStruct])
   ```
 
   修复后目标：
@@ -3527,7 +3527,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  sections.push(['query', definition.query as unknown as RuntimeSchema])
+  sections.push(['query', definition.query as unknown as RuntimeStruct])
   ```
 
   修复后目标：
@@ -3540,7 +3540,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  sections.push(['headers', definition.headers as unknown as RuntimeSchema])
+  sections.push(['headers', definition.headers as unknown as RuntimeStruct])
   ```
 
   修复后目标：
@@ -3553,7 +3553,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  sections.push(['body', definition.body as unknown as RuntimeSchema])
+  sections.push(['body', definition.body as unknown as RuntimeStruct])
   ```
 
   修复后目标：
@@ -3568,26 +3568,26 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  makeSchema({
+  makeStruct({
   ```
 
   修复后目标：
 
   ```ts
-  makeSchema({
+  makeStruct({
   ```
 
 - [ ] `packages/core/src/struct/runtime.ts:22:10` — `type-assertion` — `source`
       修复前：
 
   ```ts
-  return schema as TSchema
+  return struct as TStruct
   ```
 
   修复后目标：
 
   ```ts
-  return schemaSchema
+  return structStruct
   ```
 
 - [ ] `packages/core/src/struct/runtime.ts:28:14` — `as-never` — `source`
@@ -3691,26 +3691,26 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  export type AnySchema = Schema<any, any, boolean>
+  export type AnyStruct = Struct<any, any, boolean>
   ```
 
   修复后目标：
 
   ```ts
-  export type AnySchema = Schema<any, any, boolean>
+  export type AnyStruct = Struct<any, any, boolean>
   ```
 
 - [ ] `packages/core/src/struct/types.ts:60:37` — `explicit-any` — `source`
       修复前：
 
   ```ts
-  export type AnySchema = Schema<any, any, boolean>
+  export type AnyStruct = Struct<any, any, boolean>
   ```
 
   修复后目标：
 
   ```ts
-  export type AnySchema = Schema<any, any, boolean>
+  export type AnyStruct = Struct<any, any, boolean>
   ```
 
 - [ ] `packages/core/src/struct/types.ts:81:44` — `explicit-any` — `source`
@@ -3723,10 +3723,10 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
   修复后目标：
 
   ```ts
-  // Type boundary: keep public ObjectShape as any for exact object-literal schema inference; add RuntimeObjectShape separately.
+  // Type boundary: keep public ObjectShape as any for exact object-literal struct inference; add RuntimeObjectShape separately.
   // oxlint-disable-next-line typescript/no-explicit-any
   export type ObjectShape = { [key: string]: any }
-  export type RuntimeObjectShape = { [key: string]: RuntimeSchema }
+  export type RuntimeObjectShape = { [key: string]: RuntimeStruct }
   ```
 
 #### `packages/core/src/struct/utils.ts`
@@ -3735,7 +3735,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return `array<${expectedType((definition.item as RuntimeSchema)[DEFINITION])}>`
+  return `array<${expectedType((definition.item as RuntimeStruct)[DEFINITION])}>`
   ```
 
   修复后目标：
@@ -3748,7 +3748,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return `${expectedType((definition.left as RuntimeSchema)[DEFINITION])} & ${expectedType((definition.right as RuntimeSchema)[DEFINITION])}`
+  return `${expectedType((definition.left as RuntimeStruct)[DEFINITION])} & ${expectedType((definition.right as RuntimeStruct)[DEFINITION])}`
   ```
 
   修复后目标：
@@ -3761,7 +3761,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return `${expectedType((definition.left as RuntimeSchema)[DEFINITION])} & ${expectedType((definition.right as RuntimeSchema)[DEFINITION])}`
+  return `${expectedType((definition.left as RuntimeStruct)[DEFINITION])} & ${expectedType((definition.right as RuntimeStruct)[DEFINITION])}`
   ```
 
   修复后目标：
@@ -3774,7 +3774,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return definition.options.map((option) => expectedType((option as RuntimeSchema)[DEFINITION])).join(' | ')
+  return definition.options.map((option) => expectedType((option as RuntimeStruct)[DEFINITION])).join(' | ')
   ```
 
   修复后目标：
@@ -3787,7 +3787,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return `record<${expectedType((definition.value as RuntimeSchema)[DEFINITION])}>`
+  return `record<${expectedType((definition.value as RuntimeStruct)[DEFINITION])}>`
   ```
 
   修复后目标：
@@ -6662,13 +6662,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return encodeValue(schema as RuntimeSchema, value)
+  return encodeValue(struct as RuntimeStruct, value)
   ```
 
   修复后目标：
 
   ```ts
-  return encodeValue(schema, value)
+  return encodeValue(struct, value)
   ```
 
 - [ ] `packages/core/src/struct/constructors.primitives.spec.ts:52:36` — `type-assertion` — `source`
@@ -6742,7 +6742,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return value as RuntimeSchema
+  return value as RuntimeStruct
   ```
 
   修复后目标：
@@ -6755,20 +6755,20 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => struct.enum({} as { [key: string]: never })).toThrow('enum schema requires at least one string or number value')
+  expect(() => struct.enum({} as { [key: string]: never })).toThrow('enum struct requires at least one string or number value')
   ```
 
   修复后目标：
 
   ```ts
-  expect(() => struct.enum({} satisfies { [key: string]: never })).toThrow('enum schema requires at least one string or number value')
+  expect(() => struct.enum({} satisfies { [key: string]: never })).toThrow('enum struct requires at least one string or number value')
   ```
 
 - [ ] `packages/core/src/struct/coverage.spec.ts:47:32` — `as-never` — `source`
       修复前：
 
   ```ts
-  expect(() => struct.object(null as never)).toThrow('object schema requires a plain object')
+  expect(() => struct.object(null as never)).toThrow('object struct requires a plain object')
   ```
 
   修复后目标：
@@ -6781,7 +6781,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => struct.request(null as never)).toThrow('request schema requires a plain object')
+  expect(() => struct.request(null as never)).toThrow('request struct requires a plain object')
   ```
 
   修复后目标：
@@ -6794,7 +6794,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => struct.request({ path: struct.string() as never })).toThrow('request.path must be an object schema')
+  expect(() => struct.request({ path: struct.string() as never })).toThrow('request.path must be an object struct')
   ```
 
   修复后目标：
@@ -6807,7 +6807,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => struct.request({ query: struct.string() as never })).toThrow('request.query must be an object schema')
+  expect(() => struct.request({ query: struct.string() as never })).toThrow('request.query must be an object struct')
   ```
 
   修复后目标：
@@ -6820,7 +6820,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => struct.request({ headers: struct.string() as never })).toThrow('request.headers must be an object schema')
+  expect(() => struct.request({ headers: struct.string() as never })).toThrow('request.headers must be an object struct')
   ```
 
   修复后目标：
@@ -6846,13 +6846,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const objectDefinition = schema[DEFINITION] as ObjectDefinition
+  const objectDefinition = struct[DEFINITION] as ObjectDefinition
   ```
 
   修复后目标：
 
   ```ts
-  const objectDefinition = schema[DEFINITION] satisfies ObjectDefinition
+  const objectDefinition = struct[DEFINITION] satisfies ObjectDefinition
   ```
 
 - [ ] `packages/core/src/struct/coverage.spec.ts:147:38` — `as-never` — `source`
@@ -6887,13 +6887,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return encodeValue(schema as RuntimeSchema, value)
+  return encodeValue(struct as RuntimeStruct, value)
   ```
 
   修复后目标：
 
   ```ts
-  return encodeValue(schema, value)
+  return encodeValue(struct, value)
   ```
 
 - [ ] `packages/core/src/struct/encode.spec.ts:50:22` — `type-assertion` — `source`
@@ -6954,39 +6954,39 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const booleanSchema = struct.boolean() as unknown as { [key: symbol]: unknown }
+  const booleanStruct = struct.boolean() as unknown as { [key: symbol]: unknown }
   ```
 
   修复后目标：
 
   ```ts
-  const booleanSchema = struct.boolean() satisfies { [key: symbol]: unknown }
+  const booleanStruct = struct.boolean() satisfies { [key: symbol]: unknown }
   ```
 
 - [ ] `packages/core/src/struct/facade.spec.ts:70:24` — `double-assertion` — `source`
       修复前：
 
   ```ts
-  const nullSchema = struct.null() as unknown as { [key: symbol]: unknown }
+  const nullStruct = struct.null() as unknown as { [key: symbol]: unknown }
   ```
 
   修复后目标：
 
   ```ts
-  const nullSchema = struct.null() satisfies { [key: symbol]: unknown }
+  const nullStruct = struct.null() satisfies { [key: symbol]: unknown }
   ```
 
 - [ ] `packages/core/src/struct/facade.spec.ts:71:31` — `type-assertion` — `source`
       修复前：
 
   ```ts
-  const booleanDefinition = Object.getOwnPropertySymbols(booleanSchema)
+  const booleanDefinition = Object.getOwnPropertySymbols(booleanStruct)
   ```
 
   修复后目标：
 
   ```ts
-  const booleanDefinition = Object.getOwnPropertySymbols(booleanSchema)
+  const booleanDefinition = Object.getOwnPropertySymbols(booleanStruct)
   ```
 
 - [ ] `packages/core/src/struct/facade.spec.ts:73:82` — `type-assertion` — `source`
@@ -7006,13 +7006,13 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const nullDefinition = Object.getOwnPropertySymbols(nullSchema)
+  const nullDefinition = Object.getOwnPropertySymbols(nullStruct)
   ```
 
   修复后目标：
 
   ```ts
-  const nullDefinition = Object.getOwnPropertySymbols(nullSchema)
+  const nullDefinition = Object.getOwnPropertySymbols(nullStruct)
   ```
 
 - [ ] `packages/core/src/struct/facade.spec.ts:78:82` — `type-assertion` — `source`
@@ -7568,7 +7568,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => serializeOutgoingWebSocketMessage(schemas, {} as never)).toThrow('must include a string type')
+  expect(() => serializeOutgoingWebSocketMessage(structs, {} as never)).toThrow('must include a string type')
   ```
 
   修复后目标：
@@ -7581,7 +7581,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => serializeOutgoingWebSocketMessage(schemas, { type: '' } as never)).toThrow('must include a string type')
+  expect(() => serializeOutgoingWebSocketMessage(structs, { type: '' } as never)).toThrow('must include a string type')
   ```
 
   修复后目标：
@@ -7594,7 +7594,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => serializeOutgoingWebSocketMessage(schemas, null as never)).toThrow('must include a string type')
+  expect(() => serializeOutgoingWebSocketMessage(structs, null as never)).toThrow('must include a string type')
   ```
 
   修复后目标：
@@ -7607,7 +7607,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => serializeOutgoingWebSocketMessage(schemas, { type: 'other' } as never)).toThrow('Undeclared outgoing message type: other')
+  expect(() => serializeOutgoingWebSocketMessage(structs, { type: 'other' } as never)).toThrow('Undeclared outgoing message type: other')
   ```
 
   修复后目标：
@@ -7620,7 +7620,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  const result = serializeOutgoingWebSocketMessage(schemas, { type: 'msg', text: 'hello' } as never)
+  const result = serializeOutgoingWebSocketMessage(structs, { type: 'msg', text: 'hello' } as never)
   ```
 
   修复后目标：
@@ -7633,7 +7633,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  expect(() => serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: { text: 123 } } as never)).toThrow()
+  expect(() => serializeOutgoingWebSocketMessage(structs, { type: 'msg', data: { text: 123 } } as never)).toThrow()
   ```
 
   修复后目标：
@@ -11152,33 +11152,33 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  return createBoundView(schema as unknown as RuntimeSchema, [], owner) as RequestBuildInput<TInput>
+  return createBoundView(struct as unknown as RuntimeStruct, [], owner) as RequestBuildInput<TInput>
   ```
 
   修复后目标：
 
   ```ts
-  return createBoundView(schema as unknown, [], owner) as RequestBuildInput<TInput>
+  return createBoundView(struct as unknown, [], owner) as RequestBuildInput<TInput>
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:812:26` — `double-assertion` — `markdown-code`
       修复前：
 
   ```ts
-  return createBoundView(schema as unknown as RuntimeSchema, [], owner) as RequestBuildInput<TInput>
+  return createBoundView(struct as unknown as RuntimeStruct, [], owner) as RequestBuildInput<TInput>
   ```
 
   修复后目标：
 
   ```ts
-  return createBoundView(schema, [], owner) as RequestBuildInput<TInput>
+  return createBoundView(struct, [], owner) as RequestBuildInput<TInput>
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:821:36` — `double-assertion` — `markdown-code`
       修复前：
 
   ```ts
-  const boundInput = createBoundView(options.input as unknown as RuntimeSchema, [], owner)
+  const boundInput = createBoundView(options.input as unknown as RuntimeStruct, [], owner)
   ```
 
   修复后目标：
@@ -11243,117 +11243,117 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  type SchemaInput<T> = T extends { readonly _struct: { readonly input: any } } ? T['_struct']['input'] : never
+  type StructInput<T> = T extends { readonly _struct: { readonly input: any } } ? T['_struct']['input'] : never
   ```
 
   修复后目标：
 
   ```ts
-  type SchemaInput<T> = T extends { readonly _struct: { readonly input: unknown } } ? T['_struct']['input'] : never
+  type StructInput<T> = T extends { readonly _struct: { readonly input: unknown } } ? T['_struct']['input'] : never
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:928:73` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type SchemaOutput<T> = T extends { readonly _struct: { readonly output: any } } ? T['_struct']['output'] : never
+  type StructOutput<T> = T extends { readonly _struct: { readonly output: any } } ? T['_struct']['output'] : never
   ```
 
   修复后目标：
 
   ```ts
-  type SchemaOutput<T> = T extends { readonly _struct: { readonly output: unknown } } ? T['_struct']['output'] : never
+  type StructOutput<T> = T extends { readonly _struct: { readonly output: unknown } } ? T['_struct']['output'] : never
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:948:10` — `type-assertion` — `markdown-code`
       修复前：
 
   ```ts
-  return schema as TSchema
+  return struct as TStruct
   ```
 
   修复后目标：
 
   ```ts
-  return schemaSchema
+  return structStruct
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:971:8` — `double-assertion` — `markdown-code`
       修复前：
 
   ```ts
-  return createPrimitiveSchema({
+  return createPrimitiveStruct({
   ```
 
   修复后目标：
 
   ```ts
-  return createPrimitiveSchema({
+  return createPrimitiveStruct({
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:999:52` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  export function createAnySchema(): Schema<unknown, any> {
+  export function createAnyStruct(): Struct<unknown, any> {
   ```
 
   修复后目标：
 
   ```ts
-  export function createAnySchema(): Schema<unknown, any> {
+  export function createAnyStruct(): Struct<unknown, any> {
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:1000:10` — `double-assertion` — `markdown-code`
       修复前：
 
   ```ts
-  return makeSchema({
+  return makeStruct({
   ```
 
   修复后目标：
 
   ```ts
-  return makeSchema({
+  return makeStruct({
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:1003:36` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  }) as unknown as Schema<unknown, any>
+  }) as unknown as Struct<unknown, any>
   ```
 
   修复后目标：
 
   ```ts
-  }) as unknown as Schema<unknown, unknown>
+  }) as unknown as Struct<unknown, unknown>
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:1010:52` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  export function createAnySchema(): Schema<unknown, any> {
+  export function createAnyStruct(): Struct<unknown, any> {
   ```
 
   修复后目标：
 
   ```ts
-  export function createAnySchema(): Schema<unknown, any> {
+  export function createAnyStruct(): Struct<unknown, any> {
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:1012:37` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  return castSchema<Schema<unknown, any>>(
+  return castStruct<Struct<unknown, any>>(
   ```
 
   修复后目标：
 
   ```ts
-  return castSchema<Schema<unknown, any>>(
+  return castStruct<Struct<unknown, any>>(
   ```
 
 - [ ] `docs/superpowers/plans/2026-06-13-oxlint-oxfmt-type-safety-implementation.md:1067:10` — `type-assertion` — `markdown-code`
@@ -12342,273 +12342,273 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  type OutputOf<S> = S extends SchemaLike<any, infer O, any> ? O : never
+  type OutputOf<S> = S extends StructLike<any, infer O, any> ? O : never
   ```
 
   修复后目标：
 
   ```ts
-  type OutputOf<S> = S extends SchemaLike<unknown, infer O, unknown> ? O : never
+  type OutputOf<S> = S extends StructLike<unknown, infer O, unknown> ? O : never
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:316:55` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type OutputOf<S> = S extends SchemaLike<any, infer O, any> ? O : never
+  type OutputOf<S> = S extends StructLike<any, infer O, any> ? O : never
   ```
 
   修复后目标：
 
   ```ts
-  type OutputOf<S> = S extends SchemaLike<unknown, infer O, unknown> ? O : never
+  type OutputOf<S> = S extends StructLike<unknown, infer O, unknown> ? O : never
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:334:36` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type BoundRef<S extends SchemaLike<any, any, any>, Root> = {
+  type BoundRef<S extends StructLike<any, any, any>, Root> = {
   ```
 
   修复后目标：
 
   ```ts
-  type BoundRef<S extends SchemaLike<unknown, unknown, unknown>, Root> = {
+  type BoundRef<S extends StructLike<unknown, unknown, unknown>, Root> = {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:334:41` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type BoundRef<S extends SchemaLike<any, any, any>, Root> = {
+  type BoundRef<S extends StructLike<any, any, any>, Root> = {
   ```
 
   修复后目标：
 
   ```ts
-  type BoundRef<S extends SchemaLike<unknown, unknown, unknown>, Root> = {
+  type BoundRef<S extends StructLike<unknown, unknown, unknown>, Root> = {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:334:46` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type BoundRef<S extends SchemaLike<any, any, any>, Root> = {
+  type BoundRef<S extends StructLike<any, any, any>, Root> = {
   ```
 
   修复后目标：
 
   ```ts
-  type BoundRef<S extends SchemaLike<unknown, unknown, unknown>, Root> = {
+  type BoundRef<S extends StructLike<unknown, unknown, unknown>, Root> = {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:341:77` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<SchemaLike<any, any, any>, Root> & {
+  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<StructLike<any, any, any>, Root> & {
   ```
 
   修复后目标：
 
   ```ts
-  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<SchemaLike<unknown, unknown, unknown>, Root> & {
+  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<StructLike<unknown, unknown, unknown>, Root> & {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:341:82` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<SchemaLike<any, any, any>, Root> & {
+  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<StructLike<any, any, any>, Root> & {
   ```
 
   修复后目标：
 
   ```ts
-  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<SchemaLike<unknown, unknown, unknown>, Root> & {
+  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<StructLike<unknown, unknown, unknown>, Root> & {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:341:87` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<SchemaLike<any, any, any>, Root> & {
+  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<StructLike<any, any, any>, Root> & {
   ```
 
   修复后目标：
 
   ```ts
-  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<SchemaLike<unknown, unknown, unknown>, Root> & {
+  type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<StructLike<unknown, unknown, unknown>, Root> & {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:345:41` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type BoundObject<S extends ObjectSchema<any>, TShape, Root> = BoundRef<S, Root> & {
+  type BoundObject<S extends ObjectStruct<any>, TShape, Root> = BoundRef<S, Root> & {
   ```
 
   修复后目标：
 
   ```ts
-  type BoundObject<S extends ObjectSchema<unknown>, TShape, Root> = BoundRef<S, Root> & {
+  type BoundObject<S extends ObjectStruct<unknown>, TShape, Root> = BoundRef<S, Root> & {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:349:89` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectSchema<any>, any, Root> & {
+  type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectStruct<any>, any, Root> & {
   ```
 
   修复后目标：
 
   ```ts
-  type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectSchema<unknown>, unknown, Root> & {
+  type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectStruct<unknown>, unknown, Root> & {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:349:95` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectSchema<any>, any, Root> & {
+  type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectStruct<any>, any, Root> & {
   ```
 
   修复后目标：
 
   ```ts
-  type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectSchema<unknown>, unknown, Root> & {
+  type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectStruct<unknown>, unknown, Root> & {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:367:29` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  : S extends ArraySchema<any>
+  : S extends ArrayStruct<any>
   ```
 
   修复后目标：
 
   ```ts
-  : S extends ArraySchema<unknown>
+  : S extends ArrayStruct<unknown>
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:369:30` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  : S extends SchemaLike<any, any, any>
+  : S extends StructLike<any, any, any>
   ```
 
   修复后目标：
 
   ```ts
-  : S extends SchemaLike<unknown, unknown, unknown>
+  : S extends StructLike<unknown, unknown, unknown>
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:369:35` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  : S extends SchemaLike<any, any, any>
+  : S extends StructLike<any, any, any>
   ```
 
   修复后目标：
 
   ```ts
-  : S extends SchemaLike<unknown, unknown, unknown>
+  : S extends StructLike<unknown, unknown, unknown>
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:369:40` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  : S extends SchemaLike<any, any, any>
+  : S extends StructLike<any, any, any>
   ```
 
   修复后目标：
 
   ```ts
-  : S extends SchemaLike<unknown, unknown, unknown>
+  : S extends StructLike<unknown, unknown, unknown>
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:387:49` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type HttpBuildContext<Root extends ObjectSchema<any>> = {
+  type HttpBuildContext<Root extends ObjectStruct<any>> = {
   ```
 
   修复后目标：
 
   ```ts
-  type HttpBuildContext<Root extends ObjectSchema<unknown>> = {
+  type HttpBuildContext<Root extends ObjectStruct<unknown>> = {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:402:56` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type EventStreamBuildContext<Root extends ObjectSchema<any>> = {
+  type EventStreamBuildContext<Root extends ObjectStruct<any>> = {
   ```
 
   修复后目标：
 
   ```ts
-  type EventStreamBuildContext<Root extends ObjectSchema<unknown>> = {
+  type EventStreamBuildContext<Root extends ObjectStruct<unknown>> = {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:408:54` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type WebSocketBuildContext<Root extends ObjectSchema<any>> = {
+  type WebSocketBuildContext<Root extends ObjectStruct<any>> = {
   ```
 
   修复后目标：
 
   ```ts
-  type WebSocketBuildContext<Root extends ObjectSchema<unknown>> = {
+  type WebSocketBuildContext<Root extends ObjectStruct<unknown>> = {
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:427:22` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  schema: SchemaLike<any, any, any>
+  struct: StructLike<any, any, any>
   ```
 
   修复后目标：
 
   ```ts
-  schema: SchemaLike<unknown, unknown, unknown>
+  struct: StructLike<unknown, unknown, unknown>
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:427:27` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  schema: SchemaLike<any, any, any>
+  struct: StructLike<any, any, any>
   ```
 
   修复后目标：
 
   ```ts
-  schema: SchemaLike<unknown, unknown, unknown>
+  struct: StructLike<unknown, unknown, unknown>
   ```
 
 - [ ] `packages/core/research/defjs-build-options.md:427:32` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  schema: SchemaLike<any, any, any>
+  struct: StructLike<any, any, any>
   ```
 
   修复后目标：
 
   ```ts
-  schema: SchemaLike<unknown, unknown, unknown>
+  struct: StructLike<unknown, unknown, unknown>
   ```
 
 #### `packages/core/research/go-style-endpoint-practices.md`
@@ -12617,39 +12617,39 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  type HttpBuildContext<Root extends ObjectSchema<any>> = {
+  type HttpBuildContext<Root extends ObjectStruct<any>> = {
   ```
 
   修复后目标：
 
   ```ts
-  type HttpBuildContext<Root extends ObjectSchema<unknown>> = {
+  type HttpBuildContext<Root extends ObjectStruct<unknown>> = {
   ```
 
 - [ ] `packages/core/research/go-style-endpoint-practices.md:292:56` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type EventStreamBuildContext<Root extends ObjectSchema<any>> = {
+  type EventStreamBuildContext<Root extends ObjectStruct<any>> = {
   ```
 
   修复后目标：
 
   ```ts
-  type EventStreamBuildContext<Root extends ObjectSchema<unknown>> = {
+  type EventStreamBuildContext<Root extends ObjectStruct<unknown>> = {
   ```
 
 - [ ] `packages/core/research/go-style-endpoint-practices.md:302:54` — `explicit-any` — `markdown-code`
       修复前：
 
   ```ts
-  type WebSocketBuildContext<Root extends ObjectSchema<any>> = {
+  type WebSocketBuildContext<Root extends ObjectStruct<any>> = {
   ```
 
   修复后目标：
 
   ```ts
-  type WebSocketBuildContext<Root extends ObjectSchema<unknown>> = {
+  type WebSocketBuildContext<Root extends ObjectStruct<unknown>> = {
   ```
 
 #### `packages/core/research/http-middleware-best-practices-v2.md`
@@ -12766,5 +12766,5 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
 
 - [ ] Spec coverage: Appendix A includes 852 generated modification checkboxes, matching the verified audit count.
 - [ ] Placeholder scan: this document contains no unresolved placeholders from the plan-writing failure list.
-- [ ] Type consistency: helpers introduced in Tasks 1-7 have explicit names and signatures: `RuntimeObjectShape`, `assertSchema`, `copyReadonlyTuple`, `encodePrimitiveValue`, `isEnumValue`, `createRequestCommandBuilder`, `createPromiseWithResolvers`, `createTypedFetchMock`, `createMockWebSocketConstructor`, `callRuntimeOnly`, `parseTokenResponse`, and `isErrnoException`.
+- [ ] Type consistency: helpers introduced in Tasks 1-7 have explicit names and signatures: `RuntimeObjectShape`, `assertStruct`, `copyReadonlyTuple`, `encodePrimitiveValue`, `isEnumValue`, `createRequestCommandBuilder`, `createPromiseWithResolvers`, `createTypedFetchMock`, `createMockWebSocketConstructor`, `callRuntimeOnly`, `parseTokenResponse`, and `isErrnoException`.
 - [ ] Verification coverage: each task has focused commands; Task 8 has full `pnpm check` and `pnpm test` gates.

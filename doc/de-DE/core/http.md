@@ -1,11 +1,11 @@
 ---
 title: HTTP
-description: Use defineRequest to define HTTP endpoints, master status-code-to-schema mapping, cancellation and timeout, progress tracking, and response type control.
+description: Use defineRequest to define HTTP endpoints, master status-code-to-struct mapping, cancellation and timeout, progress tracking, and response type control.
 ---
 
 # HTTP
 
-Verwende `defineRequest`, um einen HTTP-Endpunkt zu definieren, und führe ihn mit `Client.execute()` aus. Das Core-Paket handhabt Schema-Validierung, Statuscode-Verteilung, Signal-Merging und Response-Body-Parsing automatisch.
+Verwende `defineRequest`, um einen HTTP-Endpunkt zu definieren, und führe ihn mit `Client.execute()` aus. Das Core-Paket handhabt Struct-Validierung, Statuscode-Verteilung, Signal-Merging und Response-Body-Parsing automatisch.
 
 ## Endpunkt definieren
 
@@ -52,16 +52,16 @@ const listUsers = defineRequest({
 })
 ```
 
-## Status-Code-zu-Schema-Output-Mapping
+## Status-Code-zu-Struct-Output-Mapping
 
-`output` mapped HTTP-Statuscodes auf Schemata. Die Laufzeit wählt das passende Schema per Response-Statuscode.
+`output` mapped HTTP-Statuscodes auf Structta. Die Laufzeit wählt das passende Struct per Response-Statuscode.
 
 Sowohl Objekt- als auch Array-Form werden unterstützt:
 
 ```typescript
 import { defineRequest, object, string } from '@defjs/core'
 
-// Objekt-Form: Schlüssel sind Statuscodes, Werte sind Schemata
+// Objekt-Form: Schlüssel sind Statuscodes, Werte sind Structta
 const createUser = defineRequest({
   method: 'POST',
   path: '/users',
@@ -78,7 +78,7 @@ const createUser = defineRequest({
   },
 })
 
-// Array-Form: unterstützt Mapping mehrerer Statuscodes auf dasselbe Schema
+// Array-Form: unterstützt Mapping mehrerer Statuscodes auf dasselbe Struct
 const updateUser = defineRequest({
   method: 'PUT',
   path: '/users/:id',
@@ -128,8 +128,8 @@ if (error === null) {
 
 ### Type-Helper
 
-- `RequestSuccessData<TOutput>`: Extrahiert alle 2xx-Schema-Output-Typen aus `output`. Falls kein 2xx-Mapping existiert, wird als `unknown` inferred.
-- `RequestErrorData<TOutput>`: Extrahiert alle Nicht-2xx-Schema-Output-Typen aus `output`. Falls kein Nicht-2xx-Mapping existiert, wird als `unknown` inferred.
+- `RequestSuccessData<TOutput>`: Extrahiert alle 2xx-Struct-Output-Typen aus `output`. Falls kein 2xx-Mapping existiert, wird als `unknown` inferred.
+- `RequestErrorData<TOutput>`: Extrahiert alle Nicht-2xx-Struct-Output-Typen aus `output`. Falls kein Nicht-2xx-Mapping existiert, wird als `unknown` inferred.
 
 ## Request ausführen
 
@@ -284,7 +284,7 @@ Unterstützte `responseType`-Werte:
 | `blob`        | `Blob` zurückgeben                                              |
 | `arraybuffer` | `ArrayBuffer` zurückgeben                                       |
 
-Falls `responseType` `json` ist und `output` ein Schema für den zurückgegebenen Statuscode definiert, validiert das Framework das geparste JSON gegen das Schema. Falls die Validierung fehlschlägt, wird ein `DefinitionError` mit `code: 'RESPONSE_VALIDATION_FAILED'` zurückgegeben.
+Falls `responseType` `json` ist und `output` ein Struct für den zurückgegebenen Statuscode definiert, validiert das Framework das geparste JSON gegen das Struct. Falls die Validierung fehlschlägt, wird ein `DefinitionError` mit `code: 'RESPONSE_VALIDATION_FAILED'` zurückgegeben.
 
 ## Wie geht es weiter
 

@@ -1,7 +1,7 @@
-import type { FlattenedSchemaError, FormattedSchemaError, Path, SchemaIssue } from './types'
+import type { FlattenedStructError, FormattedStructError, Path, StructIssue } from './types'
 import { describeValue, formatPath } from './utils'
 
-export type ErrorMap = (issue: SchemaIssue) => string | undefined
+export type ErrorMap = (issue: StructIssue) => string | undefined
 
 let globalErrorMap: ErrorMap | undefined
 
@@ -10,26 +10,26 @@ export function setErrorMap(map: ErrorMap | undefined): void {
 }
 
 export class StructError extends Error {
-  readonly issues: SchemaIssue[]
+  readonly issues: StructIssue[]
 
-  constructor(issues: SchemaIssue[]) {
+  constructor(issues: StructIssue[]) {
     const first = issues[0]?.message
-    super(issues.length <= 1 ? (first ?? 'Schema parse failed') : `${issues.length} schema issues: ${first}`)
+    super(issues.length <= 1 ? (first ?? 'Struct parse failed') : `${issues.length} struct issues: ${first}`)
     this.name = 'StructError'
     this.issues = issues
   }
 
-  format(): FormattedSchemaError {
-    const root: FormattedSchemaError = { _errors: [] }
+  format(): FormattedStructError {
+    const root: FormattedStructError = { _errors: [] }
     for (const item of this.issues) {
-      let cursor: FormattedSchemaError = root
+      let cursor: FormattedStructError = root
       for (const segment of item.path) {
         const key = formatErrorTreeKey(segment)
         const existing = cursor[key]
         if (existing && !Array.isArray(existing)) {
           cursor = existing
         } else {
-          const next: FormattedSchemaError = { _errors: [] }
+          const next: FormattedStructError = { _errors: [] }
           cursor[key] = next
           cursor = next
         }
@@ -39,7 +39,7 @@ export class StructError extends Error {
     return root
   }
 
-  flatten(): FlattenedSchemaError {
+  flatten(): FlattenedStructError {
     const formErrors: string[] = []
     const fieldErrors: { [key: string]: string[] } = {}
     for (const item of this.issues) {
@@ -55,7 +55,7 @@ export class StructError extends Error {
 
   prettify(): string {
     if (this.issues.length === 0) {
-      return 'Schema parse failed'
+      return 'Struct parse failed'
     }
     return this.issues
       .map((item) => {
@@ -71,8 +71,8 @@ function formatErrorTreeKey(segment: number | string): string {
   return key === '_errors' ? '\\_errors' : key
 }
 
-export function issue(path: Path, code: SchemaIssue['code'], expected: string, received: unknown, message?: string): SchemaIssue {
-  const candidate: SchemaIssue = {
+export function issue(path: Path, code: StructIssue['code'], expected: string, received: unknown, message?: string): StructIssue {
+  const candidate: StructIssue = {
     code,
     expected,
     message: message ?? `Expected ${expected} at ${formatPath(path)}, received ${describeValue(received)}`,

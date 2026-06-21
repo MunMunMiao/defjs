@@ -1,10 +1,9 @@
-import { encodeStructValue, getStructFields, isObjectStruct } from '../introspection'
-import { MultipartTag } from '../tag'
-import type { SchemaLike } from '../types'
-import { assertPlainObject, getWireKey } from './common'
+import { isObjectStruct } from '../introspection'
+import type { AnyStructLike } from '../types'
+import { encodeFlatByAlias, writeRepeated } from './flat'
 import { isSearchParamScalar, stringifySearchParamScalar } from './urlencoded'
 
-export function encodeMultipart(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): FormData {
+export function encodeMultipart(struct: AnyStructLike, value: unknown): FormData {
   if (!isObjectStruct(struct)) {
     throw new TypeError('multipart encode expects object struct')
   }
@@ -14,38 +13,25 @@ export function encodeMultipart(struct: SchemaLike<unknown, unknown, boolean>, v
     throw new Error('FormData is not supported in current runtime')
   }
 
-  assertPlainObject(value, 'multipart encode expects object value')
-
-  const form = new FormData()
-  for (const field of getStructFields(struct)) {
-    const fieldTag = field.tags.get(MultipartTag.kind)
-    appendFormData(form, getWireKey(field.key, fieldTag), encodeStructValue(field.struct, value[field.key]))
-  }
-
-  return form
+  return encodeFlatByAlias(struct, value, {
+    create: () => new FormData(),
+    label: 'multipart',
+    put: appendFormData,
+  })
 }
 
 export function appendFormData(form: FormData, key: string, value: unknown): void {
-  if (typeof value === 'undefined') {
-    return
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      appendFormData(form, key, item)
+  writeRepeated(key, value, (itemKey, item) => {
+    if (typeof Blob !== 'undefined' && item instanceof Blob) {
+      form.append(itemKey, item)
+      return
     }
-    return
-  }
 
-  if (typeof Blob !== 'undefined' && value instanceof Blob) {
-    form.append(key, value)
-    return
-  }
+    if (isSearchParamScalar(item)) {
+      form.append(itemKey, stringifySearchParamScalar(item))
+      return
+    }
 
-  if (isSearchParamScalar(value)) {
-    form.append(key, stringifySearchParamScalar(value))
-    return
-  }
-
-  throw new TypeError(`multipart value for "${key}" requires a scalar, Blob, or File`)
+    throw new TypeError(`multipart value for "${itemKey}" requires a scalar, Blob, or File`)
+  })
 }

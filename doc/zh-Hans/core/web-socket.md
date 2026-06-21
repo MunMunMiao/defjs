@@ -1,6 +1,6 @@
 ---
 title: WebSocket
-description: Typed WebSocket endpoints with schema-driven messages, automatic reconnect, heartbeat, and send queueing.
+description: Typed WebSocket endpoints with struct-driven messages, automatic reconnect, heartbeat, and send queueing.
 ---
 
 # WebSocket

@@ -1,6 +1,6 @@
 ---
 title: Struct
-description: Declarative schema definition, type inference, error mapping, and the field tag system.
+description: Declarative struct definition, type inference, error mapping, and the field alias support.
 ---
 
 # Struct
@@ -9,12 +9,12 @@ description: Declarative schema definition, type inference, error mapping, and t
 
 ## プリミティブ型
 
-すべてのスキーマは `struct` 名前空間を通じて作成され、`.optional()`、`.null()`、`.nullish()`、`.tag(...)` などのチェーン呼び出しをサポートします。
+すべてのスキーマは `struct` 名前空間を通じて作成され、`.optional()`、`.null()`、`.nullish()`、`.alias(name)` などのチェーン呼び出しをサポートします。
 
 ### スカラー
 
 ```typescript
-import { struct } from '@defjs/core'
+import { struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -23,7 +23,7 @@ const User = struct.object({
   role: struct.literal('admin'),
 })
 
-type User = struct.Infer<typeof User>
+type User = Infer<typeof User>
 // { id: number; name: string; active: boolean; role: 'admin' }
 ```
 
@@ -95,11 +95,11 @@ const CreateUser = struct.request({
   path: struct.object({ orgId: struct.number() }),
   query: struct.object({ dryRun: struct.boolean().optional() }),
   headers: struct.object({
-    'X-Api-Key': struct.string().tag(tag.header('X-Api-Key')),
+    'X-Api-Key': struct.string().alias('X-Api-Key'),
   }),
   body: struct.json(
     struct.object({
-      name: struct.string().tag(tag.json('user_name')),
+      name: struct.string().alias('user_name'),
     }),
   ),
 })
@@ -109,7 +109,7 @@ const CreateUser = struct.request({
 
 | ラッパー                   | エンコーディング     |
 | -------------------------- | -------------------- |
-| `struct.json(schema)`      | `JSON.stringify`     |
+| `struct.json(struct)`      | `JSON.stringify`     |
 | `struct.urlencoded(shape)` | `URLSearchParams`    |
 | `struct.formData(shape)`   | `FormData`           |
 | `struct.text()`            | プレーンテキスト     |
@@ -118,7 +118,7 @@ const CreateUser = struct.request({
 
 ## `Infer<T>` 型推論
 
-`struct.Infer<T>` はスキーマの出力型を抽出します。これは覚えておくべき唯一の型レベルヘルパーです。
+`Infer<T>` はスキーマの出力型を抽出します。これは覚えておくべき唯一の型レベルヘルパーです。
 
 ```typescript
 const Person = struct.object({
@@ -126,21 +126,21 @@ const Person = struct.object({
   age: struct.number().optional(),
 })
 
-type Person = struct.Infer<typeof Person>
+type Person = Infer<typeof Person>
 // { name: string; age?: number }
 ```
 
 `Infer` は `struct.array(...)`、`struct.union(...)`、`struct.request(...)` でも機能します：
 
 ```typescript
-type Tags = struct.Infer<typeof Tags> // string[]
-type Id = struct.Infer<typeof Id> // string | number
-type Req = struct.Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
+type Tags = Infer<typeof Tags> // string[]
+type Id = Infer<typeof Id> // string | number
+type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
 ```
 
 ## StructError とエラーマッピング
 
-検証に失敗すると、実行時は完全な `SchemaIssue[]` を含む `StructError` を返します。
+検証に失敗すると、実行時は完全な `StructIssue[]` を含む `StructError` を返します。
 
 ```typescript
 import { struct, StructError } from '@defjs/core'
@@ -175,84 +175,43 @@ setErrorMap((issue) => {
 })
 ```
 
-## タグシステム
+## Field Aliases
 
-タグはフィールドに付与されるメタデータで、コーデック、リクエストビルダー、または外部アダプターによって読み取られます。コアは 6 つのビルトイン名前空間を提供します：
-
-| 名前空間                | 用途                                   | 引数なしの動作                       |
-| ----------------------- | -------------------------------------- | ------------------------------------ |
-| `tag.json()`            | JSON フィールドのワイヤーキー          | フィールド名にフォールバック         |
-| `tag.urlencoded()`      | URL エンコードフィールドのワイヤーキー | フィールド名にフォールバック         |
-| `tag.multipart()`       | マルチパートフィールドのワイヤーキー   | フィールド名にフォールバック         |
-| `tag.query(fieldName)`  | クエリパラメーターのワイヤーキー       | **明示的に名前を指定する必要がある** |
-| `tag.uri(fieldName)`    | URI パスパラメーターのワイヤーキー     | **明示的に名前を指定する必要がある** |
-| `tag.header(fieldName)` | HTTP ヘッダーのワイヤーキー            | **明示的に名前を指定する必要がある** |
-
-### 使用例
+`.alias(name)` は唯一の組み込みフィールド wire-name メカニズムです。JSON、query、headers、path、urlencoded、FormData のエンコード/デコードで使う外部 key だけを変更します。TypeScript のプロパティ名、出力型、request section、body codec、または `build(ctx, input)` 内で明示的に書いた object key は変更しません。alias がないフィールドは object field key を wire key として使います。
 
 ```typescript
-import { struct, tag } from '@defjs/core'
+import { struct } from '@defjs/core'
 
 const UserBody = struct.object({
-  id: struct.number().tag(tag.json('user_id')),
-  name: struct.string().tag(tag.json('user_name')),
-  email: struct.string().tag(tag.header('X-User-Email')),
+  id: struct.number().alias('user_id'),
+  name: struct.string().alias('user_name'),
 })
 ```
 
-### カスタム Config タグ
+The same alias is used by JSON, query, path params, headers, urlencoded bodies, and multipart bodies. If the same logical value needs different names in different targets, split the struct or write explicit keys in `build(ctx, input)`.
 
-`tag.defineConfig` はサードパーティライブラリーに独自の名前空間と設定キーの定義を許可します：
+## Field Introspection
 
-```typescript
-import { tag } from '@defjs/core'
-
-const GormTag = tag.createTagNamespace('gorm')
-const gorm = tag.defineConfig(GormTag)
-
-const Model = struct.object({
-  id: struct.number().tag(gorm('column', 'id'), gorm('primaryKey')),
-})
-```
-
-ルール：
-
-- 同じ名前空間内では、後の `value` が先の `value` を上書きします。
-- 同じ名前空間かつ同じ `config` キーでは、後の値が先の値を上書きします。
-- 設定値は `string | number | boolean` のみ可能です。
-
-### タグの読み取り
-
-```typescript
-import { getFieldTag, getFieldTags, tag } from '@defjs/core'
-
-const field = UserBody.shape.name
-const jsonTag = getFieldTag(field, tag.kind.json, 'name')
-// { namespace: JsonTag, value: 'user_name', config: Map() }
-```
-
-## フィールドイントロスペクション
-
-`getStructFields` はオブジェクトスキーマを、フィールドキー、サブスキーマ、および実体化されたタグを含む読み取り可能なフィールドリストに展開します。
+`getStructFields` expands an object struct into a readable field list containing field key, alias, and sub-struct.
 
 ```typescript
 import { getStructFields } from '@defjs/core'
 
 const fields = getStructFields(UserBody)
 // [
-//   { key: 'id', struct: NumberSchema, tags: Map<symbol, FieldTag> },
-//   { key: 'name', struct: StringSchema, tags: Map<symbol, FieldTag> },
+//   { key: 'id', alias: 'user_id', struct: NumberStruct },
+//   { key: 'name', alias: 'user_name', struct: StringStruct },
 // ]
 ```
 
-`isObjectStruct` と組み合わせて、イントロスペクション前の安全な型チェックを行います：
+Combined with `isObjectStruct` for safe type checking before introspection:
 
 ```typescript
 import { isObjectStruct, getStructFields } from '@defjs/core'
 
-if (isObjectStruct(schema)) {
-  for (const field of getStructFields(schema)) {
-    console.log(field.key, field.tags.get(tag.kind.json)?.value)
+if (isObjectStruct(struct)) {
+  for (const field of getStructFields(struct)) {
+    console.log(field.key, field.alias)
   }
 }
 ```

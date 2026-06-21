@@ -6,12 +6,12 @@ import type { ClientOption } from './option'
 import type { HttpAwaitResult, HttpCommand, HttpExecuteOptions, RequestErrorData, RequestSuccessData } from '../http/http'
 import { executeHttpCommand } from '../http/http'
 import type { RequestOutputShape } from '../http/request'
-import type { EventSchemas, EventStreamCommand, EventStreamData, EventStreamExecuteOptions, StreamAwaitResult } from '../sse/sse'
+import type { EventStructs, EventStreamCommand, EventStreamData, EventStreamExecuteOptions, StreamAwaitResult } from '../sse/sse'
 import { executeEventStreamCommand } from '../sse/sse'
 import type { AnyStruct } from '../struct'
 import type {
   SocketAwaitResult,
-  SocketSchemas,
+  SocketStructs,
   WebSocketCommand,
   WebSocketExecuteOptions,
   WebSocketIncomingData,
@@ -29,12 +29,12 @@ export type Client = {
     options?: HttpExecuteOptions,
   ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>>
 
-  execute<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+  execute<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
     command: EventStreamCommand<TInput, TEvents>,
     options?: EventStreamExecuteOptions,
   ): Promise<StreamAwaitResult<EventStreamData<TEvents>>>
 
-  execute<TInput extends AnyStruct | undefined, TIncoming extends SocketSchemas, TOutgoing extends SocketSchemas | undefined>(
+  execute<TInput extends AnyStruct | undefined, TIncoming extends SocketStructs, TOutgoing extends SocketStructs | undefined>(
     command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
     options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
@@ -80,11 +80,11 @@ export function createClient(...options: ClientOption[]): Client {
     command: HttpCommand<TInput, TOutput>,
     options?: HttpExecuteOptions,
   ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>>
-  function execute<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+  function execute<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
     command: EventStreamCommand<TInput, TEvents>,
     options?: EventStreamExecuteOptions,
   ): Promise<StreamAwaitResult<EventStreamData<TEvents>>>
-  function execute<TInput extends AnyStruct | undefined, TIncoming extends SocketSchemas, TOutgoing extends SocketSchemas | undefined>(
+  function execute<TInput extends AnyStruct | undefined, TIncoming extends SocketStructs, TOutgoing extends SocketStructs | undefined>(
     command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
     options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>

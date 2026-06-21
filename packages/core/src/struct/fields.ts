@@ -1,0 +1,50 @@
+import { resolveObjectShape } from './shape'
+import { DEFINITION } from './symbols'
+import type { ObjectDefinition, RuntimeStruct } from './types'
+
+export interface ResolvedStructField {
+  readonly alias: string | undefined
+  readonly key: string
+  readonly struct: RuntimeStruct
+  readonly wireKey: string
+}
+
+export function getWireKey(fieldKey: string, alias: string | undefined): string {
+  return alias ?? fieldKey
+}
+
+export function resolveStructFields(struct: RuntimeStruct, definition: ObjectDefinition): readonly ResolvedStructField[] {
+  const cached = definition.cache.fields
+  if (cached) {
+    return cached
+  }
+
+  const shape = definition.cache.resolvedShape ?? resolveObjectShape(struct, definition)
+  const fields = Object.freeze(
+    Object.entries(shape).map(([key, field]) => {
+      const runtime = field as unknown as RuntimeStruct
+      const alias = runtime[DEFINITION].alias
+      return Object.freeze({
+        alias,
+        key,
+        struct: runtime,
+        wireKey: getWireKey(key, alias),
+      })
+    }),
+  )
+
+  assertUniqueWireKeys(fields)
+  definition.cache.fields = fields
+  return fields
+}
+
+function assertUniqueWireKeys(fields: readonly ResolvedStructField[]): void {
+  const seen = new Map<string, string>()
+  for (const field of fields) {
+    if (seen.has(field.wireKey)) {
+      const previous = seen.get(field.wireKey) as string
+      throw new TypeError(`duplicate wire key "${field.wireKey}" for object fields "${previous}" and "${field.key}"`)
+    }
+    seen.set(field.wireKey, field.key)
+  }
+}

@@ -1,6 +1,6 @@
 ---
 title: Struct
-description: Declarative schema definition, type inference, error mapping, and the field tag system.
+description: Declarative struct definition, type inference, error mapping, and the field alias support.
 ---
 
 # Struct
@@ -9,12 +9,12 @@ description: Declarative schema definition, type inference, error mapping, and t
 
 ## Types primitifs
 
-Tous les schémas sont créés via l'espace de noms `struct`, supportant les appels chaînés `.optional()`, `.null()`, `.nullish()`, et `.tag(...)`.
+Tous les schémas sont créés via l'espace de noms `struct`, supportant les appels chaînés `.optional()`, `.null()`, `.nullish()`, et `.alias(name)`.
 
 ### Scalaires
 
 ```typescript
-import { struct } from '@defjs/core'
+import { struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -23,7 +23,7 @@ const User = struct.object({
   role: struct.literal('admin'),
 })
 
-type User = struct.Infer<typeof User>
+type User = Infer<typeof User>
 // { id: number; name: string; active: boolean; role: 'admin' }
 ```
 
@@ -95,11 +95,11 @@ const CreateUser = struct.request({
   path: struct.object({ orgId: struct.number() }),
   query: struct.object({ dryRun: struct.boolean().optional() }),
   headers: struct.object({
-    'X-Api-Key': struct.string().tag(tag.header('X-Api-Key')),
+    'X-Api-Key': struct.string().alias('X-Api-Key'),
   }),
   body: struct.json(
     struct.object({
-      name: struct.string().tag(tag.json('user_name')),
+      name: struct.string().alias('user_name'),
     }),
   ),
 })
@@ -109,7 +109,7 @@ Les wrappers de corps déterminent l'encodage transport :
 
 | Wrapper                    | Encodage            |
 | -------------------------- | ------------------- |
-| `struct.json(schema)`      | `JSON.stringify`    |
+| `struct.json(struct)`      | `JSON.stringify`    |
 | `struct.urlencoded(shape)` | `URLSearchParams`   |
 | `struct.formData(shape)`   | `FormData`          |
 | `struct.text()`            | Texte brut          |
@@ -118,7 +118,7 @@ Les wrappers de corps déterminent l'encodage transport :
 
 ## Inférence de type `Infer<T>`
 
-`struct.Infer<T>` extrait le type de sortie d'un schéma. C'est le seul helper de niveau type que tu dois maîtriser.
+`Infer<T>` extrait le type de sortie d'un schéma. C'est le seul helper de niveau type que tu dois maîtriser.
 
 ```typescript
 const Person = struct.object({
@@ -126,21 +126,21 @@ const Person = struct.object({
   age: struct.number().optional(),
 })
 
-type Person = struct.Infer<typeof Person>
+type Person = Infer<typeof Person>
 // { name: string; age?: number }
 ```
 
 `Infer` fonctionne aussi pour `struct.array(...)`, `struct.union(...)`, `struct.request(...)` :
 
 ```typescript
-type Tags = struct.Infer<typeof Tags> // string[]
-type Id = struct.Infer<typeof Id> // string | number
-type Req = struct.Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
+type Tags = Infer<typeof Tags> // string[]
+type Id = Infer<typeof Id> // string | number
+type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
 ```
 
 ## StructError et mapping d'erreurs
 
-Quand la validation échoue, le runtime retourne `StructError` contenant un `SchemaIssue[]` complet.
+Quand la validation échoue, le runtime retourne `StructError` contenant un `StructIssue[]` complet.
 
 ```typescript
 import { struct, StructError } from '@defjs/core'
@@ -175,73 +175,32 @@ setErrorMap((issue) => {
 })
 ```
 
-## Système de tags
+## Alias de champs
 
-Les tags sont des métadonnées attachées aux champs, lues par les codecs, les request builders ou les adaptateurs externes. Le core fournit 6 espaces de noms intégrés :
-
-| Espace de noms          | Objectif                       | Comportement sans argument            |
-| ----------------------- | ------------------------------ | ------------------------------------- |
-| `tag.json()`            | Clé de fil JSON                | Retombe sur le nom du champ           |
-| `tag.urlencoded()`      | Clé de champ URL-encodée       | Retombe sur le nom du champ           |
-| `tag.multipart()`       | Clé de champ multipart         | Retombe sur le nom du champ           |
-| `tag.query(fieldName)`  | Clé de paramètre de requête    | **Doit explicitement fournir le nom** |
-| `tag.uri(fieldName)`    | Clé de paramètre de chemin URI | **Doit explicitement fournir le nom** |
-| `tag.header(fieldName)` | Clé d'en-tête HTTP             | **Doit explicitement fournir le nom** |
-
-### Exemple d'utilisation
+`.alias(name)` est le seul mécanisme intégré de wire-name de champ. Il change la clé externe utilisée par l'encodage/décodage JSON, query, headers, path, urlencoded et FormData ; il ne change pas le nom de propriété TypeScript, le type de sortie, la section de requête, le codec de body ni les clés écrites explicitement dans `build(ctx, input)`. Les champs sans alias utilisent leur clé d'objet.
 
 ```typescript
-import { struct, tag } from '@defjs/core'
+import { struct } from '@defjs/core'
 
 const UserBody = struct.object({
-  id: struct.number().tag(tag.json('user_id')),
-  name: struct.string().tag(tag.json('user_name')),
-  email: struct.string().tag(tag.header('X-User-Email')),
+  id: struct.number().alias('user_id'),
+  name: struct.string().alias('user_name'),
 })
 ```
 
-### Tag de config personnalisé
-
-`tag.defineConfig` permet aux bibliothèques tierces de définir leur propre espace de noms et clé de config :
-
-```typescript
-import { tag } from '@defjs/core'
-
-const GormTag = tag.createTagNamespace('gorm')
-const gorm = tag.defineConfig(GormTag)
-
-const Model = struct.object({
-  id: struct.number().tag(gorm('column', 'id'), gorm('primaryKey')),
-})
-```
-
-Règles :
-
-- Dans le même espace de noms, une `value` ultérieure remplace une antérieure.
-- Dans le même espace de noms et même clé `config`, une valeur ultérieure remplace une antérieure.
-- La valeur de config ne peut être que `string | number | boolean`.
-
-### Lecture des tags
-
-```typescript
-import { getFieldTag, getFieldTags, tag } from '@defjs/core'
-
-const field = UserBody.shape.name
-const jsonTag = getFieldTag(field, tag.kind.json, 'name')
-// { namespace: JsonTag, value: 'user_name', config: Map() }
-```
+Le même alias est utilisé par JSON, query, path params, headers, les corps urlencoded et les corps multipart. Si la même valeur logique nécessite des noms différents selon les targets, sépare le schéma ou écris des clés explicites dans `build(ctx, input)`. Les namespaces de tag personnalisés et la metadata de tags ne font pas partie de l'API publique.
 
 ## Introspection des champs
 
-`getStructFields` développe un schéma d'objet en une liste de champs lisible, contenant la clé de champ, le sous-schéma et les tags matérialisés.
+`getStructFields` développe un schéma d'objet en une liste de champs lisible contenant la clé du champ, l'alias et le sous-schéma.
 
 ```typescript
 import { getStructFields } from '@defjs/core'
 
 const fields = getStructFields(UserBody)
 // [
-//   { key: 'id', struct: NumberSchema, tags: Map<symbol, FieldTag> },
-//   { key: 'name', struct: StringSchema, tags: Map<symbol, FieldTag> },
+//   { key: 'id', alias: 'user_id', struct: NumberStruct },
+//   { key: 'name', alias: 'user_name', struct: StringStruct },
 // ]
 ```
 
@@ -250,9 +209,9 @@ Combiné avec `isObjectStruct` pour une vérification de type sûre avant intros
 ```typescript
 import { isObjectStruct, getStructFields } from '@defjs/core'
 
-if (isObjectStruct(schema)) {
-  for (const field of getStructFields(schema)) {
-    console.log(field.key, field.tags.get(tag.kind.json)?.value)
+if (isObjectStruct(struct)) {
+  for (const field of getStructFields(struct)) {
+    console.log(field.key, field.alias)
   }
 }
 ```

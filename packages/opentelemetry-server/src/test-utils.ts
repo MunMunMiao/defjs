@@ -1,5 +1,6 @@
 import type { FnReturn, OmitKeys, SelectKeys } from './utility_types'
 import type { EventStreamHandle, HttpRequest, HttpResponse, WebSocketSessionLike } from '@defjs/core'
+import { makeResponse } from '@defjs/core'
 import type {
   Context,
   Exception,
@@ -179,13 +180,13 @@ export function makeHttpRequest(headers?: Headers): HttpRequest {
 }
 
 export function makeHttpResponse<R = unknown>(body: R | null = null): HttpResponse<R> {
-  return {
+  return makeResponse({
+    body,
+    headers: new Headers(),
     status: 200,
     statusText: 'OK',
-    headers: new Headers(),
     url: 'https://api.example.com/test',
-    body,
-  }
+  })
 }
 
 export function makeSSERequest(headers?: Headers): HttpRequest {

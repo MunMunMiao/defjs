@@ -128,7 +128,7 @@ const client = createClient({
   sse: {
     onInvalidEvent: async (context) => {
       console.warn('Invalid event:', context.reason, context.message)
-      // context.reason: 'missing-schema' | 'validation-failed'
+      // context.reason: 'missing-struct' | 'validation-failed'
       // context.message: { id, event, data, retry? }
       // context.cause: 驗證失敗時的原始錯誤
     },

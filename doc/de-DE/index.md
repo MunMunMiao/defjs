@@ -16,7 +16,7 @@ hero:
 features:
   - icon: 🔒
     title: Type Safety
-    details: Definiere Anfrageschemata mit struct. Erhalte End-to-End-Typinferenz für Inputs, Outputs und Fehlerzweige. Die Laufzeitvalidierung fängt Inkonsistenzen ab, bevor sie die Produktion erreichen.
+    details: Definiere Anfragestructta mit struct. Erhalte End-to-End-Typinferenz für Inputs, Outputs und Fehlerzweige. Die Laufzeitvalidierung fängt Inkonsistenzen ab, bevor sie die Produktion erreichen.
   - icon: 🌐
     title: Multi-Transport
     details: Ein einheitlicher API-Stil für HTTP-Anfragen, Server-Sent Events und WebSocket-Verbindungen. Wechsle den Transport, ohne deine Anwendungslogik neu zu schreiben.

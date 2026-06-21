@@ -28,7 +28,13 @@ export function fillUrl(path: string, params?: { [key: string]: RequestBuildValu
     }
   }
 
-  return path.replace(/:([^/]+)/g, (_, part) => paramMap.get(part) ?? 'undefined')
+  return path.replace(/:([^/]+)/g, (_, part: string) => {
+    const value = paramMap.get(part)
+    if (typeof value === 'undefined') {
+      throw new TypeError(`Missing path param: ${part}`)
+    }
+    return value
+  })
 }
 
 export interface SearchParamsOptions {

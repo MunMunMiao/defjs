@@ -1,6 +1,6 @@
 # `@defjs/core` 使用手册
 
-> 当前状态：当前结构解析合同以 `src/struct/README.md` 和 `src/struct/public_api.ts` 为准。`struct` 只暴露结构声明、wire key 标记和 tag 标记；解析与序列化由 codec、endpoint runtime 和 request build 内部使用 struct 元数据完成。
+> 当前状态：当前结构解析合同以 `src/struct/README.md` 和 `src/struct/public_api.ts` 为准。`struct` 只暴露结构声明和 `.alias(name)` 字段 wire-name 机制；解析与序列化由 codec、endpoint runtime 和 request build 内部使用 struct 元数据完成。
 
 这份文档只保留当前最常用的 API 和使用方式。
 
@@ -9,15 +9,9 @@
 ### 创建 client
 
 ```ts
-import { createClient, createGlobalClient } from '@defjs/core'
+import { createClient, withEndpoint } from '@defjs/core'
 
-const client = createClient({
-  endpoint: 'https://api.example.com/v1',
-})
-
-createGlobalClient({
-  endpoint: 'https://api.example.com/v1',
-})
+const client = createClient(withEndpoint('https://api.example.com/v1'))
 ```
 
 `endpoint` 是基础地址。内部会先用 `new URL(endpoint)` 解析，然后再拼接 endpoint 定义里的 `path`。
@@ -37,31 +31,21 @@ https://api.example.com/v1/user/info
 
 ## Client 规则
 
-`client` 分两种：
+`client` 是显式创建和传递的执行器：
 
-1. 全局 client
-2. 独立 client
+```ts
+const [error, result] = await client.execute(command)
+```
 
-推荐方式：
+`createGlobalClient` / `getGlobalClient` / `setGlobalClient` / `resetGlobalClient` 已在 0.4 移除。需要多个外部 API 时，分别创建多个 `Client` 实例。
 
-1. 前端大多数场景直接创建一个全局 client
-2. 如果要请求多个外部 API，再在实际调用时传独立 client
+## Struct
 
-请求时查找 client 的顺序固定为：
-
-1. 第二段配置里的 `client`
-2. 全局 client
-3. 两者都没有时直接报错
-
-也就是说，当前不会在定义 endpoint 时绑定 client。
-
-## Schema
-
-endpoint 定义层只接受 `@defjs/core` 自带 `struct` schema，不接收第三方 schema adapter。
+endpoint 定义层只接受 `@defjs/core` 自带 `struct` struct，不接收第三方 struct adapter。
 
 有两条硬规则：
 
-1. 请求侧不再提供 `schema.json / schema.formData / schema.urlSearchParams`
+1. 请求侧不再提供 `struct.json / struct.formData / struct.urlSearchParams`
 2. `input` 或 `output` 省略时，表示这一层完全忽略解析
 
 这意味着：
@@ -75,40 +59,40 @@ endpoint 定义层只接受 `@defjs/core` 自带 `struct` schema，不接收第�
 
 #### 类型对偶：值类型 vs 指针
 
-Go 区分**值类型**和**指针类型** —— 前者缺字段填零值，后者缺字段为 `nil`、可接受显式 `null`。struct 通过 **`.nullish()`**（同时开 `optional + nullable`）精确对偶 Go 指针；`.optional()` 是更严的子集（只允许缺字段，拒绝显式 `null`）。
+Go 区分**值类型**和**指针类型** —— 前者缺字段或收到显式 `null` 时填零值，后者缺字段为 `nil`、可接受显式 `null`。struct 通过 **`.nullish()`**（同时开 `optional + nullable`）精确对偶 Go 指针；`.optional()` 表示字段可省略，缺失或显式 `null` 在 object 字段位置都会省略输出。
 
-| Go 字段                      | struct 写法                      | 合法输入                                                       | 非法输入               | 缺失输入              | `null` 输入 | wire 序列化                |
-| ---------------------------- | -------------------------------- | -------------------------------------------------------------- | ---------------------- | --------------------- | ----------- | -------------------------- |
-| `string`                     | `struct.string()`                | `"x"` → `"x"`                                                  | `123` → throw          | `""`                  | throw       | `"x"` → `"x"`              |
-| `*string`                    | `struct.string().nullish()`      | `"x"` → `"x"`                                                  | `123` → throw          | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
-| `int`                        | `struct.number()`                | `42` → `42`                                                    | `"x"` → throw          | `0`                   | throw       | `42` → `42`                |
-| `*int`                       | `struct.number().nullish()`      | `42` → `42`                                                    | `"x"` → throw          | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
-| `int64`（`json:",string"`）  | `struct.bigint()`                | `42n` / `"42"` → `42n`                                         | `42`(number) → throw § | `0n`                  | throw       | `42n` → `"42"` §           |
-| `*int64`（`json:",string"`） | `struct.bigint().nullish()`      | `42n` / `"42"` → `42n`                                         | `42`(number) → throw § | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
-| `bool`                       | `struct.boolean()`               | `true` → `true`                                                | `1` → throw            | `false`               | throw       | `true` → `true`            |
-| `*bool`                      | `struct.boolean().nullish()`     | `true` → `true`                                                | `1` → throw            | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
-| `time.Time`                  | `struct.date()`                  | `Date` / `"2026-05-12T10:00:00Z"` / `1747036800000` → `Date` † | `"not-a-date"` → throw | `new Date(0)` (epoch) | throw       | `Date` → ISO 字符串 †      |
-| `*time.Time`                 | `struct.date().nullish()`        | `Date` / ISO 字符串 / 数字 → `Date` †                          | `"not-a-date"` → throw | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
-| `struct{...}`                | `struct.object({...})`           | `{...}` → 解析后值                                             | `"x"` → throw          | 全字段递归零值        | throw       | `{...}` → 按 wire key 输出 |
-| `*struct{...}`               | `struct.object({...}).nullish()` | `{...}` → 解析后值                                             | `"x"` → throw          | `undefined`           | `null`      | `undefined` → ⌀ ‡          |
-| `[]T` slice                  | `struct.array(T)`                | `[a, b]` → 递归解析                                            | `"x"` → throw          | `[]`                  | throw ※     | `[...]` → 递归序列化       |
-| `map[K]V`                    | `struct.record(V)`               | `{k: v}` → 递归解析                                            | `"x"` → throw          | `{}`                  | throw ※     | `{...}` → 递归序列化       |
+| Go 字段                      | struct 写法                      | 合法输入                                                       | 非法输入               | 缺失输入              | `null` 输入    | wire 序列化                |
+| ---------------------------- | -------------------------------- | -------------------------------------------------------------- | ---------------------- | --------------------- | -------------- | -------------------------- |
+| `string`                     | `struct.string()`                | `"x"` → `"x"`                                                  | `123` → throw          | `""`                  | `""`           | `"x"` → `"x"`              |
+| `*string`                    | `struct.string().nullish()`      | `"x"` → `"x"`                                                  | `123` → throw          | `undefined`           | `null`         | `undefined` → ⌀ ‡          |
+| `int`                        | `struct.number()`                | `42` → `42`                                                    | `"x"` → throw          | `0`                   | `0`            | `42` → `42`                |
+| `*int`                       | `struct.number().nullish()`      | `42` → `42`                                                    | `"x"` → throw          | `undefined`           | `null`         | `undefined` → ⌀ ‡          |
+| `int64`（`json:",string"`）  | `struct.bigint()`                | `42n` / `"42"` → `42n`                                         | `42`(number) → throw § | `0n`                  | `0n`           | `42n` → `"42"` §           |
+| `*int64`（`json:",string"`） | `struct.bigint().nullish()`      | `42n` / `"42"` → `42n`                                         | `42`(number) → throw § | `undefined`           | `null`         | `undefined` → ⌀ ‡          |
+| `bool`                       | `struct.boolean()`               | `true` → `true`                                                | `1` → throw            | `false`               | `false`        | `true` → `true`            |
+| `*bool`                      | `struct.boolean().nullish()`     | `true` → `true`                                                | `1` → throw            | `undefined`           | `null`         | `undefined` → ⌀ ‡          |
+| `time.Time`                  | `struct.date()`                  | `Date` / `"2026-05-12T10:00:00Z"` / `1747036800000` → `Date` † | `"not-a-date"` → throw | `new Date(0)` (epoch) | `new Date(0)`  | `Date` → ISO 字符串 †      |
+| `*time.Time`                 | `struct.date().nullish()`        | `Date` / ISO 字符串 / 数字 → `Date` †                          | `"not-a-date"` → throw | `undefined`           | `null`         | `undefined` → ⌀ ‡          |
+| `struct{...}`                | `struct.object({...})`           | `{...}` → 解析后值                                             | `"x"` → throw          | 全字段递归零值        | 全字段递归零值 | `{...}` → 按 wire key 输出 |
+| `*struct{...}`               | `struct.object({...}).nullish()` | `{...}` → 解析后值                                             | `"x"` → throw          | `undefined`           | `null`         | `undefined` → ⌀ ‡          |
+| `[]T` slice                  | `struct.array(T)`                | `[a, b]` → 递归解析                                            | `"x"` → throw          | `[]`                  | `[]`           | `[...]` → 递归序列化       |
+| `map[K]V`                    | `struct.record(V)`               | `{k: v}` → 递归解析                                            | `"x"` → throw          | `{}`                  | `{}`           | `{...}` → 递归序列化       |
 
 - `†` `struct.date()` 内置 wire 桥接：边界解析接受任何 `new Date()` 可解析的输入（`Date` 实例 / ISO 字符串 / epoch 数字 / 任意），Invalid Date 抛 `invalid_type`；wire 序列化输出 ISO 字符串。等价于 Go `time.Time` 的 `MarshalJSON` / `UnmarshalJSON`。**注意 footgun**：`boolean` 输入也会被 `new Date()` 接受 —— `new Date(true)` = `1970-01-01T00:00:00.001Z`（epoch + 1ms，Valid Date），**不抛错**。这是"直接交给 `new Date`"的语义边界。
 - `‡` `⌀` 表示在 object 字段位置序列化时：value 中不含该 key → **整字段跳过**；显式带 `key: undefined` → 保留 `undefined`，后续 `JSON.stringify` 才丢字段 —— 整体效果与 Go `omitempty` 等价。
-- `※` Go slice/map 底层 pointer-like，JSON `null` → nil。struct 中 `array(T)` / `record(V)` 默认拒绝 `null`，要表达此语义请显式 `.nullish()` 或 `.null()` —— 与 Go 的细微偏差。
-- `§` `struct.bigint()` 接受 `bigint` 与字符串（对齐 Go `json:",string"` tag 用法），**拒绝 `number`**（避免 IEEE 754 精度丢失，超过 `Number.MAX_SAFE_INTEGER` 直接 throw）；wire 序列化输出字符串。
+- `※` `array(T)` / `record(V)` 是值类型 struct，缺失或显式 `null` 都走零值；要保留 `null` 本身请显式 `.nullish()` 或 `.null()`。
+- `§` `struct.bigint()` 的 runtime 输入是 `bigint`，wire 输入是字符串（对齐 Go `json:",string"` tag 用法），wire 输出也始终是字符串。它**拒绝 `number`**，避免 IEEE 754 精度丢失；空字符串或空白字符串沿用 JavaScript `BigInt()` 行为得到 `0n`。
 
 **关键**：用值类型还是指针，**是用户的语义决策** —— 通过 `struct.x()` 与 `struct.x().nullish()` / `.optional()` 表达。struct 不替用户决定。
 
 #### 修饰行为对偶
 
-| Go 行为                        | `@defjs/core/struct`                                                          |
-| ------------------------------ | ----------------------------------------------------------------------------- |
-| `json:"field_name"` tag 重命名 | `.tag(tag.json('field_name'))`                                                |
-| `omitempty` Output 字段可省    | `.optional()`                                                                 |
-| `json.Marshal` 反向序列化      | 由 endpoint runtime / request build 内部执行，struct 实例不暴露反向序列化方法 |
-| 未知字段                       | 始终忽略，不提供额外严格模式                                                  |
+| Go 行为                            | `@defjs/core/struct`                                                          |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
+| `json:"field_name"` 风格字段重命名 | `.alias('field_name')`                                                        |
+| `omitempty` Output 字段可省        | `.optional()`                                                                 |
+| `json.Marshal` 反向序列化          | 由 endpoint runtime / request build 内部执行，struct 实例不暴露反向序列化方法 |
+| 未知字段                           | 始终忽略，不提供额外严格模式                                                  |
 
 零值兜底是**设计意图**而非 bug：缺字段时拿到 Go 风格零值；struct 不提供额外严格校验入口。
 
@@ -192,7 +176,7 @@ const Tree = struct.object({
 .optional()            // pointer-like，Output 可省
 .null()                // 接受 null
 .nullish()             // optional + nullable
-.tag(tag.json('name')) // Go-style field tag / wire key；core request placement 使用 struct.request sections
+.alias('name') // 字段 wire key alias；core request placement 使用 struct.request sections
 ```
 
 **边界解析**
@@ -216,7 +200,7 @@ setErrorMap(map) // 全局拦截 issue.message，i18n 友好
 
 ### 设计目标
 
-1. `input` 同时作为调用方输入解析合同和 request build 元数据源，避免 schema、tag、build 三套规则漂移。
+1. `input` 同时作为调用方输入解析合同和 request build 元数据源，避免 struct、tag、build 三套规则漂移。
 2. 简单 endpoint 不需要写 `build`：`struct.request(...)` 直接描述 `path/query/headers/body`，runtime 自动 materialize request。
 3. 复杂 endpoint 必须显式写 `build(ctx, input)`：只编排当前 endpoint input tree 的字段引用，不接收 raw runtime value。
 4. `build` 只负责 request shape 编排；鉴权、trace、事务、request-scoped metadata 通过 `context` 和 interceptor 处理。
@@ -224,7 +208,7 @@ setErrorMap(map) // 全局拦截 issue.message，i18n 友好
 
 ### 非目标
 
-1. 不做 tag-based placement：字段属于 `path/query/headers/body` 由 `struct.request(...)` section 决定，`tag.*(...)` 只决定 wire key。
+1. 不做 field-level placement：字段属于 `path/query/headers/body` 由 `struct.request(...)` section 决定，`.alias(name)` 只决定 wire key。
 2. 不做 `endpoint.build ?? autoBuild` 的隐式混合；写了 `build` 就完整接管 request plan。
 3. 不暴露泛 `setBody`、raw `BodyInit`、actual input resolver、`setXXX` 或 context 读写入口。
 4. 不把 WebSocket 握手 headers、自定义 transport factory、OpenAPI 导出纳入 build v1。
@@ -277,7 +261,7 @@ request-time:
 
 ### Request-shaped input
 
-`struct.request(...)` 替代旧的字段 tag placement 心智。placement 不再由字段上的 `tag.query/header/json` 决定，而由 request 分区决定：
+`struct.request(...)` 替代旧的字段 placement 心智。placement 不由字段 alias 决定，而由 request 分区决定：
 
 ```ts
 const UploadInput = struct.request({
@@ -288,7 +272,7 @@ const UploadInput = struct.request({
     includeProfile: struct.boolean().optional(),
   }),
   headers: struct.object({
-    traceId: struct.string().tag(tag.header('x-trace-id')),
+    traceId: struct.string().alias('x-trace-id'),
   }),
   body: struct.formData({
     uid: struct.number(),
@@ -323,16 +307,16 @@ body: FormData(uid=7, files=file)
 规则：
 
 1. `path`、`query`、`headers` 必须是 flat object；`path` 字段必须可编码为 required scalar。
-2. `body` schema 决定 body codec：`struct.json(...)`、`struct.urlencoded(...)`、`struct.formData(...)`、`struct.text()`、`struct.blob()`、`struct.arrayBuffer()`。
+2. `body` struct 决定 body codec：`struct.json(...)`、`struct.urlencoded(...)`、`struct.formData(...)`、`struct.text()`、`struct.blob()`、`struct.arrayBuffer()`。
 3. `struct.json(...)` 支持 deep object / array；`struct.urlencoded(...)` 和 `struct.formData(...)` 只支持 flat field object。
 4. headers 先写入，body 阶段再裁决最终 `Content-Type`；如果 body 类型需要自己的 `Content-Type`，会覆盖用户已写入的 header。
-5. 字段 wire key 使用 Go-style `tag.*(...)`，例如 `.tag(tag.header('x-trace-id'))`；wire key 只改名，不决定字段属于哪个 request section。
+5. 字段 wire key 使用 `.alias(name)`，例如 `.alias('x-trace-id')`；wire key 只改名，不决定字段属于哪个 request section。
 6. 省略某个 section 表示该 section 不参与请求构建。
 7. 写了 `build(ctx, input)` 后，request-shaped 默认构建不再参与，用户完整接管 request plan。
 
 ### Input bound view
 
-字段 struct 只负责声明 schema，不能单独传给 `ctx.bindXXX(...)`。所有 binding source 必须从 `build(ctx, input)` 的第二参 `input` 取出：
+字段 struct 只负责声明 struct，不能单独传给 `ctx.bindXXX(...)`。所有 binding source 必须从 `build(ctx, input)` 的第二参 `input` 取出：
 
 ```ts
 const Input = struct.request({
@@ -340,7 +324,7 @@ const Input = struct.request({
     id: struct.number(),
   }),
   headers: struct.object({
-    token: struct.string().optional().tag(tag.header('x-token')),
+    token: struct.string().optional().alias('x-token'),
   }),
 })
 
@@ -468,7 +452,7 @@ build(ctx, input) {
 ### Binding 边界
 
 1. binding metadata 由 `struct` 包根据 endpoint input struct 创建 endpoint-local bound input；path 不能写回裸字段 struct。
-2. binding metadata 使用 endpoint-local registry / private symbol / WeakMap，不能占用用户字段名 `path`、`schema`、`fieldKey`。
+2. binding metadata 使用 endpoint-local registry / private symbol / WeakMap，不能占用用户字段名 `path`、`struct`、`fieldKey`。
 3. ctx 必须校验 bound source 属于当前 endpoint input owner，不能接受伪造对象、闭包里的字段 struct 或其他 endpoint 的 bound view。
 4. root input object / nested object bound view 可以作为 direct source，但必须按 helper 支持结构校验。
 5. path/query/header 是 flat output；source 可以来自 deep bound source，也可以来自平铺 object source。
@@ -644,9 +628,9 @@ const downloadAvatar = defineRequest({
 
 ```ts
 output: {
-  200: userSchema,
-  201: userSchema,
-  404: errorSchema,
+  200: userStruct,
+  201: userStruct,
+  404: errorStruct,
 }
 ```
 
@@ -654,11 +638,11 @@ output: {
 output: [
   {
     status: [200, 201],
-    body: userSchema,
+    body: userStruct,
   },
   {
     status: 404,
-    body: errorSchema,
+    body: errorStruct,
   },
 ]
 ```
@@ -677,7 +661,7 @@ const watchUserInfo = defineEventStream({
       id: struct.number(),
     }),
     headers: struct.object({
-      token: struct.string().tag(tag.header('x-token')),
+      token: struct.string().alias('x-token'),
     }),
   }),
   events: {

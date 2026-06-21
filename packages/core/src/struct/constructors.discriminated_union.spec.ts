@@ -82,7 +82,7 @@ describe('constructors.ts discriminatedUnion', () => {
 
   test('rejects discriminator field that is not literal', () => {
     expect(() => struct.discriminatedUnion('type', [struct.object({ type: struct.string() }) as never])).toThrowError(
-      'must be a literal schema',
+      'must be a literal struct',
     )
   })
 

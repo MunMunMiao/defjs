@@ -3,15 +3,15 @@ import { createTransportError, ERR_ABORTED, ERR_TIMEOUT } from '../error'
 import type { AnyStruct } from '../struct'
 import { decodeJson, encodeJson } from '../struct/codec/json'
 import { parseStructValue } from '../struct/introspection'
-import type { ManualSocketCloseReason, SocketSchemas, WebSocketCloseInfo, WebSocketIncomingData, WebSocketOutgoingData } from './web_socket'
+import type { ManualSocketCloseReason, SocketStructs, WebSocketCloseInfo, WebSocketIncomingData, WebSocketOutgoingData } from './web_socket'
 
 // ---- outgoing serialization ----
 
-export function serializeOutgoingWebSocketMessage<TOutgoing extends SocketSchemas | undefined>(
-  schemas: TOutgoing,
+export function serializeOutgoingWebSocketMessage<TOutgoing extends SocketStructs | undefined>(
+  structs: TOutgoing,
   message: WebSocketOutgoingData<TOutgoing>,
 ): string {
-  if (!schemas) {
+  if (!structs) {
     throw new Error('No outgoing WebSocket messages are declared for this endpoint')
   }
 
@@ -19,24 +19,24 @@ export function serializeOutgoingWebSocketMessage<TOutgoing extends SocketSchema
     throw new Error('Outgoing WebSocket messages must include a string type')
   }
 
-  const schema = schemas[message.type]
-  if (!schema) {
+  const struct = structs[message.type]
+  if (!struct) {
     throw new Error(`Undeclared outgoing message type: ${message.type}`)
   }
 
   const payload = 'data' in message ? message.data : omitSocketType(message)
 
-  return JSON.stringify(normalizeSocketPayload(message.type, serializeStructPayload(schema, payload)))
+  return JSON.stringify(normalizeSocketPayload(message.type, serializeStructPayload(struct, payload)))
 }
 
-function serializeStructPayload(schema: AnyStruct, payload: unknown): unknown {
+function serializeStructPayload(struct: AnyStruct, payload: unknown): unknown {
   // Outgoing validation should stay synchronous for send() ergonomics.
-  return encodeJson(schema, parseStructValue(schema, payload))
+  return encodeJson(struct, parseStructValue(struct, payload))
 }
 
 // ---- incoming transformation ----
 
-export async function transformWebSocketMessage<TIncoming extends SocketSchemas>(
+export async function transformWebSocketMessage<TIncoming extends SocketStructs>(
   incoming: TIncoming,
   raw: unknown,
 ): Promise<WebSocketIncomingData<TIncoming> | undefined> {
@@ -46,14 +46,14 @@ export async function transformWebSocketMessage<TIncoming extends SocketSchemas>
   }
 
   const messageType = decoded['type']
-  const schema = incoming[messageType] ?? incoming['default']
-  if (!schema) {
+  const struct = incoming[messageType] ?? incoming['default']
+  if (!struct) {
     return undefined
   }
 
   const payload = 'data' in decoded ? decoded['data'] : omitSocketType(decoded)
 
-  const value = decodeJson(schema, payload)
+  const value = decodeJson(struct, payload)
 
   return normalizeSocketPayload(messageType, value) as WebSocketIncomingData<TIncoming>
 }

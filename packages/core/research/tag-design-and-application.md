@@ -19,7 +19,7 @@ type Req struct {
 
 在 TypeScript 里，推荐模型是：
 
-- package / public API 命名从 `schema` 收口为 `struct`。
+- package / public API 命名从 `struct` 收口为 `struct`。
 - 所有内置 tag helper 都挂在 `tag` namespace 下，例如 `tag.json()`、`tag.query()`、`tag.multipart()`。
 - JSON 字段名只通过 `tag.json()` 表达。
 - tag namespace 的内部 key 用 `Symbol`，避免字符串命名冲突。
@@ -110,7 +110,7 @@ GORM adapter
 
 ## 三、`struct` 包命名
 
-`schema` 这个名字太宽，容易和 JSON Schema、Standard Schema、数据库 schema、OpenAPI schema 混在一起。当前讨论的是“类似 Go struct 的字段定义和 tag metadata”，所以 public API 建议改名为 `struct`。
+`struct` 这个名字太宽，容易和 JSON Struct、Standard Struct、数据库 struct、OpenAPI struct 混在一起。当前讨论的是“类似 Go struct 的字段定义和 tag metadata”，所以 public API 建议改名为 `struct`。
 
 推荐：
 
@@ -591,7 +591,7 @@ body <- encode selected body codec
 必须覆盖：
 
 - 所有内置 helper 都在 `tag` namespace 下。
-- `struct` 示例和导出命名不再使用 `schema`。
+- `struct` 示例和导出命名不再使用 `struct`。
 - `kind` 用 Symbol 查找，不靠裸字符串。
 - 内置和 adapter namespace 通过导出的唯一 Symbol 识别，不依赖调用方临时创建同名 symbol。
 - value tag 后写覆盖前写。

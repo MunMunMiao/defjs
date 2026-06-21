@@ -102,7 +102,7 @@ console.log(user.name)
 Voici un exemple end-to-end avec validation d'entrée, validation de sortie, gestion des erreurs et un intercepteur :
 
 ```typescript
-import { createClient, defineRequest, struct, tag, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
 
 // 1. Créer le Client
 const client = createClient(
@@ -122,7 +122,7 @@ const createPost = defineRequest({
   input: struct.object({
     title: struct.string(),
     body: struct.string(),
-    'X-Request-ID': tag(struct.string(), { kind: 'header' }),
+    'X-Request-ID': struct.string(),
   }),
   build: (input) => ({
     body: { title: input.title, body: input.body },
@@ -179,11 +179,11 @@ async function createPost() {
 | API                    | Description                               | Usage typique                                                                  |
 | ---------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | Créer un client de requête                | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | Définir un point de terminaison HTTP      | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserSchema } })` |
+| `defineRequest`        | Définir un point de terminaison HTTP      | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
 | `defineEventStream`    | Définir un point de terminaison SSE       | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | Définir un point de terminaison WebSocket | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | Constructeur de schéma                    | `struct.object({ id: struct.number() })`                                       |
-| `tag`                  | Tag de métadonnées pour les champs        | `tag(struct.string(), { kind: 'header' })`                                     |
+| `.alias(name)`         | Alias de clé wire pour les champs         | `struct.string().alias('user_name')`                                           |
 | `withEndpoint`         | Définir l'URL de base                     | `withEndpoint('https://api.example.com')`                                      |
 | `withInterceptors`     | Enregistrer des intercepteurs             | `withInterceptors([...interceptors])`                                          |
 | `withCredentials`      | Activer les credentials cross-origin      | `withCredentials(true)`                                                        |

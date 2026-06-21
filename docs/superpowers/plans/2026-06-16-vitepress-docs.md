@@ -47,7 +47,7 @@
 
 #### 3.3 HTTP 请求 (`core/http.md`)
 
-- 状态码到 schema 的 output 映射
+- 状态码到 struct 的 output 映射
 - 成功/错误数据类型推导（RequestSuccessData / RequestErrorData）
 - 取消与超时配置（abort / timeout / signal）
 - 下载/上传进度监听
@@ -55,7 +55,7 @@
 
 #### 3.4 SSE 流 (`core/sse.md`)
 
-- `defineEventStream` 的事件 schema 定义
+- `defineEventStream` 的事件 struct 定义
 - 执行结果：`[error, stream, openInfo]`
 - `EventStreamHandle` 与 `stream.closed`
 - 无效事件处理：`onInvalidEvent` 观察者行为
@@ -63,7 +63,7 @@
 
 #### 3.5 WebSocket (`core/web-socket.md`)
 
-- `defineWebSocket` 的 incoming / outgoing schema
+- `defineWebSocket` 的 incoming / outgoing struct
 - `WebSocketSession` API（send / receive / close / state / onStateChange / onRuntimeError）
 - 连接生命周期状态机
 - 心跳、重连、发送队列配置

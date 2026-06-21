@@ -1,17 +1,17 @@
 ---
 title: WebSocket
-description: Typed WebSocket endpoints with schema-driven messages, automatic reconnect, heartbeat, and send queueing.
+description: Typed WebSocket endpoints with struct-driven messages, automatic reconnect, heartbeat, and send queueing.
 ---
 
 # WebSocket
 
 `@defjs/core` provides typed WebSocket endpoints via `defineWebSocket`. Each endpoint declares:
 
-- `incoming` schemas — messages the server sends to the client.
-- `outgoing` schemas — messages the client sends to the server.
-- `input` schema + `build` handler — request parameters and query/path construction (optional).
+- `incoming` structs — messages the server sends to the client.
+- `outgoing` structs — messages the client sends to the server.
+- `input` struct + `build` handler — request parameters and query/path construction (optional).
 
-Messages are JSON-encoded and validated at runtime against the declared schemas.
+Messages are JSON-encoded and validated at runtime against the declared structs.
 
 ## Defining a WebSocket Endpoint
 
@@ -47,9 +47,9 @@ const useChatSocket = defineWebSocket({
 })
 ```
 
-### Schema Shapes
+### Struct Shapes
 
-**Incoming messages** are keyed by `type`. When a message arrives, its JSON `type` field is matched against the schema keys. If the payload is a plain object, its fields are merged with `type`:
+**Incoming messages** are keyed by `type`. When a message arrives, its JSON `type` field is matched against the struct keys. If the payload is a plain object, its fields are merged with `type`:
 
 ```typescript
 // Server sends: { "type": "message", "text": "hi", "userId": 1 }
@@ -69,7 +69,7 @@ If the payload is a scalar or array, it is wrapped under `data`:
 socket.send({ type: 'message', text: 'hello' })
 ```
 
-A special `default` key can be used in `incoming` to catch undeclared message types with a shared schema.
+A special `default` key can be used in `incoming` to catch undeclared message types with a shared struct.
 
 ## Executing and Consuming Messages
 
@@ -122,7 +122,7 @@ const unsubscribe = socket.onStateChange((state) => {
   console.log('Socket state:', state)
 })
 
-// Runtime errors (schema failures, heartbeat timeout, etc.)
+// Runtime errors (struct failures, heartbeat timeout, etc.)
 socket.onRuntimeError((error) => {
   console.error('Runtime error:', error)
 })
@@ -331,6 +331,6 @@ async function run(token: string) {
 
 ## What's Next
 
-- [SSE →](/core/sse) — Server-Sent Events with typed schemas and reconnect.
+- [SSE →](/core/sse) — Server-Sent Events with typed structs and reconnect.
 - [Client →](/core/client) — Client creation and WebSocket configuration.
 - [Commands →](/core/commands) — `defineWebSocket` input and build rules.

@@ -1,30 +1,66 @@
-import { encodeValue, matchesDefinition } from '../encode'
-import { getStructFields, isObjectStruct, parseStructValue } from '../introspection'
-import { resolveRuntimeSchema } from '../shape'
+import { encodeValue } from '../encode'
+import { matchesDefinition } from '../match'
+import { resolveStructFields } from '../fields'
+import { isObjectStruct, parseStructValue } from '../introspection'
+import { resolveRuntimeStruct } from '../shape'
 import { DEFINITION } from '../symbols'
-import type { FieldTag, TagNamespace } from '../tag'
-import type { Path, RuntimeSchema, SchemaLike } from '../types'
-import { hasOwnKey, isPlainObject } from '../utils'
+import type { AnyStructLike, DiscriminatedUnionDefinition, Path, RuntimeStruct } from '../types'
+import { hasOwnKey, isObjectIntersectionStruct, isPlainObject } from '../utils'
 
-export function encodeObjectByTag(
-  struct: SchemaLike<unknown, unknown, boolean>,
-  value: unknown,
-  namespace: TagNamespace,
-  options: { requireTag?: boolean } = {},
-): unknown {
+export function encodeObjectByAlias(struct: AnyStructLike, value: unknown, label = 'json'): unknown {
   if (!isObjectStruct(struct)) {
-    return encodeTaggedField(struct, value, namespace, options)
+    return encodeAliasedField(struct, value, label)
   }
 
-  assertPlainObject(value, `${namespace.name} encode expects object value`)
+  assertPlainObject(value, `${label} encode expects object value`)
 
-  const output: { [key: string]: unknown } = Object.create(null)
-  for (const field of getStructFields(struct)) {
-    const fieldTag = field.tags.get(namespace.kind)
-    if (options.requireTag && !fieldTag) {
+  return mapAliasedObjectFields(struct as unknown as RuntimeStruct, value, (fieldStruct, fieldValue) =>
+    encodeAliasedField(fieldStruct, fieldValue, label),
+  )
+}
+
+export function decodeObjectByAlias(struct: AnyStructLike, value: unknown, label = 'json'): unknown {
+  if (!isObjectStruct(struct)) {
+    return parseStructValue(struct, decodeAliasedField(struct, value, label, []))
+  }
+
+  return parseStructValue(struct, normalizeObjectByAlias(struct, value, label, []))
+}
+
+function normalizeObjectByAlias(struct: AnyStructLike, value: unknown, label: string, path: Path): { [key: string]: unknown } {
+  assertPlainObject(value, `${label} decode expects object value`)
+
+  const runtime = struct as unknown as RuntimeStruct
+  const definition = runtime[DEFINITION]
+  if (definition.kind !== 'object') {
+    throw new TypeError(`${label} decode expects object struct`)
+  }
+
+  const normalized: { [key: string]: unknown } = Object.create(null)
+  for (const field of resolveStructFields(runtime, definition)) {
+    if (!hasOwnKey(value, field.wireKey)) {
       continue
     }
 
+    const rawValue = value[field.wireKey]
+    normalized[field.key] = decodeAliasedField(field.struct, rawValue, label, [...path, field.key])
+  }
+
+  return normalized
+}
+
+export function mapAliasedObjectFields(
+  struct: RuntimeStruct,
+  value: { [key: string]: unknown },
+  encodeChild: (struct: RuntimeStruct, value: unknown) => unknown,
+): { [key: string]: unknown } {
+  const output: { [key: string]: unknown } = Object.create(null)
+  const definition = struct[DEFINITION]
+  if (definition.kind !== 'object') {
+    throw new TypeError('json encode expects object struct')
+  }
+
+  for (const field of resolveStructFields(struct, definition)) {
     if (!hasOwnKey(value, field.key)) {
       continue
     }
@@ -34,58 +70,10 @@ export function encodeObjectByTag(
       continue
     }
 
-    output[getWireKey(field.key, fieldTag)] = encodeTaggedField(field.struct, fieldValue, namespace, options)
+    output[field.wireKey] = encodeChild(field.struct, fieldValue)
   }
 
   return output
-}
-
-export function decodeObjectByTag(
-  struct: SchemaLike<unknown, unknown, boolean>,
-  value: unknown,
-  namespace: TagNamespace,
-  options: { requireTag?: boolean } = {},
-): unknown {
-  if (!isObjectStruct(struct)) {
-    return parseStructValue(struct, decodeTaggedField(struct, value, namespace, options, []))
-  }
-
-  return parseStructValue(struct, normalizeObjectByTag(struct, value, namespace, options, []))
-}
-
-function normalizeObjectByTag(
-  struct: SchemaLike<unknown, unknown, boolean>,
-  value: unknown,
-  namespace: TagNamespace,
-  options: { requireTag?: boolean },
-  path: Path,
-): { [key: string]: unknown } {
-  assertPlainObject(value, `${namespace.name} decode expects object value`)
-
-  const normalized: { [key: string]: unknown } = Object.create(null)
-  for (const field of getStructFields(struct)) {
-    const fieldTag = field.tags.get(namespace.kind)
-    if (options.requireTag && !fieldTag) {
-      continue
-    }
-
-    const wireKey = getWireKey(field.key, fieldTag)
-    if (!hasOwnKey(value, wireKey)) {
-      continue
-    }
-
-    const rawValue = value[wireKey]
-    normalized[field.key] = decodeTaggedField(field.struct, rawValue, namespace, options, [...path, field.key])
-  }
-
-  return normalized
-}
-
-export function getWireKey(fieldKey: string, fieldTag: FieldTag | undefined): string {
-  if (typeof fieldTag?.value === 'string') {
-    return fieldTag.value
-  }
-  return fieldKey
 }
 
 export function assertPlainObject(value: unknown, message: string): asserts value is { [key: string]: unknown } {
@@ -94,65 +82,32 @@ export function assertPlainObject(value: unknown, message: string): asserts valu
   }
 }
 
-function encodeTaggedField(
-  struct: SchemaLike<unknown, unknown, boolean>,
-  value: unknown,
-  namespace: TagNamespace,
-  options: { requireTag?: boolean },
-): unknown {
+function encodeAliasedField(struct: AnyStructLike, value: unknown, label: string): unknown {
   if (isObjectStruct(struct)) {
-    return encodeObjectByTag(struct, value, namespace, options)
+    return encodeObjectByAlias(struct, value, label)
   }
 
-  return encodeValue(struct as unknown as RuntimeSchema, value, {
-    encodeObject: (objectStruct, objectValue, encodeChild) => {
-      const output: { [key: string]: unknown } = Object.create(null)
-      for (const field of getStructFields(objectStruct)) {
-        const fieldTag = field.tags.get(namespace.kind)
-        if (options.requireTag && !fieldTag) {
-          continue
-        }
-
-        if (!hasOwnKey(objectValue, field.key)) {
-          continue
-        }
-
-        const fieldValue = objectValue[field.key]
-        if (typeof fieldValue === 'undefined') {
-          continue
-        }
-
-        output[getWireKey(field.key, fieldTag)] = encodeChild(field.struct as unknown as RuntimeSchema, fieldValue)
-      }
-      return output
-    },
+  return encodeValue(struct as unknown as RuntimeStruct, value, {
+    encodeObject: (objectStruct, objectValue, encodeChild) => mapAliasedObjectFields(objectStruct, objectValue, encodeChild),
   })
 }
 
-function decodeTaggedField(
-  struct: SchemaLike<unknown, unknown, boolean>,
-  value: unknown,
-  namespace: TagNamespace,
-  options: { requireTag?: boolean },
-  path: Path,
-): unknown {
-  const runtime = resolveRuntimeSchema(struct as unknown as RuntimeSchema)
+function decodeAliasedField(struct: AnyStructLike, value: unknown, label: string, path: Path): unknown {
+  const runtime = resolveRuntimeStruct(struct as unknown as RuntimeStruct)
   const definition = runtime[DEFINITION]
 
   switch (definition.kind) {
     case 'object':
-      return normalizeObjectByTag(runtime, value, namespace, options, path)
+      return normalizeObjectByAlias(runtime, value, label, path)
 
     case 'array':
-      return Array.isArray(value)
-        ? value.map((item, index) => decodeTaggedField(definition.item, item, namespace, options, [...path, index]))
-        : value
+      return Array.isArray(value) ? value.map((item, index) => decodeAliasedField(definition.item, item, label, [...path, index])) : value
 
     case 'tuple':
       return Array.isArray(value)
         ? value.map((item, index) => {
             const itemStruct = definition.items[index]
-            return itemStruct ? decodeTaggedField(itemStruct, item, namespace, options, [...path, index]) : item
+            return itemStruct ? decodeAliasedField(itemStruct, item, label, [...path, index]) : item
           })
         : value
 
@@ -162,50 +117,94 @@ function decodeTaggedField(
       }
       const output: { [key: string]: unknown } = Object.create(null)
       for (const [key, entry] of Object.entries(value)) {
-        output[key] = decodeTaggedField(definition.value, entry, namespace, options, [...path, key])
+        output[key] = decodeAliasedField(definition.value, entry, label, [...path, key])
       }
       return output
     }
 
     case 'or':
       for (const option of definition.options) {
-        const decoded = tryDecodeTaggedField(option, value, namespace, options, path)
+        const decoded = tryDecodeAliasedField(option, value, label, path)
         if (!decoded.ok) {
           continue
         }
-        const optionRuntime = resolveRuntimeSchema(option as unknown as RuntimeSchema)
+        const optionRuntime = resolveRuntimeStruct(option as unknown as RuntimeStruct)
         if (matchesDefinition(optionRuntime[DEFINITION], decoded.value, optionRuntime)) {
           return decoded.value
         }
       }
       return value
 
-    case 'discriminatedUnion':
-      for (const option of definition.options) {
-        const decoded = tryDecodeTaggedField(option, value, namespace, options, path)
-        if (decoded.ok && isPlainObject(decoded.value) && definition.map.get(decoded.value[definition.discriminator]) === option) {
-          return decoded.value
-        }
+    case 'discriminatedUnion': {
+      const routed = readDiscriminatorWireValue(definition, value)
+      if (routed.ok) {
+        return decodeAliasedField(routed.option, value, label, path)
+      }
+      if (routed.ambiguous) {
+        throw new TypeError('ambiguous discriminated union discriminator')
       }
       return value
+    }
 
-    case 'intersection':
-      return decodeTaggedField(definition.right, value, namespace, options, path)
+    case 'intersection': {
+      const leftDecoded = decodeAliasedField(definition.left, value, label, path)
+      const rightDecoded = decodeAliasedField(definition.right, value, label, path)
+      return isObjectIntersectionStruct(definition.left) &&
+        isObjectIntersectionStruct(definition.right) &&
+        isPlainObject(leftDecoded) &&
+        isPlainObject(rightDecoded)
+        ? { ...leftDecoded, ...rightDecoded }
+        : rightDecoded
+    }
 
     default:
       return value
   }
 }
 
-function tryDecodeTaggedField(
-  struct: SchemaLike<unknown, unknown, boolean>,
+function readDiscriminatorWireValue(
+  definition: DiscriminatedUnionDefinition,
   value: unknown,
-  namespace: TagNamespace,
-  options: { requireTag?: boolean },
+): { ok: true; option: RuntimeStruct } | { ok: false; ambiguous: boolean } {
+  if (!isPlainObject(value)) {
+    return { ambiguous: false, ok: false }
+  }
+
+  let matched: RuntimeStruct | undefined
+  for (const option of definition.options) {
+    const runtime = option as unknown as RuntimeStruct
+    const optionDefinition = runtime[DEFINITION]
+    if (optionDefinition.kind !== 'object') {
+      continue
+    }
+    const fields = resolveStructFields(runtime, optionDefinition)
+    const discriminator = fields.find((field) => field.key === definition.discriminator)
+    const wireKey = discriminator?.wireKey ?? definition.discriminator
+    if (!hasOwnKey(value, wireKey)) {
+      continue
+    }
+
+    const candidate = definition.map.get(value[wireKey]) as RuntimeStruct | undefined
+    if (!candidate) {
+      continue
+    }
+    if (matched && matched !== candidate) {
+      return { ambiguous: true, ok: false }
+    }
+    matched = candidate
+  }
+
+  return matched ? { ok: true, option: matched } : { ambiguous: false, ok: false }
+}
+
+function tryDecodeAliasedField(
+  struct: AnyStructLike,
+  value: unknown,
+  label: string,
   path: Path,
 ): { ok: true; value: unknown } | { ok: false } {
   try {
-    return { ok: true, value: decodeTaggedField(struct, value, namespace, options, path) }
+    return { ok: true, value: decodeAliasedField(struct, value, label, path) }
   } catch {
     return { ok: false }
   }

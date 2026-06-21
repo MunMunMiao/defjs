@@ -148,12 +148,16 @@ export function createMessageParser(
   onMessage?: (message: EventStreamMessage) => void | Promise<void>,
 ): (line: Uint8Array, fieldLength: number) => Promise<void> {
   let message = { id: '', event: '', data: '', retry: undefined } as EventStreamMessage
+  let hasData = false
   const decoder = new TextDecoder()
 
   return async (line: Uint8Array, fieldLength: number) => {
     if (line.length === 0) {
-      await onMessage?.(message)
+      if (hasData) {
+        await onMessage?.(message)
+      }
       message = { id: '', event: '', data: '', retry: undefined } as EventStreamMessage
+      hasData = false
       return
     }
 
@@ -167,6 +171,7 @@ export function createMessageParser(
 
     switch (field) {
       case 'data':
+        hasData = true
         message.data = message.data ? `${message.data}\n${value}` : value
         break
       case 'event':

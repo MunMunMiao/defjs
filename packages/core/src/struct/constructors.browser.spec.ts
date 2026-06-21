@@ -56,8 +56,8 @@ describe('constructors.ts browser primitives', () => {
     expect((zeroBuffer as ArrayBuffer).byteLength).toBe(0)
   })
 
-  test('upload object schema integrates web types end-to-end', async () => {
-    const uploadSchema = struct.object({
+  test('upload object struct integrates web types end-to-end', async () => {
+    const uploadStruct = struct.object({
       attachment: struct.file(),
       cover: struct.blob(),
       bytes: struct.arrayBuffer(),
@@ -71,7 +71,7 @@ describe('constructors.ts browser primitives', () => {
       caption: 'hello',
     }
 
-    const [err, parsed] = parse(uploadSchema, payload)
+    const [err, parsed] = parse(uploadStruct, payload)
     if (err) {
       throw err
     }
@@ -79,7 +79,7 @@ describe('constructors.ts browser primitives', () => {
     expect(parsed.cover.type).toBe('image/jpeg')
     expect(parsed.bytes.byteLength).toBe(16)
 
-    const [tupleErr, tupleVal] = parse(uploadSchema, payload)
+    const [tupleErr, tupleVal] = parse(uploadStruct, payload)
     if (tupleErr) {
       throw tupleErr
     }
@@ -101,13 +101,13 @@ describe('constructors.ts browser primitives', () => {
     expect(bv).toBe(2026n)
   })
 
-  test('object schema accepts payloads with Web API instances', () => {
-    const userSchema = struct.object({
+  test('object struct accepts payloads with Web API instances', () => {
+    const userStruct = struct.object({
       avatar: struct.file(),
       name: struct.string(),
     })
 
-    const [error, value] = parse(userSchema, {
+    const [error, value] = parse(userStruct, {
       avatar: new File([''], 'cover.png'),
       name: 'x',
     })

@@ -1,7 +1,7 @@
 import type { FnReturn } from '../internal/utility_types'
 import { serializeOutgoingWebSocketMessage } from './codec'
 import type { SendQueue } from './queue'
-import type { SocketSchemas, WebSocketHeartbeatConfig, WebSocketOutgoingData } from './web_socket'
+import type { SocketStructs, WebSocketHeartbeatConfig, WebSocketOutgoingData } from './web_socket'
 
 export type HeartbeatRuntime<TIncoming> = {
   isAck?: (message: TIncoming) => boolean
@@ -15,7 +15,7 @@ export type HeartbeatSession<TIncoming> = {
   lastRuntimeError: unknown
 }
 
-export function startHeartbeat<TIncoming, TOutgoing extends SocketSchemas | undefined>(
+export function startHeartbeat<TIncoming, TOutgoing extends SocketStructs | undefined>(
   socket: WebSocket,
   sessionController: HeartbeatSession<TIncoming>,
   config: WebSocketHeartbeatConfig<TIncoming, WebSocketOutgoingData<TOutgoing>> | undefined,

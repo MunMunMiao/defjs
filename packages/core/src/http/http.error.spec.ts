@@ -279,7 +279,7 @@ describe('request http runtime errors', () => {
     expect(error?.message).toContain('500')
   })
 
-  test('should use HTTP status message when response.error is undefined with output schema', async () => {
+  test('should use HTTP status message when response.error is undefined with output struct', async () => {
     const client = createClient(
       withEndpoint('https://example.com'),
       withInterceptors(
@@ -403,14 +403,16 @@ describe('request http runtime errors', () => {
     const client = createClient(
       withEndpoint('https://example.com'),
       withInterceptors(
-        createHttpInterceptor(async () => ({
-          body: null,
-          error: 'custom string error',
-          headers: new Headers(),
-          status: 500,
-          statusText: 'Server Error',
-          url: 'https://example.com/test',
-        })),
+        createHttpInterceptor(async () =>
+          makeResponse({
+            body: null,
+            error: 'custom string error',
+            headers: new Headers(),
+            status: 500,
+            statusText: 'Server Error',
+            url: 'https://example.com/test',
+          }),
+        ),
       ),
     )
 
@@ -427,18 +429,20 @@ describe('request http runtime errors', () => {
     expect(error?.message).toBe('custom string error')
   })
 
-  test('should use string error for non-ok response with output schema', async () => {
+  test('should use string error for non-ok response with output struct', async () => {
     const client = createClient(
       withEndpoint('https://example.com'),
       withInterceptors(
-        createHttpInterceptor(async () => ({
-          body: { code: 'ERR' },
-          error: 'custom string error',
-          headers: new Headers([['content-type', 'application/json']]),
-          status: 500,
-          statusText: 'Server Error',
-          url: 'https://example.com/test',
-        })),
+        createHttpInterceptor(async () =>
+          makeResponse({
+            body: { code: 'ERR' },
+            error: 'custom string error',
+            headers: new Headers([['content-type', 'application/json']]),
+            status: 500,
+            statusText: 'Server Error',
+            url: 'https://example.com/test',
+          }),
+        ),
       ),
     )
 
@@ -516,7 +520,7 @@ describe('request http runtime errors', () => {
     expect(error?.message).toContain('Internal Server Error')
   })
 
-  test('should use Error message for non-ok response with output schema', async () => {
+  test('should use Error message for non-ok response with output struct', async () => {
     const client = createClient(
       withEndpoint('https://example.com'),
       withInterceptors(

@@ -5,7 +5,7 @@ import { HTTP_CLIENT, injectClient, provideClient, withEndpoint, withInterceptor
 
 const passthroughHttpInterceptor = () => createHttpInterceptor((req, next) => next(req))
 
-const UserSchema = struct.object({
+const UserStruct = struct.object({
   id: struct.number(),
   name: struct.string(),
 })
@@ -13,7 +13,7 @@ const UserSchema = struct.object({
 const getUsers = defineRequest({
   method: 'GET',
   output: {
-    200: struct.array(UserSchema),
+    200: struct.array(UserStruct),
   },
   path: '/api/users',
 })

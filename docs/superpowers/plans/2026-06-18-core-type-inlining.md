@@ -17,7 +17,7 @@
 - 全部五波完成后必须执行：`pnpm run test`
 - 每波独立 commit，commit message 格式：`refactor(core): inline <wave summary>`
 - 不修改运行时行为；只修改类型定义和类型注解。
-- 保留真正的共享工具类型和领域抽象类型：`ExcludeUnion`、`FnReturn`、`WebSocketState`、`EventSchemas`、`SocketSchemas`。
+- 保留真正的共享工具类型和领域抽象类型：`ExcludeUnion`、`FnReturn`、`WebSocketState`、`EventStructs`、`SocketStructs`。
 - 接受 breaking change：被 `client/public_api.ts` 导出的部分类型将在第五波移除。
 
 ---
@@ -40,7 +40,7 @@
 
 **Interfaces:**
 
-- Consumes: 现有 `WebSocketQueueOptions`、`WebSocketReconnectOptions`、`RequestBuilder`、`HttpResponse`、`RequestBuildValue`、`RuntimeSchema` 等。
+- Consumes: 现有 `WebSocketQueueOptions`、`WebSocketReconnectOptions`、`RequestBuilder`、`HttpResponse`、`RequestBuildValue`、`RuntimeStruct` 等。
 - Produces: 移除 `CommandEntry`、`HttpRequestBuildContext`、`WebSocketQueueConfig`、`WebSocketReconnectConfig`、`HttpResponseBody`、`ScalarRequestBuildValue`、`EncodeChild`、`TaggedObject`、`TagObjectOptions`、`SearchParamScalar`、`RequestInitWithDuplex`（fetch.ts）这些别名；使用处直接写原始类型。
 
 - [ ] **Step 1: Verify baseline tests pass**
@@ -195,19 +195,19 @@ to the same (already correct). The type is already inline; just remove the alias
 In `packages/core/src/struct/encode.ts`, delete line 6:
 
 ```ts
-export type EncodeChild = (schema: RuntimeSchema, value: unknown) => unknown
+export type EncodeChild = (struct: RuntimeStruct, value: unknown) => unknown
 ```
 
 Change line 9 from:
 
 ```ts
-  encodeObject?: (schema: RuntimeSchema, value: { [key: string]: unknown }, encodeChild: EncodeChild) => unknown
+  encodeObject?: (struct: RuntimeStruct, value: { [key: string]: unknown }, encodeChild: EncodeChild) => unknown
 ```
 
 to:
 
 ```ts
-  encodeObject?: (schema: RuntimeSchema, value: { [key: string]: unknown }, encodeChild: (schema: RuntimeSchema, value: unknown) => unknown) => unknown
+  encodeObject?: (struct: RuntimeStruct, value: { [key: string]: unknown }, encodeChild: (struct: RuntimeStruct, value: unknown) => unknown) => unknown
 ```
 
 - [ ] **Step 9: Inline `TaggedObject` and `TagObjectOptions` in common.ts**
@@ -377,12 +377,12 @@ type OutputPairs<TOutput extends RequestOutputShape> = TOutput extends readonly 
     }[keyof TOutput]
 ```
 
-- [ ] **Step 3: Inline `OutputPairs` into `SuccessSchemaOf` and `ErrorSchemaOf`**
+- [ ] **Step 3: Inline `OutputPairs` into `SuccessStructOf` and `ErrorStructOf`**
 
-Replace lines 59-75 with two self-contained types. The new `SuccessSchemaOf` becomes:
+Replace lines 59-75 with two self-contained types. The new `SuccessStructOf` becomes:
 
 ```ts
-type SuccessSchemaOf<TOutput extends RequestOutputShape> = (
+type SuccessStructOf<TOutput extends RequestOutputShape> = (
   TOutput extends readonly (infer TItem)[]
     ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
       ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
@@ -403,9 +403,9 @@ type SuccessSchemaOf<TOutput extends RequestOutputShape> = (
   : never
 ```
 
-`ErrorSchemaOf` mirrors the above, with the success branch returning `never` and the error branch returning `TBody`.
+`ErrorStructOf` mirrors the above, with the success branch returning `never` and the error branch returning `TBody`.
 
-- [ ] **Step 4: Inline `SuccessSchemaOf` and `ErrorSchemaOf` into `RequestSuccessData` and `RequestErrorData`**
+- [ ] **Step 4: Inline `SuccessStructOf` and `ErrorStructOf` into `RequestSuccessData` and `RequestErrorData`**
 
 Replace lines 77-87 with inlined derivations. For example, `RequestSuccessData` becomes:
 
@@ -594,9 +594,9 @@ export type EventStreamExecuteOptions = UseEventStreamBaseConfig & UseCancellati
 Replace lines 32-41:
 
 ```ts
-type KnownEventKey<TEvents extends EventSchemas> = ExcludeUnion<keyof TEvents & string, 'default'>
+type KnownEventKey<TEvents extends EventStructs> = ExcludeUnion<keyof TEvents & string, 'default'>
 
-type KnownEventUnion<TEvents extends EventSchemas> = {
+type KnownEventUnion<TEvents extends EventStructs> = {
   [K in keyof TEvents & string as K extends 'default' ? never : K]: {
     data: Infer<TEvents[K]>
     event: K
@@ -609,7 +609,7 @@ type KnownEventUnion<TEvents extends EventSchemas> = {
 with:
 
 ```ts
-type KnownEventUnion<TEvents extends EventSchemas> = {
+type KnownEventUnion<TEvents extends EventStructs> = {
   [K in keyof TEvents & string as K extends 'default' ? never : K]: {
     data: Infer<TEvents[K]>
     event: K
@@ -622,7 +622,7 @@ type KnownEventUnion<TEvents extends EventSchemas> = {
 Wait — using `as` in the index access key is awkward. Instead, keep the mapping producing a union directly:
 
 ```ts
-type KnownEventUnion<TEvents extends EventSchemas> = {
+type KnownEventUnion<TEvents extends EventStructs> = {
   [K in keyof TEvents & string as K extends 'default' ? never : K]: {
     data: Infer<TEvents[K]>
     event: K
@@ -635,7 +635,7 @@ type KnownEventUnion<TEvents extends EventSchemas> = {
 Better: since the mapped type already filters `'default'`, the index key can simply be `keyof TEvents & string` and TypeScript will only include non-default keys because the other keys map to `never` and are filtered. So use:
 
 ```ts
-type KnownEventUnion<TEvents extends EventSchemas> = {
+type KnownEventUnion<TEvents extends EventStructs> = {
   [K in keyof TEvents & string as K extends 'default' ? never : K]: {
     data: Infer<TEvents[K]>
     event: K
@@ -652,11 +652,11 @@ Verify with type tests that this produces the same union.
 In `packages/core/src/web_socket/web_socket.ts`, replace lines 57-65 similarly:
 
 ```ts
-type KnownIncomingSocketUnion<TIncoming extends SocketSchemas> = {
+type KnownIncomingSocketUnion<TIncoming extends SocketStructs> = {
   [K in keyof TIncoming & string as K extends 'default' ? never : K]: NormalizeSocketMessage<K, Infer<TIncoming[K]>>
 }[keyof TIncoming & string]
 
-type KnownOutgoingSocketUnion<TOutgoing extends SocketSchemas> = {
+type KnownOutgoingSocketUnion<TOutgoing extends SocketStructs> = {
   [K in keyof TOutgoing & string as K extends 'default' ? never : K]: SocketSendMessage<K, EndpointInput<TOutgoing[K]>>
 }[keyof TOutgoing & string]
 ```
@@ -738,8 +738,8 @@ In `packages/core/src/client/command.ts`, replace lines 24-26:
 
 ```ts
 export type HttpDispatchCommand = HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>
-export type EventStreamDispatchCommand = EventStreamCommand<AnyStruct | undefined, EventSchemas>
-export type WebSocketDispatchCommand = WebSocketCommand<AnyStruct | undefined, SocketSchemas, SocketSchemas | undefined>
+export type EventStreamDispatchCommand = EventStreamCommand<AnyStruct | undefined, EventStructs>
+export type WebSocketDispatchCommand = WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined>
 ```
 
 with the full instantiations at every usage point. Update line 37 `Command` to:
@@ -747,8 +747,8 @@ with the full instantiations at every usage point. Update line 37 `Command` to:
 ```ts
 export type Command =
   | HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>
-  | EventStreamCommand<AnyStruct | undefined, EventSchemas>
-  | WebSocketCommand<AnyStruct | undefined, SocketSchemas, SocketSchemas | undefined>
+  | EventStreamCommand<AnyStruct | undefined, EventStructs>
+  | WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined>
 ```
 
 Update type guards `isHttpCommand`, `isEventStreamCommand`, `isWebSocketCommand` to return the full instantiations directly (they already do, so just remove reliance on the aliases).
@@ -762,7 +762,7 @@ export type HttpCommandEntry = [command: HttpDispatchCommand, options?: HttpExec
 export type EventStreamCommandEntry = [command: EventStreamDispatchCommand, options?: EventStreamExecuteOptions]
 export type WebSocketCommandEntry = [
   command: WebSocketDispatchCommand,
-  options?: WebSocketExecuteOptions<WebSocketIncomingData<SocketSchemas>, WebSocketOutgoingData<SocketSchemas | undefined>>,
+  options?: WebSocketExecuteOptions<WebSocketIncomingData<SocketStructs>, WebSocketOutgoingData<SocketStructs | undefined>>,
 ]
 export type CommandEntry = HttpCommandEntry | EventStreamCommandEntry | WebSocketCommandEntry
 export type UnknownCommandEntry = [command: Command, options?: unknown]
@@ -773,12 +773,12 @@ with only the tuples needed by the type guards and `client.ts`:
 ```ts
 export type HttpCommandEntry = [command: HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>, options?: HttpExecuteOptions]
 export type EventStreamCommandEntry = [
-  command: EventStreamCommand<AnyStruct | undefined, EventSchemas>,
+  command: EventStreamCommand<AnyStruct | undefined, EventStructs>,
   options?: EventStreamExecuteOptions,
 ]
 export type WebSocketCommandEntry = [
-  command: WebSocketCommand<AnyStruct | undefined, SocketSchemas, SocketSchemas | undefined>,
-  options?: WebSocketExecuteOptions<WebSocketIncomingData<SocketSchemas>, WebSocketOutgoingData<SocketSchemas | undefined>>,
+  command: WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined>,
+  options?: WebSocketExecuteOptions<WebSocketIncomingData<SocketStructs>, WebSocketOutgoingData<SocketStructs | undefined>>,
 ]
 export type UnknownCommandEntry = [command: Command, options?: unknown]
 ```
@@ -943,7 +943,7 @@ Update `ClientSSEOptions` and `ClientSSEConfig` to embed them directly:
 export interface ClientSSEOptions {
   handle?: typeof fetch
   onInvalidEvent?: (context: {
-    reason: 'missing-schema' | 'validation-failed'
+    reason: 'missing-struct' | 'validation-failed'
     message: { id: string; event: string; data: string; retry?: number }
     cause?: unknown
   }) => void | Promise<void>

@@ -34,11 +34,11 @@ Defjs is a TypeScript library for defining typed request APIs and executing them
 ```shell
 npm install @defjs/core
 // or
-yarn install @defjs/core
+yarn add @defjs/core
 // or
-pnpm install @defjs/core
+pnpm add @defjs/core
 // or
-bun install @defjs/core
+bun add @defjs/core
 ```
 
 > Use via CDN
@@ -46,16 +46,14 @@ bun install @defjs/core
 **ES modules only**
 
 ```javascript
-import { createClient, defineRequest, struct } from 'https://unpkg.com/@defjs/core/index.min.js'
+import { createClient, defineRequest, struct, withEndpoint } from 'https://unpkg.com/@defjs/core/index.min.js'
 
 /**
  * @title Step 1
  * @file src/main.ts
  * @description Set up a client
  */
-const client = createClient({
-  endpoint: 'https://example.com',
-})
+const client = createClient(withEndpoint('https://example.com'))
 
 /**
  * @title Step 2

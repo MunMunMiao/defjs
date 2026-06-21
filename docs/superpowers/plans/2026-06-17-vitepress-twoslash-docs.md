@@ -1167,7 +1167,7 @@ async function loadUser() {
   const [error, user] = await client.execute(getUser({ id: 1 }))
 
   if (error) {
-    // error is typed based on the non-2xx schemas in output
+    // error is typed based on the non-2xx structs in output
     console.error(error.code, error.message)
     return
   }

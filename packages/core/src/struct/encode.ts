@@ -1,18 +1,81 @@
-import { resolveObjectShape } from './shape'
+import { selectUnionOptions } from './match'
+import { getRequestSections } from './request'
+
+export { matchesDefinition } from './match'
+import { resolveObjectShape, resolveRuntimeStruct } from './shape'
 import { DEFINITION } from './symbols'
-import type { RuntimeSchema, SchemaDefinition } from './types'
-import { hasOwnKey, isPlainObject } from './utils'
+import type { RuntimeStruct, StructDefinition } from './types'
+import { hasOwnKey, isObjectIntersectionStruct, isPlainObject } from './utils'
 
 export interface EncodeOptions {
   encodeObject?: (
-    schema: RuntimeSchema,
+    struct: RuntimeStruct,
     value: { [key: string]: unknown },
-    encodeChild: (schema: RuntimeSchema, value: unknown) => unknown,
+    encodeChild: (struct: RuntimeStruct, value: unknown) => unknown,
   ) => unknown
+  selectUnionOptions?: typeof selectUnionOptions
 }
 
-export function encodeValue(schema: RuntimeSchema, value: unknown, options: EncodeOptions = {}): unknown {
-  const definition = schema[DEFINITION]
+const NO_FLAG_MATCH = Symbol('NO_FLAG_MATCH')
+
+function encodeFlagValue(definition: StructDefinition, value: unknown): unknown | typeof NO_FLAG_MATCH {
+  if (value === null && (definition.kind === 'null' || definition.flags.nullable)) {
+    return null
+  }
+  if (typeof value === 'undefined' && definition.flags.optional) {
+    return undefined
+  }
+  return NO_FLAG_MATCH
+}
+
+function sameEncodedShape(
+  leftStruct: RuntimeStruct,
+  leftValue: unknown,
+  rightStruct: RuntimeStruct,
+  rightValue: unknown,
+  options: EncodeOptions,
+): boolean {
+  return sameWireValue(
+    getComparableEncodedValue(leftStruct, leftValue, options),
+    getComparableEncodedValue(rightStruct, rightValue, options),
+  )
+}
+
+function sameWireValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => sameWireValue(item, right[index]))
+    )
+  }
+  if (!isPlainObject(left) || !isPlainObject(right)) {
+    return false
+  }
+
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) => hasOwnKey(right, key) && sameWireValue(left[key], right[key]))
+}
+
+function getComparableEncodedValue(struct: RuntimeStruct, value: unknown, options: EncodeOptions): unknown {
+  const definition = struct[DEFINITION]
+  if (options.encodeObject && definition.alias && (definition.kind === 'array' || definition.kind === 'object')) {
+    return { alias: definition.alias, value }
+  }
+  return value
+}
+
+export function encodeValue(struct: RuntimeStruct, value: unknown, options: EncodeOptions = {}): unknown {
+  const definition = struct[DEFINITION]
+  const flagged = encodeFlagValue(definition, value)
+  if (flagged !== NO_FLAG_MATCH) {
+    return flagged
+  }
 
   switch (definition.kind) {
     case 'any':
@@ -33,12 +96,12 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
       return definition.encode ? definition.encode(value as never) : value
 
     case 'array':
-      return Array.isArray(value) ? value.map((item) => encodeValue(definition.item as unknown as RuntimeSchema, item, options)) : value
+      return Array.isArray(value) ? value.map((item) => encodeValue(definition.item as unknown as RuntimeStruct, item, options)) : value
 
     case 'tuple':
       return Array.isArray(value)
         ? value.map((item, index) =>
-            index < definition.items.length ? encodeValue(definition.items[index] as unknown as RuntimeSchema, item, options) : item,
+            index < definition.items.length ? encodeValue(definition.items[index] as unknown as RuntimeStruct, item, options) : item,
           )
         : value
 
@@ -48,7 +111,7 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
       }
       const output: { [key: string]: unknown } = Object.create(null)
       for (const [key, entry] of Object.entries(value)) {
-        output[key] = encodeValue(definition.value as unknown as RuntimeSchema, entry, options)
+        output[key] = encodeValue(definition.value as unknown as RuntimeStruct, entry, options)
       }
       return output
     }
@@ -58,15 +121,15 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
         return value
       }
       if (options.encodeObject) {
-        return options.encodeObject(schema, value, (fieldSchema, fieldValue) => encodeValue(fieldSchema, fieldValue, options))
+        return options.encodeObject(struct, value, (fieldStruct, fieldValue) => encodeValue(fieldStruct, fieldValue, options))
       }
       const output: { [key: string]: unknown } = Object.create(null)
-      const shape = resolveObjectShape(schema, definition)
-      for (const [key, fieldSchema] of Object.entries(shape)) {
+      const shape = resolveObjectShape(struct, definition)
+      for (const [key, fieldStruct] of Object.entries(shape)) {
         if (!hasOwnKey(value, key)) {
           continue
         }
-        output[key] = encodeValue(fieldSchema as unknown as RuntimeSchema, value[key], options)
+        output[key] = encodeValue(fieldStruct as unknown as RuntimeStruct, value[key], options)
       }
       return output
     }
@@ -76,174 +139,57 @@ export function encodeValue(schema: RuntimeSchema, value: unknown, options: Enco
         return value
       }
       const output: { [key: string]: unknown } = Object.create(null)
-      if (definition.path && hasOwnKey(value, 'path')) {
-        output['path'] = encodeValue(definition.path as unknown as RuntimeSchema, value['path'], options)
-      }
-      if (definition.query && hasOwnKey(value, 'query')) {
-        output['query'] = encodeValue(definition.query as unknown as RuntimeSchema, value['query'], options)
-      }
-      if (definition.headers && hasOwnKey(value, 'headers')) {
-        output['headers'] = encodeValue(definition.headers as unknown as RuntimeSchema, value['headers'], options)
-      }
-      if (definition.body && hasOwnKey(value, 'body')) {
-        output['body'] = encodeValue(definition.body as unknown as RuntimeSchema, value['body'], options)
+      for (const section of getRequestSections(definition)) {
+        const key = section.key
+        const sectionStruct = section.struct
+        if (hasOwnKey(value, key)) {
+          output[key] = encodeValue(sectionStruct, value[key], options)
+        }
       }
       return output
     }
 
     case 'requestBody':
-      return encodeValue(definition.schema as unknown as RuntimeSchema, value, options)
+      return encodeValue(definition.struct as unknown as RuntimeStruct, value, options)
 
     case 'or': {
-      for (const opt of definition.options) {
-        const optDef = (opt as unknown as RuntimeSchema)[DEFINITION]
-        if (matchesDefinition(optDef, value, opt as unknown as RuntimeSchema)) {
-          return encodeValue(opt as unknown as RuntimeSchema, value, options)
+      const selectOptions = options.selectUnionOptions ?? selectUnionOptions
+      const matches = selectOptions(definition.options, value)
+      const firstOption = matches[0]
+      if (!firstOption) {
+        return value
+      }
+
+      const first = encodeValue(firstOption, value, options)
+      for (let index = 1; index < matches.length; index += 1) {
+        const option = matches[index] as RuntimeStruct
+        const encoded = encodeValue(option, value, options)
+        if (!sameEncodedShape(firstOption, first, option, encoded, options)) {
+          throw new TypeError('ambiguous union encode: multiple union branches match with different wire output')
         }
       }
-      return value
+      return first
     }
 
     case 'discriminatedUnion': {
       if (isPlainObject(value)) {
         const matched = definition.map.get((value as { [key: string]: unknown })[definition.discriminator])
         if (matched) {
-          return encodeValue(matched as unknown as RuntimeSchema, value, options)
+          return encodeValue(matched as unknown as RuntimeStruct, value, options)
         }
       }
       return value
     }
 
-    case 'intersection':
-      return encodeValue(definition.right as unknown as RuntimeSchema, value, options)
-  }
-}
-
-// Best-effort runtime type guard used by encode() to route union / intersection / discriminatedUnion to the right branch.
-// Use strict native type checks instead of `definition.is`: some primitive predicates accept wire forms
-// such as string dates or bigint strings, while encode() receives parsed runtime values.
-export function matchesDefinition(definition: SchemaDefinition, value: unknown, schema: RuntimeSchema): boolean {
-  switch (definition.kind) {
-    case 'any':
-    case 'unknown':
-      return true
-    case 'null':
-      return value === null
-    case 'string':
-      return typeof value === 'string'
-    case 'number':
-      return typeof value === 'number' && !Number.isNaN(value)
-    case 'boolean':
-      return typeof value === 'boolean'
-    case 'bigint':
-      return typeof value === 'bigint'
-    case 'date':
-      return value instanceof Date && !Number.isNaN(value.getTime())
-    case 'blob':
-      return typeof Blob !== 'undefined' && value instanceof Blob
-    case 'file':
-      return typeof File !== 'undefined' && value instanceof File
-    case 'arrayBuffer':
-      return value instanceof ArrayBuffer
-    case 'literal':
-      return Object.is(value, definition.value)
-    case 'enum':
-      return definition.values.includes(value as never)
-    case 'array': {
-      if (!Array.isArray(value)) {
-        return false
-      }
-      const itemSchema = definition.item as unknown as RuntimeSchema
-      for (const item of value) {
-        if (!matchesFieldValue(itemSchema, item)) {
-          return false
-        }
-      }
-      return true
-    }
-    case 'tuple':
-      if (!Array.isArray(value) || value.length !== definition.items.length) {
-        return false
-      }
-      for (let index = 0; index < definition.items.length; index += 1) {
-        if (!matchesFieldValue(definition.items[index] as unknown as RuntimeSchema, value[index])) {
-          return false
-        }
-      }
-      return true
-    case 'object':
-      if (!isPlainObject(value)) {
-        return false
-      }
-      return matchesObjectValue(schema, value)
-
-    case 'request':
-      return isPlainObject(value)
-
-    case 'requestBody':
-      return matchesFieldValue(definition.schema as unknown as RuntimeSchema, value)
-
-    case 'record': {
-      if (!isPlainObject(value)) {
-        return false
-      }
-      const valueSchema = definition.value as unknown as RuntimeSchema
-      for (const entry of Object.values(value)) {
-        if (!matchesFieldValue(valueSchema, entry)) {
-          return false
-        }
-      }
-      return true
-    }
-    case 'or':
-      return definition.options.some((opt) =>
-        matchesDefinition((opt as unknown as RuntimeSchema)[DEFINITION], value, opt as unknown as RuntimeSchema),
-      )
-    case 'discriminatedUnion':
-      return isPlainObject(value) && definition.map.has((value as { [key: string]: unknown })[definition.discriminator])
-    case 'intersection':
-      return (
-        matchesDefinition((definition.left as unknown as RuntimeSchema)[DEFINITION], value, definition.left as unknown as RuntimeSchema) &&
-        matchesDefinition((definition.right as unknown as RuntimeSchema)[DEFINITION], value, definition.right as unknown as RuntimeSchema)
-      )
-  }
-}
-
-function matchesObjectValue(schema: RuntimeSchema, value: { [key: string]: unknown }): boolean {
-  const definition = schema[DEFINITION]
-  if (definition.kind !== 'object') {
-    return true
-  }
-
-  const shape = resolveObjectShape(schema, definition)
-  for (const [key, fieldSchema] of Object.entries(shape)) {
-    const fieldDefinition = (fieldSchema as unknown as RuntimeSchema)[DEFINITION]
-    if (!hasOwnKey(value, key)) {
-      if (isRequiredField(fieldDefinition)) {
-        return false
-      }
-      continue
-    }
-
-    const fieldValue = value[key]
-    if (fieldDefinition.kind === 'literal' && !Object.is(fieldValue, fieldDefinition.value)) {
-      return false
-    }
-    if (fieldDefinition.kind === 'enum' && !fieldDefinition.values.includes(fieldValue as never)) {
-      return false
-    }
-    if (!matchesFieldValue(fieldSchema as unknown as RuntimeSchema, fieldValue)) {
-      return false
+    case 'intersection': {
+      const leftEncoded = encodeValue(resolveRuntimeStruct(definition.left), value, options)
+      const rightEncoded = encodeValue(resolveRuntimeStruct(definition.right), value, options)
+      return isObjectIntersectionStruct(definition.left) &&
+        isObjectIntersectionStruct(definition.right) &&
+        isPlainObject(leftEncoded) &&
+        isPlainObject(rightEncoded)
+        ? { ...leftEncoded, ...rightEncoded }
+        : rightEncoded
     }
   }
-
-  return true
-}
-
-function matchesFieldValue(schema: RuntimeSchema, value: unknown): boolean {
-  return matchesDefinition(schema[DEFINITION], value, schema)
-}
-
-function isRequiredField(definition: SchemaDefinition): boolean {
-  return !definition.flags.optional && !definition.flags.nullable
 }

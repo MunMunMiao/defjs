@@ -1,17 +1,17 @@
 ---
 title: WebSocket
-description: Typed WebSocket endpoints with schema-driven messages, automatic reconnect, heartbeat, and send queueing.
+description: Typed WebSocket endpoints with struct-driven messages, automatic reconnect, heartbeat, and send queueing.
 ---
 
 # WebSocket
 
 `@defjs/core` bietet typisierte WebSocket-Endpunkte über `defineWebSocket`. Jeder Endpoint deklariert:
 
-- `incoming`-Schemata — Nachrichten, die der Server an den Client sendet.
-- `outgoing`-Schemata — Nachrichten, die der Client an den Server sendet.
-- `input`-Schema + `build`-Handler — Request-Parameter und Query/Path-Konstruktion (optional).
+- `incoming`-Structta — Nachrichten, die der Server an den Client sendet.
+- `outgoing`-Structta — Nachrichten, die der Client an den Server sendet.
+- `input`-Struct + `build`-Handler — Request-Parameter und Query/Path-Konstruktion (optional).
 
-Nachrichten werden JSON-kodiert und zur Laufzeit gegen die deklarierten Schemata validiert.
+Nachrichten werden JSON-kodiert und zur Laufzeit gegen die deklarierten Structta validiert.
 
 ## WebSocket-Endpunkt definieren
 
@@ -47,9 +47,9 @@ const useChatSocket = defineWebSocket({
 })
 ```
 
-### Schema-Formen
+### Struct-Formen
 
-**Incoming-Nachrichten** sind nach `type` keyed. Wenn eine Nachricht ankommt, wird ihr JSON-`type`-Feld gegen die Schema-Keys gematcht. Falls der Payload ein Plain-Object ist, werden seine Felder mit `type` gemerged:
+**Incoming-Nachrichten** sind nach `type` keyed. Wenn eine Nachricht ankommt, wird ihr JSON-`type`-Feld gegen die Struct-Keys gematcht. Falls der Payload ein Plain-Object ist, werden seine Felder mit `type` gemerged:
 
 ```typescript
 // Server sends: { "type": "message", "text": "hi", "userId": 1 }
@@ -69,7 +69,7 @@ Falls der Payload ein Skalar oder Array ist, wird er unter `data` gewrapped:
 socket.send({ type: 'message', text: 'hello' })
 ```
 
-Ein spezieller `default`-Key kann in `incoming` verwendet werden, um nicht deklarierte Message-Typen mit einem Shared-Schema abzufangen.
+Ein spezieller `default`-Key kann in `incoming` verwendet werden, um nicht deklarierte Message-Typen mit einem Shared-Struct abzufangen.
 
 ## Ausführen und Konsumieren von Nachrichten
 
@@ -122,7 +122,7 @@ const unsubscribe = socket.onStateChange((state) => {
   console.log('Socket state:', state)
 })
 
-// Laufzeitfehler (Schema-Fehler, Heartbeat-Timeout etc.)
+// Laufzeitfehler (Struct-Fehler, Heartbeat-Timeout etc.)
 socket.onRuntimeError((error) => {
   console.error('Runtime error:', error)
 })
@@ -331,6 +331,6 @@ async function run(token: string) {
 
 ## Wie geht es weiter
 
-- [SSE →](/core/sse) — Server-Sent Events mit typisierten Schemata und Wiederverbindung.
+- [SSE →](/core/sse) — Server-Sent Events mit typisierten Structta und Wiederverbindung.
 - [Client →](/core/client) — Client-Erstellung und WebSocket-Konfiguration.
 - [Commands →](/core/commands) — `defineWebSocket`-Input- und Build-Regeln.

@@ -1,9 +1,9 @@
 import type { RequestOutputShape } from '../http/request'
 import type { HttpCommand, HttpExecuteOptions } from '../http/http'
-import type { EventSchemas, EventStreamCommand, EventStreamExecuteOptions } from '../sse/sse'
+import type { EventStructs, EventStreamCommand, EventStreamExecuteOptions } from '../sse/sse'
 import type { AnyStruct } from '../struct'
 import type {
-  SocketSchemas,
+  SocketStructs,
   WebSocketCommand,
   WebSocketExecuteOptions,
   WebSocketIncomingData,
@@ -23,17 +23,17 @@ export interface BaseCommand<TCommandType extends CommandType> {
 
 export type Command =
   | HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>
-  | EventStreamCommand<AnyStruct | undefined, EventSchemas>
-  | WebSocketCommand<AnyStruct | undefined, SocketSchemas, SocketSchemas | undefined>
+  | EventStreamCommand<AnyStruct | undefined, EventStructs>
+  | WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined>
 
 export type HttpCommandEntry = [command: HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>, options?: HttpExecuteOptions]
 export type EventStreamCommandEntry = [
-  command: EventStreamCommand<AnyStruct | undefined, EventSchemas>,
+  command: EventStreamCommand<AnyStruct | undefined, EventStructs>,
   options?: EventStreamExecuteOptions,
 ]
 export type WebSocketCommandEntry = [
-  command: WebSocketCommand<AnyStruct | undefined, SocketSchemas, SocketSchemas | undefined>,
-  options?: WebSocketExecuteOptions<WebSocketIncomingData<SocketSchemas>, WebSocketOutgoingData<SocketSchemas | undefined>>,
+  command: WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined>,
+  options?: WebSocketExecuteOptions<WebSocketIncomingData<SocketStructs>, WebSocketOutgoingData<SocketStructs | undefined>>,
 ]
 export type UnknownCommandEntry = [command: Command, options?: unknown]
 
@@ -49,13 +49,13 @@ export function isHttpCommand(value: unknown): value is HttpCommand<AnyStruct | 
   return commandTypeOf(value) === HTTP_COMMAND
 }
 
-export function isEventStreamCommand(value: unknown): value is EventStreamCommand<AnyStruct | undefined, EventSchemas> {
+export function isEventStreamCommand(value: unknown): value is EventStreamCommand<AnyStruct | undefined, EventStructs> {
   return commandTypeOf(value) === EVENT_STREAM_COMMAND
 }
 
 export function isWebSocketCommand(
   value: unknown,
-): value is WebSocketCommand<AnyStruct | undefined, SocketSchemas, SocketSchemas | undefined> {
+): value is WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined> {
   return commandTypeOf(value) === WEB_SOCKET_COMMAND
 }
 

@@ -1,6 +1,6 @@
 ---
 title: Struct
-description: Declarative schema definition, type inference, error mapping, and the field tag system.
+description: Declarative struct definition, type inference, error mapping, and the field alias support.
 ---
 
 # Struct
@@ -9,12 +9,12 @@ description: Declarative schema definition, type inference, error mapping, and t
 
 ## الأنواع الأولية
 
-تُنشأ جميع المخططات عبر نطاق `struct`، ويدعم استدعاءات السلسلة `.optional()` و `.null()` و `.nullish()` و `.tag(...)`.
+تُنشأ جميع المخططات عبر نطاق `struct`، ويدعم استدعاءات السلسلة `.optional()` و `.null()` و `.nullish()` و `.alias(name)`.
 
 ### القيم الأساسية
 
 ```typescript
-import { struct } from '@defjs/core'
+import { struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -23,7 +23,7 @@ const User = struct.object({
   role: struct.literal('admin'),
 })
 
-type User = struct.Infer<typeof User>
+type User = Infer<typeof User>
 // { id: number; name: string; active: boolean; role: 'admin' }
 ```
 
@@ -95,11 +95,11 @@ const CreateUser = struct.request({
   path: struct.object({ orgId: struct.number() }),
   query: struct.object({ dryRun: struct.boolean().optional() }),
   headers: struct.object({
-    'X-Api-Key': struct.string().tag(tag.header('X-Api-Key')),
+    'X-Api-Key': struct.string().alias('X-Api-Key'),
   }),
   body: struct.json(
     struct.object({
-      name: struct.string().tag(tag.json('user_name')),
+      name: struct.string().alias('user_name'),
     }),
   ),
 })
@@ -109,7 +109,7 @@ const CreateUser = struct.request({
 
 | الغلاف                     | الترميز           |
 | -------------------------- | ----------------- |
-| `struct.json(schema)`      | `JSON.stringify`  |
+| `struct.json(struct)`      | `JSON.stringify`  |
 | `struct.urlencoded(shape)` | `URLSearchParams` |
 | `struct.formData(shape)`   | `FormData`        |
 | `struct.text()`            | نص عادي           |
@@ -118,7 +118,7 @@ const CreateUser = struct.request({
 
 ## استنتاج النوع `Infer<T>`
 
-يستخرج `struct.Infer<T>` نوع إخراج المخطط. هو المساعد الوحيد على المستوى النوعي الذي تحتاج إلى إتقانه.
+يستخرج `Infer<T>` نوع إخراج المخطط. هو المساعد الوحيد على المستوى النوعي الذي تحتاج إلى إتقانه.
 
 ```typescript
 const Person = struct.object({
@@ -126,21 +126,21 @@ const Person = struct.object({
   age: struct.number().optional(),
 })
 
-type Person = struct.Infer<typeof Person>
+type Person = Infer<typeof Person>
 // { name: string; age?: number }
 ```
 
 يعمل `Infer` أيضًا مع `struct.array(...)` و `struct.union(...)` و `struct.request(...)`:
 
 ```typescript
-type Tags = struct.Infer<typeof Tags> // string[]
-type Id = struct.Infer<typeof Id> // string | number
-type Req = struct.Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
+type Tags = Infer<typeof Tags> // string[]
+type Id = Infer<typeof Id> // string | number
+type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
 ```
 
 ## StructError وتعيين الأخطاء
 
-عند فشل التحقق، يُرجع وقت التشغيل `StructError` يحتوي على `SchemaIssue[]` كاملة.
+عند فشل التحقق، يُرجع وقت التشغيل `StructError` يحتوي على `StructIssue[]` كاملة.
 
 ```typescript
 import { struct, StructError } from '@defjs/core'
@@ -175,84 +175,43 @@ setErrorMap((issue) => {
 })
 ```
 
-## نظام الوسوم
+## Field Aliases
 
-الوسوم هي بيانات وصفية مرتبطة بالحقول، تقرأها برامج الترميز أو منشئو الطلبات أو المحولات الخارجية. يوفر الأساس 6 نطاقات مدمجة:
-
-| النطاق                  | الغرض                          | السلوك بدون وسيط          |
-| ----------------------- | ------------------------------ | ------------------------- |
-| `tag.json()`            | مفتاح JSON على السلك           | يعود إلى اسم الحقل        |
-| `tag.urlencoded()`      | مفتاح URL-encoded على السلك    | يعود إلى اسم الحقل        |
-| `tag.multipart()`       | مفتاح multipart على السلك      | يعود إلى اسم الحقل        |
-| `tag.query(fieldName)`  | مفتاح معامل استعلام على السلك  | **يجب توفير الاسم صراحة** |
-| `tag.uri(fieldName)`    | مفتاح معامل مسار URI على السلك | **يجب توفير الاسم صراحة** |
-| `tag.header(fieldName)` | مفتاح رأس HTTP على السلك       | **يجب توفير الاسم صراحة** |
-
-### مثال الاستخدام
+`.alias(name)` هي الآلية المدمجة الوحيدة لاسم الحقل على wire. تغيّر المفتاح الخارجي المستخدم في ترميز/فك ترميز JSON و query و headers و path و urlencoded و FormData فقط؛ ولا تغيّر اسم خاصية TypeScript أو نوع الإخراج أو request section أو body codec أو المفاتيح المكتوبة صراحة داخل `build(ctx, input)`. الحقول بلا alias تستخدم مفتاح الحقل في الكائن.
 
 ```typescript
-import { struct, tag } from '@defjs/core'
+import { struct } from '@defjs/core'
 
 const UserBody = struct.object({
-  id: struct.number().tag(tag.json('user_id')),
-  name: struct.string().tag(tag.json('user_name')),
-  email: struct.string().tag(tag.header('X-User-Email')),
+  id: struct.number().alias('user_id'),
+  name: struct.string().alias('user_name'),
 })
 ```
 
-### وسم إعداد مخصص
+The same alias is used by JSON, query, path params, headers, urlencoded bodies, and multipart bodies. If the same logical value needs different names in different targets, split the struct or write explicit keys in `build(ctx, input)`.
 
-يتيح `tag.defineConfig` للمكتبات الخارجية تعريف نطاقها الخاص ومفتاح الإعداد:
+## Field Introspection
 
-```typescript
-import { tag } from '@defjs/core'
-
-const GormTag = tag.createTagNamespace('gorm')
-const gorm = tag.defineConfig(GormTag)
-
-const Model = struct.object({
-  id: struct.number().tag(gorm('column', 'id'), gorm('primaryKey')),
-})
-```
-
-القواعد:
-
-- داخل نفس النطاق، يتجاوز `value` اللاحق السابق.
-- داخل نفس النطاق ونفس مفتاح `config`، يتجاوز اللاحق السابق.
-- قيمة الإعداد يمكن أن تكون `string | number | boolean` فقط.
-
-### قراءة الوسوم
-
-```typescript
-import { getFieldTag, getFieldTags, tag } from '@defjs/core'
-
-const field = UserBody.shape.name
-const jsonTag = getFieldTag(field, tag.kind.json, 'name')
-// { namespace: JsonTag, value: 'user_name', config: Map() }
-```
-
-## فحص الحقول
-
-يُوسّع `getStructFields` مخطط كائن إلى قائمة حقول قابلة للقراءة، تحتوي على مفتاح الحقل والمخطط الفرعي والوسوم المُميّزة.
+`getStructFields` expands an object struct into a readable field list containing field key, alias, and sub-struct.
 
 ```typescript
 import { getStructFields } from '@defjs/core'
 
 const fields = getStructFields(UserBody)
 // [
-//   { key: 'id', struct: NumberSchema, tags: Map<symbol, FieldTag> },
-//   { key: 'name', struct: StringSchema, tags: Map<symbol, FieldTag> },
+//   { key: 'id', alias: 'user_id', struct: NumberStruct },
+//   { key: 'name', alias: 'user_name', struct: StringStruct },
 // ]
 ```
 
-يُجمع مع `isObjectStruct` للتحقق الآمن من النوع قبل الفحص:
+Combined with `isObjectStruct` for safe type checking before introspection:
 
 ```typescript
 import { isObjectStruct, getStructFields } from '@defjs/core'
 
-if (isObjectStruct(schema)) {
-  for (const field of getStructFields(schema)) {
-    console.log(field.key, field.tags.get(tag.kind.json)?.value)
+if (isObjectStruct(struct)) {
+  for (const field of getStructFields(struct)) {
+    console.log(field.key, field.alias)
   }
 }
 ```

@@ -250,7 +250,7 @@ const client = createClient(
 | `sse.fetch`          | SSE-spezifische `fetch`-Implementierung                                                                                  |
 | `sse.reconnect`      | Wiederverbindungsstrategie: Versuche, Verzögerung, Backoff-Faktor, Jitter, max Verzögerung, eigene Entscheidungsfunktion |
 | `sse.queue`          | Event-Warteschlange: max Kapazität, Overflow-Strategie                                                                   |
-| `sse.onInvalidEvent` | Invalid-Event-Observer (fehlendes Schema oder Validierungsfehler)                                                        |
+| `sse.onInvalidEvent` | Invalid-Event-Observer (fehlendes Struct oder Validierungsfehler)                                                        |
 | `sse.maxBufferSize`  | Limit der zugrunde liegenden Puffergröße (Bytes)                                                                         |
 
 ### WebSocket-Optionen

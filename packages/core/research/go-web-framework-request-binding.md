@@ -265,7 +265,7 @@ Huma 更接近 typed API framework，而不是传统 router。它把整个 reque
 - `RawBody []byte` 可暴露原始 request bytes。
 - path params 永远 required。
 - query/header/cookie 默认 optional。
-- request/response struct 还用于 OpenAPI/JSON Schema。
+- request/response struct 还用于 OpenAPI/JSON Struct。
 
 对 `@defjs/core` 的启发：
 

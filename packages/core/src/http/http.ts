@@ -206,7 +206,7 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
 
   const controller = new AbortController()
 
-  // Fast path: caller already aborted before we did any schema work — skip parseEndpointInput.
+  // Fast path: caller already aborted before we did any struct work — skip parseEndpointInput.
   const requestAbort = config.abort
   if (requestAbort?.aborted) {
     const transportError = createTransportError(requestAbort.reason ?? ERR_ABORTED)
@@ -276,15 +276,15 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
     return fail(httpError, ignoredResponse)
   }
 
-  const schema = resolveOutputSchema(definition.output, response.status)
-  if (!schema) {
+  const struct = resolveOutputStruct(definition.output, response.status)
+  if (!struct) {
     const definitionError = createDefinitionError('UNDECLARED_STATUS', new Error(`Undeclared status: ${response.status}`), settledResponse)
     return fail(definitionError as RequestError<RequestErrorData<TOutput>>, settledResponse)
   }
 
   let parsedBody: unknown
   try {
-    parsedBody = parseStructResponse(schema, response.body, responseType)
+    parsedBody = parseStructResponse(struct, response.body, responseType)
   } catch (error) {
     const definitionError = createDefinitionError('RESPONSE_VALIDATION_FAILED', error, settledResponse)
     return fail(definitionError as RequestError<RequestErrorData<TOutput>>, settledResponse)
@@ -318,14 +318,14 @@ function getHttpErrorMessage(response: HttpResponse<unknown>): string {
   return String(response.error ?? `HTTP ${response.status}`)
 }
 
-function resolveOutputSchema(output: RequestOutputShape, status: number): AnyStruct | undefined {
+function resolveOutputStruct(output: RequestOutputShape, status: number): AnyStruct | undefined {
   const map = normalizeOutputShape(output)
   return map.get(status)
 }
 
-function parseStructResponse(schema: AnyStruct, body: unknown, responseType: HttpResponseType | undefined): unknown {
+function parseStructResponse(struct: AnyStruct, body: unknown, responseType: HttpResponseType | undefined): unknown {
   if (responseType === 'json') {
-    return decodeJson(schema, body)
+    return decodeJson(struct, body)
   }
-  return parseStructValue(schema, body)
+  return parseStructValue(struct, body)
 }

@@ -37,8 +37,8 @@ describe('web socket build helpers', () => {
   })
 
   test('should fill url params with undefined fallback', () => {
-    expect(createWebSocketUrl('http://localhost', '/ws/:id', { id: undefined }, undefined, (p) => p.toString())).toBe(
-      'ws://localhost/ws/undefined',
+    expect(() => createWebSocketUrl('http://localhost', '/ws/:id', { id: undefined }, undefined, (p) => p.toString())).toThrow(
+      'Missing path param: id',
     )
   })
 
@@ -49,8 +49,8 @@ describe('web socket build helpers', () => {
   })
 
   test('should fill url params with empty array', () => {
-    expect(createWebSocketUrl('http://localhost', '/ws/:id', { id: [] }, undefined, (p) => p.toString())).toBe(
-      'ws://localhost/ws/undefined',
+    expect(() => createWebSocketUrl('http://localhost', '/ws/:id', { id: [] }, undefined, (p) => p.toString())).toThrow(
+      'Missing path param: id',
     )
   })
 

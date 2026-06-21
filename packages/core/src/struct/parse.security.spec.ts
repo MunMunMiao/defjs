@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { decodeJson } from './codec/json'
-import { struct, tag } from './index'
+import { decodeJson, encodeJson } from './codec/json'
+import { struct } from './index'
 import { parseStructTuple as parse } from './introspection'
 
 describe('parse.ts prototype pollution defense', () => {
@@ -88,10 +88,45 @@ describe('parse.ts prototype pollution defense', () => {
 
   test('decodeJson ignores inherited wire keys', () => {
     const s = struct.object({
-      name: struct.string().tag(tag.json('user_name')),
+      name: struct.string().alias('user_name'),
     })
     const wire = Object.create({ user_name: 'admin' })
 
     expect(decodeJson(s, wire)).toEqual({ name: '' })
+  })
+
+  test('JSON aliases for dangerous keys do not pollute prototypes', () => {
+    const dangerousStruct = struct.object({
+      constructorValue: struct.string().alias('constructor'),
+      protoValue: struct.string().alias('__proto__'),
+    })
+
+    const encoded = encodeJson(dangerousStruct, { constructorValue: 'ctor', protoValue: 'proto' }) as { [key: string]: unknown }
+    expect(Object.hasOwn(encoded, '__proto__')).toBe(true)
+    expect(Object.hasOwn(encoded, 'constructor')).toBe(true)
+    expect(encoded['__proto__']).toBe('proto')
+    expect(encoded['constructor']).toBe('ctor')
+    expect((Object.prototype as { [key: string]: unknown })['proto']).toBeUndefined()
+
+    const decoded = decodeJson(dangerousStruct, JSON.parse('{"__proto__":"proto","constructor":"ctor"}'))
+    expect(decoded).toEqual({ constructorValue: 'ctor', protoValue: 'proto' })
+    expect(Object.getPrototypeOf(decoded)).toBeNull()
+    expect((Object.prototype as { [key: string]: unknown })['proto']).toBeUndefined()
+  })
+
+  test('keeps dangerous wire keys as own data properties during alias decode', () => {
+    const Payload = struct.object({
+      proto: struct.string().alias('__proto__'),
+      constructorValue: struct.string().alias('constructor'),
+    })
+
+    const raw: { [key: string]: unknown } = Object.create(null)
+    raw['__proto__'] = 'safe'
+    raw['constructor'] = 'value'
+
+    const output = decodeJson(Payload, raw)
+
+    expect(output).toEqual({ proto: 'safe', constructorValue: 'value' })
+    expect(({} as { proto?: string }).proto).toBeUndefined()
   })
 })

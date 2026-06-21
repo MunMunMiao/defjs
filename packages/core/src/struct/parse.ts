@@ -1,4 +1,5 @@
 import { issue } from './errors'
+import { getRequestSections } from './request'
 import { resolveObjectShape } from './shape'
 import { DEFINITION, OMIT } from './symbols'
 import type {
@@ -17,26 +18,26 @@ import type {
   RecordDefinition,
   RequestBodyDefinition,
   RequestDefinition,
-  RuntimeSchema,
-  SchemaDefinition,
-  SchemaIssue,
+  RuntimeStruct,
+  StructDefinition,
+  StructIssue,
   TupleDefinition,
   UnionDefinition,
 } from './types'
 import { cloneValue, expectedType, failure, hasOwnKey, isPlainObject, success } from './utils'
 
-export function parseValue(schema: RuntimeSchema, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
-  const definition = schema[DEFINITION]
+export function parseValue(struct: RuntimeStruct, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
+  const definition = struct[DEFINITION]
 
   if (input === undefined) {
-    return parseMissingValue(schema, path, mode)
+    return parseMissingValue(struct, path, mode)
   }
 
   if (input === null) {
     if (definition.kind === 'null' || definition.flags.nullable) {
       return success(null)
     }
-    return parseMissingValue(schema, path, mode)
+    return parseMissingValue(struct, path, mode)
   }
 
   switch (definition.kind) {
@@ -68,7 +69,7 @@ export function parseValue(schema: RuntimeSchema, input: unknown, path: Path, mo
       return parseLiteralValue(definition, input, path)
 
     case 'object':
-      return parseObjectValue(schema, definition, input, path)
+      return parseObjectValue(struct, definition, input, path)
 
     case 'or':
       return parseUnionValue(definition, input, path)
@@ -90,22 +91,8 @@ export function parseValue(schema: RuntimeSchema, input: unknown, path: Path, mo
   }
 }
 
-function parseMissingValue(schema: RuntimeSchema, path: Path, mode: ParseMode): ParseResult<unknown> {
-  const definition = schema[DEFINITION]
-
-  if (mode === 'field' && definition.flags.optional) {
-    return success(OMIT)
-  }
-
-  if (definition.flags.optional) {
-    return success(undefined)
-  }
-
-  if (definition.flags.nullable || definition.kind === 'null') {
-    return success(null)
-  }
-
-  return success(buildZeroValue(schema, path))
+function parseMissingValue(struct: RuntimeStruct, path: Path, mode: ParseMode): ParseResult<unknown> {
+  return success(resolveMissingValue(struct, path, mode))
 }
 
 function parsePrimitiveValue(
@@ -121,7 +108,7 @@ function parsePrimitiveValue(
 }
 
 function parseEnumValue(definition: EnumDefinition<string | number>, input: unknown, path: Path): ParseResult<unknown> {
-  // Type boundary: enum schemas are defined with string or number literals; by the time we reach this
+  // Type boundary: enum structs are defined with string or number literals; by the time we reach this
   // parser the input has already been validated as non-null/undefined and only enum members can match.
   return definition.values.includes(input as string | number)
     ? success(input)
@@ -132,16 +119,20 @@ function parseLiteralValue(definition: LiteralDefinition<LiteralValue>, input: u
   return Object.is(input, definition.value) ? success(input) : failure(issue(path, 'invalid_literal', definition.expected, input))
 }
 
+function finishParse<T>(issues: StructIssue[], output: T): ParseResult<T> {
+  return issues.length > 0 ? failure(...issues) : success(output)
+}
+
 function parseArrayValue(definition: ArrayDefinition, input: unknown, path: Path): ParseResult<unknown[]> {
   if (!Array.isArray(input)) {
     return failure(issue(path, 'invalid_type', 'array', input))
   }
 
   const output: unknown[] = []
-  const issues: SchemaIssue[] = []
+  const issues: StructIssue[] = []
 
   for (let index = 0; index < input.length; index += 1) {
-    const result = parseValue(definition.item as RuntimeSchema, input[index], [...path, index], 'value')
+    const result = parseValue(definition.item as RuntimeStruct, input[index], [...path, index], 'value')
     if (result.ok) {
       output[index] = result.value
     } else {
@@ -149,11 +140,11 @@ function parseArrayValue(definition: ArrayDefinition, input: unknown, path: Path
     }
   }
 
-  return issues.length > 0 ? failure(...issues) : success(output)
+  return finishParse(issues, output)
 }
 
 function parseObjectValue(
-  schema: RuntimeSchema,
+  struct: RuntimeStruct,
   definition: ObjectDefinition,
   input: unknown,
   path: Path,
@@ -162,13 +153,13 @@ function parseObjectValue(
     return failure(issue(path, 'invalid_type', 'object', input))
   }
 
-  const shape = resolveObjectShape(schema, definition)
+  const shape = resolveObjectShape(struct, definition)
   const output: { [key: string]: unknown } = Object.create(null)
-  const issues: SchemaIssue[] = []
+  const issues: StructIssue[] = []
 
-  for (const [key, itemSchema] of Object.entries(shape)) {
+  for (const [key, itemStruct] of Object.entries(shape)) {
     const hasOwnInput = hasOwnKey(input, key)
-    const result = parseValue(itemSchema as RuntimeSchema, hasOwnInput ? input[key] : undefined, [...path, key], 'field')
+    const result = parseValue(itemStruct as RuntimeStruct, hasOwnInput ? input[key] : undefined, [...path, key], 'field')
 
     if (result.ok) {
       if (result.value !== OMIT) {
@@ -179,10 +170,10 @@ function parseObjectValue(
     }
   }
 
-  return issues.length > 0 ? failure(...issues) : success(output)
+  return finishParse(issues, output)
 }
 
-export function isFieldRequired(itemDefinition: SchemaDefinition): boolean {
+export function isFieldRequired(itemDefinition: StructDefinition): boolean {
   return !itemDefinition.flags.optional && !itemDefinition.flags.nullable
 }
 
@@ -192,10 +183,10 @@ function parseRecordValue(definition: RecordDefinition, input: unknown, path: Pa
   }
 
   const output: { [key: string]: unknown } = Object.create(null)
-  const issues: SchemaIssue[] = []
+  const issues: StructIssue[] = []
 
   for (const [key, value] of Object.entries(input)) {
-    const result = parseValue(definition.value as RuntimeSchema, value, [...path, key], 'field')
+    const result = parseValue(definition.value as RuntimeStruct, value, [...path, key], 'field')
     if (result.ok) {
       if (result.value !== OMIT) {
         output[key] = result.value
@@ -205,7 +196,7 @@ function parseRecordValue(definition: RecordDefinition, input: unknown, path: Pa
     }
   }
 
-  return issues.length > 0 ? failure(...issues) : success(output)
+  return finishParse(issues, output)
 }
 
 function parseRequestValue(definition: RequestDefinition, input: unknown, path: Path): ParseResult<{ [key: string]: unknown }> {
@@ -214,12 +205,13 @@ function parseRequestValue(definition: RequestDefinition, input: unknown, path: 
   }
 
   const output: { [key: string]: unknown } = Object.create(null)
-  const issues: SchemaIssue[] = []
+  const issues: StructIssue[] = []
   const sections = getRequestSections(definition)
 
-  for (const [key, sectionSchema] of sections) {
-    const sectionKey = key as string
-    const result = parseValue(sectionSchema, hasOwnKey(input, sectionKey) ? input[sectionKey] : undefined, [...path, sectionKey], 'field')
+  for (const section of sections) {
+    const sectionKey = section.key
+    const sectionStruct = section.struct
+    const result = parseValue(sectionStruct, hasOwnKey(input, sectionKey) ? input[sectionKey] : undefined, [...path, sectionKey], 'field')
     if (result.ok) {
       if (result.value !== OMIT) {
         output[sectionKey] = result.value
@@ -229,11 +221,11 @@ function parseRequestValue(definition: RequestDefinition, input: unknown, path: 
     }
   }
 
-  return issues.length > 0 ? failure(...issues) : success(output)
+  return finishParse(issues, output)
 }
 
 function parseRequestBodyValue(definition: RequestBodyDefinition, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
-  return parseValue(definition.schema as RuntimeSchema, input, path, mode)
+  return parseValue(definition.struct as RuntimeStruct, input, path, mode)
 }
 
 function parseTupleValue(definition: TupleDefinition, input: unknown, path: Path): ParseResult<unknown[]> {
@@ -242,10 +234,10 @@ function parseTupleValue(definition: TupleDefinition, input: unknown, path: Path
   }
 
   const output: unknown[] = []
-  const issues: SchemaIssue[] = []
+  const issues: StructIssue[] = []
 
   for (let index = 0; index < definition.items.length; index += 1) {
-    const result = parseValue(definition.items[index] as RuntimeSchema, input[index], [...path, index], 'value')
+    const result = parseValue(definition.items[index] as RuntimeStruct, input[index], [...path, index], 'value')
     if (result.ok) {
       output[index] = result.value
     } else {
@@ -253,12 +245,12 @@ function parseTupleValue(definition: TupleDefinition, input: unknown, path: Path
     }
   }
 
-  return issues.length > 0 ? failure(...issues) : success(output)
+  return finishParse(issues, output)
 }
 
 function parseUnionValue(definition: UnionDefinition, input: unknown, path: Path): ParseResult<unknown> {
   for (const option of definition.options) {
-    const result = parseValue(option as RuntimeSchema, input, path, 'value')
+    const result = parseValue(option as RuntimeStruct, input, path, 'value')
     if (result.ok) {
       return result
     }
@@ -278,16 +270,16 @@ function parseDiscriminatedUnionValue(definition: DiscriminatedUnionDefinition, 
     return failure(issue([...path, definition.discriminator], 'invalid_union', definition.expected, value))
   }
 
-  return parseValue(target as RuntimeSchema, input, path, 'value')
+  return parseValue(target as RuntimeStruct, input, path, 'value')
 }
 
 function parseIntersectionValue(definition: IntersectionDefinition, input: unknown, path: Path): ParseResult<unknown> {
-  const leftResult = parseValue(definition.left as RuntimeSchema, input, path, 'value')
+  const leftResult = parseValue(definition.left as RuntimeStruct, input, path, 'value')
   if (!leftResult.ok) {
     return leftResult
   }
 
-  const rightResult = parseValue(definition.right as RuntimeSchema, input, path, 'value')
+  const rightResult = parseValue(definition.right as RuntimeStruct, input, path, 'value')
   if (!rightResult.ok) {
     return rightResult
   }
@@ -298,12 +290,12 @@ function parseIntersectionValue(definition: IntersectionDefinition, input: unkno
   return success(merged)
 }
 
-export function safeZeroValue(schema: RuntimeSchema): unknown {
-  return buildMissingValue(schema, [], 'value')
+export function safeZeroValue(struct: RuntimeStruct): unknown {
+  return resolveMissingValue(struct, [], 'value')
 }
 
-export function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
-  const definition = schema[DEFINITION]
+export function buildZeroValue(struct: RuntimeStruct, path: Path): unknown {
+  const definition = struct[DEFINITION]
 
   switch (definition.kind) {
     case 'any':
@@ -328,8 +320,8 @@ export function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
       return cloneValue(definition.values[0])
 
     case 'intersection': {
-      const leftZero = buildZeroValue(definition.left as RuntimeSchema, path)
-      const rightZero = buildZeroValue(definition.right as RuntimeSchema, path)
+      const leftZero = buildZeroValue(definition.left as RuntimeStruct, path)
+      const rightZero = buildZeroValue(definition.right as RuntimeStruct, path)
       return isPlainObject(leftZero) && isPlainObject(rightZero) ? { ...leftZero, ...rightZero } : rightZero
     }
 
@@ -338,10 +330,10 @@ export function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
 
     case 'object': {
       const output: { [key: string]: unknown } = Object.create(null)
-      const shape = resolveObjectShape(schema, definition)
+      const shape = resolveObjectShape(struct, definition)
 
-      for (const [key, itemSchema] of Object.entries(shape)) {
-        const value = buildMissingValue(itemSchema as RuntimeSchema, [...path, key], 'field')
+      for (const [key, itemStruct] of Object.entries(shape)) {
+        const value = resolveMissingValue(itemStruct as RuntimeStruct, [...path, key], 'field')
         if (value !== OMIT) {
           output[key] = value
         }
@@ -351,18 +343,20 @@ export function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
     }
 
     case 'or':
-      return buildMissingValue(definition.options[0] as RuntimeSchema, path, 'value')
+      return resolveMissingValue(definition.options[0] as RuntimeStruct, path, 'value')
 
     case 'discriminatedUnion':
-      return buildMissingValue(definition.options[0] as RuntimeSchema, path, 'value')
+      return resolveMissingValue(definition.options[0] as RuntimeStruct, path, 'value')
 
     case 'record':
       return {}
 
     case 'request': {
       const output: { [key: string]: unknown } = Object.create(null)
-      for (const [key, sectionSchema] of getRequestSections(definition)) {
-        const value = buildMissingValue(sectionSchema, [...path, key], 'field')
+      for (const section of getRequestSections(definition)) {
+        const key = section.key
+        const sectionStruct = section.struct
+        const value = resolveMissingValue(sectionStruct, [...path, key], 'field')
         if (value !== OMIT) {
           output[key] = value
         }
@@ -371,20 +365,24 @@ export function buildZeroValue(schema: RuntimeSchema, path: Path): unknown {
     }
 
     case 'requestBody':
-      return buildMissingValue(definition.schema as RuntimeSchema, path, 'value')
+      return resolveMissingValue(definition.struct as RuntimeStruct, path, 'value')
 
     case 'tuple': {
       const output: unknown[] = []
       for (let index = 0; index < definition.items.length; index += 1) {
-        output[index] = buildMissingValue(definition.items[index] as RuntimeSchema, [...path, index], 'value')
+        output[index] = resolveMissingValue(definition.items[index] as RuntimeStruct, [...path, index], 'value')
       }
       return output
     }
   }
 }
 
-function buildMissingValue(schema: RuntimeSchema, path: Path, mode: ParseMode): unknown {
-  const definition = schema[DEFINITION]
+function resolveMissingValue(struct: RuntimeStruct, path: Path, mode: ParseMode): unknown {
+  const definition = struct[DEFINITION]
+
+  if (definition.flags.nullable || definition.kind === 'null') {
+    return null
+  }
 
   if (mode === 'field' && definition.flags.optional) {
     return OMIT
@@ -394,28 +392,5 @@ function buildMissingValue(schema: RuntimeSchema, path: Path, mode: ParseMode): 
     return undefined
   }
 
-  if (definition.flags.nullable || definition.kind === 'null') {
-    return null
-  }
-
-  return buildZeroValue(schema, path)
-}
-
-type RequestSectionKey = 'body' | 'headers' | 'path' | 'query'
-
-function getRequestSections(definition: RequestDefinition): [RequestSectionKey, RuntimeSchema][] {
-  const sections: [RequestSectionKey, RuntimeSchema][] = []
-  if (definition.path) {
-    sections.push(['path', definition.path as RuntimeSchema])
-  }
-  if (definition.query) {
-    sections.push(['query', definition.query as RuntimeSchema])
-  }
-  if (definition.headers) {
-    sections.push(['headers', definition.headers as RuntimeSchema])
-  }
-  if (definition.body) {
-    sections.push(['body', definition.body as RuntimeSchema])
-  }
-  return sections
+  return buildZeroValue(struct, path)
 }

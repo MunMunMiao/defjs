@@ -102,7 +102,7 @@ console.log(user.name)
 以下是一個端到端範例，套件含輸入驗證、輸出驗證、錯誤處理與攔截器：
 
 ```typescript
-import { createClient, defineRequest, struct, tag, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
 
 // 1. 建立用戶端
 const client = createClient(
@@ -122,7 +122,7 @@ const createPost = defineRequest({
   input: struct.object({
     title: struct.string(),
     body: struct.string(),
-    'X-Request-ID': tag(struct.string(), { kind: 'header' }),
+    'X-Request-ID': struct.string(),
   }),
   build: (input) => ({
     body: { title: input.title, body: input.body },
@@ -179,11 +179,11 @@ async function createPost() {
 | API                    | 說明                | 典型用法                                                                       |
 | ---------------------- | ------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | 建立請求用戶端      | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | 定義 HTTP 端點      | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserSchema } })` |
+| `defineRequest`        | 定義 HTTP 端點      | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
 | `defineEventStream`    | 定義 SSE 端點       | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | 定義 WebSocket 端點 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | 結構描述建構器      | `struct.object({ id: struct.number() })`                                       |
-| `tag`                  | 欄位後設資料標籤    | `tag(struct.string(), { kind: 'header' })`                                     |
+| `.alias(name)`         | 欄位 wire 名別名    | `struct.string().alias('user_name')`                                           |
 | `withEndpoint`         | 設定基礎 URL        | `withEndpoint('https://api.example.com')`                                      |
 | `withInterceptors`     | 註冊攔截器          | `withInterceptors([...interceptors])`                                          |
 | `withCredentials`      | 啟用跨域憑證        | `withCredentials(true)`                                                        |

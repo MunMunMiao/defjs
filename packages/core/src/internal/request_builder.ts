@@ -1,12 +1,10 @@
-import type { AnyStruct, RequestBodyCodec as StructRequestBodyCodec } from '../struct'
-import type { RequestDefinition } from '../struct/types'
-import { getWireKey } from '../struct/codec/common'
+import type { AnyStruct, RequestBodyDescriptor } from '../struct/types'
+import { mapAliasedObjectFields } from '../struct/codec/common'
 import { encodeValue } from '../struct/encode'
-import { getStructFields } from '../struct/introspection'
+import { resolveStructFields } from '../struct/fields'
 import { resolveObjectShape } from '../struct/shape'
 import { DEFINITION } from '../struct/symbols'
-import { HeaderTag, JsonTag, MultipartTag, QueryTag, UriTag, UrlencodedTag } from '../struct/tag'
-import type { RuntimeSchema, SchemaLike } from '../struct/types'
+import type { RequestDefinition, RuntimeStruct, StructLike } from '../struct/types'
 import { hasOwnKey, isPlainObject } from '../struct/utils'
 import type { HttpRequest } from './http_request'
 import type {
@@ -35,7 +33,7 @@ type BoundSource = {
   readonly [BOUND_SOURCE]: {
     readonly owner: symbol
     readonly path: readonly BoundPathSegment[]
-    readonly schema: RuntimeSchema
+    readonly struct: RuntimeStruct
   }
 }
 
@@ -206,9 +204,9 @@ function createTypedBuildContext<TTransport extends RequestTransport>(
   return createBuildPlanBuilder(plan) as RequestBuildContext<TTransport>
 }
 
-function createTypedBuildInput<TInput extends AnyStruct>(schema: TInput, owner: symbol): RequestBuildInput<TInput> {
-  // Type boundary: createBoundView materializes a runtime proxy from the same schema used by RequestBuildInput's conditional type.
-  return createBoundView(schema as unknown as RuntimeSchema, [], owner) as RequestBuildInput<TInput>
+function createTypedBuildInput<TInput extends AnyStruct>(struct: TInput, owner: symbol): RequestBuildInput<TInput> {
+  // Type boundary: createBoundView materializes a runtime proxy from the same struct used by RequestBuildInput's conditional type.
+  return createBoundView(struct as unknown as RuntimeStruct, [], owner) as RequestBuildInput<TInput>
 }
 
 function buildDefaultRequest<TInput>(input: TInput, options: RequestAutoBuildOptions, transport: RequestTransport): RequestBuild {
@@ -216,7 +214,7 @@ function buildDefaultRequest<TInput>(input: TInput, options: RequestAutoBuildOpt
     return {}
   }
 
-  const runtime = options.input as RuntimeSchema
+  const runtime = options.input as RuntimeStruct
   const definition = runtime[DEFINITION]
 
   if (definition.kind === 'request') {
@@ -235,40 +233,44 @@ function buildRequestShape<TInput>(input: TInput, definition: RequestDefinition,
   const requestInput: { [key: string]: unknown } = isPlainObject(input) ? input : {}
 
   if (definition.path) {
-    setPathParamsState(state, encodeFlatRecord(definition.path as RuntimeSchema, requestInput['path'], 'path'))
+    setPathParamsState(state, encodeFlatRecord(definition.path as RuntimeStruct, requestInput['path'], 'path'))
   }
   if (definition.query) {
-    setQueryParamsState(state, encodeFlatRecord(definition.query as RuntimeSchema, requestInput['query'], 'query'))
+    setQueryParamsState(state, encodeFlatRecord(definition.query as RuntimeStruct, requestInput['query'], 'query'))
   }
   if (definition.headers) {
-    setHeadersState(state, encodeFlatRecord(definition.headers as RuntimeSchema, requestInput['headers'], 'headers'))
+    setHeadersState(state, encodeFlatRecord(definition.headers as RuntimeStruct, requestInput['headers'], 'headers'))
   }
-  if (definition.body) {
-    setRequestShapeBody(state, definition.body as RuntimeSchema, requestInput['body'])
+  if (definition.bodyDescriptor) {
+    setRequestShapeBody(state, definition.bodyDescriptor, requestInput['body'])
   }
 
   assertTransportBuild(state.snapshot, transport)
   return state.snapshot
 }
 
-function setRequestShapeBody(state: RequestBuilderState, bodySchema: RuntimeSchema, bodyValue: unknown): void {
-  const body = resolveRequestBody(bodySchema)
-  switch (body.codec) {
+function setRequestShapeBody(state: RequestBuilderState, descriptor: RequestBodyDescriptor, bodyValue: unknown): void {
+  switch (descriptor.codec) {
     case 'json':
-      setJsonBody(state, encodeKeyedValue(body.schema, bodyValue))
+      setJsonBody(state, encodeKeyedValue(descriptor.struct, bodyValue))
       return
     case 'urlencoded':
-      setFormUrlEncodedBody(state, encodeFlatRecord(body.schema, bodyValue, 'urlencoded'))
+      setFormUrlEncodedBody(state, encodeFlatRecord(descriptor.struct, bodyValue, 'urlencoded'))
       return
     case 'formData':
-      setFormDataBody(state, encodeFlatRecord(body.schema, bodyValue, 'formData') as { [key: string]: RequestFormDataValue })
+      setFormDataBody(state, encodeFlatRecord(descriptor.struct, bodyValue, 'formData') as { [key: string]: RequestFormDataValue })
       return
     case 'text':
-      setTextBody(state, String(encodeValue(body.schema, bodyValue) ?? ''))
+      setTextBody(state, String(encodeValue(descriptor.struct, bodyValue) ?? ''))
       return
-    case 'blob':
+    case 'blob': {
+      const encoded = encodeValue(descriptor.struct, bodyValue) as HttpRequest['body']
+      const contentType = typeof Blob !== 'undefined' && encoded instanceof Blob && encoded.type ? encoded.type : undefined
+      setRawBody(state, encoded, { contentType })
+      return
+    }
     case 'arrayBuffer':
-      setRawBody(state, encodeValue(body.schema, bodyValue) as HttpRequest['body'])
+      setRawBody(state, encodeValue(descriptor.struct, bodyValue) as HttpRequest['body'], { contentType: 'application/octet-stream' })
       return
   }
 }
@@ -464,16 +466,16 @@ function materializeBuildPlan(plan: readonly BuildPlanStep[], input: unknown, st
   }
 }
 
-function createBoundView(schema: RuntimeSchema, path: readonly BoundPathSegment[], owner: symbol): unknown {
-  const definition = schema[DEFINITION]
+function createBoundView(struct: RuntimeStruct, path: readonly BoundPathSegment[], owner: symbol): unknown {
+  const definition = struct[DEFINITION]
   if (definition.kind === 'requestBody') {
-    return createBoundView(definition.schema as RuntimeSchema, path, owner)
+    return createBoundView(definition.struct as RuntimeStruct, path, owner)
   }
 
   const view: { [key: PropertyKey]: unknown } = Object.create(null)
   Object.defineProperty(view, BOUND_SOURCE, {
     enumerable: false,
-    value: { owner, path, schema },
+    value: { owner, path, struct },
   })
 
   if (definition.kind === 'request') {
@@ -484,11 +486,11 @@ function createBoundView(schema: RuntimeSchema, path: readonly BoundPathSegment[
   }
 
   if (definition.kind === 'object') {
-    const shape = resolveObjectShape(schema, definition)
+    const shape = resolveObjectShape(struct, definition)
     for (const [key, field] of Object.entries(shape)) {
       Object.defineProperty(view, key, {
         enumerable: true,
-        get: () => createBoundView(field as RuntimeSchema, [...path, key], owner),
+        get: () => createBoundView(field as RuntimeStruct, [...path, key], owner),
       })
     }
   }
@@ -498,7 +500,7 @@ function createBoundView(schema: RuntimeSchema, path: readonly BoundPathSegment[
       enumerable: false,
       value: (callback: (item: unknown) => unknown) => {
         const itemToken = Symbol('arrayItem')
-        const itemView = createBoundView(definition.item as RuntimeSchema, [itemToken], owner)
+        const itemView = createBoundView(definition.item as RuntimeStruct, [itemToken], owner)
         return {
           [ARRAY_PROJECTION]: {
             itemProjection: callback(itemView),
@@ -516,16 +518,16 @@ function createBoundView(schema: RuntimeSchema, path: readonly BoundPathSegment[
 function defineBoundSection(
   view: { [key: PropertyKey]: unknown },
   key: 'body' | 'headers' | 'path' | 'query',
-  schema: SchemaLike<unknown, unknown, boolean> | undefined,
+  struct: StructLike<unknown, unknown, boolean> | undefined,
   path: readonly BoundPathSegment[],
   owner: symbol,
 ): void {
-  if (!schema) {
+  if (!struct) {
     return
   }
   Object.defineProperty(view, key, {
     enumerable: true,
-    get: () => createBoundView(schema as RuntimeSchema, [...path, key], owner),
+    get: () => createBoundView(struct as RuntimeStruct, [...path, key], owner),
   })
 }
 
@@ -548,7 +550,7 @@ function materializeRecordProjection(
   if (isBoundSource(projection)) {
     const source = projection[BOUND_SOURCE]
     assertBoundOwner(source, owner)
-    return encodeFlatRecord(source.schema, readBoundSource(source, input, scope), target)
+    return encodeFlatRecord(source.struct, readBoundSource(source, input, scope), target)
   }
 
   if (!isPlainObject(projection)) {
@@ -570,7 +572,7 @@ function materializeProjection(projection: unknown, input: unknown, scope: Build
   if (isBoundSource(projection)) {
     const source = projection[BOUND_SOURCE]
     assertBoundOwner(source, owner)
-    return encodeSourceValue(source.schema, readBoundSource(source, input, scope), target)
+    return encodeSourceValue(source.struct, readBoundSource(source, input, scope), target)
   }
 
   if (isArrayProjection(projection)) {
@@ -642,38 +644,25 @@ function assertBoundOwner(source: BoundSource[typeof BOUND_SOURCE], owner: symbo
   }
 }
 
-function encodeSourceValue(schema: RuntimeSchema, value: unknown, target: string): unknown {
+function encodeSourceValue(struct: RuntimeStruct, value: unknown, target: string): unknown {
   if (target === 'json') {
-    return encodeKeyedValue(schema, value)
+    return encodeKeyedValue(struct, value)
   }
-  return encodeValue(schema, value)
+  return encodeValue(struct, value)
 }
 
-function encodeKeyedValue(schema: RuntimeSchema, value: unknown): unknown {
-  return encodeValue(schema, value, {
-    encodeObject(objectStruct, objectValue, encodeChild) {
-      const output: { [key: string]: unknown } = Object.create(null)
-      for (const field of getStructFields(objectStruct)) {
-        if (!hasOwnKey(objectValue, field.key)) {
-          continue
-        }
-        const fieldValue = objectValue[field.key]
-        if (typeof fieldValue === 'undefined') {
-          continue
-        }
-        output[getWireKey(field.key, field.tags.get(JsonTag.kind))] = encodeChild(field.struct as RuntimeSchema, fieldValue)
-      }
-      return output
-    },
+function encodeKeyedValue(struct: RuntimeStruct, value: unknown): unknown {
+  return encodeValue(struct, value, {
+    encodeObject: (objectStruct, objectValue, encodeChild) => mapAliasedObjectFields(objectStruct, objectValue, encodeChild),
   })
 }
 
 function encodeFlatRecord(
-  schema: RuntimeSchema,
+  struct: RuntimeStruct,
   value: unknown,
   target: 'formData' | 'headers' | 'path' | 'query' | 'urlencoded',
 ): { [key: string]: RequestBuildValue } {
-  const definition = schema[DEFINITION]
+  const definition = struct[DEFINITION]
   if (definition.kind !== 'object') {
     throw new Error(`${target} binding expects an object struct`)
   }
@@ -682,17 +671,16 @@ function encodeFlatRecord(
   }
 
   const output: { [key: string]: RequestBuildValue } = Object.create(null)
-  for (const field of getStructFields(schema)) {
+  for (const field of resolveStructFields(struct, definition)) {
     if (!hasOwnKey(value, field.key)) {
       continue
     }
-    const encoded = encodeValue(field.struct as RuntimeSchema, value[field.key])
+    const encoded = encodeValue(field.struct, value[field.key])
     if (typeof encoded === 'undefined') {
       continue
     }
-    const outputKey = getWireKey(field.key, field.tags.get(getFlatTargetTagKind(target)))
-    assertFlatValue(target, outputKey, encoded)
-    output[outputKey] = encoded as RequestBuildValue
+    assertFlatValue(target, field.wireKey, encoded)
+    output[field.wireKey] = encoded as RequestBuildValue
   }
   return output
 }
@@ -732,40 +720,6 @@ function assertSingleBodyValue(kind: 'arrayBuffer' | 'blob', value: unknown): as
 function assertTextBodyValue(value: unknown): asserts value is string {
   if (typeof value !== 'string') {
     throw new Error('text body binding expects a string field')
-  }
-}
-
-function resolveRequestBody(schema: RuntimeSchema): { codec: StructRequestBodyCodec; schema: RuntimeSchema } {
-  const definition = schema[DEFINITION]
-  if (definition.kind === 'requestBody') {
-    return {
-      codec: definition.codec,
-      schema: definition.schema as RuntimeSchema,
-    }
-  }
-  if (definition.kind === 'blob') {
-    return { codec: 'blob', schema }
-  }
-  /* istanbul ignore else -- unreachable: body wrappers are validated at construction time */
-  if (definition.kind === 'arrayBuffer') {
-    return { codec: 'arrayBuffer', schema }
-  }
-  /* istanbul ignore next -- unreachable: struct.request validates the body section at construction time */
-  throw new Error('body binding requires a body wrapper schema')
-}
-
-function getFlatTargetTagKind(target: 'formData' | 'headers' | 'path' | 'query' | 'urlencoded'): symbol {
-  switch (target) {
-    case 'formData':
-      return MultipartTag.kind
-    case 'headers':
-      return HeaderTag.kind
-    case 'path':
-      return UriTag.kind
-    case 'query':
-      return QueryTag.kind
-    case 'urlencoded':
-      return UrlencodedTag.kind
   }
 }
 

@@ -11,7 +11,7 @@
 1. **只内联“为了抽离而抽离”的类型**：使用次数 ≤3、无独立语义、仅是简写或透传的类型。
 2. **保留真正的领域抽象和共享工具**：
    - `ExcludeUnion`、`FnReturn` 等共享工具类型保留。
-   - `WebSocketState`、`EventSchemas`、`SocketSchemas` 等核心领域类型保留。
+   - `WebSocketState`、`EventStructs`、`SocketStructs` 等核心领域类型保留。
    - 复杂的 HTTP 输出推导链虽然要内联中间步骤，但保留最终面向用户的 `RequestSuccessData` / `RequestErrorData`。
 3. **显式编写**：用原始类型表达式、元组字面量、对象字面量直接替换别名，不引入新的工具类型。
 4. **不影响类型推理**：每波修改后必须跑 `tsc --noEmit` 和 `vitest --typecheck`，确保推导结果不变。
@@ -40,9 +40,9 @@
 | -------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `UseRequestBaseConfig`                                         | 展开到 `UseRequestConfig`                                             |
 | `ExpandStatus`                                                 | 展开到 `OutputPairs`                                                  |
-| `OutputPairs`                                                  | 展开到 `SuccessSchemaOf` / `ErrorSchemaOf`                            |
-| `SuccessSchemaOf`                                              | 展开到 `RequestSuccessData`                                           |
-| `ErrorSchemaOf`                                                | 展开到 `RequestErrorData`                                             |
+| `OutputPairs`                                                  | 展开到 `SuccessStructOf` / `ErrorStructOf`                            |
+| `SuccessStructOf`                                              | 展开到 `RequestSuccessData`                                           |
+| `ErrorStructOf`                                                | 展开到 `RequestErrorData`                                             |
 | `RequestDefinitionBase`                                        | 展开到 `RequestDefinitionWithoutBuild` / `RequestDefinitionWithBuild` |
 | `RequestDefinitionWithoutBuild` / `RequestDefinitionWithBuild` | 展开到 `RequestDefinition` 联合类型和 `defineRequest` 重载            |
 | `IsInputOptional`                                              | 展开到 `RequestCommandBuilder` 条件类型                               |
@@ -65,7 +65,7 @@
 | 类型                         | 操作                                                                          |
 | ---------------------------- | ----------------------------------------------------------------------------- |
 | `HttpDispatchCommand`        | 内联为 `HttpCommand<AnyStruct \| undefined, RequestOutputShape \| undefined>` |
-| `EventStreamDispatchCommand` | 内联为 `EventStreamCommand<AnyStruct \| undefined, EventSchemas>`             |
+| `EventStreamDispatchCommand` | 内联为 `EventStreamCommand<AnyStruct \| undefined, EventStructs>`             |
 | `WebSocketDispatchCommand`   | 内联为 `WebSocketCommand<...>`                                                |
 | `HttpCommandEntry`           | 内联为元组 `[command: HttpCommand<...>, options?: HttpExecuteOptions]`        |
 | `EventStreamCommandEntry`    | 内联为元组                                                                    |
@@ -130,4 +130,4 @@ pnpm run test
 - `ExcludeUnion`：分布式条件类型语义，多个模块共享。
 - `FnReturn`：生产代码和大量类型测试共享的函数返回类型提取工具。
 - `WebSocketState`：WebSocket 模块核心领域类型，使用广泛。
-- `EventSchemas` / `SocketSchemas`：SSE / WebSocket 模块核心泛型约束，使用次数极高。
+- `EventStructs` / `SocketStructs`：SSE / WebSocket 模块核心泛型约束，使用次数极高。

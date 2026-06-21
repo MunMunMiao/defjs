@@ -1,6 +1,6 @@
 ---
 title: Struct
-description: Declarative schema definition, type inference, error mapping, and the field tag system.
+description: Declarative struct definition, type inference, error mapping, and the field alias support.
 ---
 
 # 結構描述
@@ -9,12 +9,12 @@ description: Declarative schema definition, type inference, error mapping, and t
 
 ## 基本類型
 
-所有結構描述都透過 `struct` 命名空間建立，支援鏈式呼叫 `.optional()`、`.null()`、`.nullish()` 與 `.tag(...)`。
+所有結構描述都透過 `struct` 命名空間建立，支援鏈式呼叫 `.optional()`、`.null()`、`.nullish()` 與 `.alias(name)`。
 
 ### 純量
 
 ```typescript
-import { struct } from '@defjs/core'
+import { struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -23,7 +23,7 @@ const User = struct.object({
   role: struct.literal('admin'),
 })
 
-type User = struct.Infer<typeof User>
+type User = Infer<typeof User>
 // { id: number; name: string; active: boolean; role: 'admin' }
 ```
 
@@ -95,11 +95,11 @@ const CreateUser = struct.request({
   path: struct.object({ orgId: struct.number() }),
   query: struct.object({ dryRun: struct.boolean().optional() }),
   headers: struct.object({
-    'X-Api-Key': struct.string().tag(tag.header('X-Api-Key')),
+    'X-Api-Key': struct.string().alias('X-Api-Key'),
   }),
   body: struct.json(
     struct.object({
-      name: struct.string().tag(tag.json('user_name')),
+      name: struct.string().alias('user_name'),
     }),
   ),
 })
@@ -109,7 +109,7 @@ const CreateUser = struct.request({
 
 | 套件裝器                   | 編碼               |
 | -------------------------- | ------------------ |
-| `struct.json(schema)`      | `JSON.stringify`   |
+| `struct.json(struct)`      | `JSON.stringify`   |
 | `struct.urlencoded(shape)` | `URLSearchParams`  |
 | `struct.formData(shape)`   | `FormData`         |
 | `struct.text()`            | 純文字             |
@@ -118,7 +118,7 @@ const CreateUser = struct.request({
 
 ## `Infer<T>` 類型推導
 
-`struct.Infer<T>` 提取結構描述的輸出類型。這是你唯一需要掌握類型層級輔助函式。
+`Infer<T>` 提取結構描述的輸出類型。這是你唯一需要掌握類型層級輔助函式。
 
 ```typescript
 const Person = struct.object({
@@ -126,21 +126,21 @@ const Person = struct.object({
   age: struct.number().optional(),
 })
 
-type Person = struct.Infer<typeof Person>
+type Person = Infer<typeof Person>
 // { name: string; age?: number }
 ```
 
 `Infer` 也適用於 `struct.array(...)`、`struct.union(...)`、`struct.request(...)`：
 
 ```typescript
-type Tags = struct.Infer<typeof Tags> // string[]
-type Id = struct.Infer<typeof Id> // string | number
-type Req = struct.Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
+type Tags = Infer<typeof Tags> // string[]
+type Id = Infer<typeof Id> // string | number
+type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
 ```
 
 ## StructError 與錯誤對應
 
-驗證失敗時，執行階段回傳含完整 `SchemaIssue[]` 的 `StructError`。
+驗證失敗時，執行階段回傳含完整 `StructIssue[]` 的 `StructError`。
 
 ```typescript
 import { struct, StructError } from '@defjs/core'
@@ -175,84 +175,43 @@ setErrorMap((issue) => {
 })
 ```
 
-## 標籤系統
+## Field Aliases
 
-標籤是附加在欄位上的後設資料，由編解碼器、請求建構器或外部轉接器讀取。核心提供 6 個內建命名空間：
-
-| 命名空間                | 用途                 | 無引數行為           |
-| ----------------------- | -------------------- | -------------------- |
-| `tag.json()`            | JSON 欄位線上鍵      | 退回欄位名稱         |
-| `tag.urlencoded()`      | URL 編碼欄位線上鍵   | 退回欄位名稱         |
-| `tag.multipart()`       | Multipart 欄位線上鍵 | 退回欄位名稱         |
-| `tag.query(fieldName)`  | 查詢參數線上鍵       | **必須明確提供名稱** |
-| `tag.uri(fieldName)`    | URI 路徑參數線上鍵   | **必須明確提供名稱** |
-| `tag.header(fieldName)` | HTTP 標頭線上鍵      | **必須明確提供名稱** |
-
-### 使用範例
+`.alias(name)` 是唯一內建欄位 wire-name 機制。它只改變 JSON、query、headers、path、urlencoded 和 FormData 編解碼使用的外部 key；不改變 TypeScript 屬性名、輸出類型、request section、body codec，也不會改寫 `build(ctx, input)` 中手寫的物件 key。未設定 alias 的欄位會使用物件欄位名作為 wire key。
 
 ```typescript
-import { struct, tag } from '@defjs/core'
+import { struct } from '@defjs/core'
 
 const UserBody = struct.object({
-  id: struct.number().tag(tag.json('user_id')),
-  name: struct.string().tag(tag.json('user_name')),
-  email: struct.string().tag(tag.header('X-User-Email')),
+  id: struct.number().alias('user_id'),
+  name: struct.string().alias('user_name'),
 })
 ```
 
-### 自訂 Config 標籤
+The same alias is used by JSON, query, path params, headers, urlencoded bodies, and multipart bodies. If the same logical value needs different names in different targets, split the struct or write explicit keys in `build(ctx, input)`.
 
-`tag.defineConfig` 允許第三方函式庫定義自己的命名空間與設定鍵：
+## Field Introspection
 
-```typescript
-import { tag } from '@defjs/core'
-
-const GormTag = tag.createTagNamespace('gorm')
-const gorm = tag.defineConfig(GormTag)
-
-const Model = struct.object({
-  id: struct.number().tag(gorm('column', 'id'), gorm('primaryKey')),
-})
-```
-
-規則：
-
-- 同一命名空間內，後面的 `value` 覆寫前面的 `value`。
-- 同一命名空間且同一 `config` 鍵，後面的值覆寫前面的值。
-- Config 值只能為 `string | number | boolean`。
-
-### 讀取標籤
-
-```typescript
-import { getFieldTag, getFieldTags, tag } from '@defjs/core'
-
-const field = UserBody.shape.name
-const jsonTag = getFieldTag(field, tag.kind.json, 'name')
-// { namespace: JsonTag, value: 'user_name', config: Map() }
-```
-
-## 欄位內省
-
-`getStructFields` 將物件結構描述展開為可讀的欄位列表，套件含欄位鍵、子結構描述與具體化的標籤。
+`getStructFields` expands an object struct into a readable field list containing field key, alias, and sub-struct.
 
 ```typescript
 import { getStructFields } from '@defjs/core'
 
 const fields = getStructFields(UserBody)
 // [
-//   { key: 'id', struct: NumberSchema, tags: Map<symbol, FieldTag> },
-//   { key: 'name', struct: StringSchema, tags: Map<symbol, FieldTag> },
+//   { key: 'id', alias: 'user_id', struct: NumberStruct },
+//   { key: 'name', alias: 'user_name', struct: StringStruct },
 // ]
 ```
 
-與 `isObjectStruct` 搭配，可在內省前進行安全類型檢查：
+Combined with `isObjectStruct` for safe type checking before introspection:
 
 ```typescript
 import { isObjectStruct, getStructFields } from '@defjs/core'
 
-if (isObjectStruct(schema)) {
-  for (const field of getStructFields(schema)) {
-    console.log(field.key, field.tags.get(tag.kind.json)?.value)
+if (isObjectStruct(struct)) {
+  for (const field of getStructFields(struct)) {
+    console.log(field.key, field.alias)
   }
 }
 ```

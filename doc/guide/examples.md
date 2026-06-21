@@ -9,27 +9,27 @@ This page provides copy-paste-ready examples for the most common use cases.
 
 ## REST CRUD
 
-### Define Schemas and Endpoints
+### Define Structs and Endpoints
 
 ```typescript
-import { createClient, defineRequest, struct, tag, withEndpoint, RequestError } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint, RequestError } from '@defjs/core'
 
 // Data models
-const UserSchema = struct.object({
+const UserStruct = struct.object({
   id: struct.number(),
   name: struct.string(),
   email: struct.string(),
 })
 
-const UserListSchema = struct.object({
-  items: struct.array(UserSchema),
+const UserListStruct = struct.object({
+  items: struct.array(UserStruct),
   total: struct.number(),
 })
 
 const CreateUserInput = struct.object({
   name: struct.string(),
   email: struct.string(),
-  role: struct.string().tag(tag.json('role')),
+  role: struct.string().alias('role'),
 })
 
 // Request definitions
@@ -41,7 +41,7 @@ const createUser = defineRequest({
     body: input,
   }),
   output: {
-    201: UserSchema,
+    201: UserStruct,
     400: struct.object({ message: struct.string() }),
   },
 })
@@ -50,7 +50,7 @@ const listUsers = defineRequest({
   method: 'GET',
   path: '/v1/users',
   output: {
-    200: UserListSchema,
+    200: UserListStruct,
   },
 })
 
@@ -58,13 +58,13 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/v1/users/:id',
   input: struct.object({
-    id: struct.number().tag(tag.uri('id')),
+    id: struct.number().alias('id'),
   }),
   build: (input) => ({
     params: { id: input.id },
   }),
   output: {
-    200: UserSchema,
+    200: UserStruct,
     404: struct.object({ message: struct.string() }),
   },
 })
@@ -73,7 +73,7 @@ const updateUser = defineRequest({
   method: 'PUT',
   path: '/v1/users/:id',
   input: struct.object({
-    id: struct.number().tag(tag.uri('id')),
+    id: struct.number().alias('id'),
     name: struct.string(),
     email: struct.string(),
   }),
@@ -82,7 +82,7 @@ const updateUser = defineRequest({
     body: { name: input.name, email: input.email },
   }),
   output: {
-    200: UserSchema,
+    200: UserStruct,
     404: struct.object({ message: struct.string() }),
   },
 })
@@ -91,7 +91,7 @@ const deleteUser = defineRequest({
   method: 'DELETE',
   path: '/v1/users/:id',
   input: struct.object({
-    id: struct.number().tag(tag.uri('id')),
+    id: struct.number().alias('id'),
   }),
   build: (input) => ({
     params: { id: input.id },
@@ -163,7 +163,7 @@ function handleError(error: RequestError<unknown>) {
       console.error('Network error:', error.code, error.message)
       break
     case 'definition':
-      console.error('Schema error:', error.code, error.message)
+      console.error('Struct error:', error.code, error.message)
       break
     case 'http':
       console.error('HTTP error:', error.status, error.message)
@@ -254,7 +254,7 @@ const client = createClient(
 const chatRoom = defineWebSocket({
   path: '/room/:roomId',
   input: struct.object({
-    roomId: struct.string().tag(tag.uri('roomId')),
+    roomId: struct.string().alias('roomId'),
   }),
   build: (input) => ({
     params: { roomId: input.roomId },
@@ -484,11 +484,11 @@ async function loadUser() {
 | `defineRequest({ method, path, input?, build?, output? })`                                  | Define an HTTP endpoint     |
 | `defineEventStream({ path, events, input?, build? })`                                       | Define an SSE endpoint      |
 | `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                            | Define a WebSocket endpoint |
-| `struct.object(shape)`                                                                      | Object schema               |
-| `struct.string()` / `struct.number()` / `struct.boolean()`                                  | Primitive schemas           |
-| `struct.array(item)`                                                                        | Array schema                |
-| `struct.enum(values)`                                                                       | Enum schema                 |
-| `tag.uri()` / `tag.json()` / `tag.query()` / `tag.header()`                                 | Field tags                  |
+| `struct.object(shape)`                                                                      | Object struct               |
+| `struct.string()` / `struct.number()` / `struct.boolean()`                                  | Primitive structs           |
+| `struct.array(item)`                                                                        | Array struct                |
+| `struct.enum(values)`                                                                       | Enum struct                 |
+| `struct.alias(name)                                                                         | Field aliases               |
 | `createHttpInterceptor(fn)` / `createSSEInterceptor(fn)` / `createWebSocketInterceptor(fn)` | Create interceptors         |
 | `basicAuthHttpInterceptor(fn)` / `basicAuthSSEInterceptor(fn)`                              | Built-in Basic Auth         |
 

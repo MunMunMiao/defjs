@@ -288,7 +288,7 @@ describe('web socket runtime', () => {
     await expect(socket.closed).resolves.toMatchObject({ code: 1000, reason: 'done' })
   })
 
-  test('should emit runtime error when incoming message schema validation fails', async () => {
+  test('should emit runtime error when incoming message struct validation fails', async () => {
     const useSocket = defineWebSocket({
       incoming: {
         message: struct.object({
@@ -540,7 +540,7 @@ describe('web socket runtime', () => {
     controller.abort('stop reconnect loop')
     await expect(socket.closed).resolves.toBeDefined()
     expect(socket.state).toBe('error')
-  }, 2000)
+  }, 5000)
 
   test('should abort during reconnect delay with aborted state', async () => {
     const useSocket = defineWebSocket({

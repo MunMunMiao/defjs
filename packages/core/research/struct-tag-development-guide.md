@@ -917,10 +917,10 @@ bun run test:deno
 
 ```sh
 git diff --check
-rg "tag\\.form\\b|schema\\." packages/core/src packages/core/research
+rg "tag\\.form\\b|struct\\." packages/core/src packages/core/research
 ```
 
-其中 `schema` 只允许出现在迁移前旧代码或历史研究说明里，新 `struct` 实现和新示例不应出现旧调用入口。
+其中 `struct` 只允许出现在迁移前旧代码或历史研究说明里，新 `struct` 实现和新示例不应出现旧调用入口。
 
 ---
 

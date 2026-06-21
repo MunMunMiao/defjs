@@ -655,46 +655,46 @@ export type TypedInterceptorFn<T> = (req: HttpRequest, next: HttpInterceptorNext
 // 但业务中间件可能需要知道具体类型
 ```
 
-由于 @defjs/core 的 schema validation 在 handler 之后执行（`http.ts:267-274`），中间件层面只能看到 `HttpResponse<unknown>`。这是正确的设计——中间件不应依赖具体响应类型。
+由于 @defjs/core 的 struct validation 在 handler 之后执行（`http.ts:267-274`），中间件层面只能看到 `HttpResponse<unknown>`。这是正确的设计——中间件不应依赖具体响应类型。
 
-### 6.2 Schema Validation 集成模式
+### 6.2 Struct Validation 集成模式
 
 当前集成点（`http.ts:258-274`）：
 
 ```typescript
-const schema = resolveOutputSchema(endpoint.output, response.status)
-if (!schema) {
+const struct = resolveOutputStruct(endpoint.output, response.status)
+if (!struct) {
   return createDefinitionError('UNDECLARED_STATUS', ...)
 }
 
 let parsedBody: unknown
 try {
-  parsedBody = await parseCompatibleSchema(schema, response.body)
+  parsedBody = await parseCompatibleStruct(struct, response.body)
 } catch (error) {
   return createDefinitionError('RESPONSE_VALIDATION_FAILED', error, settledResponse)
 }
 ```
 
-**中间件与 schema validation 的关系：**
+**中间件与 struct validation 的关系：**
 
-- 中间件在 schema validation **之前**执行
+- 中间件在 struct validation **之前**执行
 - 中间件看到的 `response.body` 是原始数据（string/object/ArrayBuffer）
-- 中间件可以修改 `response.body`，但修改后的数据仍需通过 schema validation
-- 如果中间件需要访问解析后的数据，应在 schema validation 之后执行（即作为最后一个 interceptor）
+- 中间件可以修改 `response.body`，但修改后的数据仍需通过 struct validation
+- 如果中间件需要访问解析后的数据，应在 struct validation 之后执行（即作为最后一个 interceptor）
 
 **建议：** 提供 `afterValidation` 标记或分两阶段 interceptor：
 
 ```typescript
 // 方案：通过 interceptor 注册顺序控制
 // 第一个 interceptor = 最先处理请求，最后处理响应
-// 所以放在数组末尾的 interceptor 会在 schema validation 之后处理响应
+// 所以放在数组末尾的 interceptor 会在 struct validation 之后处理响应
 
 const client = createClient({
   interceptors: [
     // 1. 请求阶段：auth、csrf、rate limit
     bearerAuthInterceptor({ getToken: () => token }),
     rateLimitInterceptor({ capacity: 10, refillRate: 0.01 }),
-    // 2. 响应阶段（洋葱模型逆序）：logging 最后执行，此时 schema 已验证
+    // 2. 响应阶段（洋葱模型逆序）：logging 最后执行，此时 struct 已验证
     loggingInterceptor(),
   ],
 })
@@ -887,7 +887,7 @@ when((req) => req.endpoint.startsWith('/api/admin/'), bearerAuthInterceptor({ ge
 2. 非抛出错误模型，避免 Promise rejection 的不可控传播
 3. 统一的 `HttpRequest` 输入，三种协议（HTTP/SSE/WebSocket）API 一致
 4. `WebSocketSessionLike` 接口避免循环依赖，设计精巧
-5. 与 schema validation 解耦，中间件只处理原始数据
+5. 与 struct validation 解耦，中间件只处理原始数据
 
 **扩展方向优先级：**
 

@@ -11,6 +11,7 @@ import type { HttpContext } from '../internal/context'
 import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
 import { parseEndpointInput } from '../internal/endpoint_input'
 import type { SettledResponse } from '../internal/http_response'
+import { makeResponse, toSettledResponse } from '../internal/http_response'
 import type { RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct, Infer } from '../struct'
 import { decodeJson } from '../struct/codec/json'
@@ -23,9 +24,9 @@ interface UseEventStreamBaseConfig {
   context?: HttpContext
 }
 
-export type EventSchemas = { [key: string]: AnyStruct }
+export type EventStructs = { [key: string]: AnyStruct }
 
-type KnownEventUnion<TEvents extends EventSchemas> = {
+type KnownEventUnion<TEvents extends EventStructs> = {
   [K in keyof TEvents & string as K extends 'default' ? never : K]: {
     data: Infer<TEvents[K]>
     event: K
@@ -36,7 +37,7 @@ type KnownEventUnion<TEvents extends EventSchemas> = {
   ? O[keyof O]
   : never
 
-type DefaultEventUnion<TEvents extends EventSchemas> = 'default' extends keyof TEvents
+type DefaultEventUnion<TEvents extends EventStructs> = 'default' extends keyof TEvents
   ? {
       data: Infer<TEvents['default']>
       event: string
@@ -50,9 +51,9 @@ type DefaultEventUnion<TEvents extends EventSchemas> = 'default' extends keyof T
       retry?: number
     }
 
-export type EventStreamData<TEvents extends EventSchemas> = KnownEventUnion<TEvents> | DefaultEventUnion<TEvents>
+export type EventStreamData<TEvents extends EventStructs> = KnownEventUnion<TEvents> | DefaultEventUnion<TEvents>
 
-interface EventStreamDefinitionBase<TEvents extends EventSchemas = EventSchemas> {
+interface EventStreamDefinitionBase<TEvents extends EventStructs = EventStructs> {
   events: TEvents
   method?: string
   path: string
@@ -60,7 +61,7 @@ interface EventStreamDefinitionBase<TEvents extends EventSchemas = EventSchemas>
 
 type EventStreamDefinitionWithoutBuild<
   TInput extends AnyStruct | undefined = undefined,
-  TEvents extends EventSchemas = EventSchemas,
+  TEvents extends EventStructs = EventStructs,
 > = EventStreamDefinitionBase<TEvents> & {
   build?: never
   input?: TInput
@@ -68,13 +69,13 @@ type EventStreamDefinitionWithoutBuild<
 
 type EventStreamDefinitionWithBuild<
   TInput extends AnyStruct,
-  TEvents extends EventSchemas = EventSchemas,
+  TEvents extends EventStructs = EventStructs,
 > = EventStreamDefinitionBase<TEvents> & {
   build: RequestBuildHandler<TInput, 'sse'>
   input: TInput
 }
 
-export type EventStreamDefinition<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas> =
+export type EventStreamDefinition<TInput extends AnyStruct | undefined = undefined, TEvents extends EventStructs = EventStructs> =
   | EventStreamDefinitionWithoutBuild<TInput, TEvents>
   | (TInput extends AnyStruct ? EventStreamDefinitionWithBuild<TInput, TEvents> : never)
 
@@ -101,7 +102,7 @@ type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [u
     ? true
     : false
 
-export interface EventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas> extends BaseCommand<
+export interface EventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventStructs> extends BaseCommand<
   typeof EVENT_STREAM_COMMAND
 > {
   readonly endpoint: EventStreamEndpoint<TInput, TEvents>
@@ -110,25 +111,25 @@ export interface EventStreamCommand<TInput extends AnyStruct | undefined, TEvent
 
 export type EventStreamExecuteOptions = UseEventStreamBaseConfig & UseCancellationConfig & { signal?: AbortSignal }
 
-export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEvents extends EventSchemas> =
+export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEvents extends EventStructs> =
   IsInputOptional<TInput> extends true
     ? (input?: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
     : (input: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
 
 type EventStreamEndpoint<
   TInput extends AnyStruct | undefined = undefined,
-  TEvents extends EventSchemas = EventSchemas,
+  TEvents extends EventStructs = EventStructs,
 > = EventStreamDefinition<TInput, TEvents> & {
   readonly method: string
 }
 
-export function defineEventStream<TInput extends AnyStruct, TEvents extends EventSchemas = EventSchemas>(
+export function defineEventStream<TInput extends AnyStruct, TEvents extends EventStructs = EventStructs>(
   definition: EventStreamDefinitionWithBuild<TInput, TEvents>,
 ): EventStreamCommandBuilder<TInput, TEvents>
-export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
+export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventStructs = EventStructs>(
   definition: EventStreamDefinitionWithoutBuild<TInput, TEvents>,
 ): EventStreamCommandBuilder<TInput, TEvents>
-export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
+export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventStructs = EventStructs>(
   definition: EventStreamDefinition<TInput, TEvents>,
 ): EventStreamCommandBuilder<TInput, TEvents> {
   const endpoint: EventStreamEndpoint<TInput, TEvents> = {
@@ -154,7 +155,7 @@ function castParsedEventStreamInput<TInput extends AnyStruct | undefined>(value:
   return value as ParsedInput<TInput>
 }
 
-export async function executeEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+export async function executeEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
   clientConfig: ClientConfig,
   command: EventStreamCommand<TInput, TEvents>,
   options?: EventStreamExecuteOptions,
@@ -166,7 +167,7 @@ export async function executeEventStreamCommand<TInput extends AnyStruct | undef
   return runEventStreamCommand(clientConfig, endpoint, input, config, controller, state)
 }
 
-async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
   clientConfig: ClientConfig,
   endpoint: EventStreamEndpoint<TInput, TEvents>,
   input: EndpointInput<TInput> | undefined,
@@ -183,7 +184,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
     return [definitionError, undefined, undefined]
   }
 
-  // Fast path: caller already aborted before we did any schema work.
+  // Fast path: caller already aborted before we did any struct work.
   if (config.abort?.aborted) {
     /* istanbul ignore next -- unreachable: AbortController always sets a default reason */
     const transportError = createTransportError(config.abort.reason ?? ERR_ABORTED)
@@ -273,22 +274,22 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
   }
 }
 
-async function transformStreamMessage<TEvents extends EventSchemas>(
+async function transformStreamMessage<TEvents extends EventStructs>(
   events: TEvents,
   message: EventStreamMessage,
   onInvalidEvent?: (context: {
-    reason: 'missing-schema' | 'validation-failed'
+    reason: 'missing-struct' | 'validation-failed'
     message: { id: string; event: string; data: string; retry?: number }
     cause?: unknown
   }) => void | Promise<void>,
 ): Promise<EventStreamData<TEvents> | undefined> {
   const eventName = message.event || 'message'
-  const eventSchema = resolveEventSchema(events, eventName)
+  const eventStruct = resolveEventStruct(events, eventName)
   const rawData = decodeEventData(message.data)
 
-  if (!eventSchema) {
+  if (!eventStruct) {
     await notifyInvalidEvent(onInvalidEvent, {
-      reason: 'missing-schema',
+      reason: 'missing-struct',
       message: {
         id: message.id || '',
         event: eventName,
@@ -301,11 +302,11 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
 
   try {
     return {
-      data: await parseEventData(eventSchema, rawData),
+      data: await parseEventData(eventStruct, rawData),
       event: eventName,
       id: message.id || undefined,
       retry: message.retry,
-      // Type boundary: parseEventData validates against the resolved event schema; the shape matches EventStreamData<TEvents>.
+      // Type boundary: parseEventData validates against the resolved event struct; the shape matches EventStreamData<TEvents>.
     } as EventStreamData<TEvents>
   } catch (error) {
     await notifyInvalidEvent(onInvalidEvent, {
@@ -325,13 +326,13 @@ async function transformStreamMessage<TEvents extends EventSchemas>(
 async function notifyInvalidEvent(
   onInvalidEvent:
     | ((context: {
-        reason: 'missing-schema' | 'validation-failed'
+        reason: 'missing-struct' | 'validation-failed'
         message: { id: string; event: string; data: string; retry?: number }
         cause?: unknown
       }) => void | Promise<void>)
     | undefined,
   context: {
-    reason: 'missing-schema' | 'validation-failed'
+    reason: 'missing-struct' | 'validation-failed'
     message: { id: string; event: string; data: string; retry?: number }
     cause?: unknown
   },
@@ -347,7 +348,7 @@ async function notifyInvalidEvent(
   }
 }
 
-function resolveEventSchema<TEvents extends EventSchemas>(events: TEvents, eventName: string): AnyStruct | undefined {
+function resolveEventStruct<TEvents extends EventStructs>(events: TEvents, eventName: string): AnyStruct | undefined {
   const exact = events[eventName]
   if (exact) {
     return exact
@@ -361,8 +362,8 @@ function resolveEventSchema<TEvents extends EventSchemas>(events: TEvents, event
   return undefined
 }
 
-function parseEventData(schema: AnyStruct, data: unknown): unknown {
-  return decodeJson(schema, data)
+function parseEventData(struct: AnyStruct, data: unknown): unknown {
+  return decodeJson(struct, data)
 }
 
 function decodeEventData(data: string): unknown {
@@ -386,11 +387,12 @@ function normalizeOpenInfo(open?: {
   }
 
   return {
-    response: {
-      body: null,
-      ...open.response,
-      ok: open.response.status >= 200 && open.response.status < 300,
-    },
+    response: toSettledResponse(
+      makeResponse({
+        body: null,
+        ...open.response,
+      }),
+    ),
     url: open.url,
   }
 }

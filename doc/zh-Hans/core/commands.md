@@ -72,15 +72,15 @@ const command = ListUsers() // 无需参数
 ```typescript
 // 数组形式（推荐）
 output: [
-  { status: 200, body: UserSchema },
-  { status: [401, 403], body: AuthErrorSchema },
+  { status: 200, body: UserStruct },
+  { status: [401, 403], body: AuthErrorStruct },
 ]
 
 // 对象形式
 output: {
-  200: UserSchema,
-  '401': AuthErrorSchema,
-  '403': AuthErrorSchema,
+  200: UserStruct,
+  '401': AuthErrorStruct,
+  '403': AuthErrorStruct,
 }
 ```
 

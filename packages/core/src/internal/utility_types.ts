@@ -6,7 +6,7 @@
  * utility-type library. Only two helpers remain:
  *
  * - `ExcludeUnion`: distributive union filtering used by the struct core types.
- * - `FnReturn`: return-type extraction used for recursive schema types and
+ * - `FnReturn`: return-type extraction used for recursive struct types and
  *   cross-runtime timer handles where writing the type by hand is error-prone.
  */
 

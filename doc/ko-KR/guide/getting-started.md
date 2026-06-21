@@ -102,7 +102,7 @@ console.log(user.name)
 입력 검증, 출력 검증, 오류 처리, 인터셉터를 포함한 엔드투엔드 예제예요:
 
 ```typescript
-import { createClient, defineRequest, struct, tag, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
 
 // 1. 클라이언트 생성
 const client = createClient(
@@ -122,7 +122,7 @@ const createPost = defineRequest({
   input: struct.object({
     title: struct.string(),
     body: struct.string(),
-    'X-Request-ID': tag(struct.string(), { kind: 'header' }),
+    'X-Request-ID': struct.string(),
   }),
   build: (input) => ({
     body: { title: input.title, body: input.body },
@@ -179,11 +179,11 @@ async function createPost() {
 | API                    | 설명                      | 일반적인 사용법                                                                |
 | ---------------------- | ------------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | 요청 클라이언트 생성      | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | HTTP 엔드포인트 정의      | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserSchema } })` |
+| `defineRequest`        | HTTP 엔드포인트 정의      | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
 | `defineEventStream`    | SSE 엔드포인트 정의       | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | WebSocket 엔드포인트 정의 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | 스키마 빌더               | `struct.object({ id: struct.number() })`                                       |
-| `tag`                  | 필드 메타데이터 태그      | `tag(struct.string(), { kind: 'header' })`                                     |
+| `.alias(name)`         | 필드 wire 이름 별칭       | `struct.string().alias('user_name')`                                           |
 | `withEndpoint`         | 기본 URL 설정             | `withEndpoint('https://api.example.com')`                                      |
 | `withInterceptors`     | 인터셉터 등록             | `withInterceptors([...interceptors])`                                          |
 | `withCredentials`      | 교차 출처 인증 정보 포함  | `withCredentials(true)`                                                        |

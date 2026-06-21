@@ -1,5 +1,6 @@
 import { DEFINITION } from './symbols'
-import type { ParseFailure, ParseSuccess, Path, RuntimeSchema, SchemaDefinition, SchemaIssue } from './types'
+import { resolveRuntimeStruct } from './shape'
+import type { ParseFailure, ParseSuccess, Path, RuntimeStruct, StructDefinition, StructIssue, StructLike } from './types'
 
 export function success<T>(value: T): ParseSuccess<T> {
   return {
@@ -8,20 +9,20 @@ export function success<T>(value: T): ParseSuccess<T> {
   }
 }
 
-export function failure(...issues: SchemaIssue[]): ParseFailure {
+export function failure(...issues: StructIssue[]): ParseFailure {
   return {
     issues,
     ok: false,
   }
 }
 
-export function expectedType(definition: SchemaDefinition): string {
+export function expectedType(definition: StructDefinition): string {
   switch (definition.kind) {
     case 'any':
       return 'any'
 
     case 'array':
-      return `array<${expectedType((definition.item as RuntimeSchema)[DEFINITION])}>`
+      return `array<${expectedType((definition.item as RuntimeStruct)[DEFINITION])}>`
 
     case 'arrayBuffer':
       return 'ArrayBuffer'
@@ -43,19 +44,19 @@ export function expectedType(definition: SchemaDefinition): string {
       return definition.expected
 
     case 'intersection':
-      return `${expectedType((definition.left as RuntimeSchema)[DEFINITION])} & ${expectedType((definition.right as RuntimeSchema)[DEFINITION])}`
+      return `${expectedType((definition.left as RuntimeStruct)[DEFINITION])} & ${expectedType((definition.right as RuntimeStruct)[DEFINITION])}`
 
     case 'object':
       return 'object'
 
     case 'or':
-      return definition.options.map((option) => expectedType((option as RuntimeSchema)[DEFINITION])).join(' | ')
+      return definition.options.map((option) => expectedType((option as RuntimeStruct)[DEFINITION])).join(' | ')
 
     case 'discriminatedUnion':
       return definition.expected
 
     case 'record':
-      return `record<${expectedType((definition.value as RuntimeSchema)[DEFINITION])}>`
+      return `record<${expectedType((definition.value as RuntimeStruct)[DEFINITION])}>`
 
     case 'request':
       return 'request'
@@ -69,6 +70,17 @@ export function expectedType(definition: SchemaDefinition): string {
     case 'unknown':
       return 'unknown'
   }
+}
+
+export function isObjectIntersectionStruct(struct: StructLike<unknown, unknown, boolean>): boolean {
+  const definition = resolveRuntimeStruct(struct)[DEFINITION]
+  if (definition.kind === 'object') {
+    return true
+  }
+  if (definition.kind === 'intersection') {
+    return isObjectIntersectionStruct(definition.left) && isObjectIntersectionStruct(definition.right)
+  }
+  return false
 }
 
 export function formatPath(path: Path): string {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { decodeJson } from './codec/json'
-import { StructError, struct, tag } from './index'
+import { StructError, struct } from './index'
 import { parseStructTuple as parse } from './introspection'
 
 describe('parse.ts object and composite values', () => {
@@ -32,39 +32,54 @@ describe('parse.ts object and composite values', () => {
     })
   })
 
-  test('keeps optional, null and nullish behavior distinct', () => {
-    const requestSchema = struct.object({
-      locale: struct.string().optional(),
-      timezone: struct.string().nullish(),
-      theme: struct.string().null(),
+  test('keeps Go-style missing, optional, nullable, nullish, and zero-value policy', () => {
+    const shape = struct.object({
+      name: struct.string(),
+      age: struct.number(),
+      active: struct.boolean(),
+      note: struct.string().optional(),
+      nickname: struct.string().null(),
+      bio: struct.string().nullish(),
+      empty: struct.null(),
+      tags: struct.array(struct.string()),
     })
 
-    const [err1, val1] = parse(requestSchema, {})
-    if (err1) {
-      throw err1
-    }
-    expect(val1).toEqual({
-      theme: null,
+    const [error, value] = parse(shape, {})
+
+    expect(error).toBeNull()
+    expect(value).toEqual({
+      active: false,
+      age: 0,
+      bio: null,
+      empty: null,
+      name: '',
+      nickname: null,
+      tags: [],
     })
-    const [err2, val2] = parse(requestSchema, { timezone: null })
-    if (err2) {
-      throw err2
-    }
-    expect(val2).toEqual({
-      theme: null,
-      timezone: null,
-    })
-    const [err3] = parse(requestSchema, { theme: 'dark' })
-    expect(err3).toBeNull()
+    expect(Object.hasOwn(value, 'note')).toBe(false)
+  })
+
+  test('keeps value-type null inputs on the zero-value path', () => {
+    const [stringErr, stringValue] = parse(struct.string(), null)
+    expect(stringErr).toBeNull()
+    expect(stringValue).toBe('')
+
+    const [bigintErr, bigintValue] = parse(struct.bigint(), null)
+    expect(bigintErr).toBeNull()
+    expect(bigintValue).toBe(0n)
+
+    const [numberErr, numberValue] = parse(struct.bigint(), 42)
+    expect(numberErr).toBeInstanceOf(StructError)
+    expect(numberValue).toBe(0n)
   })
 
   test('maps tagged json input key without changing output key', () => {
-    const querySchema = struct.object({
-      pageSize: struct.number().tag(tag.json('page_size')),
+    const queryStruct = struct.object({
+      pageSize: struct.number().alias('page_size'),
       page: struct.number(),
     })
 
-    const val = decodeJson(querySchema, { page: 1, page_size: 50 })
+    const val = decodeJson(queryStruct, { page: 1, page_size: 50 })
     expect(val).toEqual({
       page: 1,
       pageSize: 50,
@@ -72,7 +87,7 @@ describe('parse.ts object and composite values', () => {
   })
 
   test('passes through any and unknown values', () => {
-    const uploadSchema = struct.object({
+    const uploadStruct = struct.object({
       metadata: struct.any(),
       raw: struct.unknown(),
     })
@@ -80,7 +95,7 @@ describe('parse.ts object and composite values', () => {
     const raw = 'raw body'
     const metadata = ['skip', 'validation']
 
-    const [err1, val1] = parse(uploadSchema, { metadata, raw })
+    const [err1, val1] = parse(uploadStruct, { metadata, raw })
     if (err1) {
       throw err1
     }
@@ -220,6 +235,20 @@ describe('parse.ts object and composite values', () => {
     expect(val).toEqual({
       'x-request-id': 'trace-2',
     })
+  })
+
+  test('keeps request section output order path query headers body', () => {
+    const Input = struct.request({
+      body: struct.json(struct.object({ name: struct.string() })),
+      headers: struct.object({ trace: struct.string() }),
+      path: struct.object({ id: struct.string() }),
+      query: struct.object({ page: struct.number() }),
+    })
+
+    const [error, value] = parse(Input, {})
+
+    expect(error).toBeNull()
+    expect(Object.keys(value)).toEqual(['path', 'query', 'headers', 'body'])
   })
 
   test('drops unknown keys as the only object parse policy', () => {

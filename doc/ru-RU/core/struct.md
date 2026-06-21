@@ -1,6 +1,6 @@
 ---
 title: Struct
-description: Declarative schema definition, type inference, error mapping, and the field tag system.
+description: Declarative struct definition, type inference, error mapping, and the field alias support.
 ---
 
 # Struct
@@ -9,12 +9,12 @@ description: Declarative schema definition, type inference, error mapping, and t
 
 ## Примитивные типы
 
-Все схемы создаются через неймспейс `struct`, поддерживающий цепочечные вызовы `.optional()`, `.null()`, `.nullish()` и `.tag(...)`.
+Все схемы создаются через неймспейс `struct`, поддерживающий цепочечные вызовы `.optional()`, `.null()`, `.nullish()` и `.alias(name)`.
 
 ### Скаляры
 
 ```typescript
-import { struct } from '@defjs/core'
+import { struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -23,7 +23,7 @@ const User = struct.object({
   role: struct.literal('admin'),
 })
 
-type User = struct.Infer<typeof User>
+type User = Infer<typeof User>
 // { id: number; name: string; active: boolean; role: 'admin' }
 ```
 
@@ -95,11 +95,11 @@ const CreateUser = struct.request({
   path: struct.object({ orgId: struct.number() }),
   query: struct.object({ dryRun: struct.boolean().optional() }),
   headers: struct.object({
-    'X-Api-Key': struct.string().tag(tag.header('X-Api-Key')),
+    'X-Api-Key': struct.string().alias('X-Api-Key'),
   }),
   body: struct.json(
     struct.object({
-      name: struct.string().tag(tag.json('user_name')),
+      name: struct.string().alias('user_name'),
     }),
   ),
 })
@@ -109,7 +109,7 @@ const CreateUser = struct.request({
 
 | Обертка                    | Кодировка          |
 | -------------------------- | ------------------ |
-| `struct.json(schema)`      | `JSON.stringify`   |
+| `struct.json(struct)`      | `JSON.stringify`   |
 | `struct.urlencoded(shape)` | `URLSearchParams`  |
 | `struct.formData(shape)`   | `FormData`         |
 | `struct.text()`            | Plain text         |
@@ -118,7 +118,7 @@ const CreateUser = struct.request({
 
 ## Вывод типов `Infer<T>`
 
-`struct.Infer<T>` извлекает выходной тип схемы. Это единственный типовой помощник, который нужно освоить.
+`Infer<T>` извлекает выходной тип схемы. Это единственный типовой помощник, который нужно освоить.
 
 ```typescript
 const Person = struct.object({
@@ -126,21 +126,21 @@ const Person = struct.object({
   age: struct.number().optional(),
 })
 
-type Person = struct.Infer<typeof Person>
+type Person = Infer<typeof Person>
 // { name: string; age?: number }
 ```
 
 `Infer` также работает для `struct.array(...)`, `struct.union(...)`, `struct.request(...)`:
 
 ```typescript
-type Tags = struct.Infer<typeof Tags> // string[]
-type Id = struct.Infer<typeof Id> // string | number
-type Req = struct.Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
+type Tags = Infer<typeof Tags> // string[]
+type Id = Infer<typeof Id> // string | number
+type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
 ```
 
 ## StructError и отображение ошибок
 
-При валидационном сбое рантайм возвращает `StructError`, содержащий полный `SchemaIssue[]`.
+При валидационном сбое рантайм возвращает `StructError`, содержащий полный `StructIssue[]`.
 
 ```typescript
 import { struct, StructError } from '@defjs/core'
@@ -175,84 +175,43 @@ setErrorMap((issue) => {
 })
 ```
 
-## Система тегов
+## Field Aliases
 
-Теги — это метаданные, прикреплённые к полям, читаемые кодеками, request builders или внешними адаптерами. Ядро предоставляет 6 встроенных неймспейсов:
-
-| Неймспейс               | Назначение                   | Поведение без аргументов     |
-| ----------------------- | ---------------------------- | ---------------------------- |
-| `tag.json()`            | Wire-ключ JSON-поля          | Fallback на имя поля         |
-| `tag.urlencoded()`      | Wire-ключ URL-encoded поля   | Fallback на имя поля         |
-| `tag.multipart()`       | Wire-ключ multipart поля     | Fallback на имя поля         |
-| `tag.query(fieldName)`  | Wire-ключ query-параметра    | **Имя нужно указывать явно** |
-| `tag.uri(fieldName)`    | Wire-ключ URI path-параметра | **Имя нужно указывать явно** |
-| `tag.header(fieldName)` | Wire-ключ HTTP-заголовка     | **Имя нужно указывать явно** |
-
-### Пример использования
+`.alias(name)` — единственный встроенный механизм field wire-name. Он меняет только внешний key, используемый при кодировании/декодировании JSON, query, headers, path, urlencoded и FormData; он не меняет имя свойства TypeScript, выходной тип, request section, body codec или ключи, явно записанные в `build(ctx, input)`. Поля без alias используют свой object field key.
 
 ```typescript
-import { struct, tag } from '@defjs/core'
+import { struct } from '@defjs/core'
 
 const UserBody = struct.object({
-  id: struct.number().tag(tag.json('user_id')),
-  name: struct.string().tag(tag.json('user_name')),
-  email: struct.string().tag(tag.header('X-User-Email')),
+  id: struct.number().alias('user_id'),
+  name: struct.string().alias('user_name'),
 })
 ```
 
-### Пользовательский Config Tag
+The same alias is used by JSON, query, path params, headers, urlencoded bodies, and multipart bodies. If the same logical value needs different names in different targets, split the struct or write explicit keys in `build(ctx, input)`.
 
-`tag.defineConfig` позволяет сторонним библиотекам определять свой неймспейс и config-ключ:
+## Field Introspection
 
-```typescript
-import { tag } from '@defjs/core'
-
-const GormTag = tag.createTagNamespace('gorm')
-const gorm = tag.defineConfig(GormTag)
-
-const Model = struct.object({
-  id: struct.number().tag(gorm('column', 'id'), gorm('primaryKey')),
-})
-```
-
-Правила:
-
-- Внутри одного неймспейса поздний `value` переопределяет ранний `value`.
-- Внутри одного неймспейса и одного ключа `config` поздний value переопределяет ранний.
-- Config-значение может быть только `string | number | boolean`.
-
-### Чтение тегов
-
-```typescript
-import { getFieldTag, getFieldTags, tag } from '@defjs/core'
-
-const field = UserBody.shape.name
-const jsonTag = getFieldTag(field, tag.kind.json, 'name')
-// { namespace: JsonTag, value: 'user_name', config: Map() }
-```
-
-## Интроспекция полей
-
-`getStructFields` разворачивает объектную схему в читаемый список полей, содержащий ключ поля, под-схему и материализованные теги.
+`getStructFields` expands an object struct into a readable field list containing field key, alias, and sub-struct.
 
 ```typescript
 import { getStructFields } from '@defjs/core'
 
 const fields = getStructFields(UserBody)
 // [
-//   { key: 'id', struct: NumberSchema, tags: Map<symbol, FieldTag> },
-//   { key: 'name', struct: StringSchema, tags: Map<symbol, FieldTag> },
+//   { key: 'id', alias: 'user_id', struct: NumberStruct },
+//   { key: 'name', alias: 'user_name', struct: StringStruct },
 // ]
 ```
 
-Вместе с `isObjectStruct` для безопасной проверки типа перед интроспекцией:
+Combined with `isObjectStruct` for safe type checking before introspection:
 
 ```typescript
 import { isObjectStruct, getStructFields } from '@defjs/core'
 
-if (isObjectStruct(schema)) {
-  for (const field of getStructFields(schema)) {
-    console.log(field.key, field.tags.get(tag.kind.json)?.value)
+if (isObjectStruct(struct)) {
+  for (const field of getStructFields(struct)) {
+    console.log(field.key, field.alias)
   }
 }
 ```

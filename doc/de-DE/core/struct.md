@@ -1,20 +1,20 @@
 ---
 title: Struct
-description: Declarative schema definition, type inference, error mapping, and the field tag system.
+description: Declarative struct definition, type inference, error mapping, and the field alias support.
 ---
 
 # Struct
 
-`@defjs/core` bietet eine leichtgewichtige Struct-Fassade zum Deklarieren von Schemata, Validieren von Inputs und Inferieren von Typen. Das Design-Intent ist modelliert nach Gos `encoding/json`: Zero-Value-Fallback, Akzeptieren partieller Input und stabiles, vorhersagbares Laufzeitverhalten.
+`@defjs/core` bietet eine leichtgewichtige Struct-Fassade zum Deklarieren von Structta, Validieren von Inputs und Inferieren von Typen. Das Design-Intent ist modelliert nach Gos `encoding/json`: Zero-Value-Fallback, Akzeptieren partieller Input und stabiles, vorhersagbares Laufzeitverhalten.
 
 ## Primitive Typen
 
-Alle Schemata werden über den `struct`-Namespace erstellt, unterstützt Chain-Calls `.optional()`, `.null()`, `.nullish()` und `.tag(...)`.
+Alle Structta werden über den `struct`-Namespace erstellt, unterstützt Chain-Calls `.optional()`, `.null()`, `.nullish()` und `.alias(name)`.
 
 ### Skalare
 
 ```typescript
-import { struct } from '@defjs/core'
+import { struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -23,7 +23,7 @@ const User = struct.object({
   role: struct.literal('admin'),
 })
 
-type User = struct.Infer<typeof User>
+type User = Infer<typeof User>
 // { id: number; name: string; active: boolean; role: 'admin' }
 ```
 
@@ -86,7 +86,7 @@ const Event = struct.discriminatedUnion('kind', [
 ])
 ```
 
-## Request-Schemata
+## Request-Structta
 
 `struct.request(...)` organisiert `path`, `query`, `headers` und `body` in eine einzelne Input-Struktur für automatischen HTTP-Request-Build durch den Endpoint.
 
@@ -95,11 +95,11 @@ const CreateUser = struct.request({
   path: struct.object({ orgId: struct.number() }),
   query: struct.object({ dryRun: struct.boolean().optional() }),
   headers: struct.object({
-    'X-Api-Key': struct.string().tag(tag.header('X-Api-Key')),
+    'X-Api-Key': struct.string().alias('X-Api-Key'),
   }),
   body: struct.json(
     struct.object({
-      name: struct.string().tag(tag.json('user_name')),
+      name: struct.string().alias('user_name'),
     }),
   ),
 })
@@ -109,7 +109,7 @@ Body-Wrapper bestimmen Transport-Encoding:
 
 | Wrapper                    | Encoding           |
 | -------------------------- | ------------------ |
-| `struct.json(schema)`      | `JSON.stringify`   |
+| `struct.json(struct)`      | `JSON.stringify`   |
 | `struct.urlencoded(shape)` | `URLSearchParams`  |
 | `struct.formData(shape)`   | `FormData`         |
 | `struct.text()`            | Plain text         |
@@ -118,7 +118,7 @@ Body-Wrapper bestimmen Transport-Encoding:
 
 ## `Infer<T>` Typ-Inferenz
 
-`struct.Infer<T>` extrahiert den Output-Typ eines Schemas. Es ist der einzige Typ-Level-Helper, den du beherrschen musst.
+`Infer<T>` extrahiert den Output-Typ eines Structs. Es ist der einzige Typ-Level-Helper, den du beherrschen musst.
 
 ```typescript
 const Person = struct.object({
@@ -126,21 +126,21 @@ const Person = struct.object({
   age: struct.number().optional(),
 })
 
-type Person = struct.Infer<typeof Person>
+type Person = Infer<typeof Person>
 // { name: string; age?: number }
 ```
 
 `Infer` funktioniert auch für `struct.array(...)`, `struct.union(...)`, `struct.request(...)`:
 
 ```typescript
-type Tags = struct.Infer<typeof Tags> // string[]
-type Id = struct.Infer<typeof Id> // string | number
-type Req = struct.Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
+type Tags = Infer<typeof Tags> // string[]
+type Id = Infer<typeof Id> // string | number
+type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
 ```
 
 ## StructError und Error-Mapping
 
-Falls Validierung fehlschlägt, gibt die Laufzeit `StructError` zurück, enthaltend ein komplettes `SchemaIssue[]`.
+Falls Validierung fehlschlägt, gibt die Laufzeit `StructError` zurück, enthaltend ein komplettes `StructIssue[]`.
 
 ```typescript
 import { struct, StructError } from '@defjs/core'
@@ -175,84 +175,43 @@ setErrorMap((issue) => {
 })
 ```
 
-## Tag-System
+## Field Aliases
 
-Tags sind Metadaten, die an Felder angehängt werden, von Codecs, Request-Buildern oder externen Adaptern gelesen. Das Core bietet 6 eingebaute Namespaces:
-
-| Namespace               | Zweck                       | No-Arg-Verhalten                |
-| ----------------------- | --------------------------- | ------------------------------- |
-| `tag.json()`            | JSON-Feld-Wire-Key          | Fällt auf Feldnamen zurück      |
-| `tag.urlencoded()`      | URL-encoded-Feld-Wire-Key   | Fällt auf Feldnamen zurück      |
-| `tag.multipart()`       | Multipart-Feld-Wire-Key     | Fällt auf Feldnamen zurück      |
-| `tag.query(fieldName)`  | Query-Parameter-Wire-Key    | **Muss explizit Namen angeben** |
-| `tag.uri(fieldName)`    | URI-Path-Parameter-Wire-Key | **Muss explizit Namen angeben** |
-| `tag.header(fieldName)` | HTTP-Header-Wire-Key        | **Muss explizit Namen angeben** |
-
-### Nutzungsbeispiel
+`.alias(name)` ist der einzige eingebaute Mechanismus für Field-Wire-Names. Es ändert den externen Key, den JSON-, Query-, Headers-, Path-, urlencoded- und FormData-Encoding/Decoding verwenden; es ändert nicht den TypeScript-Property-Namen, den Output-Typ, die Request-Section, den Body-Codec oder explizit in `build(ctx, input)` geschriebene Keys. Felder ohne Alias verwenden ihren Object-Field-Key.
 
 ```typescript
-import { struct, tag } from '@defjs/core'
+import { struct } from '@defjs/core'
 
 const UserBody = struct.object({
-  id: struct.number().tag(tag.json('user_id')),
-  name: struct.string().tag(tag.json('user_name')),
-  email: struct.string().tag(tag.header('X-User-Email')),
+  id: struct.number().alias('user_id'),
+  name: struct.string().alias('user_name'),
 })
 ```
 
-### Custom-Config-Tag
+The same alias is used by JSON, query, path params, headers, urlencoded bodies, and multipart bodies. If the same logical value needs different names in different targets, split the struct or write explicit keys in `build(ctx, input)`.
 
-`tag.defineConfig` erlaubt Drittbibliotheken, ihren eigenen Namespace und Config-Key zu definieren:
+## Field Introspection
 
-```typescript
-import { tag } from '@defjs/core'
-
-const GormTag = tag.createTagNamespace('gorm')
-const gorm = tag.defineConfig(GormTag)
-
-const Model = struct.object({
-  id: struct.number().tag(gorm('column', 'id'), gorm('primaryKey')),
-})
-```
-
-Regeln:
-
-- Innerhalb desselben Namespace überschreibt späterer `value` früheren `value`.
-- Innerhalb desselben Namespace und desselben `config`-Keys überschreibt späterer Wert früheren Wert.
-- Config-Value kann nur `string | number | boolean` sein.
-
-### Tags lesen
-
-```typescript
-import { getFieldTag, getFieldTags, tag } from '@defjs/core'
-
-const field = UserBody.shape.name
-const jsonTag = getFieldTag(field, tag.kind.json, 'name')
-// { namespace: JsonTag, value: 'user_name', config: Map() }
-```
-
-## Field-Introspection
-
-`getStructFields` expandiert ein Objekt-Schema in eine lesbare Feldliste, enthaltend Feld-Key, Sub-Schema und materialisierte Tags.
+`getStructFields` expands an object struct into a readable field list containing field key, alias, and sub-struct.
 
 ```typescript
 import { getStructFields } from '@defjs/core'
 
 const fields = getStructFields(UserBody)
 // [
-//   { key: 'id', struct: NumberSchema, tags: Map<symbol, FieldTag> },
-//   { key: 'name', struct: StringSchema, tags: Map<symbol, FieldTag> },
+//   { key: 'id', alias: 'user_id', struct: NumberStruct },
+//   { key: 'name', alias: 'user_name', struct: StringStruct },
 // ]
 ```
 
-Kombiniert mit `isObjectStruct` für sicheres Type-Checking vor Introspection:
+Combined with `isObjectStruct` for safe type checking before introspection:
 
 ```typescript
 import { isObjectStruct, getStructFields } from '@defjs/core'
 
-if (isObjectStruct(schema)) {
-  for (const field of getStructFields(schema)) {
-    console.log(field.key, field.tags.get(tag.kind.json)?.value)
+if (isObjectStruct(struct)) {
+  for (const field of getStructFields(struct)) {
+    console.log(field.key, field.alias)
   }
 }
 ```

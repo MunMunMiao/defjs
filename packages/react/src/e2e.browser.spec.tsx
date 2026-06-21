@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { createHttpInterceptor, defineRequest, struct } from '@defjs/core'
 import { ClientProvider, useClient, withEndpoint, withInterceptors } from './core'
 
-const UserSchema = struct.object({
+const UserStruct = struct.object({
   id: struct.number(),
   name: struct.string(),
 })
@@ -13,7 +13,7 @@ const getUsers = defineRequest({
   method: 'GET',
   path: '/api/users',
   output: {
-    200: struct.array(UserSchema),
+    200: struct.array(UserStruct),
   },
 })
 

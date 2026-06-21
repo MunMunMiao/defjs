@@ -1,11 +1,11 @@
 ---
 title: HTTP
-description: Use defineRequest to define HTTP endpoints, master status-code-to-schema mapping, cancellation and timeout, progress tracking, and response type control.
+description: Use defineRequest to define HTTP endpoints, master status-code-to-struct mapping, cancellation and timeout, progress tracking, and response type control.
 ---
 
 # HTTP
 
-Use `defineRequest` to define an HTTP endpoint, then execute it with `Client.execute()`. The core package handles schema validation, status-code dispatch, signal merging, and response body parsing automatically.
+Use `defineRequest` to define an HTTP endpoint, then execute it with `Client.execute()`. The core package handles struct validation, status-code dispatch, signal merging, and response body parsing automatically.
 
 ## Defining an Endpoint
 
@@ -52,16 +52,16 @@ const listUsers = defineRequest({
 })
 ```
 
-## Status-Code-to-Schema Output Mapping
+## Status-Code-to-Struct Output Mapping
 
-`output` maps HTTP status codes to schemas. The runtime selects the matching schema by response status code.
+`output` maps HTTP status codes to structs. The runtime selects the matching struct by response status code.
 
 Both object and array forms are supported:
 
 ```typescript
 import { defineRequest, object, string } from '@defjs/core'
 
-// Object form: keys are status codes, values are schemas
+// Object form: keys are status codes, values are structs
 const createUser = defineRequest({
   method: 'POST',
   path: '/users',
@@ -78,7 +78,7 @@ const createUser = defineRequest({
   },
 })
 
-// Array form: supports mapping multiple status codes to the same schema
+// Array form: supports mapping multiple status codes to the same struct
 const updateUser = defineRequest({
   method: 'PUT',
   path: '/users/:id',
@@ -128,8 +128,8 @@ if (error === null) {
 
 ### Type Helpers
 
-- `RequestSuccessData<TOutput>`: Extracts all 2xx schema output types from `output`. If no 2xx mapping exists, infers as `unknown`.
-- `RequestErrorData<TOutput>`: Extracts all non-2xx schema output types from `output`. If no non-2xx mapping exists, infers as `unknown`.
+- `RequestSuccessData<TOutput>`: Extracts all 2xx struct output types from `output`. If no 2xx mapping exists, infers as `unknown`.
+- `RequestErrorData<TOutput>`: Extracts all non-2xx struct output types from `output`. If no non-2xx mapping exists, infers as `unknown`.
 
 ## Executing a Request
 
@@ -284,7 +284,7 @@ Supported `responseType` values:
 | `blob`        | Return `Blob`                                            |
 | `arraybuffer` | Return `ArrayBuffer`                                     |
 
-When `responseType` is `json` and `output` defines a schema for the returned status code, the framework validates the parsed JSON against the schema. If validation fails, a `DefinitionError` with `code: 'RESPONSE_VALIDATION_FAILED'` is returned.
+When `responseType` is `json` and `output` defines a struct for the returned status code, the framework validates the parsed JSON against the struct. If validation fails, a `DefinitionError` with `code: 'RESPONSE_VALIDATION_FAILED'` is returned.
 
 ## What's Next
 

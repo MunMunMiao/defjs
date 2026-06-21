@@ -77,7 +77,7 @@ const getUser = defineRequest({
 ```
 
 ::: tip
-The keys in `output` are HTTP status codes. Defjs automatically selects the matching schema at runtime and derives TypeScript types accordingly: 2xx responses are typed as success data, non-2xx as error data.
+The keys in `output` are HTTP status codes. Defjs automatically selects the matching struct at runtime and derives TypeScript types accordingly: 2xx responses are typed as success data, non-2xx as error data.
 :::
 
 ### Step 3: Execute
@@ -110,7 +110,7 @@ async function loadUser() {
   const [error, user] = await client.execute(getUser({ id: 1 }))
 
   if (error) {
-    // error is typed based on the non-2xx schemas in output
+    // error is typed based on the non-2xx structs in output
     console.error(error.code, error.message)
     return
   }
@@ -125,7 +125,7 @@ async function loadUser() {
 Here is an end-to-end example with input validation, output validation, error handling, and an interceptor:
 
 ```typescript
-import { createClient, defineRequest, struct, tag, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
 
 // 1. Create Client
 const client = createClient(
@@ -145,7 +145,7 @@ const createPost = defineRequest({
   input: struct.object({
     title: struct.string(),
     body: struct.string(),
-    'X-Request-ID': tag(struct.string(), { kind: 'header' }),
+    'X-Request-ID': struct.string(),
   }),
   build: (input) => ({
     body: { title: input.title, body: input.body },
@@ -202,11 +202,11 @@ async function createPost() {
 | API                    | Description                     | Typical Usage                                                                  |
 | ---------------------- | ------------------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | Create a request client         | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | Define an HTTP endpoint         | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserSchema } })` |
+| `defineRequest`        | Define an HTTP endpoint         | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
 | `defineEventStream`    | Define an SSE endpoint          | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | Define a WebSocket endpoint     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
-| `struct`               | Schema builder                  | `struct.object({ id: struct.number() })`                                       |
-| `tag`                  | Metadata tag for fields         | `tag(struct.string(), { kind: 'header' })`                                     |
+| `struct`               | Struct builder                  | `struct.object({ id: struct.number() })`                                       |
+| `.alias(name)`         | Field wire-name alias           | `struct.string().alias('user_name')`                                           |
 | `withEndpoint`         | Set base URL                    | `withEndpoint('https://api.example.com')`                                      |
 | `withInterceptors`     | Register interceptors           | `withInterceptors([...interceptors])`                                          |
 | `withCredentials`      | Enable cross-origin credentials | `withCredentials(true)`                                                        |

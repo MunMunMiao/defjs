@@ -4,7 +4,7 @@ import { createClient, withCredentials, withEndpoint, withHTTPHandle, withInterc
 import type { Client } from '../client'
 import { ERR_ABORTED } from '../error'
 import { createSSEInterceptor } from '../interceptor'
-import { struct, tag } from '../struct'
+import { struct } from '../struct'
 import { defineEventStream } from './index'
 
 describe('request event stream runtime', () => {
@@ -116,7 +116,7 @@ describe('request event stream runtime', () => {
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
   })
 
-  test('should support default event schema parsing', async () => {
+  test('should support default event struct parsing', async () => {
     const useMixedStream = defineEventStream({
       events: {
         default: struct.object({
@@ -160,7 +160,7 @@ describe('request event stream runtime', () => {
     const useAliasStream = defineEventStream({
       events: {
         profile: struct.object({
-          displayName: struct.string().tag(tag.json('display_name')),
+          displayName: struct.string().alias('display_name'),
         }),
       },
       path: '/alias-stream',
@@ -407,7 +407,7 @@ describe('request event stream runtime', () => {
     expect(error?.code).toBe('HTTP_STATUS')
   })
 
-  test('should skip unknown event types without default schema', async () => {
+  test('should skip unknown event types without default struct', async () => {
     const useStream = defineEventStream({
       events: {
         message: struct.string(),
@@ -590,10 +590,10 @@ describe('request event stream runtime', () => {
     if (!firstInvalidEvent) {
       throw new Error('Expected invalid event')
     }
-    expect(firstInvalidEvent.reason).toBe('missing-schema')
+    expect(firstInvalidEvent.reason).toBe('missing-struct')
   })
 
-  test('should invoke onInvalidEvent for schema validation failures', async () => {
+  test('should invoke onInvalidEvent for struct validation failures', async () => {
     const invalidEvents: Array<{ reason: string; event: string; hasCause: boolean }> = []
 
     const client = createClient(
@@ -638,7 +638,7 @@ describe('request event stream runtime', () => {
     expect(firstInvalidEvent.hasCause).toBe(true)
   })
 
-  test('should include message id in onInvalidEvent for missing-schema', async () => {
+  test('should include message id in onInvalidEvent for missing-struct', async () => {
     const captured: Array<{ id: string; reason: string }> = []
 
     const client = createClient(
@@ -683,10 +683,10 @@ describe('request event stream runtime', () => {
       // no events should be yielded
     }
 
-    expect(captured).toEqual([{ id: '42', reason: 'missing-schema' }])
+    expect(captured).toEqual([{ id: '42', reason: 'missing-struct' }])
   })
 
-  test('should include empty id in onInvalidEvent for missing-schema', async () => {
+  test('should include empty id in onInvalidEvent for missing-struct', async () => {
     const captured: Array<{ id: string; reason: string }> = []
 
     const client = createClient(
@@ -732,7 +732,7 @@ describe('request event stream runtime', () => {
       // no events should be yielded
     }
 
-    expect(captured).toEqual([{ id: '', reason: 'missing-schema' }])
+    expect(captured).toEqual([{ id: '', reason: 'missing-struct' }])
   })
 
   test('should include empty id in onInvalidEvent for validation-failed', async () => {

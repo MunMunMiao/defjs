@@ -26,15 +26,34 @@ describe('url helpers', () => {
     expect(
       fillUrl('/user/:id/:name', {
         id: [1, 2],
-        name: undefined,
+        name: 'miao',
       }),
-    ).toBe('/user/1/undefined')
+    ).toBe('/user/1/miao')
 
-    expect(
+    expect(() =>
+      fillUrl('/user/:id', {
+        id: undefined,
+      }),
+    ).toThrow('Missing path param: id')
+
+    expect(() =>
       fillUrl('/user/:id', {
         id: [],
       }),
-    ).toBe('/user/undefined')
+    ).toThrow('Missing path param: id')
+
+    expect(() =>
+      fillUrl('/user/:id/:name', {
+        id: [1, 2],
+        name: undefined,
+      }),
+    ).toThrow('Missing path param: name')
+
+    expect(() =>
+      fillUrl('/user/:id', {
+        id: [],
+      }),
+    ).toThrow('Missing path param: id')
 
     expect(() =>
       fillUrl('/user/:id', {

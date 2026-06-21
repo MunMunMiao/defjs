@@ -1,61 +1,63 @@
 import { describe, expect, test } from 'vitest'
-import { decodeObjectByTag, encodeObjectByTag } from './codec/common'
+import { decodeObjectByAlias, encodeObjectByAlias, mapAliasedObjectFields } from './codec/common'
 import { decodeJson, encodeJson } from './codec/json'
 import { appendFormData, encodeMultipart } from './codec/multipart'
 import { encodeHeaders, encodePathParams, encodeQueryParams } from './codec/query'
+import { forEachEncodedWireField, writeRepeated } from './codec/flat'
 import { appendSearchParam, encodeUrlencoded, stringifySearchParamScalar } from './codec/urlencoded'
 import { encodeValue, matchesDefinition } from './encode'
 import { StructError } from './errors'
 import { struct as directStruct } from './facade'
 import { isStruct } from './guards'
 import { struct } from './index'
-import { getFieldTags, getStructFields, parseStructTuple as parse, parseStructValue } from './introspection'
+import { resolveStructFields } from './fields'
+import { getStructFields, parseStructTuple as parse, parseStructValue } from './introspection'
+import { matchesRuntimeValue } from './match'
 import { buildZeroValue, isFieldRequired, parseValue, safeZeroValue } from './parse'
-import { assertSchema, resolveObjectShape } from './shape'
-import { DEFINITION, OMIT, TYPES } from './symbols'
-import { createTagNamespace, HeaderTag, JsonTag, tag } from './tag'
-import type { ObjectDefinition, RuntimeSchema, SchemaDefinition } from './types'
+import { DEFAULT_FLAGS, makeStruct } from './runtime'
+import { assertStruct, resolveObjectShape } from './shape'
+import { DEFINITION, OMIT } from './symbols'
+import type { ObjectDefinition, RuntimeStruct, StructDefinition } from './types'
 import { cloneValue, describeValue, expectedType } from './utils'
 
-function runtime(value: unknown): RuntimeSchema {
-  return value as RuntimeSchema
+function runtime(value: unknown): RuntimeStruct {
+  return value as RuntimeStruct
 }
 
-function definition(value: unknown): SchemaDefinition {
+function definition(value: unknown): StructDefinition {
   return runtime(value)[DEFINITION]
 }
 
 describe('struct coverage boundary cases', () => {
   test('direct runtime exports stay wired', async () => {
-    const schema = directStruct.object({ id: directStruct.string() })
+    const testStruct = directStruct.object({ id: directStruct.string() })
 
-    expect(isStruct(schema)).toBe(true)
+    expect(isStruct(testStruct)).toBe(true)
     expect(typeof DEFINITION).toBe('symbol')
     expect(typeof OMIT).toBe('symbol')
-    expect(typeof TYPES).toBe('symbol')
 
     expect(parseValue(runtime(directStruct.string()), 'x', [], 'value')).toEqual({
       ok: true,
       value: 'x',
     })
-    expect(encodeJson(schema, { id: 'u_1' })).toEqual({ id: 'u_1' })
-    expect(decodeJson(schema, { id: 'u_1' })).toEqual({ id: 'u_1' })
+    expect(encodeJson(testStruct, { id: 'u_1' })).toEqual({ id: 'u_1' })
+    expect(decodeJson(testStruct, { id: 'u_1' })).toEqual({ id: 'u_1' })
   })
 
   test('constructor guards reject invalid enum and object definitions', () => {
-    expect(() => struct.enum({} as { [key: string]: never })).toThrow('enum schema requires at least one string or number value')
-    expect(() => struct.object(null as never)).toThrow('object schema requires a plain object')
-    expect(() => struct.request(null as never)).toThrow('request schema requires a plain object')
-    expect(() => struct.request({ path: struct.string() as never })).toThrow('request.path must be an object schema')
-    expect(() => struct.request({ query: struct.string() as never })).toThrow('request.query must be an object schema')
-    expect(() => struct.request({ headers: struct.string() as never })).toThrow('request.headers must be an object schema')
+    expect(() => struct.enum({} as { [key: string]: never })).toThrow('enum struct requires at least one string or number value')
+    expect(() => struct.object(null as never)).toThrow('object struct requires a plain object')
+    expect(() => struct.request(null as never)).toThrow('request struct requires a plain object')
+    expect(() => struct.request({ path: struct.string() as never })).toThrow('request.path must be an object struct')
+    expect(() => struct.request({ query: struct.string() as never })).toThrow('request.query must be an object struct')
+    expect(() => struct.request({ headers: struct.string() as never })).toThrow('request.headers must be an object struct')
     expect(() =>
       struct.request({
         body: struct.object({
           id: struct.string(),
         }) as never,
       }),
-    ).toThrow('body must use a body wrapper schema')
+    ).toThrow('body must use a body wrapper struct')
     expect(definition(struct.request({ body: struct.blob() })).kind).toBe('request')
     expect(definition(struct.request({ body: struct.arrayBuffer() })).kind).toBe('request')
     expect(definition(struct.text()).kind).toBe('requestBody')
@@ -135,19 +137,19 @@ describe('struct coverage boundary cases', () => {
   test('introspection and shape guards reject non-object structs', () => {
     expect(() => getStructFields(struct.string())).toThrow('object struct is required')
     expect(() => parseStructValue(struct.string(), 1)).toThrow(StructError)
-    expect(() => assertSchema({}, 'value')).toThrow('value must be a schema')
+    expect(() => assertStruct({}, 'value')).toThrow('value must be a struct')
 
-    const schema = runtime(struct.object({ id: struct.string() }))
-    const objectDefinition = schema[DEFINITION] as ObjectDefinition
-    const first = resolveObjectShape(schema, objectDefinition)
-    expect(resolveObjectShape(schema, objectDefinition)).toBe(first)
+    const objectStruct = runtime(struct.object({ id: struct.string() }))
+    const objectDefinition = objectStruct[DEFINITION] as ObjectDefinition
+    const first = resolveObjectShape(objectStruct, objectDefinition)
+    expect(resolveObjectShape(objectStruct, objectDefinition)).toBe(first)
   })
 
-  test('runtime tag guard rejects invalid tag options', () => {
-    expect(() => struct.string().tag(null as never)).toThrow('tag() requires tag option functions')
+  test('runtime alias guard rejects non-string names', () => {
+    expect(() => struct.string().alias(null as never)).toThrow('alias() requires a string name')
   })
 
-  test('zero value helpers cover optional, nullable, any, unknown, and composite schemas', () => {
+  test('zero value helpers cover optional, nullable, any, unknown, and composite structs', () => {
     expect(isFieldRequired(definition(struct.string()))).toBe(true)
     expect(isFieldRequired(definition(struct.string().optional()))).toBe(false)
     expect(isFieldRequired(definition(struct.string().null()))).toBe(false)
@@ -156,6 +158,21 @@ describe('struct coverage boundary cases', () => {
     expect(safeZeroValue(runtime(struct.unknown()))).toBeUndefined()
     expect(safeZeroValue(runtime(struct.string().optional()))).toBeUndefined()
     expect(safeZeroValue(runtime(struct.string().null()))).toBeNull()
+    expect(safeZeroValue(runtime(struct.string().nullish()))).toBeNull()
+    expect(
+      safeZeroValue(
+        runtime(
+          struct.object({
+            optional: struct.string().optional(),
+            nullable: struct.string().null(),
+            nullish: struct.string().nullish(),
+          }),
+        ),
+      ),
+    ).toEqual({
+      nullable: null,
+      nullish: null,
+    })
     expect(buildZeroValue(runtime(struct.or(struct.string().optional(), struct.number())), [])).toBeUndefined()
     expect(
       buildZeroValue(
@@ -259,7 +276,7 @@ describe('struct coverage boundary cases', () => {
 
   test('expectedType covers every runtime definition kind', () => {
     const message = struct.object({ type: struct.literal('message') })
-    const schemas = [
+    const structs = [
       [struct.any(), 'any'],
       [struct.array(struct.string()), 'array<string>'],
       [struct.arrayBuffer(), 'ArrayBuffer'],
@@ -284,8 +301,8 @@ describe('struct coverage boundary cases', () => {
       [struct.unknown(), 'unknown'],
     ] as const
 
-    for (const [schema, expected] of schemas) {
-      expect(expectedType(definition(schema))).toBe(expected)
+    for (const [struct, expected] of structs) {
+      expect(expectedType(definition(struct))).toBe(expected)
     }
   })
 
@@ -335,45 +352,45 @@ describe('struct coverage boundary cases', () => {
     expect(describeValue(Symbol('s'))).toBe('[object Symbol]')
   })
 
-  test('tagged object codec covers skip, non-object, primitive, and nested paths', () => {
+  test('aliased object codec covers skip, non-object, primitive, and nested paths', () => {
     const profile = struct.object({
       internal: struct.string(),
-      name: struct.string().tag(tag.json('full_name')),
-      omitted: struct.string().tag(tag.json('omitted')),
+      name: struct.string().alias('full_name'),
+      omitted: struct.string().alias('omitted'),
     })
 
-    expect(encodeObjectByTag(struct.string(), 'x', JsonTag)).toBe('x')
-    expect(encodeObjectByTag(profile, { name: 'Miao', omitted: undefined }, JsonTag)).toEqual({ full_name: 'Miao' })
-    expect(() => encodeObjectByTag(profile, 'bad', JsonTag)).toThrow('json encode expects object value')
+    expect(encodeObjectByAlias(struct.string(), 'x')).toBe('x')
+    expect(encodeObjectByAlias(profile, { name: 'Miao', omitted: undefined })).toEqual({ full_name: 'Miao' })
+    expect(() => encodeObjectByAlias(profile, 'bad')).toThrow('json encode expects object value')
 
     const profiles = struct.array(profile)
-    expect(encodeObjectByTag(profiles, [{ name: 'Miao', omitted: undefined }], JsonTag)).toEqual([{ full_name: 'Miao' }])
+    expect(encodeObjectByAlias(profiles, [{ name: 'Miao', omitted: undefined }])).toEqual([{ full_name: 'Miao' }])
 
-    expect(decodeObjectByTag(struct.string(), 'x', JsonTag)).toBe('x')
-    expect(decodeObjectByTag(profile, { full_name: 'Miao' }, JsonTag)).toEqual({
+    expect(decodeObjectByAlias(struct.string(), 'x')).toBe('x')
+    expect(decodeObjectByAlias(profile, { full_name: 'Miao' })).toEqual({
       internal: '',
       name: 'Miao',
       omitted: '',
     })
-    expect(() => decodeObjectByTag(profile, 'bad', JsonTag)).toThrow('json decode expects object value')
+    expect(() => decodeObjectByAlias(profile, 'bad')).toThrow('json decode expects object value')
 
-    expect(() => decodeObjectByTag(struct.array(profile), 'bad', JsonTag)).toThrow(StructError)
-    expect(() => decodeObjectByTag(struct.tuple([profile]), 'bad', JsonTag)).toThrow(StructError)
-    expect(decodeObjectByTag(struct.tuple([profile]), [{ full_name: 'Miao' }, { untouched: true }], JsonTag)).toEqual([
+    expect(() => decodeObjectByAlias(struct.array(profile), 'bad')).toThrow(StructError)
+    expect(() => decodeObjectByAlias(struct.tuple([profile]), 'bad')).toThrow(StructError)
+    expect(decodeObjectByAlias(struct.tuple([profile]), [{ full_name: 'Miao' }, { untouched: true }])).toEqual([
       { internal: '', name: 'Miao', omitted: '' },
     ])
-    expect(() => decodeObjectByTag(struct.record(profile), 'bad', JsonTag)).toThrow(StructError)
+    expect(() => decodeObjectByAlias(struct.record(profile), 'bad')).toThrow(StructError)
 
     const event = struct.or(
-      struct.object({ payload: struct.string().tag(tag.json('body')), type: struct.literal('message').tag(tag.json('kind')) }),
-      struct.object({ count: struct.number().tag(tag.json('count')), type: struct.literal('count').tag(tag.json('kind')) }),
+      struct.object({ payload: struct.string().alias('body'), type: struct.literal('message').alias('kind') }),
+      struct.object({ count: struct.number().alias('count'), type: struct.literal('count').alias('kind') }),
     )
-    expect(() => decodeObjectByTag(event, 'bad', JsonTag)).toThrow(StructError)
+    expect(() => decodeObjectByAlias(event, 'bad')).toThrow(StructError)
 
     const discriminated = struct.discriminatedUnion('type', [
-      struct.object({ payload: struct.string().tag(tag.json('body')), type: struct.literal('message').tag(tag.json('kind')) }),
+      struct.object({ payload: struct.string().alias('body'), type: struct.literal('message').alias('kind') }),
     ])
-    expect(() => decodeObjectByTag(discriminated, { kind: 'unknown' }, JsonTag)).toThrow(StructError)
+    expect(() => decodeObjectByAlias(discriminated, { kind: 'unknown' })).toThrow(StructError)
   })
 
   test('multipart codec rejects invalid shapes and supports explicit append branches', () => {
@@ -390,11 +407,11 @@ describe('struct coverage boundary cases', () => {
 
   test('query, header, path, and urlencoded codecs cover scalar and complex branches', () => {
     const query = struct.object({
-      filter: struct.object({ page: struct.number() }).tag(tag.query('filter')),
-      include: struct.boolean().tag(tag.query('include')),
+      filter: struct.object({ page: struct.number() }).alias('filter'),
+      include: struct.boolean().alias('include'),
       missing: struct.string(),
-      optional: struct.string().optional().tag(tag.query('optional')),
-      tags: struct.array(struct.string()).tag(tag.query('tag')),
+      optional: struct.string().optional().alias('optional'),
+      tags: struct.array(struct.string()).alias('tag'),
     })
 
     expect(() => encodeQueryParams(struct.string(), {})).toThrow('query encode expects object struct')
@@ -412,20 +429,20 @@ describe('struct coverage boundary cases', () => {
     )
 
     const pathParams = struct.object({
-      id: struct.string().tag(tag.uri('id')),
+      id: struct.string().alias('id'),
     })
     expect(encodePathParams(pathParams, { id: 'u_1' })).toEqual({ id: 'u_1' })
 
     const headers = struct.object({
-      meta: struct.object({ page: struct.number() }).tag(tag.header('x-meta')),
+      meta: struct.object({ page: struct.number() }).alias('x-meta'),
     })
     expect(() => encodeHeaders(headers, { meta: { page: 1 } })).toThrow('header value for "x-meta" requires a scalar value')
 
     expect(() => encodeUrlencoded(struct.string(), {})).toThrow('urlencoded encode expects object struct')
     const form = struct.object({
       internal: struct.string(),
-      name: struct.string().tag(tag.urlencoded('name')),
-      optional: struct.string().optional().tag(tag.urlencoded('optional')),
+      name: struct.string().alias('name'),
+      optional: struct.string().optional().alias('optional'),
     })
     expect(encodeUrlencoded(form, { name: 'Miao', optional: undefined }).toString()).toBe('name=Miao')
 
@@ -436,10 +453,135 @@ describe('struct coverage boundary cases', () => {
     expect(stringifySearchParamScalar(null)).toBe('null')
   })
 
-  test('custom tag namespace guards reject invalid names and config keys', () => {
-    expect(() => createTagNamespace('1bad')).toThrow('invalid tag namespace name: 1bad')
-    expect(() => getFieldTags(struct.string().tag(tag.defineConfig(HeaderTag)('bad key')), 'id')).toThrow(
-      'invalid header tag config key: bad key',
+  test('guard helpers reject malformed struct metadata', () => {
+    expect(isStruct({ [DEFINITION]: null })).toBe(false)
+    expect(isStruct({ [DEFINITION]: { flags: { nullable: false, optional: false }, kind: 'not-real' } })).toBe(false)
+  })
+
+  test('union flag and alias codecs cover optional and ambiguous encode branches', () => {
+    const optional = struct.string().optional()
+    expect(matchesDefinition(definition(optional), undefined, runtime(optional))).toBe(true)
+
+    const conflicting = struct.or(
+      struct.object({ count: struct.number() }).alias('left'),
+      struct.object({ count: struct.number() }).alias('right'),
     )
+    expect(() => encodeObjectByAlias(conflicting, { count: 1 })).toThrow(
+      'ambiguous union encode: multiple union branches match with different wire output',
+    )
+  })
+
+  test('field, flat, and discriminator helpers cover remaining branch edges', () => {
+    const duplicate = runtime(
+      struct.object({
+        first: struct.string().alias('same'),
+        second: struct.string().alias('same'),
+      }),
+    )
+    const duplicateDefinition = duplicate[DEFINITION] as ObjectDefinition
+    expect(() => resolveObjectShape(duplicate, duplicateDefinition)).toThrow(
+      'duplicate wire key "same" for object fields "first" and "second"',
+    )
+    expect(() => getStructFields(duplicate)).toThrow('duplicate wire key "same" for object fields "first" and "second"')
+
+    const pathFields: Array<{ key: string; value: unknown }> = []
+    forEachEncodedWireField(
+      struct.object({
+        keep: struct.string().alias('keep'),
+        skip: struct.string().optional().alias('skip'),
+      }),
+      { keep: 'yes' },
+      'path',
+      (field) => pathFields.push(field),
+    )
+    expect(pathFields).toEqual([{ key: 'keep', value: 'yes' }])
+
+    const repeated: unknown[] = []
+    writeRepeated('item', ['a', undefined, ['b']], (_key, value) => repeated.push(value))
+    expect(repeated).toEqual(['a', 'b'])
+
+    const ambiguous = struct.discriminatedUnion('type', [
+      struct.object({ type: struct.literal('a').alias('kind_a') }),
+      struct.object({ type: struct.literal('b').alias('kind_b') }),
+    ])
+    expect(() => decodeObjectByAlias(ambiguous, { kind_a: 'a', kind_b: 'b' })).toThrow('ambiguous discriminated union discriminator')
+  })
+
+  test('coverage guards cover defensive branches without changing public semantics', () => {
+    const duplicateDefinition = {
+      cache: {
+        resolvedShape: {
+          first: struct.string().alias('same'),
+          second: struct.string().alias('same'),
+        },
+      },
+      flags: DEFAULT_FLAGS,
+      kind: 'object',
+      shape: Object.create(null),
+    } as ObjectDefinition
+    expect(() => resolveStructFields(runtime(struct.object({})), duplicateDefinition)).toThrow('duplicate wire key "same"')
+
+    const dateWithoutRuntimeGuard = makeStruct({
+      expected: 'Date',
+      flags: DEFAULT_FLAGS,
+      is: (value): value is Date => value instanceof Date,
+      kind: 'date',
+      zero: () => new Date(0),
+    })
+    expect(matchesRuntimeValue(dateWithoutRuntimeGuard, new Date(0))).toBe(true)
+
+    expect(() => mapAliasedObjectFields(runtime(struct.string()), {}, () => undefined)).toThrow('json encode expects object struct')
+
+    const nonObjectDiscriminator = makeStruct({
+      discriminator: 'type',
+      expected: '"text"',
+      flags: DEFAULT_FLAGS,
+      kind: 'discriminatedUnion',
+      map: new Map([['text', struct.object({ type: struct.literal('text') })]]),
+      options: [struct.string() as never],
+    })
+    expect(decodeObjectByAlias(nonObjectDiscriminator, { type: 'text' })).toEqual({ type: 'text' })
+
+    const discriminatorFallbackOption = struct.object({ payload: struct.string().alias('body') })
+    const rawDiscriminator = makeStruct({
+      discriminator: 'type',
+      expected: '"text"',
+      flags: DEFAULT_FLAGS,
+      kind: 'discriminatedUnion',
+      map: new Map([['text', discriminatorFallbackOption]]),
+      options: [discriminatorFallbackOption],
+    })
+    expect(() => decodeObjectByAlias(rawDiscriminator, { body: 'hello', type: 'text' })).toThrow(StructError)
+
+    const missingWireDiscriminator = struct.discriminatedUnion('type', [struct.object({ type: struct.literal('text').alias('kind') })])
+    expect(() => decodeObjectByAlias(missingWireDiscriminator, { other: 'text' })).toThrow(StructError)
+    expect(() => decodeObjectByAlias(missingWireDiscriminator, 'not-object')).toThrow(StructError)
+
+    let reads = 0
+    const unstableObjectStruct = {
+      _struct: undefined,
+      get [DEFINITION]() {
+        reads += 1
+        return {
+          flags: DEFAULT_FLAGS,
+          kind: reads < 3 ? 'object' : 'string',
+        }
+      },
+    }
+    expect(() => decodeObjectByAlias(unstableObjectStruct as never, {})).toThrow('json decode expects object struct')
+
+    const undefinedEncodingString = makeStruct({
+      encode: () => undefined,
+      expected: 'string',
+      flags: DEFAULT_FLAGS,
+      is: (value): value is string => typeof value === 'string',
+      kind: 'string',
+      zero: () => '',
+    })
+    const encodedUndefinedFields: Array<{ key: string; value: unknown }> = []
+    forEachEncodedWireField(struct.object({ value: undefinedEncodingString }), { value: 'drops after child encode' }, 'query', (field) =>
+      encodedUndefinedFields.push(field),
+    )
+    expect(encodedUndefinedFields).toEqual([])
   })
 })

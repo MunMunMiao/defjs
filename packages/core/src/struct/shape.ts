@@ -1,24 +1,25 @@
 import { isStruct } from './guards'
-import type { ObjectDefinition, ObjectShape, RuntimeSchema, SchemaLike } from './types'
+import { DEFINITION } from './symbols'
+import type { ObjectDefinition, ObjectShape, RuntimeStruct, StructLike } from './types'
 
-export function resolveObjectShape(schema: RuntimeSchema, definition: ObjectDefinition): ObjectShape {
-  const cached = definition.cache.get(schema)
+export function resolveObjectShape(_struct: RuntimeStruct, definition: ObjectDefinition): ObjectShape {
+  const cached = definition.cache.resolvedShape
   if (cached) {
     return cached
   }
 
   const shape = readObjectShape(definition.shape)
-
   for (const [key, value] of Object.entries(shape)) {
-    assertSchema(value, `object field "${key}"`)
+    assertStruct(value, `object field "${key}"`)
   }
 
-  definition.cache.set(schema, shape)
+  assertUniqueShapeWireKeys(shape)
+  definition.cache.resolvedShape = shape
   return shape
 }
 
-export function resolveRuntimeSchema(schema: RuntimeSchema): RuntimeSchema {
-  return schema
+export function resolveRuntimeStruct(struct: StructLike<unknown, unknown, boolean>): RuntimeStruct {
+  return struct as RuntimeStruct
 }
 
 export function readObjectShape(shape: ObjectShape): ObjectShape {
@@ -34,8 +35,22 @@ export function readObjectShape(shape: ObjectShape): ObjectShape {
   return output as unknown as ObjectShape
 }
 
-export function assertSchema(value: unknown, label: string): asserts value is SchemaLike<unknown, unknown, boolean> {
+function assertUniqueShapeWireKeys(shape: ObjectShape): void {
+  const seen = new Map<string, string>()
+  for (const [key, field] of Object.entries(shape)) {
+    const runtime = field as unknown as RuntimeStruct
+    const alias = runtime[DEFINITION].alias
+    const wireKey = alias ?? key
+    if (seen.has(wireKey)) {
+      const previous = seen.get(wireKey) as string
+      throw new TypeError(`duplicate wire key "${wireKey}" for object fields "${previous}" and "${key}"`)
+    }
+    seen.set(wireKey, key)
+  }
+}
+
+export function assertStruct(value: unknown, label: string): asserts value is StructLike<unknown, unknown, boolean> {
   if (!isStruct(value)) {
-    throw new TypeError(`${label} must be a schema`)
+    throw new TypeError(`${label} must be a struct`)
   }
 }

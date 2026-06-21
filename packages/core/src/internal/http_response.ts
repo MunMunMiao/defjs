@@ -1,4 +1,7 @@
+const HTTP_RESPONSE: unique symbol = Symbol('HttpResponse')
+
 export type HttpResponse<R> = {
+  readonly [HTTP_RESPONSE]: true
   readonly url: string
   readonly status: number
   readonly statusText: string
@@ -38,6 +41,7 @@ export function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<
   }
 
   return {
+    [HTTP_RESPONSE]: true,
     status,
     statusText,
     url,

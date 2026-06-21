@@ -1,32 +1,32 @@
 import {
-  createAnySchema,
-  createArrayBufferSchema,
-  createArraySchema,
-  createBigIntSchema,
-  createBlobSchema,
-  createBooleanSchema,
-  createDateSchema,
-  createDiscriminatedUnionSchema,
-  createEnumSchema,
-  createFileSchema,
-  createFormDataBodySchema,
-  createIntersectionSchema,
-  createJsonBodySchema,
-  createLiteralSchema,
-  createNullSchema,
-  createNumberSchema,
-  createObjectEnumSchema,
-  createObjectSchema,
-  createRecordSchema,
-  createRequestSchema,
-  createStringSchema,
-  createTextBodySchema,
-  createTupleSchema,
-  createUnionSchema,
-  createUnknownSchema,
-  createUrlencodedBodySchema,
+  createAnyStruct,
+  createArrayBufferStruct,
+  createArrayStruct,
+  createBigIntStruct,
+  createBlobStruct,
+  createBooleanStruct,
+  createDateStruct,
+  createDiscriminatedUnionStruct,
+  createEnumStruct,
+  createFileStruct,
+  createFormDataBodyStruct,
+  createIntersectionStruct,
+  createJsonBodyStruct,
+  createLiteralStruct,
+  createNullStruct,
+  createNumberStruct,
+  createObjectEnumStruct,
+  createObjectStruct,
+  createRecordStruct,
+  createRequestStruct,
+  createStringStruct,
+  createTextBodyStruct,
+  createTupleStruct,
+  createUnionStruct,
+  createUnknownStruct,
+  createUrlencodedBodyStruct,
 } from './constructors'
-import type { Schema, SchemaLike, UnionSchema } from './types'
+import type { Struct, StructLike, UnionStruct } from './types'
 
 type EnumValue<T> = T extends readonly (infer U extends string)[]
   ? U
@@ -34,44 +34,44 @@ type EnumValue<T> = T extends readonly (infer U extends string)[]
     ? U
     : never
 
-function structEnum<const T extends readonly [string, ...string[]]>(value: T): Schema<EnumValue<T> | undefined, EnumValue<T>>
-function structEnum<const T extends { [key: string]: number | string }>(value: T): Schema<EnumValue<T> | undefined, EnumValue<T>>
+function structEnum<const T extends readonly [string, ...string[]]>(value: T): Struct<EnumValue<T> | undefined, EnumValue<T>>
+function structEnum<const T extends { [key: string]: number | string }>(value: T): Struct<EnumValue<T> | undefined, EnumValue<T>>
 function structEnum(value: { [key: string]: number | string } | readonly [string, ...string[]]) {
   if (Array.isArray(value)) {
-    return createEnumSchema(value as readonly [string, ...string[]])
+    return createEnumStruct(value as readonly [string, ...string[]])
   }
 
-  return createObjectEnumSchema(value as { [key: string]: number | string })
+  return createObjectEnumStruct(value as { [key: string]: number | string })
 }
 
-function structOr<const T extends readonly [SchemaLike, ...SchemaLike[]]>(...options: T): UnionSchema<T> {
-  return createUnionSchema(options)
+function structOr<const T extends readonly [StructLike, ...StructLike[]]>(...options: T): UnionStruct<T> {
+  return createUnionStruct(options)
 }
 
 export const struct = {
-  any: createAnySchema,
-  array: createArraySchema,
-  arrayBuffer: createArrayBufferSchema,
-  bigint: createBigIntSchema,
-  blob: createBlobSchema,
-  boolean: createBooleanSchema,
-  date: createDateSchema,
-  discriminatedUnion: createDiscriminatedUnionSchema,
+  any: createAnyStruct,
+  array: createArrayStruct,
+  arrayBuffer: createArrayBufferStruct,
+  bigint: createBigIntStruct,
+  blob: createBlobStruct,
+  boolean: createBooleanStruct,
+  date: createDateStruct,
+  discriminatedUnion: createDiscriminatedUnionStruct,
   enum: structEnum,
-  file: createFileSchema,
-  formData: createFormDataBodySchema,
-  intersection: createIntersectionSchema,
-  json: createJsonBodySchema,
-  literal: createLiteralSchema,
-  null: createNullSchema,
-  number: createNumberSchema,
-  object: createObjectSchema,
+  file: createFileStruct,
+  formData: createFormDataBodyStruct,
+  intersection: createIntersectionStruct,
+  json: createJsonBodyStruct,
+  literal: createLiteralStruct,
+  null: createNullStruct,
+  number: createNumberStruct,
+  object: createObjectStruct,
   or: structOr,
-  record: createRecordSchema,
-  request: createRequestSchema,
-  string: createStringSchema,
-  text: createTextBodySchema,
-  tuple: createTupleSchema,
-  unknown: createUnknownSchema,
-  urlencoded: createUrlencodedBodySchema,
+  record: createRecordStruct,
+  request: createRequestStruct,
+  string: createStringStruct,
+  text: createTextBodyStruct,
+  tuple: createTupleStruct,
+  unknown: createUnknownStruct,
+  urlencoded: createUrlencodedBodyStruct,
 } as const

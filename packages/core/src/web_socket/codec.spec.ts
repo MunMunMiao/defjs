@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { ERR_ABORTED, ERR_TIMEOUT } from '../error'
-import { struct, tag } from '../struct'
+import { struct } from '../struct'
 import {
   extractCloseInfo,
   isManualSocketCloseReason,
@@ -97,59 +97,59 @@ describe('codec helpers', () => {
 })
 
 describe('serializeOutgoingWebSocketMessage', () => {
-  test('throws when no outgoing schemas', () => {
+  test('throws when no outgoing structs', () => {
     expect(() => serializeOutgoingWebSocketMessage(undefined, { type: 'msg' } as never)).toThrow('No outgoing WebSocket messages')
   })
 
   test('throws when message lacks type', () => {
-    const schemas = { msg: struct.string() }
-    expect(() => serializeOutgoingWebSocketMessage(schemas, {} as never)).toThrow('must include a string type')
-    expect(() => serializeOutgoingWebSocketMessage(schemas, { type: '' } as never)).toThrow('must include a string type')
-    expect(() => serializeOutgoingWebSocketMessage(schemas, null as never)).toThrow('must include a string type')
+    const structs = { msg: struct.string() }
+    expect(() => serializeOutgoingWebSocketMessage(structs, {} as never)).toThrow('must include a string type')
+    expect(() => serializeOutgoingWebSocketMessage(structs, { type: '' } as never)).toThrow('must include a string type')
+    expect(() => serializeOutgoingWebSocketMessage(structs, null as never)).toThrow('must include a string type')
   })
 
   test('throws for undeclared message type', () => {
-    const schemas = { msg: struct.string() }
-    expect(() => serializeOutgoingWebSocketMessage(schemas, { type: 'other' } as never)).toThrow('Undeclared outgoing message type: other')
+    const structs = { msg: struct.string() }
+    expect(() => serializeOutgoingWebSocketMessage(structs, { type: 'other' } as never)).toThrow('Undeclared outgoing message type: other')
   })
 
   test('serializes with data field', () => {
-    const schemas = {
+    const structs = {
       msg: struct.object({ text: struct.string() }),
     }
-    const result = serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: { text: 'hello' } })
+    const result = serializeOutgoingWebSocketMessage(structs, { type: 'msg', data: { text: 'hello' } })
     expect(JSON.parse(result)).toEqual({ type: 'msg', text: 'hello' })
   })
 
   test('serializes primitive payload into data field', () => {
-    const schemas = {
+    const structs = {
       msg: struct.string(),
     }
-    const result = serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: 'hello' })
+    const result = serializeOutgoingWebSocketMessage(structs, { type: 'msg', data: 'hello' })
     expect(JSON.parse(result)).toEqual({ type: 'msg', data: 'hello' })
   })
 
   test('serializes with spread fields', () => {
-    const schemas = {
+    const structs = {
       msg: struct.object({ text: struct.string() }),
     }
-    const result = serializeOutgoingWebSocketMessage(schemas, { type: 'msg', text: 'hello' } as never)
+    const result = serializeOutgoingWebSocketMessage(structs, { type: 'msg', text: 'hello' } as never)
     expect(JSON.parse(result)).toEqual({ type: 'msg', text: 'hello' })
   })
 
   test('serializes outgoing messages with struct key aliases', () => {
-    const schemas = {
-      msg: struct.object({ text: struct.string().tag(tag.json('message_text')) }),
+    const structs = {
+      msg: struct.object({ text: struct.string().alias('message_text') }),
     }
-    const result = serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: { text: 'hello' } })
+    const result = serializeOutgoingWebSocketMessage(structs, { type: 'msg', data: { text: 'hello' } })
     expect(JSON.parse(result)).toEqual({ message_text: 'hello', type: 'msg' })
   })
 
-  test('validates outgoing payload with native schema', () => {
-    const schemas = {
+  test('validates outgoing payload with native struct', () => {
+    const structs = {
       msg: struct.object({ text: struct.string() }),
     }
-    expect(() => serializeOutgoingWebSocketMessage(schemas, { type: 'msg', data: { text: 123 } } as never)).toThrow()
+    expect(() => serializeOutgoingWebSocketMessage(structs, { type: 'msg', data: { text: 123 } } as never)).toThrow()
   })
 })
 
@@ -177,7 +177,7 @@ describe('transformWebSocketMessage', () => {
     expect(await transformWebSocketMessage(incoming, '{"type":"other"}')).toBeUndefined()
   })
 
-  test('uses default schema for unknown type', async () => {
+  test('uses default struct for unknown type', async () => {
     const incoming = {
       default: struct.object({ value: struct.number() }),
     }
@@ -195,7 +195,7 @@ describe('transformWebSocketMessage', () => {
 
   test('transforms incoming messages with struct key aliases', async () => {
     const incoming = {
-      msg: struct.object({ text: struct.string().tag(tag.json('message_text')) }),
+      msg: struct.object({ text: struct.string().alias('message_text') }),
     }
     const result = await transformWebSocketMessage(incoming, '{"type":"msg","message_text":"hello"}')
     expect(result).toEqual({ type: 'msg', text: 'hello' })
@@ -252,7 +252,7 @@ describe('transformWebSocketMessage', () => {
     expect(result).toEqual({ type: 'msg', text: 'hello' })
   })
 
-  test('throws on schema validation failure', async () => {
+  test('throws on struct validation failure', async () => {
     const incoming = {
       msg: struct.object({ text: struct.string() }),
     }

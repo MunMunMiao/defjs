@@ -30,7 +30,7 @@ import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait 
 
 export type WebSocketState = 'aborted' | 'closed' | 'closing' | 'connecting' | 'error' | 'idle' | 'open' | 'reconnecting'
 
-export type SocketSchemas = { [key: string]: AnyStruct }
+export type SocketStructs = { [key: string]: AnyStruct }
 
 type SimplifySocket<T> = { [K in keyof T]: T[K] } & {}
 
@@ -53,37 +53,37 @@ type SocketSendMessage<TKey extends string, TPayload> = TPayload extends { [key:
       type: TKey
     }
 
-type KnownIncomingSocketUnion<TIncoming extends SocketSchemas> = {
+type KnownIncomingSocketUnion<TIncoming extends SocketStructs> = {
   [K in keyof TIncoming & string as K extends 'default' ? never : K]: NormalizeSocketMessage<K, Infer<TIncoming[K]>>
 } extends infer O
   ? O[keyof O]
   : never
 
-type KnownOutgoingSocketUnion<TOutgoing extends SocketSchemas> = {
+type KnownOutgoingSocketUnion<TOutgoing extends SocketStructs> = {
   [K in keyof TOutgoing & string as K extends 'default' ? never : K]: SocketSendMessage<K, EndpointInput<TOutgoing[K]>>
 } extends infer O
   ? O[keyof O]
   : never
 
-type DefaultIncomingSocketUnion<TIncoming extends SocketSchemas> = 'default' extends keyof TIncoming
+type DefaultIncomingSocketUnion<TIncoming extends SocketStructs> = 'default' extends keyof TIncoming
   ? NormalizeSocketMessage<string, Infer<TIncoming['default']>>
   : never
 
-export type WebSocketIncomingData<TIncoming extends SocketSchemas> = [
+export type WebSocketIncomingData<TIncoming extends SocketStructs> = [
   KnownIncomingSocketUnion<TIncoming> | DefaultIncomingSocketUnion<TIncoming>,
 ] extends [never]
   ? never
   : KnownIncomingSocketUnion<TIncoming> | DefaultIncomingSocketUnion<TIncoming>
 
-export type WebSocketOutgoingData<TOutgoing extends SocketSchemas | undefined> = TOutgoing extends SocketSchemas
+export type WebSocketOutgoingData<TOutgoing extends SocketStructs | undefined> = TOutgoing extends SocketStructs
   ? [KnownOutgoingSocketUnion<TOutgoing>] extends [never]
     ? never
     : KnownOutgoingSocketUnion<TOutgoing>
   : never
 
 interface WebSocketDefinitionBase<
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 > {
   incoming: TIncoming
   outgoing?: TOutgoing
@@ -93,8 +93,8 @@ interface WebSocketDefinitionBase<
 
 type WebSocketDefinitionWithoutBuild<
   TInput extends AnyStruct | undefined = undefined,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 > = WebSocketDefinitionBase<TIncoming, TOutgoing> & {
   build?: never
   input?: TInput
@@ -102,8 +102,8 @@ type WebSocketDefinitionWithoutBuild<
 
 type WebSocketDefinitionWithBuild<
   TInput extends AnyStruct,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 > = WebSocketDefinitionBase<TIncoming, TOutgoing> & {
   build: RequestBuildHandler<TInput, 'webSocket'>
   input: TInput
@@ -111,8 +111,8 @@ type WebSocketDefinitionWithBuild<
 
 export type WebSocketDefinition<
   TInput extends AnyStruct | undefined = undefined,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 > =
   | WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>
   | (TInput extends AnyStruct ? WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing> : never)
@@ -162,8 +162,8 @@ export type WebSocketExecuteOptions<TIncoming = unknown, TOutgoing = unknown> = 
 
 export interface WebSocketCommand<
   TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
+  TIncoming extends SocketStructs,
+  TOutgoing extends SocketStructs | undefined,
 > extends BaseCommand<typeof WEB_SOCKET_COMMAND> {
   readonly endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>
   readonly input: EndpointInput<TInput> | undefined
@@ -171,8 +171,8 @@ export interface WebSocketCommand<
 
 export type WebSocketCommandBuilder<
   TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
+  TIncoming extends SocketStructs,
+  TOutgoing extends SocketStructs | undefined,
 > =
   IsInputOptional<TInput> extends true
     ? (input?: EndpointInput<TInput>) => WebSocketCommand<TInput, TIncoming, TOutgoing>
@@ -186,8 +186,8 @@ type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [u
 
 type WebSocketEndpoint<
   TInput extends AnyStruct | undefined = undefined,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 > = WebSocketDefinition<TInput, TIncoming, TOutgoing>
 
 type SocketRefState<TIncoming, TOutgoing> = {
@@ -228,18 +228,18 @@ function castParsedWebSocketInput<TInput extends AnyStruct | undefined>(value: u
 
 export function defineWebSocket<
   TInput extends AnyStruct,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 >(definition: WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 >(definition: WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 >(definition: WebSocketDefinition<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing> {
   const endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing> = {
     ...definition,
@@ -260,8 +260,8 @@ export function defineWebSocket<
 
 async function runWebSocketCommand<
   TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
+  TIncoming extends SocketStructs,
+  TOutgoing extends SocketStructs | undefined,
 >(
   clientConfig: ClientConfig,
   endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>,
@@ -346,7 +346,7 @@ async function runWebSocketCommand<
         sessionController,
         sendQueue,
         WebSocketCtor.OPEN,
-        // Type boundary: createWebSocketSession is generic over TIncoming/TOutgoing; the cast aligns the locally-typed session with the endpoint's schema types.
+        // Type boundary: createWebSocketSession is generic over TIncoming/TOutgoing; the cast aligns the locally-typed session with the endpoint's struct types.
       ) as WebSocketSession<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 
       let startupSettled = false
@@ -535,7 +535,7 @@ async function runWebSocketCommand<
             try {
               transformed = await transformWebSocketMessage(endpoint.incoming, event.data)
             } catch (error) {
-              // schema validation failure → surface via onRuntimeError instead of silent drop.
+              // struct validation failure → surface via onRuntimeError instead of silent drop.
               emitRuntimeError(state, error)
               return
             }
@@ -667,7 +667,7 @@ async function runWebSocketCommand<
 
   try {
     const session = await wsChain(wsRequest, wsHandler)
-    // Type boundary: interceptor chain returns WebSocketSessionLike; the concrete type matches the endpoint's incoming/outgoing schemas.
+    // Type boundary: interceptor chain returns WebSocketSessionLike; the concrete type matches the endpoint's incoming/outgoing structs.
     return [null, session as WebSocketSession<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>, session.connection]
   } catch (error) {
     // Type boundary: wsChain rejects with RequestError<unknown> per interceptor contract.
@@ -677,8 +677,8 @@ async function runWebSocketCommand<
 
 export async function executeWebSocketCommand<
   TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
+  TIncoming extends SocketStructs,
+  TOutgoing extends SocketStructs | undefined,
 >(
   clientConfig: ClientConfig,
   command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
@@ -724,7 +724,7 @@ export type SocketLifecycleOutcome = {
   opened: boolean
 }
 
-function createWebSocketSession<TIncoming, TOutgoing extends SocketSchemas | undefined>(
+function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | undefined>(
   outgoing: TOutgoing,
   queue: AsyncQueue<TIncoming>,
   closed: Promise<WebSocketCloseInfo>,

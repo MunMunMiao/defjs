@@ -102,7 +102,7 @@ console.log(user.name)
 إليك مثال من النهاية إلى النهاية مع تحقق من المدخلات، تحقق من المخرجات، معالجة الأخطاء، واعتراض:
 
 ```typescript
-import { createClient, defineRequest, struct, tag, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
 
 // 1. إنشاء العميل
 const client = createClient(
@@ -122,7 +122,7 @@ const createPost = defineRequest({
   input: struct.object({
     title: struct.string(),
     body: struct.string(),
-    'X-Request-ID': tag(struct.string(), { kind: 'header' }),
+    'X-Request-ID': struct.string(),
   }),
   build: (input) => ({
     body: { title: input.title, body: input.body },
@@ -179,11 +179,11 @@ async function createPost() {
 | API                    | الوصف                              | الاستخدام النموذجي                                                             |
 | ---------------------- | ---------------------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | إنشاء عميل طلب                     | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | تعريف نقطة نهاية HTTP              | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserSchema } })` |
+| `defineRequest`        | تعريف نقطة نهاية HTTP              | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
 | `defineEventStream`    | تعريف نقطة نهاية SSE               | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | تعريف نقطة نهاية WebSocket         | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | منشئ المخطط                        | `struct.object({ id: struct.number() })`                                       |
-| `tag`                  | وسم بيانات للحقول                  | `tag(struct.string(), { kind: 'header' })`                                     |
+| `.alias(name)`         | اسم wire بديل للحقول               | `struct.string().alias('user_name')`                                           |
 | `withEndpoint`         | تعيين عنوان URL الأساسي            | `withEndpoint('https://api.example.com')`                                      |
 | `withInterceptors`     | تسجيل الاعتراضات                   | `withInterceptors([...interceptors])`                                          |
 | `withCredentials`      | تمكين بيانات الاعتماد عبر النطاقات | `withCredentials(true)`                                                        |

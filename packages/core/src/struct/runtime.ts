@@ -1,6 +1,5 @@
-import { DEFINITION, TYPES } from './symbols'
-import type { FieldTagOption } from './tag'
-import type { ParseResult, Path, PrimitiveKind, RuntimeSchema, Schema, SchemaDefinition, SchemaFlags, SchemaLike } from './types'
+import { DEFINITION } from './symbols'
+import type { ParseResult, Path, PrimitiveKind, RuntimeStruct, Struct, StructDefinition, StructFlags, StructLike } from './types'
 
 export interface PrimitiveDefinitionInput<K extends PrimitiveKind, TInput, TOutput = TInput> {
   decode?: (value: TInput, path: Path) => ParseResult<TOutput>
@@ -8,78 +7,68 @@ export interface PrimitiveDefinitionInput<K extends PrimitiveKind, TInput, TOutp
   expected: string
   is: (value: unknown) => value is TInput
   kind: K
-  tagOptions?: readonly FieldTagOption[]
+  alias?: string
+  runtimeIs?: (value: unknown) => boolean
   zero: () => TOutput
 }
 
-export function createPrimitiveSchema<TInput, TOutput = TInput>(
+export function createPrimitiveStruct<TInput, TOutput = TInput>(
   definition: PrimitiveDefinitionInput<PrimitiveKind, TInput, TOutput>,
-): Schema<TInput | undefined, TOutput> {
-  return castSchema<Schema<TInput | undefined, TOutput>>(
-    makeSchema({
+): Struct<TInput | undefined, TOutput> {
+  return castStruct<Struct<TInput | undefined, TOutput>>(
+    makeStruct({
       ...definition,
       flags: DEFAULT_FLAGS,
-    } as SchemaDefinition),
+    } as StructDefinition),
   )
 }
 
-export const DEFAULT_FLAGS: SchemaFlags = { nullable: false, optional: false }
+export const DEFAULT_FLAGS: StructFlags = { nullable: false, optional: false }
 
-export function castSchema<TSchema extends SchemaLike>(schema: SchemaLike): TSchema {
-  // Type boundary: all schema runtime objects are created by makeSchema/createPrimitiveSchema; the branded generic surface
+export function castStruct<TStruct extends StructLike>(struct: StructLike): TStruct {
+  // Type boundary: all struct runtime objects are created by makeStruct/createPrimitiveStruct; the branded generic surface
   // exists only for compile-time input/output inference and has no distinct runtime representation.
-  return schema as TSchema
+  return struct as TStruct
 }
 
-export function makeSchema(definition: SchemaDefinition): RuntimeSchema {
-  const schema: RuntimeSchema = {
+export function makeStruct(definition: StructDefinition): RuntimeStruct {
+  const withFlags = (flags: Partial<StructFlags>): RuntimeStruct =>
+    makeStruct({
+      ...definition,
+      flags: {
+        ...definition.flags,
+        ...flags,
+      },
+    })
+
+  const struct: RuntimeStruct = {
     [DEFINITION]: definition,
-    [TYPES]: undefined as never,
     _struct: undefined as never,
-    null() {
-      return makeSchema({
-        ...definition,
-        flags: {
-          ...definition.flags,
-          nullable: true,
-        },
-      })
-    },
-    nullish() {
-      return makeSchema({
-        ...definition,
-        flags: {
-          ...definition.flags,
-          nullable: true,
-          optional: true,
-        },
-      })
-    },
-    optional() {
-      return makeSchema({
-        ...definition,
-        flags: {
-          ...definition.flags,
-          optional: true,
-        },
-      })
-    },
-    tag(...options: FieldTagOption[]) {
-      if (options.some((option) => typeof option !== 'function')) {
-        throw new TypeError('tag() requires tag option functions')
+    alias(name: string) {
+      if (typeof name !== 'string') {
+        throw new TypeError('alias() requires a string name')
       }
 
-      return makeSchema({
+      return makeStruct({
         ...definition,
-        tagOptions: [...(definition.tagOptions ?? []), ...options],
+        alias: name,
       })
+    },
+    null() {
+      return withFlags({ nullable: true })
+    },
+    nullish() {
+      return withFlags({ nullable: true, optional: true })
+    },
+    optional() {
+      return withFlags({ optional: true })
     },
   }
 
-  Object.defineProperty(schema, '_struct', {
+  Object.defineProperty(struct, '_struct', {
     enumerable: false,
     value: undefined,
   })
 
-  return schema
+  return struct
 }

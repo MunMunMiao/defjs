@@ -223,7 +223,7 @@ const badRequest = defineRequest({
   method: 'GET',
   path: '/users/:id',
   build(request, input) {
-    request.setPathParams({ id: input.id }) // TypeScript error: missing input schema
+    request.setPathParams({ id: input.id }) // TypeScript error: missing input struct
   },
   output: { 200: struct.object({ id: struct.number() }) },
 })

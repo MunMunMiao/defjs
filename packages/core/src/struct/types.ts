@@ -1,7 +1,7 @@
 import type { ExcludeUnion } from '../internal/utility_types'
 import type { StructError } from './errors'
-import type { DEFINITION, TYPES } from './symbols'
-import type { FieldTagOption } from './tag'
+import type { ResolvedStructField } from './fields'
+import type { DEFINITION } from './symbols'
 
 export type Path = Array<number | string>
 export type ParseMode = 'field' | 'value'
@@ -9,24 +9,25 @@ export type ParseMode = 'field' | 'value'
 export type ParseTuple<O> = [error: StructError | null, value: O]
 export type LiteralValue = boolean | null | number | string
 
-export interface SchemaTypes<Input = unknown, Output = unknown, OptionalOut extends boolean = false> {
+export interface StructTypes<Input = unknown, Output = unknown, OptionalOut extends boolean = false> {
   input: Input
   optionalOut: OptionalOut extends true ? true : undefined
   output: Output
 }
 
-export interface SchemaLike<I = unknown, O = unknown, OO extends boolean = boolean> {
-  readonly [TYPES]: SchemaTypes<I, O, OO>
-  readonly _struct: SchemaTypes<I, O, OO>
+export interface StructLike<I = unknown, O = unknown, OO extends boolean = boolean> {
+  readonly _struct: StructTypes<I, O, OO>
 }
 
-export type OptionalOutputSchema = {
+export type AnyStructLike = StructLike<unknown, unknown, boolean>
+
+export type OptionalOutputStruct = {
   readonly _struct: {
     readonly optionalOut: true
   }
 }
 
-export interface SchemaIssue {
+export interface StructIssue {
   code: 'custom' | 'invalid_enum' | 'invalid_literal' | 'invalid_type' | 'invalid_union' | 'missing_key'
   expected: string
   message: string
@@ -34,49 +35,49 @@ export interface SchemaIssue {
   received: unknown
 }
 
-export interface FormattedSchemaError {
+export interface FormattedStructError {
   _errors: string[]
-  [key: string]: FormattedSchemaError | string[]
+  [key: string]: FormattedStructError | string[]
 }
 
-export interface FlattenedSchemaError {
+export interface FlattenedStructError {
   formErrors: string[]
   fieldErrors: { [key: string]: string[] }
 }
 
-export interface SchemaMethods<I, O, OO extends boolean> {
-  null(): Schema<I | null, O | null, OO>
-  nullish(): Schema<I | null | undefined, O | null | undefined, true>
-  optional(): Schema<I | undefined, O | undefined, true>
-  tag(...options: FieldTagOption[]): Schema<I, O, OO>
+export interface StructMethods<I, O, OO extends boolean> {
+  alias(name: string): Struct<I, O, OO>
+  null(): Struct<I | null, O | null, OO>
+  nullish(): Struct<I | null | undefined, O | null | undefined, true>
+  optional(): Struct<I | undefined, O | undefined, true>
 }
 
-export type Schema<Input = unknown, Output = Input, OptionalOut extends boolean = false> = SchemaMethods<Input, Output, OptionalOut> &
-  SchemaLike<Input, Output, OptionalOut>
+export type Struct<Input = unknown, Output = Input, OptionalOut extends boolean = false> = StructMethods<Input, Output, OptionalOut> &
+  StructLike<Input, Output, OptionalOut>
 
-// Type boundary: AnySchema represents the public type returned by struct.any(). The output is intentionally
-// unconstrained because the schema makes no static guarantees about decoded values.
+// Type boundary: AnyStruct represents the public type returned by struct.any(). The output is intentionally
+// unconstrained because the struct makes no static guarantees about decoded values.
 // oxlint-disable-next-line typescript/no-explicit-any
-export type AnySchema = Schema<any, any, boolean>
+export type AnyStruct = Struct<any, any, boolean>
 
-type SchemaInput<T> = T extends { readonly _struct: { readonly input: unknown } } ? T['_struct']['input'] : never
-type SchemaOutput<T> = T extends { readonly _struct: { readonly output: unknown } } ? T['_struct']['output'] : never
+type StructInput<T> = T extends { readonly _struct: { readonly input: unknown } } ? T['_struct']['input'] : never
+type StructOutput<T> = T extends { readonly _struct: { readonly output: unknown } } ? T['_struct']['output'] : never
 
-export type Infer<T> = SchemaOutput<T>
+export type Infer<T> = StructOutput<T>
 
-// Type boundary: FieldOutput inspects the generic schema surface; `unknown` lets the
-// conditional type match any SchemaLike without over-constraining callers.
+// Type boundary: FieldOutput inspects the generic struct surface; `unknown` lets the
+// conditional type match any StructLike without over-constraining callers.
 export type FieldOutput<S> =
-  S extends SchemaLike<unknown, unknown, boolean>
-    ? S extends OptionalOutputSchema
+  S extends StructLike<unknown, unknown, boolean>
+    ? S extends OptionalOutputStruct
       ? ExcludeUnion<S['_struct']['output'], undefined>
       : S['_struct']['output']
     : never
 
 export type Simplify<T> = { [K in keyof T]: T[K] } & {}
 
-// Type boundary: ObjectShape accepts any field schema type; `any` is the only way to express "a record whose
-// values are arbitrary schema instances" before the caller provides a concrete shape.
+// Type boundary: ObjectShape accepts any field struct type; `any` is the only way to express "a record whose
+// values are arbitrary struct instances" before the caller provides a concrete shape.
 // oxlint-disable-next-line typescript/no-explicit-any
 export type ObjectShape = { [key: string]: any }
 
@@ -86,36 +87,35 @@ export type ObjectInput<T extends ObjectShape> = Simplify<{
 
 export type ObjectOutput<T extends ObjectShape> = Simplify<
   {
-    -readonly [K in keyof T as T[K] extends OptionalOutputSchema ? never : K]: T[K] extends OptionalOutputSchema
-      ? ExcludeUnion<T[K]['_struct']['output'], undefined>
-      : T[K]['_struct']['output']
+    -readonly [K in keyof T as T[K] extends OptionalOutputStruct ? never : K]: FieldOutput<T[K]>
   } & {
-    -readonly [K in keyof T as T[K] extends OptionalOutputSchema ? K : never]?: T[K] extends OptionalOutputSchema
-      ? ExcludeUnion<T[K]['_struct']['output'], undefined>
-      : T[K]['_struct']['output']
+    -readonly [K in keyof T as T[K] extends OptionalOutputStruct ? K : never]?: FieldOutput<T[K]>
   }
 >
 
-export type TupleOutput<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = {
-  -readonly [K in keyof T]: SchemaOutput<T[K]>
+export type TupleOutput<T extends readonly StructLike<unknown, unknown, boolean>[]> = {
+  -readonly [K in keyof T]: StructOutput<T[K]>
 }
 
-// Type boundary: UnionOutput ranges over arbitrary schema elements; `unknown` matches any SchemaLike.
-export type UnionOutput<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = {
-  // Type boundary: per-element schema output extraction; `unknown` preserves distributivity over all schemas.
-  [K in keyof T]: T[K] extends SchemaLike<unknown, unknown, boolean> ? SchemaOutput<T[K]> : never
-}[number]
+export type UnionOutput<T extends readonly StructLike<unknown, unknown, boolean>[]> = StructOutput<T[number]>
 
-export type StringSchema = Schema<string | undefined, string>
+export type IntersectionOutput<T extends readonly StructLike<unknown, unknown, boolean>[]> = T extends readonly [
+  infer Head extends StructLike<unknown, unknown, boolean>,
+  ...infer Tail extends StructLike<unknown, unknown, boolean>[],
+]
+  ? StructOutput<Head> & IntersectionOutput<Tail>
+  : unknown
 
-export type NumberSchema = Schema<number | undefined, number>
+export type StringStruct = Struct<string | undefined, string>
 
-// Type boundary: ArrayInput/Output work with any element schema; `unknown` is the generic placeholder.
-export type ArrayInput<S extends SchemaLike<unknown, unknown, boolean>> = SchemaInput<S>[]
-export type ArrayOutput<S extends SchemaLike<unknown, unknown, boolean>> = SchemaOutput<S>[]
+export type NumberStruct = Struct<number | undefined, number>
 
-// Type boundary: ArraySchemaTypes generalises over any element schema.
-export interface ArraySchemaTypes<S extends SchemaLike<unknown, unknown, boolean>> extends SchemaTypes<
+// Type boundary: ArrayInput/Output work with any element struct; `unknown` is the generic placeholder.
+export type ArrayInput<S extends StructLike<unknown, unknown, boolean>> = StructInput<S>[]
+export type ArrayOutput<S extends StructLike<unknown, unknown, boolean>> = StructOutput<S>[]
+
+// Type boundary: ArrayStructTypes generalises over any element struct.
+export interface ArrayStructTypes<S extends StructLike<unknown, unknown, boolean>> extends StructTypes<
   ArrayInput<S>,
   ArrayOutput<S>,
   false
@@ -125,99 +125,106 @@ export interface ArraySchemaTypes<S extends SchemaLike<unknown, unknown, boolean
   output: ArrayOutput<S>
 }
 
-// Type boundary: ArraySchema generalises over any element schema.
-export interface ArraySchema<S extends SchemaLike<unknown, unknown, boolean>>
-  extends SchemaMethods<ArrayInput<S>, ArrayOutput<S>, false>, SchemaLike<ArrayInput<S>, ArrayOutput<S>, false> {
-  readonly [TYPES]: ArraySchemaTypes<S>
-  readonly _struct: ArraySchemaTypes<S>
+// Type boundary: ArrayStruct generalises over any element struct.
+export interface ArrayStruct<S extends StructLike<unknown, unknown, boolean>>
+  extends StructMethods<ArrayInput<S>, ArrayOutput<S>, false>, StructLike<ArrayInput<S>, ArrayOutput<S>, false> {
+  readonly _struct: ArrayStructTypes<S>
 }
 
-export interface ObjectSchemaTypes<T extends ObjectShape> extends SchemaTypes<ObjectInput<T>, ObjectOutput<T>, false> {
+export interface ObjectStructTypes<T extends ObjectShape> extends StructTypes<ObjectInput<T>, ObjectOutput<T>, false> {
   input: ObjectInput<T>
   optionalOut: undefined
   output: ObjectOutput<T>
 }
 
-export interface ObjectSchema<T extends ObjectShape>
-  extends SchemaMethods<ObjectInput<T>, ObjectOutput<T>, false>, SchemaLike<ObjectInput<T>, ObjectOutput<T>, false> {
-  readonly [TYPES]: ObjectSchemaTypes<T>
-  readonly _struct: ObjectSchemaTypes<T>
+export interface ObjectStruct<T extends ObjectShape>
+  extends StructMethods<ObjectInput<T>, ObjectOutput<T>, false>, StructLike<ObjectInput<T>, ObjectOutput<T>, false> {
+  readonly _struct: ObjectStructTypes<T>
 }
 
 export type RequestBodyCodec = 'arrayBuffer' | 'blob' | 'formData' | 'json' | 'text' | 'urlencoded'
+export type RequestSectionKey = 'body' | 'headers' | 'path' | 'query'
 
-export interface RequestBodySchemaTypes<C extends RequestBodyCodec, S extends SchemaLike<unknown, unknown, boolean>> extends SchemaTypes<
-  SchemaInput<S>,
-  SchemaOutput<S>,
+export type RequestBodyDescriptor = {
+  codec: RequestBodyCodec
+  struct: RuntimeStruct
+}
+
+export type RequestSection = {
+  key: RequestSectionKey
+  struct: RuntimeStruct
+}
+
+export interface RequestBodyStructTypes<C extends RequestBodyCodec, S extends StructLike<unknown, unknown, boolean>> extends StructTypes<
+  StructInput<S>,
+  StructOutput<S>,
   false
 > {
   codec: C
-  input: SchemaInput<S>
+  input: StructInput<S>
   optionalOut: undefined
-  output: SchemaOutput<S>
+  output: StructOutput<S>
 }
 
-export interface RequestBodySchema<C extends RequestBodyCodec, S extends SchemaLike<unknown, unknown, boolean>>
-  extends SchemaMethods<SchemaInput<S>, SchemaOutput<S>, false>, SchemaLike<SchemaInput<S>, SchemaOutput<S>, false> {
-  readonly [TYPES]: RequestBodySchemaTypes<C, S>
-  readonly _struct: RequestBodySchemaTypes<C, S>
+export interface RequestBodyStruct<C extends RequestBodyCodec, S extends StructLike<unknown, unknown, boolean>>
+  extends StructMethods<StructInput<S>, StructOutput<S>, false>, StructLike<StructInput<S>, StructOutput<S>, false> {
+  readonly _struct: RequestBodyStructTypes<C, S>
 }
 
-export type RequestBinaryBodySchema = Schema<ArrayBuffer | undefined, ArrayBuffer> | Schema<Blob | undefined, Blob>
-export type RequestBodyShapeSchema = RequestBinaryBodySchema | RequestBodySchema<RequestBodyCodec, SchemaLike<unknown, unknown, boolean>>
+export type RequestBinaryBodyStruct = Struct<ArrayBuffer | undefined, ArrayBuffer> | Struct<Blob | undefined, Blob>
+export type RequestBodyShapeStruct = RequestBinaryBodyStruct | RequestBodyStruct<RequestBodyCodec, StructLike<unknown, unknown, boolean>>
 
 export type RequestShape = {
-  body?: RequestBodyShapeSchema
-  headers?: ObjectSchema<ObjectShape>
-  path?: ObjectSchema<ObjectShape>
-  query?: ObjectSchema<ObjectShape>
+  body?: RequestBodyShapeStruct
+  headers?: ObjectStruct<ObjectShape>
+  path?: ObjectStruct<ObjectShape>
+  query?: ObjectStruct<ObjectShape>
 }
 
 export type RequestInput<T extends RequestShape> = Simplify<
-  (T['path'] extends ObjectSchema<ObjectShape> ? { path?: SchemaInput<T['path']> } : {}) &
-    (T['query'] extends ObjectSchema<ObjectShape> ? { query?: SchemaInput<T['query']> } : {}) &
-    (T['headers'] extends ObjectSchema<ObjectShape> ? { headers?: SchemaInput<T['headers']> } : {}) &
-    (T['body'] extends SchemaLike<unknown, unknown, boolean> ? { body?: SchemaInput<T['body']> } : {})
+  (T['path'] extends ObjectStruct<ObjectShape> ? { path?: StructInput<T['path']> } : {}) &
+    (T['query'] extends ObjectStruct<ObjectShape> ? { query?: StructInput<T['query']> } : {}) &
+    (T['headers'] extends ObjectStruct<ObjectShape> ? { headers?: StructInput<T['headers']> } : {}) &
+    (T['body'] extends StructLike<unknown, unknown, boolean> ? { body?: StructInput<T['body']> } : {})
 >
 
 export type RequestOutput<T extends RequestShape> = Simplify<
-  (T['path'] extends ObjectSchema<ObjectShape> ? { path: SchemaOutput<T['path']> } : {}) &
-    (T['query'] extends ObjectSchema<ObjectShape> ? { query: SchemaOutput<T['query']> } : {}) &
-    (T['headers'] extends ObjectSchema<ObjectShape> ? { headers: SchemaOutput<T['headers']> } : {}) &
-    (T['body'] extends SchemaLike<unknown, unknown, boolean> ? { body: SchemaOutput<T['body']> } : {})
+  (T['path'] extends ObjectStruct<ObjectShape> ? { path: StructOutput<T['path']> } : {}) &
+    (T['query'] extends ObjectStruct<ObjectShape> ? { query: StructOutput<T['query']> } : {}) &
+    (T['headers'] extends ObjectStruct<ObjectShape> ? { headers: StructOutput<T['headers']> } : {}) &
+    (T['body'] extends StructLike<unknown, unknown, boolean> ? { body: StructOutput<T['body']> } : {})
 >
 
-export interface RequestSchemaTypes<T extends RequestShape> extends SchemaTypes<RequestInput<T>, RequestOutput<T>, false> {
+export interface RequestStructTypes<T extends RequestShape> extends StructTypes<RequestInput<T>, RequestOutput<T>, false> {
   input: RequestInput<T>
   optionalOut: undefined
   output: RequestOutput<T>
 }
 
-export interface RequestSchema<T extends RequestShape>
-  extends SchemaMethods<RequestInput<T>, RequestOutput<T>, false>, SchemaLike<RequestInput<T>, RequestOutput<T>, false> {
-  readonly [TYPES]: RequestSchemaTypes<T>
-  readonly _struct: RequestSchemaTypes<T>
+export interface RequestStruct<T extends RequestShape>
+  extends StructMethods<RequestInput<T>, RequestOutput<T>, false>, StructLike<RequestInput<T>, RequestOutput<T>, false> {
+  readonly _struct: RequestStructTypes<T>
 }
 
-export type RecordSchema<S extends SchemaLike<unknown, unknown, boolean>> = Schema<
-  { [key: string]: SchemaInput<S> },
+export type RecordStruct<S extends StructLike<unknown, unknown, boolean>> = Struct<
+  { [key: string]: StructInput<S> },
   { [key: string]: FieldOutput<S> }
 >
-export type TupleSchema<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = Schema<TupleOutput<T>, TupleOutput<T>>
-export type UnionSchema<T extends readonly SchemaLike<unknown, unknown, boolean>[]> = Schema<unknown, UnionOutput<T>>
-export type DiscriminatedUnionSchema<TOptions extends readonly ObjectSchema<ObjectShape>[]> = Schema<
+export type TupleStruct<T extends readonly StructLike<unknown, unknown, boolean>[]> = Struct<TupleOutput<T>, TupleOutput<T>>
+export type UnionStruct<T extends readonly StructLike<unknown, unknown, boolean>[]> = Struct<unknown, UnionOutput<T>>
+export type DiscriminatedUnionStruct<TOptions extends readonly ObjectStruct<ObjectShape>[]> = Struct<
   unknown,
-  SchemaOutput<TOptions[number]>
+  StructOutput<TOptions[number]>
 >
 
-export type SchemaFlags = {
+export type StructFlags = {
   nullable: boolean
   optional: boolean
 }
 
 export type BaseDefinition = {
-  flags: SchemaFlags
-  tagOptions?: readonly FieldTagOption[]
+  alias?: string
+  flags: StructFlags
 }
 
 export type PrimitiveKind = 'arrayBuffer' | 'bigint' | 'blob' | 'boolean' | 'date' | 'file' | 'null' | 'number' | 'string'
@@ -228,6 +235,7 @@ export type PrimitiveDefinition<K extends PrimitiveKind, TInput, TOutput = TInpu
   expected: string
   is: (value: unknown) => value is TInput
   kind: K
+  runtimeIs?: (value: unknown) => boolean
   zero: () => TOutput
 }
 
@@ -253,11 +261,16 @@ export type EnumDefinition<T extends number | string> = BaseDefinition & {
 
 export type ArrayDefinition = BaseDefinition & {
   kind: 'array'
-  item: SchemaLike<unknown, unknown, boolean>
+  item: StructLike<unknown, unknown, boolean>
+}
+
+export type ObjectDefinitionCache = {
+  fields?: readonly ResolvedStructField[]
+  resolvedShape?: ObjectShape
 }
 
 export type ObjectDefinition = BaseDefinition & {
-  cache: WeakMap<RuntimeSchema, ObjectShape>
+  readonly cache: ObjectDefinitionCache
   kind: 'object'
   shape: ObjectShape
 }
@@ -265,47 +278,49 @@ export type ObjectDefinition = BaseDefinition & {
 export type RequestBodyDefinition = BaseDefinition & {
   codec: RequestBodyCodec
   kind: 'requestBody'
-  schema: SchemaLike<unknown, unknown, boolean>
+  struct: StructLike<unknown, unknown, boolean>
 }
 
 export type RequestDefinition = BaseDefinition & {
-  body?: SchemaLike<unknown, unknown, boolean>
-  headers?: ObjectSchema<ObjectShape>
+  body?: StructLike<unknown, unknown, boolean>
+  bodyDescriptor?: RequestBodyDescriptor
+  headers?: ObjectStruct<ObjectShape>
   kind: 'request'
-  path?: ObjectSchema<ObjectShape>
-  query?: ObjectSchema<ObjectShape>
+  path?: ObjectStruct<ObjectShape>
+  query?: ObjectStruct<ObjectShape>
+  sections: readonly RequestSection[]
 }
 
 export type RecordDefinition = BaseDefinition & {
   kind: 'record'
-  value: SchemaLike<unknown, unknown, boolean>
+  value: StructLike<unknown, unknown, boolean>
 }
 
 export type TupleDefinition = BaseDefinition & {
   kind: 'tuple'
-  items: readonly [SchemaLike<unknown, unknown, boolean>, ...SchemaLike<unknown, unknown, boolean>[]]
+  items: readonly [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]]
 }
 
 export type UnionDefinition = BaseDefinition & {
   kind: 'or'
-  options: readonly [SchemaLike<unknown, unknown, boolean>, ...SchemaLike<unknown, unknown, boolean>[]]
+  options: readonly [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]]
 }
 
 export type DiscriminatedUnionDefinition = BaseDefinition & {
   kind: 'discriminatedUnion'
   discriminator: string
   expected: string
-  map: Map<unknown, SchemaLike<unknown, unknown, boolean>>
-  options: readonly [SchemaLike<unknown, unknown, boolean>, ...SchemaLike<unknown, unknown, boolean>[]]
+  map: Map<unknown, StructLike<unknown, unknown, boolean>>
+  options: readonly [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]]
 }
 
 export type IntersectionDefinition = BaseDefinition & {
   kind: 'intersection'
-  left: SchemaLike<unknown, unknown, boolean>
-  right: SchemaLike<unknown, unknown, boolean>
+  left: StructLike<unknown, unknown, boolean>
+  right: StructLike<unknown, unknown, boolean>
 }
 
-export type SchemaDefinition =
+export type StructDefinition =
   | ArrayDefinition
   | AnyDefinition
   | DiscriminatedUnionDefinition
@@ -322,7 +337,7 @@ export type SchemaDefinition =
   | UnionDefinition
 
 export type ParseFailure = {
-  issues: SchemaIssue[]
+  issues: StructIssue[]
   ok: false
 }
 
@@ -333,12 +348,11 @@ export type ParseSuccess<T> = {
 
 export type ParseResult<T> = ParseFailure | ParseSuccess<T>
 
-export type RuntimeSchema = {
-  readonly [DEFINITION]: SchemaDefinition
-  readonly [TYPES]: SchemaTypes<unknown, unknown, boolean>
-  readonly _struct: SchemaTypes<unknown, unknown, boolean>
-  null(): RuntimeSchema
-  nullish(): RuntimeSchema
-  optional(): RuntimeSchema
-  tag(...options: FieldTagOption[]): RuntimeSchema
+export type RuntimeStruct = {
+  readonly [DEFINITION]: StructDefinition
+  readonly _struct: StructTypes<unknown, unknown, boolean>
+  alias(name: string): RuntimeStruct
+  null(): RuntimeStruct
+  nullish(): RuntimeStruct
+  optional(): RuntimeStruct
 }

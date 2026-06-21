@@ -16,7 +16,7 @@ hero:
 features:
   - icon: 🔒
     title: Type Safety
-    details: Define request schemas with struct. Get end-to-end type inference for inputs, outputs, and error branches. Runtime validation catches mismatches before they reach production.
+    details: Define request structs with struct. Get end-to-end type inference for inputs, outputs, and error branches. Runtime validation catches mismatches before they reach production.
   - icon: 🌐
     title: Multi-Transport
     details: One unified API style for HTTP requests, Server-Sent Events, and WebSocket connections. Switch transports without rewriting your application logic.

@@ -119,11 +119,11 @@ const built = buildRequest(
 
 #### Struct 构造器
 
-当前重复出现 `as unknown as Schema...`。设计方向是提取集中 schema 构造 helper，将类型品牌边界收敛到少量可信位置。保留的断言需要说明该 helper 统一构造运行时对象，类型品牌只服务编译期推导。
+当前重复出现 `as unknown as Struct...`。设计方向是提取集中 struct 构造 helper，将类型品牌边界收敛到少量可信位置。保留的断言需要说明该 helper 统一构造运行时对象，类型品牌只服务编译期推导。
 
 #### SSE / WebSocket
 
-当前存在多处泛型运行时桥接 cast。设计方向是通过更精确的函数返回类型、中间类型别名和 typed helper 减少调用点断言。对于协议解析后由 schema 保证的类型边界，可以保留断言并加备注。
+当前存在多处泛型运行时桥接 cast。设计方向是通过更精确的函数返回类型、中间类型别名和 typed helper 减少调用点断言。对于协议解析后由 struct 保证的类型边界，可以保留断言并加备注。
 
 #### 测试中的非法输入
 

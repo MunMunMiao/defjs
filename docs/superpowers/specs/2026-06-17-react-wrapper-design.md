@@ -321,7 +321,7 @@ import { createRoot } from 'react-dom/client'
 import { ClientProvider, useClient, withEndpoint } from '../src'
 import { defineRequest, struct } from '@defjs/core'
 
-const UserSchema = struct.object({
+const UserStruct = struct.object({
   id: struct.number(),
   name: struct.string(),
 })
@@ -330,7 +330,7 @@ const getUsers = defineRequest({
   method: 'GET',
   path: '/api/users',
   output: {
-    200: struct.array(UserSchema),
+    200: struct.array(UserStruct),
   },
 })
 

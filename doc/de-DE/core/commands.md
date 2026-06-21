@@ -5,7 +5,7 @@ description: Master defineRequest, defineEventStream, and defineWebSocket, inclu
 
 # Commands
 
-Defjs ist um "Commands" aufgebaut: typsichere ausführbare Objekte, die von `defineRequest`, `defineEventStream` und `defineWebSocket` erstellt werden. Jeder Command trägt ein `kind` (Transport-Typ), eine `definition` (Endpoint-Schema) und `input` (Call-Daten). Der Client verteilt basierend auf `kind` an die korrekte Transport-Logik.
+Defjs ist um "Commands" aufgebaut: typsichere ausführbare Objekte, die von `defineRequest`, `defineEventStream` und `defineWebSocket` erstellt werden. Jeder Command trägt ein `kind` (Transport-Typ), eine `definition` (Endpoint-Struct) und `input` (Call-Daten). Der Client verteilt basierend auf `kind` an die korrekte Transport-Logik.
 
 ## defineRequest: HTTP-Endpunkt-Definition
 
@@ -72,15 +72,15 @@ const command = ListUsers() // Keine Argumente nötig
 ```typescript
 // Array-Form (empfohlen)
 output: [
-  { status: 200, body: UserSchema },
-  { status: [401, 403], body: AuthErrorSchema },
+  { status: 200, body: UserStruct },
+  { status: [401, 403], body: AuthErrorStruct },
 ]
 
 // Objekt-Form
 output: {
-  200: UserSchema,
-  '401': AuthErrorSchema,
-  '403': AuthErrorSchema,
+  200: UserStruct,
+  '401': AuthErrorStruct,
+  '403': AuthErrorStruct,
 }
 ```
 
@@ -113,7 +113,7 @@ Jeder Schlüssel in `events` entspricht dem SSE-`event`-Feld. Der Client schläg
 
 ### default-Fallback
 
-Falls der Server einen nicht deklarierten Event-Namen sendet, kannst du ein `default`-Schema als Fallback bereitstellen:
+Falls der Server einen nicht deklarierten Event-Namen sendet, kannst du ein `default`-Struct als Fallback bereitstellen:
 
 ```typescript
 const Stream = defineEventStream({
@@ -154,7 +154,7 @@ SSE-`build` unterstützt keinen Request-Body und `withCredentials`.
 
 ## defineWebSocket: WebSocket-Definition
 
-`defineWebSocket` definiert einen WebSocket-Endpunkt und unterscheidet **incoming** (Server → Client) und **outgoing** (Client → Server) Message-Schemata.
+`defineWebSocket` definiert einen WebSocket-Endpunkt und unterscheidet **incoming** (Server → Client) und **outgoing** (Client → Server) Message-Structta.
 
 ```typescript
 import { defineWebSocket } from '@defjs/core'
@@ -181,7 +181,7 @@ const ChatSocket = defineWebSocket({
 const command = ChatSocket({ path: { roomId: 'lobby' } })
 ```
 
-### incoming Message-Schema
+### incoming Message-Struct
 
 `incoming` definiert Message-Typen, die vom Server gepusht werden. Jede Nachricht muss ein `type`-Feld enthalten, das einem `incoming`-Schlüssel entspricht. Falls der Payload ein Objekt ist, werden seine Felder mit `type` gemerged:
 
@@ -192,7 +192,7 @@ const command = ChatSocket({ path: { roomId: 'lobby' } })
 
 Falls der Payload ein Skalar (String, Number etc.) ist, wird er als `{ type: 'xxx', data: <value> }` gewrapped.
 
-### outgoing Message-Schema
+### outgoing Message-Struct
 
 `outgoing` definiert Message-Typen, die vom Client gesendet werden. Das `type` wird automatisch aus dem Schlüsselnamen gefüllt. Du gibst nur den Payload an:
 

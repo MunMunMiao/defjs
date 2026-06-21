@@ -102,7 +102,7 @@ console.log(user.name)
 入力検証、出力検証、エラー処理、インターセプターを含むエンドツーエンドの例を示します：
 
 ```typescript
-import { createClient, defineRequest, struct, tag, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
 
 // 1. クライアントを作成
 const client = createClient(
@@ -122,7 +122,7 @@ const createPost = defineRequest({
   input: struct.object({
     title: struct.string(),
     body: struct.string(),
-    'X-Request-ID': tag(struct.string(), { kind: 'header' }),
+    'X-Request-ID': struct.string(),
   }),
   build: (input) => ({
     body: { title: input.title, body: input.body },
@@ -179,11 +179,11 @@ async function createPost() {
 | API                    | 説明                                 | 代表的な使い方                                                                 |
 | ---------------------- | ------------------------------------ | ------------------------------------------------------------------------------ |
 | `createClient`         | リクエストクライアントを作成         | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | HTTP エンドポイントを定義            | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserSchema } })` |
+| `defineRequest`        | HTTP エンドポイントを定義            | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
 | `defineEventStream`    | SSE エンドポイントを定義             | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | WebSocket エンドポイントを定義       | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | スキーマビルダー                     | `struct.object({ id: struct.number() })`                                       |
-| `tag`                  | フィールドのメタデータタグ           | `tag(struct.string(), { kind: 'header' })`                                     |
+| `.alias(name)`         | フィールドの wire 名エイリアス       | `struct.string().alias('user_name')`                                           |
 | `withEndpoint`         | ベース URL を設定                    | `withEndpoint('https://api.example.com')`                                      |
 | `withInterceptors`     | インターセプターを登録               | `withInterceptors([...interceptors])`                                          |
 | `withCredentials`      | クロスオリジンクレデンシャルを有効化 | `withCredentials(true)`                                                        |

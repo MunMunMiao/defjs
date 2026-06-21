@@ -393,8 +393,8 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
     )
   }
 
-  const schema = resolveOutputSchema(definition.output, response.status)
-  if (!schema) {
+  const struct = resolveOutputStruct(definition.output, response.status)
+  if (!struct) {
     return fail(
       createDefinitionError('UNDECLARED_STATUS', new Error(`Undeclared status: ${response.status}`), settledResponse) as RequestError<
         RequestErrorData<TOutput>
@@ -405,7 +405,7 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
 
   let parsedBody: unknown
   try {
-    parsedBody = parseStructResponse(schema, response.body, responseType)
+    parsedBody = parseStructResponse(struct, response.body, responseType)
   } catch (error) {
     return fail(
       createDefinitionError('RESPONSE_VALIDATION_FAILED', error, settledResponse) as RequestError<RequestErrorData<TOutput>>,
@@ -428,7 +428,7 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
 }
 ```
 
-> 函数体其余辅助函数（`resolveOutputSchema`、`parseStructResponse`、`getHttpErrorMessage`）保持原样。
+> 函数体其余辅助函数（`resolveOutputStruct`、`parseStructResponse`、`getHttpErrorMessage`）保持原样。
 
 - [ ] **Step 5: 更新 `http/public_api.ts` 并运行测试**
 
@@ -490,14 +490,14 @@ import type { ClientConfig } from '../client/config'
 
 export interface EventStreamCommand<
   TInput extends AnyStruct | undefined,
-  TEvents extends EventSchemas,
+  TEvents extends EventStructs,
 > extends BaseCommand<'event-stream'> {
   readonly endpoint: EventStreamEndpoint<TInput, TEvents>
   readonly input: EndpointInput<TInput> | undefined
   readonly config?: UseEventStreamConfig
 }
 
-export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEvents extends EventSchemas> =
+export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEvents extends EventStructs> =
   IsInputOptional<TInput> extends true
     ? (input?: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
     : (input: EndpointInput<TInput>, config?: UseEventStreamConfig) => EventStreamCommand<TInput, TEvents>
@@ -508,13 +508,13 @@ export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEve
 - [ ] **Step 3: 改写 `defineEventStream`**
 
 ```ts
-export function defineEventStream<TInput extends AnyStruct, TEvents extends EventSchemas = EventSchemas>(
+export function defineEventStream<TInput extends AnyStruct, TEvents extends EventStructs = EventStructs>(
   definition: EventStreamDefinitionWithBuild<TInput, TEvents>,
 ): EventStreamCommandBuilder<TInput, TEvents>
-export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
+export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventStructs = EventStructs>(
   definition: EventStreamDefinitionWithoutBuild<TInput, TEvents>,
 ): EventStreamCommandBuilder<TInput, TEvents>
-export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventSchemas = EventSchemas>(
+export function defineEventStream<TInput extends AnyStruct | undefined = undefined, TEvents extends EventStructs = EventStructs>(
   definition: EventStreamDefinition<TInput, TEvents>,
 ): EventStreamCommandBuilder<TInput, TEvents> {
   const endpoint: EventStreamEndpoint<TInput, TEvents> = {
@@ -546,7 +546,7 @@ export function defineEventStream<TInput extends AnyStruct | undefined = undefin
 新增导出包装函数：
 
 ```ts
-export async function executeEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+export async function executeEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
   clientConfig: ClientConfig,
   command: EventStreamCommand<TInput, TEvents>,
   options?: { signal?: AbortSignal },
@@ -561,7 +561,7 @@ export async function executeEventStreamCommand<TInput extends AnyStruct | undef
 将原 `executeEventStreamEndpoint` 重命名为 `runEventStreamCommand`，签名改为：
 
 ```ts
-async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
   clientConfig: ClientConfig,
   endpoint: EventStreamEndpoint<TInput, TEvents>,
   input: EndpointInput<TInput> | undefined,
@@ -644,8 +644,8 @@ import type { ClientConfig } from '../client/config'
 
 export interface WebSocketCommand<
   TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
+  TIncoming extends SocketStructs,
+  TOutgoing extends SocketStructs | undefined,
 > extends BaseCommand<'web-socket'> {
   readonly endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>
   readonly input: EndpointInput<TInput> | undefined
@@ -654,8 +654,8 @@ export interface WebSocketCommand<
 
 export type WebSocketCommandBuilder<
   TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
+  TIncoming extends SocketStructs,
+  TOutgoing extends SocketStructs | undefined,
 > =
   IsInputOptional<TInput> extends true
     ? (
@@ -675,18 +675,18 @@ export type WebSocketCommandBuilder<
 ```ts
 export function defineWebSocket<
   TInput extends AnyStruct,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 >(definition: WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 >(definition: WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing>
 export function defineWebSocket<
   TInput extends AnyStruct | undefined = undefined,
-  TIncoming extends SocketSchemas = SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined = undefined,
+  TIncoming extends SocketStructs = SocketStructs,
+  TOutgoing extends SocketStructs | undefined = undefined,
 >(definition: WebSocketDefinition<TInput, TIncoming, TOutgoing>): WebSocketCommandBuilder<TInput, TIncoming, TOutgoing> {
   const endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing> = {
     ...definition,
@@ -721,8 +721,8 @@ export function defineWebSocket<
 ```ts
 export async function executeWebSocketCommand<
   TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
+  TIncoming extends SocketStructs,
+  TOutgoing extends SocketStructs | undefined,
 >(
   clientConfig: ClientConfig,
   command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
@@ -746,8 +746,8 @@ export async function executeWebSocketCommand<
 ```ts
 async function runWebSocketCommand<
   TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
+  TIncoming extends SocketStructs,
+  TOutgoing extends SocketStructs | undefined,
 >(
   clientConfig: ClientConfig,
   endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>,
@@ -878,15 +878,15 @@ export async function execute<TInput extends AnyStruct | undefined, TOutput exte
   options?: { client?: Client; signal?: AbortSignal },
 ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>>
 
-export async function execute<TInput extends AnyStruct | undefined, TEvents extends EventSchemas>(
+export async function execute<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
   command: EventStreamCommand<TInput, TEvents>,
   options?: { client?: Client; signal?: AbortSignal },
 ): Promise<StreamAwaitResult<EventStreamData<TEvents>>>
 
 export async function execute<
   TInput extends AnyStruct | undefined,
-  TIncoming extends SocketSchemas,
-  TOutgoing extends SocketSchemas | undefined,
+  TIncoming extends SocketStructs,
+  TOutgoing extends SocketStructs | undefined,
 >(
   command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
   options?: { client?: Client; signal?: AbortSignal },
@@ -1177,7 +1177,7 @@ git commit -m "test(core,opentelemetry-server): migrate tests and remove global 
 新增示例：
 
 ```ts
-const useGetUser = defineRequest({ method: 'GET', path: '/users/:id', output: { 200: UserSchema } })
+const useGetUser = defineRequest({ method: 'GET', path: '/users/:id', output: { 200: UserStruct } })
 const client = createClient(withEndpoint('https://api.example.com'))
 const [err, user, response] = await client.execute(useGetUser({ id: 1 }))
 

@@ -1,6 +1,6 @@
 ---
 title: Struct
-description: Declarative schema definition, type inference, error mapping, and the field tag system.
+description: Declarative struct definition, type inference, error mapping, and the field alias support.
 ---
 
 # Struct
@@ -9,12 +9,12 @@ description: Declarative schema definition, type inference, error mapping, and t
 
 ## 기본 타입
 
-모든 스키마는 `struct` 네임스페이스를 통해 생성되며, 체인 호출 `.optional()`, `.null()`, `.nullish()`, `.tag(...)`를 지원해요.
+모든 스키마는 `struct` 네임스페이스를 통해 생성되며, 체인 호출 `.optional()`, `.null()`, `.nullish()`, `.alias(name)`를 지원해요.
 
 ### 스칼라
 
 ```typescript
-import { struct } from '@defjs/core'
+import { struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -23,7 +23,7 @@ const User = struct.object({
   role: struct.literal('admin'),
 })
 
-type User = struct.Infer<typeof User>
+type User = Infer<typeof User>
 // { id: number; name: string; active: boolean; role: 'admin' }
 ```
 
@@ -95,11 +95,11 @@ const CreateUser = struct.request({
   path: struct.object({ orgId: struct.number() }),
   query: struct.object({ dryRun: struct.boolean().optional() }),
   headers: struct.object({
-    'X-Api-Key': struct.string().tag(tag.header('X-Api-Key')),
+    'X-Api-Key': struct.string().alias('X-Api-Key'),
   }),
   body: struct.json(
     struct.object({
-      name: struct.string().tag(tag.json('user_name')),
+      name: struct.string().alias('user_name'),
     }),
   ),
 })
@@ -109,7 +109,7 @@ const CreateUser = struct.request({
 
 | 래퍼                       | 인코딩            |
 | -------------------------- | ----------------- |
-| `struct.json(schema)`      | `JSON.stringify`  |
+| `struct.json(struct)`      | `JSON.stringify`  |
 | `struct.urlencoded(shape)` | `URLSearchParams` |
 | `struct.formData(shape)`   | `FormData`        |
 | `struct.text()`            | 일반 텍스트       |
@@ -118,7 +118,7 @@ const CreateUser = struct.request({
 
 ## `Infer<T>` 타입 추론
 
-`struct.Infer<T>`는 스키마의 출력 타입을 추출해요. 익혀야 할 유일한 타입 레벨 헬퍼예요.
+`Infer<T>`는 스키마의 출력 타입을 추출해요. 익혀야 할 유일한 타입 레벨 헬퍼예요.
 
 ```typescript
 const Person = struct.object({
@@ -126,21 +126,21 @@ const Person = struct.object({
   age: struct.number().optional(),
 })
 
-type Person = struct.Infer<typeof Person>
+type Person = Infer<typeof Person>
 // { name: string; age?: number }
 ```
 
 `Infer`는 `struct.array(...)`, `struct.union(...)`, `struct.request(...)`에도 동작해요:
 
 ```typescript
-type Tags = struct.Infer<typeof Tags> // string[]
-type Id = struct.Infer<typeof Id> // string | number
-type Req = struct.Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
+type Tags = Infer<typeof Tags> // string[]
+type Id = Infer<typeof Id> // string | number
+type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
 ```
 
 ## StructError와 오류 매핑
 
-검증에 실패하면 런타임은 완전한 `SchemaIssue[]`를 담은 `StructError`를 반환해요.
+검증에 실패하면 런타임은 완전한 `StructIssue[]`를 담은 `StructError`를 반환해요.
 
 ```typescript
 import { struct, StructError } from '@defjs/core'
@@ -175,84 +175,43 @@ setErrorMap((issue) => {
 })
 ```
 
-## 태그 시스템
+## Field Aliases
 
-태그는 필드에 붙는 메타데이터로, 코덱, 요청 빌더, 외부 어댑터가 읽어요. 코어는 6가지 내장 네임스페이스를 제공해요:
-
-| 네임스페이스            | 목적                        | 인자 없이 호출 시 동작            |
-| ----------------------- | --------------------------- | --------------------------------- |
-| `tag.json()`            | JSON 필드 와이어 키         | 필드 이름으로 폴백                |
-| `tag.urlencoded()`      | URL 인코딩 필드 와이어 키   | 필드 이름으로 폴백                |
-| `tag.multipart()`       | 멀티파트 필드 와이어 키     | 필드 이름으로 폴백                |
-| `tag.query(fieldName)`  | 쿼리 파라미터 와이어 키     | **이름을 명시적으로 제공해야 함** |
-| `tag.uri(fieldName)`    | URI 경로 파라미터 와이어 키 | **이름을 명시적으로 제공해야 함** |
-| `tag.header(fieldName)` | HTTP 헤더 와이어 키         | **이름을 명시적으로 제공해야 함** |
-
-### 사용 예제
+`.alias(name)`는 유일한 내장 필드 wire-name 메커니즘이에요. JSON, query, headers, path, urlencoded, FormData 인코딩/디코딩에서 쓰는 외부 key만 바꿔요. TypeScript 속성명, 출력 타입, request section, body codec, 그리고 `build(ctx, input)` 안에 명시적으로 쓴 object key는 바꾸지 않아요. alias가 없는 필드는 object field key를 wire key로 사용해요.
 
 ```typescript
-import { struct, tag } from '@defjs/core'
+import { struct } from '@defjs/core'
 
 const UserBody = struct.object({
-  id: struct.number().tag(tag.json('user_id')),
-  name: struct.string().tag(tag.json('user_name')),
-  email: struct.string().tag(tag.header('X-User-Email')),
+  id: struct.number().alias('user_id'),
+  name: struct.string().alias('user_name'),
 })
 ```
 
-### 커스텀 설정 태그
+The same alias is used by JSON, query, path params, headers, urlencoded bodies, and multipart bodies. If the same logical value needs different names in different targets, split the struct or write explicit keys in `build(ctx, input)`.
 
-`tag.defineConfig`를 사용하면 서드파티 라이브러리가 자신만의 네임스페이스와 설정 키를 정의할 수 있어요:
+## Field Introspection
 
-```typescript
-import { tag } from '@defjs/core'
-
-const GormTag = tag.createTagNamespace('gorm')
-const gorm = tag.defineConfig(GormTag)
-
-const Model = struct.object({
-  id: struct.number().tag(gorm('column', 'id'), gorm('primaryKey')),
-})
-```
-
-규칙:
-
-- 같은 네임스페이스 내에서 나중 `value`가 앞선 `value`를 덮어써요.
-- 같은 네임스페이스와 같은 `config` 키에서 나중 값이 앞선 값을 덮어써요.
-- 설정 값은 `string | number | boolean`만 가능해요.
-
-### 태그 읽기
-
-```typescript
-import { getFieldTag, getFieldTags, tag } from '@defjs/core'
-
-const field = UserBody.shape.name
-const jsonTag = getFieldTag(field, tag.kind.json, 'name')
-// { namespace: JsonTag, value: 'user_name', config: Map() }
-```
-
-## 필드 인트로스펙션
-
-`getStructFields`는 객체 스키마를 읽기 가능한 필드 목록으로 펼쳐요. 필드 키, 하위 스키마, 구체화된 태그를 포함해요.
+`getStructFields` expands an object struct into a readable field list containing field key, alias, and sub-struct.
 
 ```typescript
 import { getStructFields } from '@defjs/core'
 
 const fields = getStructFields(UserBody)
 // [
-//   { key: 'id', struct: NumberSchema, tags: Map<symbol, FieldTag> },
-//   { key: 'name', struct: StringSchema, tags: Map<symbol, FieldTag> },
+//   { key: 'id', alias: 'user_id', struct: NumberStruct },
+//   { key: 'name', alias: 'user_name', struct: StringStruct },
 // ]
 ```
 
-인트로스펙션 전에 `isObjectStruct`로 안전한 타입 검사를 할 수 있어요:
+Combined with `isObjectStruct` for safe type checking before introspection:
 
 ```typescript
 import { isObjectStruct, getStructFields } from '@defjs/core'
 
-if (isObjectStruct(schema)) {
-  for (const field of getStructFields(schema)) {
-    console.log(field.key, field.tags.get(tag.kind.json)?.value)
+if (isObjectStruct(struct)) {
+  for (const field of getStructFields(struct)) {
+    console.log(field.key, field.alias)
   }
 }
 ```

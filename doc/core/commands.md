@@ -5,7 +5,7 @@ description: Master defineRequest, defineEventStream, and defineWebSocket, inclu
 
 # Commands
 
-Defjs is built around "commands": type-safe executable objects created by `defineRequest`, `defineEventStream`, and `defineWebSocket`. Each command carries a `kind` (transport type), a `definition` (endpoint schema), and `input` (call data). The Client dispatches to the correct transport logic based on `kind`.
+Defjs is built around "commands": type-safe executable objects created by `defineRequest`, `defineEventStream`, and `defineWebSocket`. Each command carries a `kind` (transport type), a `definition` (endpoint struct), and `input` (call data). The Client dispatches to the correct transport logic based on `kind`.
 
 ## defineRequest: HTTP Endpoint Definition
 
@@ -72,15 +72,15 @@ const command = ListUsers() // No arguments needed
 ```typescript
 // Array form (recommended)
 output: [
-  { status: 200, body: UserSchema },
-  { status: [401, 403], body: AuthErrorSchema },
+  { status: 200, body: UserStruct },
+  { status: [401, 403], body: AuthErrorStruct },
 ]
 
 // Object form
 output: {
-  200: UserSchema,
-  '401': AuthErrorSchema,
-  '403': AuthErrorSchema,
+  200: UserStruct,
+  '401': AuthErrorStruct,
+  '403': AuthErrorStruct,
 }
 ```
 
@@ -113,7 +113,7 @@ Each key in `events` corresponds to the SSE `event` field. The Client looks up t
 
 ### default Fallback
 
-If the server sends an undeclared event name, you can provide a `default` schema as fallback:
+If the server sends an undeclared event name, you can provide a `default` struct as fallback:
 
 ```typescript
 const Stream = defineEventStream({
@@ -154,7 +154,7 @@ SSE `build` does not support request body or `withCredentials`.
 
 ## defineWebSocket: WebSocket Definition
 
-`defineWebSocket` defines a WebSocket endpoint, distinguishing **incoming** (server → client) and **outgoing** (client → server) message schemas.
+`defineWebSocket` defines a WebSocket endpoint, distinguishing **incoming** (server → client) and **outgoing** (client → server) message structs.
 
 ```typescript
 import { defineWebSocket } from '@defjs/core'
@@ -181,7 +181,7 @@ const ChatSocket = defineWebSocket({
 const command = ChatSocket({ path: { roomId: 'lobby' } })
 ```
 
-### incoming Message Schema
+### incoming Message Struct
 
 `incoming` defines message types pushed by the server. Each message must contain a `type` field matching an `incoming` key. If the payload is an object, its fields are merged with `type`:
 
@@ -192,7 +192,7 @@ const command = ChatSocket({ path: { roomId: 'lobby' } })
 
 If the payload is a scalar (string, number, etc.), it is wrapped as `{ type: 'xxx', data: <value> }`.
 
-### outgoing Message Schema
+### outgoing Message Struct
 
 `outgoing` defines message types sent by the client. The `type` is auto-filled from the key name. You only provide the payload:
 

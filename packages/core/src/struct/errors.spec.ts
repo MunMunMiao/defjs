@@ -8,7 +8,7 @@ afterEach(() => {
 })
 
 describe('StructError format / flatten / prettify', () => {
-  const userSchema = struct.object({
+  const userStruct = struct.object({
     id: struct.string(),
     profile: struct.object({
       email: struct.string(),
@@ -17,7 +17,7 @@ describe('StructError format / flatten / prettify', () => {
   })
 
   test('format builds a nested tree of issues', () => {
-    const [err] = parse(userSchema, { id: 42, profile: { email: false }, tags: [10] })
+    const [err] = parse(userStruct, { id: 42, profile: { email: false }, tags: [10] })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
       throw new Error('expected parse error')
@@ -37,7 +37,7 @@ describe('StructError format / flatten / prettify', () => {
   })
 
   test('flatten groups by first path segment', () => {
-    const [err] = parse(userSchema, { id: 42, profile: { email: false }, tags: [10] })
+    const [err] = parse(userStruct, { id: 42, profile: { email: false }, tags: [10] })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
       throw new Error('expected parse error')
@@ -67,7 +67,7 @@ describe('StructError format / flatten / prettify', () => {
   })
 
   test('prettify renders multi-line human readable output', () => {
-    const [err] = parse(userSchema, { id: 42, profile: { email: false }, tags: [10] })
+    const [err] = parse(userStruct, { id: 42, profile: { email: false }, tags: [10] })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
       throw new Error('expected parse error')
@@ -101,7 +101,7 @@ describe('StructError format / flatten / prettify', () => {
 
   test('prettify on empty issues falls back to a sane string', () => {
     const error = new StructError([])
-    expect(error.prettify()).toBe('Schema parse failed')
+    expect(error.prettify()).toBe('Struct parse failed')
   })
 })
 

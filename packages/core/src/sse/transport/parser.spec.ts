@@ -165,6 +165,33 @@ describe('sse parser', () => {
     ])
   })
 
+  test('should not dispatch messages for frames without data fields', async () => {
+    const ids: string[] = []
+    const retries: number[] = []
+    const messages: EventStreamMessage[] = []
+    const parseMessage = createMessageParser(
+      (id) => {
+        ids.push(id)
+      },
+      (retry) => {
+        retries.push(retry)
+      },
+      async (message) => {
+        messages.push(message)
+      },
+    )
+    const parseLine = createLineParser(parseMessage)
+
+    await parseLine(encoder.encode(': comment\n\n'))
+    await parseLine(encoder.encode('event: ping\n\n'))
+    await parseLine(encoder.encode('retry: 500\n\n'))
+    await parseLine(encoder.encode('id: 1\n\n'))
+
+    expect(ids).toEqual(['1'])
+    expect(retries).toEqual([500])
+    expect(messages).toEqual([])
+  })
+
   test('should handle partial line across chunks with non-zero line start', async () => {
     const messages: EventStreamMessage[] = []
     const parseMessage = createMessageParser(noop, noop, async (message) => {

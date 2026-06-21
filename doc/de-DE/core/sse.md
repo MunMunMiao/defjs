@@ -9,7 +9,7 @@ Defjs verwendet `defineEventStream`, um typisierte SSE- (Server-Sent Events) End
 
 ## Event-Stream definieren
 
-Bei der Definition eines SSE-Endpunkts deklariere das `events`-Feld, das Event-Namen auf Struct-Schemata mapped. Das `data`-Feld jedes Event-Typs wird automatisch nach dem passenden Schema geparst.
+Bei der Definition eines SSE-Endpunkts deklariere das `events`-Feld, das Event-Namen auf Struct-Structta mapped. Das `data`-Feld jedes Event-Typs wird automatisch nach dem passenden Struct geparst.
 
 ```typescript
 import { createClient, defineEventStream, struct } from '@defjs/core'
@@ -28,9 +28,9 @@ const useNotifications = defineEventStream({
 })
 ```
 
-### Default-Event-Schema (Fallback)
+### Default-Event-Struct (Fallback)
 
-Falls der Server Event-Typen senden könnte, die nicht explizit in `events` deklariert sind, stelle ein `default`-Schema als Fallback bereit. Ohne `default` werden unbekannte Events stillschweigend verworfen.
+Falls der Server Event-Typen senden könnte, die nicht explizit in `events` deklariert sind, stelle ein `default`-Struct als Fallback bereit. Ohne `default` werden unbekannte Events stillschweigend verworfen.
 
 ```typescript
 const useMixedStream = defineEventStream({
@@ -44,7 +44,7 @@ const useMixedStream = defineEventStream({
 
 ### Event-Streams mit Input
 
-Falls ein Stream Query-Parameter oder Request-Body braucht, gib `input`-Schema und `build`-Funktion an. Die `build`-Signatur ist dieselbe wie bei `defineRequest` und unterstützt Params, Query und Headers.
+Falls ein Stream Query-Parameter oder Request-Body braucht, gib `input`-Struct und `build`-Funktion an. Die `build`-Signatur ist dieselbe wie bei `defineRequest` und unterstützt Params, Query und Headers.
 
 ```typescript
 const useRoomStream = defineEventStream({
@@ -120,7 +120,7 @@ await stream.closed // { code: 'aborted', reason: 'user-navigated-away' }
 
 ## Invalid-Event-Handling: onInvalidEvent
 
-Falls der Server ein Event sendet, das keinem Schema in `events` (oder `default`) entspricht, oder die Schema-Validierung fehlschlägt, wird der `onInvalidEvent`-Observer ausgelöst. Er ist eine Client-Level-Konfiguration, die über `sse.onInvalidEvent` bei `createClient` übergeben wird.
+Falls der Server ein Event sendet, das keinem Struct in `events` (oder `default`) entspricht, oder die Struct-Validierung fehlschlägt, wird der `onInvalidEvent`-Observer ausgelöst. Er ist eine Client-Level-Konfiguration, die über `sse.onInvalidEvent` bei `createClient` übergeben wird.
 
 ```typescript
 const client = createClient({
@@ -128,7 +128,7 @@ const client = createClient({
   sse: {
     onInvalidEvent: async (context) => {
       console.warn('Invalid event:', context.reason, context.message)
-      // context.reason: 'missing-schema' | 'validation-failed'
+      // context.reason: 'missing-struct' | 'validation-failed'
       // context.message: { id, event, data, retry? }
       // context.cause: Original error when validation fails
     },

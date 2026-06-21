@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createHttpInterceptor } from '../interceptor'
+import { makeResponse } from '../internal/http_response'
 import { createClient } from './client'
 import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import {
@@ -73,7 +74,7 @@ describe('Client', () => {
 
   test('should apply all client option helpers', () => {
     const customFetch = vi.fn(async () => new Response('ok', { status: 200 })) as unknown as typeof fetch
-    const interceptor = createHttpInterceptor(async (_request) => new Response('ok', { status: 200 }))
+    const interceptor = createHttpInterceptor(async (_request) => makeResponse({ body: 'ok', status: 200 }))
     const serializer = (params: URLSearchParams) => `serialized=${params.toString()}`
     const beforeConnect = vi.fn()
     const tokenProvider = vi.fn(() => 'xsrf-token')

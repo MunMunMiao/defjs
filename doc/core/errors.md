@@ -42,7 +42,7 @@ interface HttpStatusError<TErrorData = unknown> {
 }
 ```
 
-The `data` type is derived from the `output` schema for the matching status code. For example, `output: { 404: notFoundStruct }` narrows `error.data` to `notFoundStruct`'s inferred type.
+The `data` type is derived from the `output` struct for the matching status code. For example, `output: { 404: notFoundStruct }` narrows `error.data` to `notFoundStruct`'s inferred type.
 
 ### TransportError
 

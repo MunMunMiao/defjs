@@ -1,12 +1,23 @@
 import type { FnReturn } from '../internal/utility_types'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { encodeValue } from './encode'
 import { struct } from './index'
-import { parseStructTuple as parse } from './introspection'
-import type { RuntimeSchema } from './types'
+import { encodeStructValue, parseStructTuple as parse } from './introspection'
+import { matchesRuntimeValue, selectUnionOption } from './match'
+import { DEFINITION } from './symbols'
+import type { RuntimeStruct } from './types'
 
-function encode(schema: unknown, value: unknown): unknown {
-  return encodeValue(schema as RuntimeSchema, value)
+function encode(struct: unknown, value: unknown): unknown {
+  return encodeValue(struct as RuntimeStruct, value)
+}
+
+function unionOptions(struct: RuntimeStruct): readonly RuntimeStruct[] {
+  const definition = struct[DEFINITION]
+  if (definition.kind !== 'or') {
+    throw new TypeError('union struct is required')
+  }
+
+  return definition.options as unknown as readonly RuntimeStruct[]
 }
 
 describe('encode.ts', () => {
@@ -16,7 +27,7 @@ describe('encode.ts', () => {
     expect(encode(struct.boolean(), true)).toBe(true)
   })
 
-  test('encode follows getter-recursive object schemas', () => {
+  test('encode follows getter-recursive object structs', () => {
     const tree = struct.object({
       id: struct.string(),
       get children(): FnReturn<typeof struct.array> {
@@ -42,6 +53,16 @@ describe('encode.ts', () => {
     expect(encode(s, 3.14)).toBe(3.14)
   })
 
+  test('encodes nullable primitive null without calling primitive encoder', () => {
+    expect(encodeStructValue(struct.date().null(), null)).toBeNull()
+    expect(encodeStructValue(struct.bigint().null(), null)).toBeNull()
+  })
+
+  test('encodes optional primitive undefined without calling primitive encoder', () => {
+    expect(encodeStructValue(struct.date().optional(), undefined)).toBeUndefined()
+    expect(encodeStructValue(struct.bigint().optional(), undefined)).toBeUndefined()
+  })
+
   test('struct.discriminatedUnion encodes via discriminator', () => {
     const s = struct.discriminatedUnion('type', [
       struct.object({ type: struct.literal('a'), payload: struct.date() }),
@@ -54,12 +75,26 @@ describe('encode.ts', () => {
     expect(bEncoded.payload).toBe('42')
   })
 
-  test('struct.intersection encodes via right side', () => {
+  test('struct.intersection encodes both object sides', () => {
     const named = struct.object({ name: struct.string() })
     const dated = struct.object({ when: struct.date() })
     const s = struct.intersection(named, dated)
     const encoded = encode(s, { name: 'x', when: new Date('2026-05-12T10:00:00Z') }) as { name: string; when: string }
+    expect(encoded.name).toBe('x')
     expect(encoded.when).toBe('2026-05-12T10:00:00.000Z')
+  })
+
+  test('struct.intersection encodes nested object intersections', () => {
+    const account = struct.object({ id: struct.string() })
+    const profile = struct.object({ name: struct.string() })
+    const audit = struct.object({ when: struct.date() })
+    const s = struct.intersection(struct.intersection(account, profile), audit)
+
+    expect(encode(s, { id: 'u_1', name: 'Miao', when: new Date('2026-05-12T10:00:00Z') })).toEqual({
+      id: 'u_1',
+      name: 'Miao',
+      when: '2026-05-12T10:00:00.000Z',
+    })
   })
 
   test('round-trip wire form stable through or codec', () => {
@@ -129,13 +164,69 @@ describe('encode.ts', () => {
       struct.number(),
     )
     expect(encode(nestedInt, { name: 'x', when: 'y' })).toEqual({
+      name: 'x',
       when: 'y',
     })
+  })
+
+  test('keeps first matching union branch when encoded output is equivalent', () => {
+    const Payload = struct.or(struct.string(), struct.string())
+
+    expect(encodeStructValue(Payload, 'x')).toBe('x')
+  })
+
+  test('keeps first matching union branch when aliases differ but encoded output is equivalent', () => {
+    const Payload = struct.or(struct.string().alias('text'), struct.string().alias('label'))
+
+    expect(encodeStructValue(Payload, 'x')).toBe('x')
+  })
+
+  test('keeps first matching union branch when object output differs only by key order', () => {
+    const Payload = struct.or(
+      struct.object({ a: struct.string(), b: struct.string() }),
+      struct.object({ b: struct.string(), a: struct.string() }),
+    )
+
+    expect(encodeStructValue(Payload, { a: 'x', b: 'y' })).toEqual({ a: 'x', b: 'y' })
   })
 
   test('struct.or falls through when no option matches', () => {
     const s = struct.or(struct.number(), struct.string())
     expect(encode(s, true)).toBe(true)
+  })
+
+  test('matchesRuntimeValue uses neutral runtime guards for date and bigint', () => {
+    const dateStruct = struct.date() as unknown as RuntimeStruct
+    const bigintStruct = struct.bigint() as unknown as RuntimeStruct
+
+    expect(matchesRuntimeValue(dateStruct, new Date('2026-05-12T10:00:00Z'))).toBe(true)
+    expect(matchesRuntimeValue(dateStruct, '2026-05-12T10:00:00Z')).toBe(false)
+    expect(matchesRuntimeValue(bigintStruct, 42n)).toBe(true)
+    expect(matchesRuntimeValue(bigintStruct, '42')).toBe(false)
+  })
+
+  test('selectUnionOption chooses neutral runtime branch for date and bigint values', () => {
+    const dateStruct = struct.date()
+    const stringStruct = struct.string()
+    const dateUnion = struct.or(dateStruct, stringStruct)
+
+    const bigintStruct = struct.bigint()
+    const numberStruct = struct.number()
+    const bigintUnion = struct.or(bigintStruct, numberStruct)
+
+    expect(selectUnionOption(unionOptions(dateUnion as unknown as RuntimeStruct), new Date('2026-05-12T10:00:00Z'))).toBe(
+      dateStruct as unknown as RuntimeStruct,
+    )
+    expect(selectUnionOption(unionOptions(bigintUnion as unknown as RuntimeStruct), 42n)).toBe(bigintStruct as unknown as RuntimeStruct)
+  })
+
+  test('encode uses injected selectUnionOptions as the union branch source', () => {
+    const union = struct.or(struct.date(), struct.string()) as unknown as RuntimeStruct
+    const mockSelect = vi.fn(() => {
+      throw new Error('selector-called')
+    })
+
+    expect(() => encodeValue(union, new Date('2026-05-12T10:00:00Z'), { selectUnionOptions: mockSelect })).toThrowError('selector-called')
   })
 
   test('struct.discriminatedUnion falls through when no match', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { struct, tag } from '../struct'
+import { struct } from '../struct'
 import { buildRequest } from './request_builder'
 
 describe('request_builder formUrlEncoded', () => {
@@ -476,7 +476,7 @@ describe('request_builder request-shaped input', () => {
         include: struct.boolean(),
       }),
       headers: struct.object({
-        token: struct.string().tag(tag.header('x-token')),
+        token: struct.string().alias('x-token'),
       }),
       body: struct.json(
         struct.object({
@@ -521,7 +521,7 @@ describe('request_builder request-shaped input', () => {
         }),
       ),
       path: struct.object({
-        orgId: struct.string().tag(tag.uri('org_id')),
+        orgId: struct.string().alias('org_id'),
       }),
     })
 
@@ -546,11 +546,11 @@ describe('request_builder request-shaped input', () => {
     const input = struct.request({
       body: struct.json(
         struct.object({
-          orgId: struct.string().tag(tag.json('org_id')),
+          orgId: struct.string().alias('org_id'),
         }),
       ),
       path: struct.object({
-        orgId: struct.string().tag(tag.uri('org_id')),
+        orgId: struct.string().alias('org_id'),
       }),
     })
 
@@ -564,15 +564,15 @@ describe('request_builder request-shaped input', () => {
     const input = struct.request({
       body: struct.json(
         struct.object({
-          bodyName: struct.string().tag(tag.json('name')),
-          bodyUid: struct.number().tag(tag.json('uid')),
+          bodyName: struct.string().alias('name'),
+          bodyUid: struct.number().alias('uid'),
         }),
       ),
       path: struct.object({
-        pathUid: struct.number().tag(tag.uri('uid')),
+        pathUid: struct.number().alias('uid'),
       }),
       query: struct.object({
-        queryName: struct.string().tag(tag.query('name')),
+        queryName: struct.string().alias('name'),
       }),
     })
 
@@ -598,15 +598,15 @@ describe('request_builder request-shaped input', () => {
     expect(JSON.parse(built.body as string)).toEqual({ name: 'baby', uid: 1 })
   })
 
-  test('only consumes tag namespace for the current request section', () => {
+  test('uses aliases independently for request sections', () => {
     const input = struct.request({
       body: struct.json(
         struct.object({
-          traceId: struct.string().tag(tag.header('x-trace-id')),
+          traceId: struct.string().alias('x-trace-id'),
         }),
       ),
       query: struct.object({
-        includeProfile: struct.boolean().tag(tag.json('include_profile')),
+        includeProfile: struct.boolean().alias('include_profile'),
       }),
     })
 
@@ -623,8 +623,34 @@ describe('request_builder request-shaped input', () => {
       { input },
     )
 
-    expect(built.query).toEqual({ includeProfile: true })
-    expect(JSON.parse(built.body as string)).toEqual({ traceId: 'trace-1' })
+    expect(built.query).toEqual({ include_profile: true })
+    expect(JSON.parse(built.body as string)).toEqual({ 'x-trace-id': 'trace-1' })
+  })
+
+  test('bound request view rejects duplicate wire keys during shape resolution', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          firstName: struct.string().alias('name'),
+          displayName: struct.string().alias('name'),
+        }),
+      ),
+    })
+
+    expect(() =>
+      buildRequest(
+        {
+          body: {
+            firstName: 'Ada',
+            displayName: 'Lovelace',
+          },
+        },
+        (_request, view) => {
+          void view.body.firstName
+        },
+        { input },
+      ),
+    ).toThrow('duplicate wire key "name"')
   })
 
   test('does not default-build non-request structs', () => {
@@ -647,13 +673,13 @@ describe('request_builder request-shaped input', () => {
 
   test('uses key aliases recursively in request-shaped json bodies', () => {
     const profile = struct.object({
-      displayName: struct.string().tag(tag.json('display_name')),
+      displayName: struct.string().alias('display_name'),
       internalNote: struct.string(),
     })
     const input = struct.request({
       body: struct.json(
         struct.object({
-          profile: profile.tag(tag.json('profile')),
+          profile: profile.alias('profile'),
         }),
       ),
     })
@@ -672,6 +698,36 @@ describe('request_builder request-shaped input', () => {
     )
 
     expect(built.body).toBe('{"profile":{"display_name":"Miao","internalNote":"local-only"}}')
+  })
+
+  test('builds blob body through the same request body descriptor path', () => {
+    const input = struct.request({ body: struct.blob() })
+    const body = new Blob(['hello'], { type: 'text/plain' })
+
+    const built = buildRequest({ body }, undefined, { input })
+
+    expect(built.body).toBe(body)
+    expect(built.bodyContentType).toBe('text/plain')
+  })
+
+  test('leaves blob body content type undefined when the Blob has no type', () => {
+    const input = struct.request({ body: struct.blob() })
+    const body = new Blob(['hello'])
+
+    const built = buildRequest({ body }, undefined, { input })
+
+    expect(built.body).toBe(body)
+    expect(built.bodyContentType).toBeUndefined()
+  })
+
+  test('builds arrayBuffer body through the same request body descriptor path', () => {
+    const input = struct.request({ body: struct.arrayBuffer() })
+    const body = new ArrayBuffer(4)
+
+    const built = buildRequest({ body }, undefined, { input })
+
+    expect(built.body).toBe(body)
+    expect(built.bodyContentType).toBe('application/octet-stream')
   })
 
   test('distinguishes urlencoded and formData body wrappers', () => {
@@ -711,18 +767,18 @@ describe('request_builder request-shaped input', () => {
       body: struct.json(
         struct.object({
           profile: struct.object({
-            displayName: struct.string().tag(tag.json('display_name')),
+            displayName: struct.string().alias('display_name'),
           }),
         }),
       ),
       headers: struct.object({
-        traceId: struct.string().tag(tag.header('x-trace-id')),
+        traceId: struct.string().alias('x-trace-id'),
       }),
       path: struct.object({
         userId: struct.number(),
       }),
       query: struct.object({
-        includeProfile: struct.boolean().tag(tag.query('include_profile')),
+        includeProfile: struct.boolean().alias('include_profile'),
       }),
     })
 
@@ -753,6 +809,128 @@ describe('request_builder request-shaped input', () => {
 
     expect(built.params).toEqual({ id: 1 })
     expect(built.body).toBe('{"data":{"includeProfile":true,"traceId":"123","userId":1},"name":"John Doe"}')
+  })
+
+  test('does not rewrite explicit JSON object literal keys with source alias', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          displayName: struct.string().alias('display_name'),
+        }),
+      ),
+    })
+
+    const built = buildRequest(
+      { body: { displayName: 'Miao' } },
+      (ctx, view) => {
+        ctx.setJson({ explicit_name: view.body.displayName })
+      },
+      { input },
+    )
+
+    expect(JSON.parse(built.body as string)).toEqual({ explicit_name: 'Miao' })
+  })
+
+  test('applies alias recursively for whole-source JSON bound objects', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          profile: struct.object({ displayName: struct.string().alias('display_name') }),
+        }),
+      ),
+    })
+
+    const built = buildRequest(
+      { body: { profile: { displayName: 'Miao' } } },
+      (ctx, view) => {
+        ctx.setJson(view.body)
+      },
+      { input },
+    )
+
+    expect(JSON.parse(built.body as string)).toEqual({
+      profile: { display_name: 'Miao' },
+    })
+  })
+
+  test('keeps explicit query projection keys literal', () => {
+    const input = struct.request({ query: struct.object({ includeProfile: struct.boolean().alias('include_profile') }) })
+    const built = buildRequest(
+      { query: { includeProfile: true } },
+      (ctx, view) => {
+        ctx.setQueryParams({ include: view.query.includeProfile })
+      },
+      { input },
+    )
+
+    expect(built.query).toEqual({ include: true })
+  })
+
+  test('applies alias for whole-source query bound object', () => {
+    const input = struct.request({ query: struct.object({ includeProfile: struct.boolean().alias('include_profile') }) })
+    const built = buildRequest(
+      { query: { includeProfile: true } },
+      (ctx, view) => {
+        ctx.setQueryParams(view.query)
+      },
+      { input },
+    )
+
+    expect(built.query).toEqual({ include_profile: true })
+  })
+
+  test('keeps explicit path projection keys literal', () => {
+    const input = struct.request({ path: struct.object({ userId: struct.number().alias('user_id') }) })
+    const built = buildRequest(
+      { path: { userId: 1 } },
+      (ctx, view) => {
+        ctx.setPathParams({ id: view.path.userId })
+      },
+      { input },
+    )
+
+    expect(built.params).toEqual({ id: 1 })
+  })
+
+  test('applies alias for whole-source path bound object', () => {
+    const input = struct.request({ path: struct.object({ userId: struct.number().alias('user_id') }) })
+    const built = buildRequest(
+      { path: { userId: 1 } },
+      (ctx, view) => {
+        ctx.setPathParams(view.path)
+      },
+      { input },
+    )
+
+    expect(built.params).toEqual({ user_id: 1 })
+  })
+
+  test('keeps explicit header projection keys literal', () => {
+    const input = struct.request({ headers: struct.object({ traceId: struct.string().alias('x-trace-id') }) })
+    const built = buildRequest(
+      { headers: { traceId: 'trace-1' } },
+      (ctx, view) => {
+        ctx.setHeaders({ trace: view.headers.traceId })
+      },
+      { input },
+    )
+
+    expect(built.headers?.get('trace')).toBe('trace-1')
+    expect(built.headers?.has('x-trace-id')).toBe(false)
+  })
+
+  test('applies alias for whole-source header bound object', () => {
+    const input = struct.request({ headers: struct.object({ traceId: struct.string().alias('x-trace-id') }) })
+    const built = buildRequest(
+      { headers: { traceId: 'trace-1' } },
+      (ctx, view) => {
+        ctx.setHeaders(view.headers)
+      },
+      { input },
+    )
+
+    expect(built.headers?.get('x-trace-id')).toBe('trace-1')
+    expect(built.headers?.has('traceId')).toBe(false)
   })
 
   test('typed bind helpers use the last write for each request area', () => {
@@ -822,7 +1000,7 @@ describe('request_builder request-shaped input', () => {
           users: struct.array(
             struct.object({
               id: struct.number(),
-              name: struct.string().tag(tag.json('full_name')),
+              name: struct.string().alias('full_name'),
               password: struct.string(),
             }),
           ),
@@ -853,7 +1031,7 @@ describe('request_builder request-shaped input', () => {
     expect(built.body).toBe('{"users":[{"id":1,"name":"Ada"},{"id":2,"name":"Grace"}]}')
   })
 
-  test('rejects literal values in schema build plan', () => {
+  test('rejects literal values in struct build plan', () => {
     const input = struct.request({
       body: struct.json(
         struct.object({
@@ -877,7 +1055,7 @@ describe('request_builder request-shaped input', () => {
     ).toThrow('json binding values must come from build input')
   })
 
-  test('rejects nested objects in flat schema build projections', () => {
+  test('rejects nested objects in flat struct build projections', () => {
     const input = struct.request({
       body: struct.json(
         struct.object({
@@ -921,7 +1099,7 @@ describe('request_builder request-shaped input', () => {
     ).toThrow('urlencoded binding does not support nested object for key "profile"')
   })
 
-  test('schema build headers reject raw Headers projections', () => {
+  test('struct build headers reject raw Headers projections', () => {
     const input = struct.request({
       headers: struct.object({
         token: struct.string(),
@@ -1196,7 +1374,7 @@ describe('request_builder edge coverage', () => {
     })
     const built = buildRequest({ body: blob }, undefined, { input })
     expect(built.body).toBe(blob)
-    expect(built.bodyContentType).toBeUndefined()
+    expect(built.bodyContentType).toBe('application/octet-stream')
   })
 
   test('request-shaped arrayBuffer body sets body', () => {
@@ -1206,7 +1384,7 @@ describe('request_builder edge coverage', () => {
     })
     const built = buildRequest({ body: buffer }, undefined, { input })
     expect(built.body).toBe(buffer)
-    expect(built.bodyContentType).toBeUndefined()
+    expect(built.bodyContentType).toBe('application/octet-stream')
   })
 
   test('passing a bound request body to a flat helper unwraps the body wrapper', () => {
@@ -1260,7 +1438,7 @@ describe('request_builder edge coverage', () => {
       buildRequest(
         { body: { tags: 'not-an-array' as never } },
         (request, view) => {
-          // Runtime boundary: view.body.tags schema is array but the bound value is not.
+          // Runtime boundary: view.body.tags struct is array but the bound value is not.
           request.setJson({ items: (view.body.tags as unknown as string[]).map((item) => item) } as never)
         },
         { input },
@@ -1340,7 +1518,7 @@ describe('request_builder edge coverage', () => {
       buildRequest(
         { body: { profile: 'not-an-object' as never } },
         (request, view) => {
-          // Runtime boundary: view.body.profile schema is object but the bound value is not.
+          // Runtime boundary: view.body.profile struct is object but the bound value is not.
           request.setFormUrlEncoded(view.body.profile as never)
         },
         { input },

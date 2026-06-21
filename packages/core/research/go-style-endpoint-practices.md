@@ -81,7 +81,7 @@ struct.arrayBuffer() -> ArrayBuffer body
 
 ## Explicit Build
 
-`build(ctx, input)` 的 `input` 是 bound view。所有 binding source 必须从 `input` 取出；闭包里的字段 struct 只负责声明 schema，不能直接传给 `ctx.bindXXX(...)`。
+`build(ctx, input)` 的 `input` 是 bound view。所有 binding source 必须从 `input` 取出；闭包里的字段 struct 只负责声明 struct，不能直接传给 `ctx.bindXXX(...)`。
 
 ```ts
 const id = struct.number()
@@ -270,7 +270,7 @@ direct object source 规则：
 HTTP ctx：
 
 ```ts
-type HttpBuildContext<Root extends ObjectSchema<any>> = {
+type HttpBuildContext<Root extends ObjectStruct<any>> = {
   bindPathParams(projection: PathParamsProjection<Root>): void
   bindQueryParams(projection: KeyValueProjection<'searchParam', Root>): void
   bindHeaders(projection: KeyValueProjection<'header', Root>): void
@@ -289,7 +289,7 @@ type HttpBuildContext<Root extends ObjectSchema<any>> = {
 SSE ctx：
 
 ```ts
-type EventStreamBuildContext<Root extends ObjectSchema<any>> = {
+type EventStreamBuildContext<Root extends ObjectStruct<any>> = {
   bindPathParams(projection: PathParamsProjection<Root>): void
   bindQueryParams(projection: KeyValueProjection<'searchParam', Root>): void
   bindHeaders(projection: KeyValueProjection<'header', Root>): void
@@ -299,7 +299,7 @@ type EventStreamBuildContext<Root extends ObjectSchema<any>> = {
 WebSocket ctx：
 
 ```ts
-type WebSocketBuildContext<Root extends ObjectSchema<any>> = {
+type WebSocketBuildContext<Root extends ObjectStruct<any>> = {
   bindPathParams(projection: PathParamsProjection<Root>): void
   bindQueryParams(projection: KeyValueProjection<'searchParam', Root>): void
 }
@@ -309,7 +309,7 @@ type WebSocketBuildContext<Root extends ObjectSchema<any>> = {
 
 ## Struct Binding Capability
 
-`BoundFor<TTarget, Root>` 不是新 schema，也不是 `S & marker`。它只表达当前 endpoint 的 bound source 可被目标 struct codec 接受。
+`BoundFor<TTarget, Root>` 不是新 struct，也不是 `S & marker`。它只表达当前 endpoint 的 bound source 可被目标 struct codec 接受。
 
 字段 struct 不能单独作为 binding source；只有 `build(ctx, input)` 第二参 `input` 派生出的 `input.*` source 才能进入 `ctx.bindXXX(...)`。
 
@@ -355,5 +355,5 @@ type tests：
 2. SSE ctx 不暴露 body helpers。
 3. WebSocket ctx 不暴露 headers/body helpers。
 4. HTTP ctx 不暴露 `setXXX`、`context`、`withCredentials`、`bindBody`、`bindXml`。
-5. 伪造 `{ path, schema }` 结构不能通过 `ctx.bindXXX`。
-6. 用户字段名为 `path`、`schema`、`fieldKey` 时不和 binding metadata 冲突。
+5. 伪造 `{ path, struct }` 结构不能通过 `ctx.bindXXX`。
+6. 用户字段名为 `path`、`struct`、`fieldKey` 时不和 binding metadata 冲突。

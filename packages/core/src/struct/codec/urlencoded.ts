@@ -1,22 +1,12 @@
-import { encodeStructValue, getStructFields, isObjectStruct } from '../introspection'
-import { UrlencodedTag } from '../tag'
-import type { SchemaLike } from '../types'
-import { assertPlainObject, getWireKey } from './common'
+import type { AnyStructLike } from '../types'
+import { encodeFlatByAlias } from './flat'
 
-export function encodeUrlencoded(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): URLSearchParams {
-  if (!isObjectStruct(struct)) {
-    throw new TypeError('urlencoded encode expects object struct')
-  }
-
-  assertPlainObject(value, 'urlencoded encode expects object value')
-
-  const params = new URLSearchParams()
-  for (const field of getStructFields(struct)) {
-    const fieldTag = field.tags.get(UrlencodedTag.kind)
-    appendSearchParam(params, getWireKey(field.key, fieldTag), encodeStructValue(field.struct, value[field.key]))
-  }
-
-  return params
+export function encodeUrlencoded(struct: AnyStructLike, value: unknown): URLSearchParams {
+  return encodeFlatByAlias(struct, value, {
+    create: () => new URLSearchParams(),
+    label: 'urlencoded',
+    put: appendSearchParam,
+  })
 }
 
 export function appendSearchParam(params: URLSearchParams, key: string, value: unknown): void {

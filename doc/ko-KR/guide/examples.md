@@ -12,24 +12,24 @@ description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket
 ### 스키마와 엔드포인트 정의
 
 ```typescript
-import { createClient, defineRequest, struct, tag, withEndpoint, RequestError } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint, RequestError } from '@defjs/core'
 
 // 데이터 모델
-const UserSchema = struct.object({
+const UserStruct = struct.object({
   id: struct.number(),
   name: struct.string(),
   email: struct.string(),
 })
 
-const UserListSchema = struct.object({
-  items: struct.array(UserSchema),
+const UserListStruct = struct.object({
+  items: struct.array(UserStruct),
   total: struct.number(),
 })
 
 const CreateUserInput = struct.object({
   name: struct.string(),
   email: struct.string(),
-  role: struct.string().tag(tag.json('role')),
+  role: struct.string().alias('role'),
 })
 
 // 요청 정의
@@ -41,7 +41,7 @@ const createUser = defineRequest({
     body: input,
   }),
   output: {
-    201: UserSchema,
+    201: UserStruct,
     400: struct.object({ message: struct.string() }),
   },
 })
@@ -50,7 +50,7 @@ const listUsers = defineRequest({
   method: 'GET',
   path: '/v1/users',
   output: {
-    200: UserListSchema,
+    200: UserListStruct,
   },
 })
 
@@ -58,13 +58,13 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/v1/users/:id',
   input: struct.object({
-    id: struct.number().tag(tag.uri('id')),
+    id: struct.number().alias('id'),
   }),
   build: (input) => ({
     params: { id: input.id },
   }),
   output: {
-    200: UserSchema,
+    200: UserStruct,
     404: struct.object({ message: struct.string() }),
   },
 })
@@ -73,7 +73,7 @@ const updateUser = defineRequest({
   method: 'PUT',
   path: '/v1/users/:id',
   input: struct.object({
-    id: struct.number().tag(tag.uri('id')),
+    id: struct.number().alias('id'),
     name: struct.string(),
     email: struct.string(),
   }),
@@ -82,7 +82,7 @@ const updateUser = defineRequest({
     body: { name: input.name, email: input.email },
   }),
   output: {
-    200: UserSchema,
+    200: UserStruct,
     404: struct.object({ message: struct.string() }),
   },
 })
@@ -91,7 +91,7 @@ const deleteUser = defineRequest({
   method: 'DELETE',
   path: '/v1/users/:id',
   input: struct.object({
-    id: struct.number().tag(tag.uri('id')),
+    id: struct.number().alias('id'),
   }),
   build: (input) => ({
     params: { id: input.id },
@@ -163,7 +163,7 @@ function handleError(error: RequestError<unknown>) {
       console.error('Network error:', error.code, error.message)
       break
     case 'definition':
-      console.error('Schema error:', error.code, error.message)
+      console.error('Struct error:', error.code, error.message)
       break
     case 'http':
       console.error('HTTP error:', error.status, error.message)
@@ -254,7 +254,7 @@ const client = createClient(
 const chatRoom = defineWebSocket({
   path: '/room/:roomId',
   input: struct.object({
-    roomId: struct.string().tag(tag.uri('roomId')),
+    roomId: struct.string().alias('roomId'),
   }),
   build: (input) => ({
     params: { roomId: input.roomId },
@@ -488,7 +488,7 @@ async function loadUser() {
 | `struct.string()` / `struct.number()` / `struct.boolean()`                                  | 기본 스키마               |
 | `struct.array(item)`                                                                        | 배열 스키마               |
 | `struct.enum(values)`                                                                       | 열거형 스키마             |
-| `tag.uri()` / `tag.json()` / `tag.query()` / `tag.header()`                                 | 필드 태그                 |
+| `struct.alias(name)                                                                         | 필드 별칭                 |
 | `createHttpInterceptor(fn)` / `createSSEInterceptor(fn)` / `createWebSocketInterceptor(fn)` | 인터셉터 생성             |
 | `basicAuthHttpInterceptor(fn)` / `basicAuthSSEInterceptor(fn)`                              | 내장 Basic Auth           |
 

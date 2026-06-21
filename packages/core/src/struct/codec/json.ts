@@ -1,15 +1,10 @@
-import { JsonTag } from '../tag'
-import type { SchemaLike } from '../types'
-import { decodeObjectByTag, encodeObjectByTag } from './common'
+import type { AnyStructLike } from '../types'
+import { decodeObjectByAlias, encodeObjectByAlias } from './common'
 
-export interface JsonCodecOptions {
-  requireTag?: boolean
+export function encodeJson(struct: AnyStructLike, value: unknown): unknown {
+  return encodeObjectByAlias(struct, value, 'json')
 }
 
-export function encodeJson(struct: SchemaLike<unknown, unknown, boolean>, value: unknown, options: JsonCodecOptions = {}): unknown {
-  return encodeObjectByTag(struct, value, JsonTag, options)
-}
-
-export function decodeJson(struct: SchemaLike<unknown, unknown, boolean>, value: unknown, options: JsonCodecOptions = {}): unknown {
-  return decodeObjectByTag(struct, value, JsonTag, options)
+export function decodeJson(struct: AnyStructLike, value: unknown): unknown {
+  return decodeObjectByAlias(struct, value, 'json')
 }

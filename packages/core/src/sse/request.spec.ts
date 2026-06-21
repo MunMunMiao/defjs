@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import type { RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct } from '../struct'
-import { struct, tag } from '../struct'
+import { struct } from '../struct'
 import { createEventStreamRequest } from './request'
 
 function unsupportedSseBuild<TInput extends AnyStruct>(build: RequestBuildHandler<TInput>): RequestBuildHandler<TInput, 'sse'> {
@@ -10,23 +10,23 @@ function unsupportedSseBuild<TInput extends AnyStruct>(build: RequestBuildHandle
 }
 
 describe('createEventStreamRequest', () => {
-  test('builds request-shaped path query and headers', () => {
+  test('builds request-shaped path query and headers with aliases', () => {
     const input = struct.request({
       headers: struct.object({
-        token: struct.string().tag(tag.header('x-token')),
+        token: struct.string().alias('x-token'),
       }),
       path: struct.object({
-        id: struct.number(),
+        userId: struct.number().alias('user_id'),
       }),
       query: struct.object({
-        include: struct.boolean(),
+        includeProfile: struct.boolean().alias('include_profile'),
       }),
     })
 
     const request = createEventStreamRequest(
       'GET',
-      '/users/:id/events',
-      { headers: { token: 'secret' }, path: { id: 1 }, query: { include: true } },
+      '/users/:user_id/events',
+      { headers: { token: 'secret' }, path: { userId: 1 }, query: { includeProfile: true } },
       undefined,
       {
         abort: new AbortController().signal,
@@ -37,8 +37,25 @@ describe('createEventStreamRequest', () => {
     )
 
     expect(request.endpoint).toBe('/users/1/events')
-    expect(request.queryString).toBe('include=true')
+    expect(request.queryString).toBe('include_profile=true')
     expect(request.headers?.get('x-token')).toBe('secret')
+  })
+
+  test('rejects request-shaped missing path params', () => {
+    const input = struct.request({
+      path: struct.object({
+        id: struct.string().optional(),
+      }),
+    })
+
+    expect(() =>
+      createEventStreamRequest('GET', '/users/:id/events', { path: {} }, undefined, {
+        abort: new AbortController().signal,
+        baseEndpoint: 'https://example.com',
+        input,
+        queryParamsSerializer: (params) => params.toString(),
+      }),
+    ).toThrow('Missing path param: id')
   })
 
   test('rejects body helpers in explicit build', () => {

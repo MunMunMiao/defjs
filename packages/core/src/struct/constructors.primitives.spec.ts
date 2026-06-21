@@ -2,10 +2,10 @@ import { describe, expect, test } from 'vitest'
 import { encodeValue } from './encode'
 import { StructError, struct } from './index'
 import { parseStructTuple as parse } from './introspection'
-import type { RuntimeSchema } from './types'
+import type { RuntimeStruct } from './types'
 
-function encode(schema: unknown, value: unknown): unknown {
-  return encodeValue(schema as RuntimeSchema, value)
+function encode(struct: unknown, value: unknown): unknown {
+  return encodeValue(struct as RuntimeStruct, value)
 }
 
 describe('constructors.ts bigint and date primitives', () => {
@@ -108,7 +108,13 @@ describe('constructors.ts bigint and date primitives', () => {
 })
 
 describe('constructors.ts intersection', () => {
-  test('intersection merges two object schemas field-wise', () => {
+  test('intersection rejects empty struct list at runtime', () => {
+    expect(() => (struct.intersection as unknown as (...structs: unknown[]) => unknown)()).toThrow(
+      new TypeError('intersection requires at least one struct'),
+    )
+  })
+
+  test('intersection merges two object structs field-wise', () => {
     const named = struct.object({ name: struct.string() })
     const aged = struct.object({ age: struct.number() })
     const person = struct.intersection(named, aged)

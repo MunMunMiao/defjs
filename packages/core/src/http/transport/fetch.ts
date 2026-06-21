@@ -235,32 +235,8 @@ async function parseNativeResponseBody(response: Response, responseType: HttpReq
   }
 }
 
-export async function fetchHandler(
-  httpRequest: HttpRequest,
-  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis) as typeof fetch,
-): Promise<HttpResponse<unknown>> {
+async function parseFetchResponse(httpRequest: HttpRequest, response: Response): Promise<HttpResponse<unknown>> {
   const downloadProgress = httpRequest.downloadProgress
-  const abortSignal = httpRequest.abort
-  let response: Response
-
-  try {
-    const request = createFetchRequest(httpRequest)
-    response = await fetchImpl(request)
-  } catch (error) {
-    // Because Safari throws an AbortError instead of a TimeoutError when using AbortSignal.timeout.
-    // So when handling an `AbortError`, one needs to determine whether the reason for the abort is a `TimeoutError` or another `AbortError`.
-    if (abortSignal?.aborted && abortSignal.reason instanceof Error) {
-      switch (true) {
-        case abortSignal.reason.name === 'AbortError':
-          return makeResponse({ error: ERR_ABORTED })
-        case abortSignal.reason.name === 'TimeoutError':
-          return makeResponse({ error: ERR_TIMEOUT })
-      }
-    }
-
-    return makeResponse({ error })
-  }
-
   const { headers, status, statusText, url } = response
   const contentLength = getContentLength(headers)
   const contentType = getContentType(headers)
@@ -329,4 +305,32 @@ export async function fetchHandler(
     url,
     body,
   })
+}
+
+export async function fetchHandler(
+  httpRequest: HttpRequest,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis) as typeof fetch,
+): Promise<HttpResponse<unknown>> {
+  const abortSignal = httpRequest.abort
+  let response: Response
+
+  try {
+    const request = createFetchRequest(httpRequest)
+    response = await fetchImpl(request)
+  } catch (error) {
+    // Because Safari throws an AbortError instead of a TimeoutError when using AbortSignal.timeout.
+    // So when handling an `AbortError`, one needs to determine whether the reason for the abort is a `TimeoutError` or another `AbortError`.
+    if (abortSignal?.aborted && abortSignal.reason instanceof Error) {
+      switch (true) {
+        case abortSignal.reason.name === 'AbortError':
+          return makeResponse({ error: ERR_ABORTED })
+        case abortSignal.reason.name === 'TimeoutError':
+          return makeResponse({ error: ERR_TIMEOUT })
+      }
+    }
+
+    return makeResponse({ error })
+  }
+
+  return parseFetchResponse(httpRequest, response)
 }

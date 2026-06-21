@@ -5,11 +5,11 @@
 ## 基本使用
 
 ```ts
-import { defineRequest, struct, tag, type Infer } from '@defjs/core'
+import { defineRequest, struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.string(),
-  name: struct.string().tag(tag.json('user_name')),
+  name: struct.string().alias('user_name'),
   age: struct.number(),
   active: struct.boolean(),
 })
@@ -35,7 +35,7 @@ HTTP、SSE、WebSocket endpoint 会在运行时用同一份 struct metadata 解�
 type User = Infer<typeof User>
 ```
 
-`Infer<T>` 表示边界解析后的输出类型。`tag.*(...)` 只影响对应外部协议里的字段名，不改变输出类型。
+`Infer<T>` 表示边界解析后的输出类型。`.alias(name)` 只影响外部协议里的字段名，不改变输出类型。
 
 ## 字段
 
@@ -77,17 +77,17 @@ const id: Infer<typeof UserId> = 'u_1'
 assertUserId(id)
 ```
 
-## Tag
+## Alias
 
-`tag` 对齐 Go struct tag 的心智模型：它是字段上的外部表示声明，类似 Go 的 `json:"user_name"`、`query:"include_profile"` 或 `header:"x-trace-id"`。它只改名，不改变 TypeScript 字段名，也不决定字段属于哪个 request section。
+`.alias(name)` 是唯一内建字段 wire-name 机制。它只改变 JSON、query、headers、path、urlencoded 和 FormData 编解码使用的外部 key；不改变 TypeScript 属性名、输出类型、request section、body codec，也不会改写 `build(ctx, input)` 中手写的对象 key。未设置 alias 的字段使用对象字段名作为 wire key。
 
 ```ts
 const Query = struct.object({
-  pageSize: struct.number().tag(tag.json('page_size')),
+  pageSize: struct.number().alias('page_size'),
 })
 ```
 
-JSON response 中的 `{ "page_size": 50 }` 会在 endpoint runtime 中解析成 `{ pageSize: 50 }`；JSON request body 也会在 build/runtime 边界按 `tag.json(...)` 输出 wire key。query、headers、path、urlencoded 和 FormData 分别由 `tag.query(...)`、`tag.header(...)`、`tag.uri(...)`、`tag.urlencoded(...)`、`tag.multipart(...)` 表达。
+JSON response 中的 `{ "page_size": 50 }` 会在 endpoint runtime 中解析成 `{ pageSize: 50 }`；JSON request body 也会在 build/runtime 边界按 `.alias('page_size')` 输出 wire key。query、headers、path、urlencoded 和 FormData 使用同一个 alias；如果同一个字段在不同 target 需要不同 wire key，应拆分 struct 或在 `build(ctx, input)` 中显式写 projection key。
 
 ## Request Shape
 
@@ -99,14 +99,14 @@ const Input = struct.request({
     id: struct.number(),
   }),
   query: struct.object({
-    includeProfile: struct.boolean().optional().tag(tag.query('include_profile')),
+    includeProfile: struct.boolean().optional().alias('include_profile'),
   }),
   headers: struct.object({
-    traceId: struct.string().tag(tag.header('x-trace-id')),
+    traceId: struct.string().alias('x-trace-id'),
   }),
   body: struct.json(
     struct.object({
-      name: struct.string().tag(tag.json('display_name')),
+      name: struct.string().alias('display_name'),
     }),
   ),
 })
@@ -120,23 +120,23 @@ const Input = struct.request({
 
 ## Build Plan
 
-`build(ctx, input)` 不是序列化阶段，而是编排阶段。带 `input` schema 的 endpoint 中，`input` 不是实际业务值，而是由 `struct.request(...)` 生成的 bound view。这个 view 记录字段路径和字段 struct，运行时再用实际入参提取值并编码。
+`build(ctx, input)` 不是序列化阶段，而是编排阶段。带 `input` struct 的 endpoint 中，`input` 不是实际业务值，而是由 `struct.request(...)` 生成的 bound view。这个 view 记录字段路径和字段 struct，运行时再用实际入参提取值并编码。
 
 ```ts
 const Input = struct.request({
   path: struct.object({
-    userId: struct.number().tag(tag.uri('id')),
+    userId: struct.number().alias('id'),
   }),
   query: struct.object({
-    includeProfile: struct.boolean().tag(tag.query('include_profile')),
+    includeProfile: struct.boolean().alias('include_profile'),
   }),
   headers: struct.object({
-    traceId: struct.string().tag(tag.header('x-trace-id')),
+    traceId: struct.string().alias('x-trace-id'),
   }),
   body: struct.json(
     struct.object({
       profile: struct.object({
-        displayName: struct.string().tag(tag.json('display_name')),
+        displayName: struct.string().alias('display_name'),
       }),
     }),
   ),
@@ -178,7 +178,7 @@ updateUser({
 })
 ```
 
-`setJson` 实际发送：
+`setJson` 中显式 projection 的 object key 是最终 wire key，因此实际发送：
 
 ```ts
 {

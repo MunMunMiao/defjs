@@ -71,8 +71,8 @@ Do not create `check:constraints`, `check-code-constraints.ts`, AST policy scann
 - Modify: `packages/core/src/internal/request_builder.ts` — expose typed build callback path and reduce runtime boundary casts.
 - Modify: `packages/core/src/internal/request_builder.spec.ts` — remove callback `any` annotations and keep behavior tests.
 - Create: `packages/core/src/internal/request_builder.type.test.ts` — focused type tests for build input inference.
-- Modify: `packages/core/src/struct/types.ts` — replace avoidable `any` with `unknown` or constrained schema aliases.
-- Modify: `packages/core/src/struct/constructors.ts` — centralize schema construction assertions.
+- Modify: `packages/core/src/struct/types.ts` — replace avoidable `any` with `unknown` or constrained struct aliases.
+- Modify: `packages/core/src/struct/constructors.ts` — centralize struct construction assertions.
 - Modify: `packages/core/src/sse/sse.ts` — reduce endpoint/session casts and add boundary remarks where casts remain.
 - Modify: `packages/core/src/web_socket/web_socket.ts` — reduce endpoint/session casts and add boundary remarks where casts remain.
 - Modify: `packages/core/src/sse/*.spec.ts`, `packages/core/src/web_socket/*.spec.ts`, `packages/core/src/http/*.spec.ts`, `packages/vue/test/core.spec.ts`, and `packages/core/test/setup.ts` — remove test `any` and naked unsafe assertions.
@@ -805,11 +805,11 @@ function createTypedBuildContext<TTransport extends RequestTransport>(
 }
 
 function createTypedBuildInput<TInput extends AnyStruct | undefined>(
-  schema: NonNullable<TInput>,
+  struct: NonNullable<TInput>,
   owner: symbol,
 ): RequestBuildInput<TInput> {
-  // Type boundary: createBoundView materializes a runtime proxy from the same schema used by RequestBuildInput's conditional type.
-  return createBoundView(schema as unknown as RuntimeSchema, [], owner) as RequestBuildInput<TInput>
+  // Type boundary: createBoundView materializes a runtime proxy from the same struct used by RequestBuildInput's conditional type.
+  return createBoundView(struct as unknown as RuntimeStruct, [], owner) as RequestBuildInput<TInput>
 }
 ```
 
@@ -818,7 +818,7 @@ function createTypedBuildInput<TInput extends AnyStruct | undefined>(
 Replace:
 
 ```ts
-const boundInput = createBoundView(options.input as unknown as RuntimeSchema, [], owner)
+const boundInput = createBoundView(options.input as unknown as RuntimeStruct, [], owner)
 build(createBuildPlanBuilder(plan), boundInput)
 ```
 
@@ -910,7 +910,7 @@ git commit -m "refactor(core): type request build callbacks"
 
 ---
 
-## Task 6: Centralize struct schema construction type boundaries
+## Task 6: Centralize struct struct construction type boundaries
 
 **Files:**
 
@@ -924,63 +924,63 @@ git commit -m "refactor(core): type request build callbacks"
 In `packages/core/src/struct/types.ts`, replace:
 
 ```ts
-type SchemaInput<T> = T extends { readonly _struct: { readonly input: any } } ? T['_struct']['input'] : never
-type SchemaOutput<T> = T extends { readonly _struct: { readonly output: any } } ? T['_struct']['output'] : never
+type StructInput<T> = T extends { readonly _struct: { readonly input: any } } ? T['_struct']['input'] : never
+type StructOutput<T> = T extends { readonly _struct: { readonly output: any } } ? T['_struct']['output'] : never
 ```
 
 with:
 
 ```ts
-type SchemaInput<T> = T extends { readonly _struct: { readonly input: unknown } } ? T['_struct']['input'] : never
-type SchemaOutput<T> = T extends { readonly _struct: { readonly output: unknown } } ? T['_struct']['output'] : never
+type StructInput<T> = T extends { readonly _struct: { readonly input: unknown } } ? T['_struct']['input'] : never
+type StructOutput<T> = T extends { readonly _struct: { readonly output: unknown } } ? T['_struct']['output'] : never
 ```
 
-Run `pnpm --filter @defjs/core typecheck`. If this breaks schema inference, revert only these two lines and add comments explaining that conditional type inference requires `any` here as a type algebra boundary.
+Run `pnpm --filter @defjs/core typecheck`. If this breaks struct inference, revert only these two lines and add comments explaining that conditional type inference requires `any` here as a type algebra boundary.
 
-- [ ] **Step 2: Add schema construction cast helper**
+- [ ] **Step 2: Add struct construction cast helper**
 
-In `packages/core/src/struct/runtime.ts`, export a helper near `makeSchema`:
+In `packages/core/src/struct/runtime.ts`, export a helper near `makeStruct`:
 
 ```ts
-export function castSchema<TSchema extends SchemaLike>(schema: SchemaLike): TSchema {
-  // Type boundary: all schema runtime objects are created by makeSchema/createPrimitiveSchema; the branded generic surface
+export function castStruct<TStruct extends StructLike>(struct: StructLike): TStruct {
+  // Type boundary: all struct runtime objects are created by makeStruct/createPrimitiveStruct; the branded generic surface
   // exists only for compile-time input/output inference and has no distinct runtime representation.
-  return schema as TSchema
+  return struct as TStruct
 }
 ```
 
-Add `SchemaLike` to the type imports in `runtime.ts` if it is not already imported.
+Add `StructLike` to the type imports in `runtime.ts` if it is not already imported.
 
-- [ ] **Step 3: Replace constructor double assertions with `castSchema`**
+- [ ] **Step 3: Replace constructor double assertions with `castStruct`**
 
 In `packages/core/src/struct/constructors.ts`, update the runtime import:
 
 ```ts
-import { createPrimitiveSchema, DEFAULT_FLAGS, makeSchema } from './runtime'
+import { createPrimitiveStruct, DEFAULT_FLAGS, makeStruct } from './runtime'
 ```
 
 becomes:
 
 ```ts
-import { castSchema, createPrimitiveSchema, DEFAULT_FLAGS, makeSchema } from './runtime'
+import { castStruct, createPrimitiveStruct, DEFAULT_FLAGS, makeStruct } from './runtime'
 ```
 
 Replace each double assertion like:
 
 ```ts
-return createPrimitiveSchema({
+return createPrimitiveStruct({
   expected: 'string',
   is: (value): value is string => typeof value === 'string',
   kind: 'string',
   zero: () => '',
-}) as unknown as StringSchema
+}) as unknown as StringStruct
 ```
 
 with:
 
 ```ts
-return castSchema<StringSchema>(
-  createPrimitiveSchema({
+return castStruct<StringStruct>(
+  createPrimitiveStruct({
     expected: 'string',
     is: (value): value is string => typeof value === 'string',
     kind: 'string',
@@ -989,28 +989,28 @@ return castSchema<StringSchema>(
 )
 ```
 
-Apply the same `castSchema<T>(...)` replacement for constructors returning `NumberSchema`, `Schema<null, null>`, `Schema<unknown, unknown>`, `ArraySchema<S>`, `ObjectSchema<T>`, `RequestSchema<T>`, `RequestBodySchema<C, S>`, `RecordSchema<S>`, `TupleSchema<T>`, `UnionSchema<T>`, and other schema interfaces in this file.
+Apply the same `castStruct<T>(...)` replacement for constructors returning `NumberStruct`, `Struct<null, null>`, `Struct<unknown, unknown>`, `ArrayStruct<S>`, `ObjectStruct<T>`, `RequestStruct<T>`, `RequestBodyStruct<C, S>`, `RecordStruct<S>`, `TupleStruct<T>`, `UnionStruct<T>`, and other struct interfaces in this file.
 
-- [ ] **Step 4: Keep true public `any` schema explicit and documented**
+- [ ] **Step 4: Keep true public `any` struct explicit and documented**
 
-For `createAnySchema`, replace:
+For `createAnyStruct`, replace:
 
 ```ts
-export function createAnySchema(): Schema<unknown, any> {
-  return makeSchema({
+export function createAnyStruct(): Struct<unknown, any> {
+  return makeStruct({
     flags: DEFAULT_FLAGS,
     kind: 'any',
-  }) as unknown as Schema<unknown, any>
+  }) as unknown as Struct<unknown, any>
 }
 ```
 
 with:
 
 ```ts
-export function createAnySchema(): Schema<unknown, any> {
+export function createAnyStruct(): Struct<unknown, any> {
   // Type boundary: struct.any() intentionally models an unconstrained decoded value for users who opt into that escape hatch.
-  return castSchema<Schema<unknown, any>>(
-    makeSchema({
+  return castStruct<Struct<unknown, any>>(
+    makeStruct({
       flags: DEFAULT_FLAGS,
       kind: 'any',
     }),
@@ -1035,7 +1035,7 @@ Run:
 
 ```bash
 git add packages/core/src/struct/types.ts packages/core/src/struct/runtime.ts packages/core/src/struct/constructors.ts packages/core/src/struct/types.runtime.type.test.ts
-git commit -m "refactor(core): centralize schema type boundaries"
+git commit -m "refactor(core): centralize struct type boundaries"
 ```
 
 ---
@@ -1056,7 +1056,7 @@ git commit -m "refactor(core): centralize schema type boundaries"
 In `packages/core/src/sse/sse.ts`, add helper functions near the endpoint creation logic:
 
 ```ts
-function createTypedEventStreamEndpoint<TInput extends AnyStruct | undefined, TEvents extends EventStreamSchemas | undefined>(
+function createTypedEventStreamEndpoint<TInput extends AnyStruct | undefined, TEvents extends EventStreamStructs | undefined>(
   endpoint: EventStreamEndpoint<TInput, TEvents>,
 ): UseEventStreamEndpointFn<TInput, TEvents> {
   return (input) => createEventStreamRef(endpoint, input)
@@ -1105,8 +1105,8 @@ In `packages/core/src/web_socket/web_socket.ts`, add helpers near endpoint creat
 ```ts
 function createTypedWebSocketEndpoint<
   TInput extends AnyStruct | undefined,
-  TIncoming extends WebSocketMessageSchemas | undefined,
-  TOutgoing extends WebSocketMessageSchemas | undefined,
+  TIncoming extends WebSocketMessageStructs | undefined,
+  TOutgoing extends WebSocketMessageStructs | undefined,
 >(endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>): UseWebSocketEndpointFn<TInput, TIncoming, TOutgoing> {
   return (input) => createWebSocketRef(endpoint, input)
 }
@@ -1117,7 +1117,7 @@ function castParsedWebSocketInput<TInput extends AnyStruct | undefined>(value: u
 }
 ```
 
-Use the exact message schema type names from the file if they differ.
+Use the exact message struct type names from the file if they differ.
 
 - [ ] **Step 5: Replace WebSocket endpoint return assertion**
 
@@ -1152,7 +1152,7 @@ parsedInput = castParsedWebSocketInput<TInput>(await parseEndpointInput(endpoint
 For each remaining assertion in `packages/core/src/sse/sse.ts` or `packages/core/src/web_socket/web_socket.ts` that cannot be eliminated, add a directly adjacent comment. Use this style:
 
 ```ts
-// Type boundary: interceptor chain returns the runtime handle created from this endpoint's event schemas.
+// Type boundary: interceptor chain returns the runtime handle created from this endpoint's event structs.
 const stream = (await sseChain(request, sseHandler)) as EventStreamHandle<EventStreamData<TEvents>>
 ```
 

@@ -6,7 +6,7 @@ export default defineConfig({
   test: {
     name: 'core-node',
     include: ['src/**/*.spec.ts'],
-    exclude: [...runtimeSpecificSpecPatterns.filter((pattern) => pattern !== 'src/**/*.node.spec.ts'), 'src/handler/**/*.spec.ts'],
+    exclude: runtimeSpecificSpecPatterns.filter((pattern) => pattern !== 'src/**/*.node.spec.ts'),
     globalSetup: globalSetupPath,
     pool: 'threads',
   },

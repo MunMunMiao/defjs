@@ -4,7 +4,7 @@
 
 最后修订：2026-05-18
 
-本文定义 `defineRequest`、`defineEventStream`、`defineWebSocket` 的 schema-aware request build 合同。
+本文定义 `defineRequest`、`defineEventStream`、`defineWebSocket` 的 struct-aware request build 合同。
 
 ## 总体规则
 
@@ -13,7 +13,7 @@
 1. 不写 `build`：`input` 必须是 `struct.request(...)`，由 `path/query/headers/body` request shape 生成 request plan。
 2. 写 `build(ctx, input)`：用户完整接管 request plan；request-shaped 默认构建不再混入。
 
-`build(ctx, input)` 只做编排。`input` 不是 actual parsed value，而是当前 endpoint input struct 的 bound view。`ctx.bindXXX(...)` 只能接收从 `input` 取出的 bound view 或 projection，不能接收闭包里的字段 struct、原始 `Input` schema 或 raw runtime value。
+`build(ctx, input)` 只做编排。`input` 不是 actual parsed value，而是当前 endpoint input struct 的 bound view。`ctx.bindXXX(...)` 只能接收从 `input` 取出的 bound view 或 projection，不能接收闭包里的字段 struct、原始 `Input` struct 或 raw runtime value。
 
 ```text
 definition-time:
@@ -81,7 +81,7 @@ type RequestBodyStruct =
 
 ## Input Bound View
 
-字段只能从 `build(ctx, input)` 的第二参 `input` 取出后绑定。闭包里的字段 struct 只负责声明 schema，不是可绑定 source。
+字段只能从 `build(ctx, input)` 的第二参 `input` 取出后绑定。闭包里的字段 struct 只负责声明 struct，不是可绑定 source。
 
 ```ts
 const Input = struct.request({
@@ -313,7 +313,7 @@ direct object source 的能力由目标 helper 决定：
 下面是目标合同。名称可以在实现时调整，能力边界必须保持。
 
 ```ts
-type OutputOf<S> = S extends SchemaLike<any, infer O, any> ? O : never
+type OutputOf<S> = S extends StructLike<any, infer O, any> ? O : never
 
 declare const BOUND_SOURCE: unique symbol
 declare const BOUND_TARGET: unique symbol
@@ -331,22 +331,22 @@ type StructBindTarget =
   | 'textBody'
   | 'htmlBody'
 
-type BoundRef<S extends SchemaLike<any, any, any>, Root> = {
+type BoundRef<S extends StructLike<any, any, any>, Root> = {
   readonly [BOUND_SOURCE]: {
     readonly owner: Root
-    readonly schema: S
+    readonly struct: S
   }
 }
 
-type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<SchemaLike<any, any, any>, Root> & {
+type BoundFor<TTarget extends StructBindTarget, Root> = BoundRef<StructLike<any, any, any>, Root> & {
   readonly [BOUND_TARGET]?: TTarget
 }
 
-type BoundObject<S extends ObjectSchema<any>, TShape, Root> = BoundRef<S, Root> & {
+type BoundObject<S extends ObjectStruct<any>, TShape, Root> = BoundRef<S, Root> & {
   readonly [K in keyof TShape]: BuildInput<TShape[K], Root>
 }
 
-type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectSchema<any>, any, Root> & {
+type ObjectSourceFor<TTarget extends StructBindTarget, Root> = BoundObject<ObjectStruct<any>, any, Root> & {
   readonly [BOUND_TARGET]?: TTarget
 }
 
@@ -357,16 +357,16 @@ type ArrayProjection<Root> = {
   }
 }
 
-type BoundArray<S extends ArraySchema<infer TItem>, Root> = BoundRef<S, Root> & {
+type BoundArray<S extends ArrayStruct<infer TItem>, Root> = BoundRef<S, Root> & {
   map<TProjection extends JsonProjection<Root>>(project: (item: BuildInput<TItem, Root>) => TProjection): ArrayProjection<Root>
 }
 
 type BuildInput<S, Root = S> =
-  S extends ObjectSchema<infer TShape>
+  S extends ObjectStruct<infer TShape>
     ? BoundObject<S, TShape, Root>
-    : S extends ArraySchema<any>
+    : S extends ArrayStruct<any>
       ? BoundArray<S, Root>
-      : S extends SchemaLike<any, any, any>
+      : S extends StructLike<any, any, any>
         ? BoundRef<S, Root>
         : never
 
@@ -384,7 +384,7 @@ type RequestBodyOptions = {
   contentType?: string | null
 }
 
-type HttpBuildContext<Root extends ObjectSchema<any>> = {
+type HttpBuildContext<Root extends ObjectStruct<any>> = {
   bindPathParams(projection: PathParamsProjection<Root>): void
   bindQueryParams(projection: KeyValueProjection<'searchParam', Root>): void
   bindHeaders(projection: KeyValueProjection<'header', Root>): void
@@ -399,19 +399,19 @@ type HttpBuildContext<Root extends ObjectSchema<any>> = {
   bindHtml(source: BoundFor<'htmlBody', Root>, options?: RequestBodyOptions): void
 }
 
-type EventStreamBuildContext<Root extends ObjectSchema<any>> = {
+type EventStreamBuildContext<Root extends ObjectStruct<any>> = {
   bindPathParams(projection: PathParamsProjection<Root>): void
   bindQueryParams(projection: KeyValueProjection<'searchParam', Root>): void
   bindHeaders(projection: KeyValueProjection<'header', Root>): void
 }
 
-type WebSocketBuildContext<Root extends ObjectSchema<any>> = {
+type WebSocketBuildContext<Root extends ObjectStruct<any>> = {
   bindPathParams(projection: PathParamsProjection<Root>): void
   bindQueryParams(projection: KeyValueProjection<'searchParam', Root>): void
 }
 ```
 
-`BoundRef` / `BoundObject` / `BoundArray` 不是 schema，也不是 `S & marker`。它们是不透明 binding source，只能由当前 endpoint 的 `build(ctx, input)` 第二参 `input` 产生。闭包里的字段 struct 即使和 input tree 里的字段是同一个实例，也不能单独传给 `ctx.bindXXX(...)`。
+`BoundRef` / `BoundObject` / `BoundArray` 不是 struct，也不是 `S & marker`。它们是不透明 binding source，只能由当前 endpoint 的 `build(ctx, input)` 第二参 `input` 产生。闭包里的字段 struct 即使和 input tree 里的字段是同一个实例，也不能单独传给 `ctx.bindXXX(...)`。
 
 `BoundFor<TTarget, Root>` 只表达当前 bound source 可被目标 struct codec 接受。能力判断必须来自 `struct` runtime definition 和现有 codec：`encodeStructValue`、`encodeObjectByTag`、`encodeQueryParams`、`encodeHeaders`、`encodePathParams`、`encodeUrlencoded`、`encodeMultipart`。
 
@@ -419,12 +419,12 @@ type WebSocketBuildContext<Root extends ObjectSchema<any>> = {
 
 ## Struct Binding Metadata
 
-binding metadata 由 `struct` 包的 binding 模块根据 endpoint input struct 派生。path 是 endpoint-local 派生信息，不能写回裸 schema / 字段 struct；binding metadata 必须存放在 endpoint-local registry、private symbol、non-enumerable marker 或 WeakMap 中，不占用用户字段名。
+binding metadata 由 `struct` 包的 binding 模块根据 endpoint input struct 派生。path 是 endpoint-local 派生信息，不能写回裸 struct / 字段 struct；binding metadata 必须存放在 endpoint-local registry、private symbol、non-enumerable marker 或 WeakMap 中，不占用用户字段名。
 
 ```ts
 type BindingMeta = {
   owner: object
-  schema: SchemaLike<any, any, any>
+  struct: StructLike<any, any, any>
   definition: StructDefinition
   path: readonly PropertyKey[]
   fieldKey: string
@@ -781,7 +781,7 @@ function materializeSource(source, parsedInput, scopeValues = new Map()) {
   if (typeof value === 'undefined') {
     return source.optional ? SKIP : undefined
   }
-  return encodeProjectedValue(source.schema, value, source.codec)
+  return encodeProjectedValue(source.struct, value, source.codec)
 }
 
 function resolveWireKey(source, target) {
@@ -833,7 +833,7 @@ struct.arrayBuffer() -> ArrayBuffer body
 
 1. `build(ctx, input)` 只在 definition-time 生成 `BuildPlan`，不能读取 actual parsed input。
 2. registry 必须带 owner token，禁止绑定其他 endpoint 的 struct 或伪造对象。
-3. `ctx.bindXXX(...)` 入参必须来自 `build` 第二参 `input`；闭包里的字段 struct、原始 `Input` schema 和其他 endpoint 的 bound view 都报 definition error。
+3. `ctx.bindXXX(...)` 入参必须来自 `build` 第二参 `input`；闭包里的字段 struct、原始 `Input` struct 和其他 endpoint 的 bound view 都报 definition error。
 4. path/query/header/urlencoded/multipart/json 的能力判断必须来自 struct runtime definition 和现有 codec。
 5. `input.array.map(item => projection)` 只允许出现在 JSON projection 中，并生成 `ArrayProjection`；callback 里的 item bound source 只能在该 `map` projection 的 scope 内使用。
 6. optional `undefined` 在 query/header/urlencoded/formData/json object projection 中 skip；path param 为 `undefined` 报错。
@@ -871,5 +871,5 @@ type tests：
 6. `ctx.bindArrayBuffer(input)` 类型层拒绝 object source。
 7. SSE ctx 不暴露 body helpers；WebSocket ctx 不暴露 headers/body helpers。
 8. HTTP ctx 不暴露 `withCredentials`、`context`、`setXXX`、`bindXml`、泛 `bindBody`。
-9. 用户字段名为 `path`、`schema`、`fieldKey` 时不和 binding metadata 冲突。
-10. 伪造 `{ path, schema }` 结构不能通过 `ctx.bindXXX` 类型或 runtime assert。
+9. 用户字段名为 `path`、`struct`、`fieldKey` 时不和 binding metadata 冲突。
+10. 伪造 `{ path, struct }` 结构不能通过 `ctx.bindXXX` 类型或 runtime assert。

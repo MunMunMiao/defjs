@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { makeHttpContext, makeHttpContextToken } from '../internal/context'
-import { struct, tag } from '../struct'
+import { struct } from '../struct'
 import { createHttpRequest, normalizeOutputShape, resolveDefaultResponseType } from './request'
 
 describe('http request helpers', () => {
@@ -75,6 +75,23 @@ describe('http request helpers', () => {
     expect(request.body).toBe('{"nickname":"Miao"}')
   })
 
+  test('should reject request-shaped missing path params', () => {
+    const input = struct.request({
+      path: struct.object({
+        id: struct.string().optional(),
+      }),
+    })
+
+    expect(() =>
+      createHttpRequest('GET', '/user/:id', { path: {} }, undefined, {
+        abort: new AbortController().signal,
+        baseEndpoint: 'https://api.example.com',
+        input,
+        queryParamsSerializer: (params) => params.toString(),
+      }),
+    ).toThrow('Missing path param: id')
+  })
+
   test('should pass request-shaped query values to custom queryParamsSerializer', () => {
     const input = struct.request({
       query: struct.object({
@@ -98,17 +115,17 @@ describe('http request helpers', () => {
 
   test('should build default request from struct.request shape', () => {
     const profile = struct.object({
-      displayName: struct.string().tag(tag.json('display_name')),
+      displayName: struct.string().alias('display_name'),
       internalNote: struct.string(),
     })
     const input = struct.request({
       body: struct.json(
         struct.object({
-          profile: profile.tag(tag.json('profile')),
+          profile: profile.alias('profile'),
         }),
       ),
       path: struct.object({
-        orgId: struct.string().tag(tag.uri('org_id')),
+        orgId: struct.string().alias('org_id'),
       }),
     })
 
@@ -145,15 +162,15 @@ describe('http request helpers', () => {
     const input = struct.request({
       body: struct.json(
         struct.object({
-          bodyName: struct.string().tag(tag.json('name')),
-          bodyUid: struct.number().tag(tag.json('uid')),
+          bodyName: struct.string().alias('name'),
+          bodyUid: struct.number().alias('uid'),
         }),
       ),
       path: struct.object({
-        pathUid: struct.number().tag(tag.uri('uid')),
+        pathUid: struct.number().alias('uid'),
       }),
       query: struct.object({
-        queryName: struct.string().tag(tag.query('name')),
+        queryName: struct.string().alias('name'),
       }),
     })
 

@@ -3,7 +3,7 @@ import { struct } from '../struct'
 import { parseEndpointInput } from './endpoint_input'
 
 describe('endpoint input helpers', () => {
-  test('should parse endpoint input and keep raw input when schema is omitted', async () => {
+  test('should parse endpoint input and keep raw input when struct is omitted', async () => {
     const input = {
       id: '1',
     }

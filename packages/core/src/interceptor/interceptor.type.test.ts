@@ -14,6 +14,7 @@ import type {
   makeSSEInterceptorChain,
   makeWebSocketInterceptorChain,
 } from './interceptor'
+import { createHttpInterceptor } from './interceptor'
 import type { HttpInterceptor, SSEInterceptor } from './index'
 import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './index'
 
@@ -97,6 +98,9 @@ basicAuthHttpInterceptor(() => ({
 
 // @ts-expect-error encode must return a string
 basicAuthHttpInterceptor(() => ({ password: 'secret', username: 'miao' }), { encode: () => 1 })
+
+// @ts-expect-error HTTP interceptors must return internal HttpResponse values, not native Response.
+createHttpInterceptor(async () => new Response('ok', { status: 200 }))
 
 // @ts-expect-error password is required
 basicAuthSSEInterceptor(() => ({

@@ -1,21 +1,22 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { isStruct, struct } from './index'
+import { struct } from './index'
+import { isStruct } from './guards'
 import { parseStructTuple as parse } from './introspection'
 import {
-  createAnySchema,
-  createArrayBufferSchema,
-  createArraySchema,
-  createBlobSchema,
-  createBooleanSchema,
-  createFileSchema,
-  createLiteralSchema,
-  createNullSchema,
-  createNumberSchema,
-  createObjectSchema,
-  createRecordSchema,
-  createStringSchema,
-  createTupleSchema,
-  createUnknownSchema,
+  createAnyStruct,
+  createArrayBufferStruct,
+  createArrayStruct,
+  createBlobStruct,
+  createBooleanStruct,
+  createFileStruct,
+  createLiteralStruct,
+  createNullStruct,
+  createNumberStruct,
+  createObjectStruct,
+  createRecordStruct,
+  createStringStruct,
+  createTupleStruct,
+  createUnknownStruct,
 } from './struct'
 
 const originalStructuredClone = globalThis.structuredClone
@@ -27,25 +28,25 @@ afterEach(() => {
 
 describe('facade.ts', () => {
   test('exports every constructor from namespace', () => {
-    expect(struct.string).toBe(createStringSchema)
-    expect(struct.number).toBe(createNumberSchema)
-    expect(struct.boolean).toBe(createBooleanSchema)
-    expect(struct.null).toBe(createNullSchema)
-    expect(struct.any).toBe(createAnySchema)
-    expect(struct.unknown).toBe(createUnknownSchema)
-    expect(struct.literal).toBe(createLiteralSchema)
+    expect(struct.string).toBe(createStringStruct)
+    expect(struct.number).toBe(createNumberStruct)
+    expect(struct.boolean).toBe(createBooleanStruct)
+    expect(struct.null).toBe(createNullStruct)
+    expect(struct.any).toBe(createAnyStruct)
+    expect(struct.unknown).toBe(createUnknownStruct)
+    expect(struct.literal).toBe(createLiteralStruct)
     expect(struct.enum).toBeTypeOf('function')
-    expect(struct.object).toBe(createObjectSchema)
-    expect(struct.array).toBe(createArraySchema)
-    expect(struct.tuple).toBe(createTupleSchema)
-    expect(struct.record).toBe(createRecordSchema)
+    expect(struct.object).toBe(createObjectStruct)
+    expect(struct.array).toBe(createArrayStruct)
+    expect(struct.tuple).toBe(createTupleStruct)
+    expect(struct.record).toBe(createRecordStruct)
     expect(struct.or).toBeTypeOf('function')
-    expect(struct.blob).toBe(createBlobSchema)
-    expect(struct.file).toBe(createFileSchema)
-    expect(struct.arrayBuffer).toBe(createArrayBufferSchema)
+    expect(struct.blob).toBe(createBlobStruct)
+    expect(struct.file).toBe(createFileStruct)
+    expect(struct.arrayBuffer).toBe(createArrayBufferStruct)
   })
 
-  test('supports primitive defaults for boolean and exact null schema', () => {
+  test('supports primitive defaults for boolean and exact null struct', () => {
     const [boolErr, boolVal] = parse(struct.boolean(), undefined)
     if (boolErr) {
       throw boolErr
@@ -66,15 +67,15 @@ describe('facade.ts', () => {
   })
 
   test('covers internal primitive definitions that are otherwise short-circuited', () => {
-    const booleanSchema = struct.boolean() as unknown as { [key: symbol]: unknown }
-    const nullSchema = struct.null() as unknown as { [key: symbol]: unknown }
-    const booleanDefinition = Object.getOwnPropertySymbols(booleanSchema)
-      .map((symbol) => booleanSchema[symbol])
+    const booleanStruct = struct.boolean() as unknown as { [key: symbol]: unknown }
+    const nullStruct = struct.null() as unknown as { [key: symbol]: unknown }
+    const booleanDefinition = Object.getOwnPropertySymbols(booleanStruct)
+      .map((symbol) => booleanStruct[symbol])
       .find((value) => typeof value === 'object' && value !== null && 'kind' in (value as object)) as {
       is: (value: unknown) => boolean
     }
-    const nullDefinition = Object.getOwnPropertySymbols(nullSchema)
-      .map((symbol) => nullSchema[symbol])
+    const nullDefinition = Object.getOwnPropertySymbols(nullStruct)
+      .map((symbol) => nullStruct[symbol])
       .find((value) => typeof value === 'object' && value !== null && 'kind' in (value as object)) as {
       is: (value: unknown) => boolean
       zero: () => null
@@ -85,7 +86,7 @@ describe('facade.ts', () => {
     expect(nullDefinition.zero()).toBeNull()
   })
 
-  test('exposes schema identity helper', () => {
+  test('exposes struct identity helper', () => {
     expect(isStruct(struct.string())).toBe(true)
     expect(
       isStruct({
@@ -96,7 +97,7 @@ describe('facade.ts', () => {
     ).toBe(false)
   })
 
-  test('returns immutable chained schema objects', () => {
+  test('returns immutable chained struct objects', () => {
     const base = struct.string()
     const optionalValue = base.optional()
 
@@ -115,7 +116,7 @@ describe('facade.ts', () => {
     expect(optVal).toBeUndefined()
   })
 
-  test('object schema snapshots the declared shape at construction time', () => {
+  test('object struct snapshots the declared shape at construction time', () => {
     const shape = { name: struct.string() }
     const user = struct.object(shape)
     ;(shape as { [key: string]: unknown })['secret'] = struct.string()

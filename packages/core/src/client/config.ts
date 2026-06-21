@@ -29,7 +29,7 @@ export interface ClientWebSocketOptions {
 export interface ClientSSEOptions {
   handle?: typeof fetch
   onInvalidEvent?: (context: {
-    reason: 'missing-schema' | 'validation-failed'
+    reason: 'missing-struct' | 'validation-failed'
     message: { id: string; event: string; data: string; retry?: number }
     cause?: unknown
   }) => void | Promise<void>
@@ -53,7 +53,7 @@ export interface ClientSSEOptions {
 export interface ClientSSEConfig {
   handle: typeof fetch
   onInvalidEvent?: (context: {
-    reason: 'missing-schema' | 'validation-failed'
+    reason: 'missing-struct' | 'validation-failed'
     message: { id: string; event: string; data: string; retry?: number }
     cause?: unknown
   }) => void | Promise<void>

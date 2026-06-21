@@ -1,9 +1,6 @@
 import type { RequestBuildValue } from '../../internal/request_values'
-import { encodeStructValue, getStructFields, isObjectStruct } from '../introspection'
-import type { TagNamespace } from '../tag'
-import { HeaderTag, QueryTag, UriTag } from '../tag'
-import type { SchemaLike } from '../types'
-import { assertPlainObject, getWireKey } from './common'
+import type { AnyStructLike } from '../types'
+import { encodeFlatByAlias } from './flat'
 import { isSearchParamScalar } from './urlencoded'
 
 export interface QueryCodecOptions {
@@ -11,47 +8,36 @@ export interface QueryCodecOptions {
 }
 
 export function encodeQueryParams(
-  struct: SchemaLike<unknown, unknown, boolean>,
+  struct: AnyStructLike,
   value: unknown,
   options: QueryCodecOptions = {},
 ): { [key: string]: RequestBuildValue } {
-  return encodeTaggedRecord(struct, value, QueryTag, 'query', options)
+  return encodeFlatRecord(struct, value, 'query', options)
 }
 
-export function encodePathParams(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): { [key: string]: RequestBuildValue } {
-  return encodeTaggedRecord(struct, value, UriTag, 'uri', { scalarOnly: true })
+export function encodePathParams(struct: AnyStructLike, value: unknown): { [key: string]: RequestBuildValue } {
+  return encodeFlatRecord(struct, value, 'uri', { scalarOnly: true })
 }
 
-export function encodeHeaders(struct: SchemaLike<unknown, unknown, boolean>, value: unknown): { [key: string]: RequestBuildValue } {
-  return encodeTaggedRecord(struct, value, HeaderTag, 'header')
+export function encodeHeaders(struct: AnyStructLike, value: unknown): { [key: string]: RequestBuildValue } {
+  return encodeFlatRecord(struct, value, 'header')
 }
 
-function encodeTaggedRecord(
-  struct: SchemaLike<unknown, unknown, boolean>,
+function encodeFlatRecord(
+  struct: AnyStructLike,
   value: unknown,
-  namespace: TagNamespace,
   label: string,
   options: QueryCodecOptions & { scalarOnly?: boolean } = {},
 ): { [key: string]: RequestBuildValue } {
-  if (!isObjectStruct(struct)) {
-    throw new TypeError(`${label} encode expects object struct`)
-  }
-
-  assertPlainObject(value, `${label} encode expects object value`)
-
-  const record: { [key: string]: RequestBuildValue } = Object.create(null)
-  for (const field of getStructFields(struct)) {
-    const fieldTag = field.tags.get(namespace.kind)
-    const encoded = encodeStructValue(field.struct, value[field.key])
-    if (typeof encoded === 'undefined') {
-      continue
-    }
-
-    const key = getWireKey(field.key, fieldTag)
-    record[key] = options.scalarOnly ? normalizeScalarRecordValue(label, key, encoded) : normalizeRecordValue(label, key, encoded, options)
-  }
-
-  return record
+  return encodeFlatByAlias(struct, value, {
+    create: () => Object.create(null) as { [key: string]: RequestBuildValue },
+    label,
+    put: (record, key, encoded) => {
+      record[key] = options.scalarOnly
+        ? normalizeScalarRecordValue(label, key, encoded)
+        : normalizeRecordValue(label, key, encoded, options)
+    },
+  })
 }
 
 function normalizeRecordValue(label: string, key: string, value: unknown, options: QueryCodecOptions): RequestBuildValue {

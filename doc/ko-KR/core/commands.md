@@ -72,15 +72,15 @@ const command = ListUsers() // 인자가 필요 없어요
 ```typescript
 // 배열 형태 (권장)
 output: [
-  { status: 200, body: UserSchema },
-  { status: [401, 403], body: AuthErrorSchema },
+  { status: 200, body: UserStruct },
+  { status: [401, 403], body: AuthErrorStruct },
 ]
 
 // 객체 형태
 output: {
-  200: UserSchema,
-  '401': AuthErrorSchema,
-  '403': AuthErrorSchema,
+  200: UserStruct,
+  '401': AuthErrorStruct,
+  '403': AuthErrorStruct,
 }
 ```
 
