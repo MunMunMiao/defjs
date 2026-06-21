@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createHttpInterceptor } from '../interceptor'
 import { makeResponse } from '../internal/http_response'
 import { createClient } from './client'
+import type { ClientSSEOptions } from './config'
 import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import {
   withCredentials,
@@ -197,7 +198,16 @@ describe('Client', () => {
   test('withSSEOptions ignores undefined fields', () => {
     const before = getClientConfig(baseClient).sse
 
-    const client = createClient(withEndpoint('https://example.com'), withSSEOptions({}))
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withSSEOptions({
+        handle: undefined,
+        onInvalidEvent: undefined,
+        reconnect: undefined,
+        queue: undefined,
+        maxBufferSize: undefined,
+      } as ClientSSEOptions),
+    )
 
     const config = getClientConfig(client).sse
     expect(config.handle).toBe(before.handle)

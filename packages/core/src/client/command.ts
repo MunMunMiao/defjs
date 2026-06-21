@@ -1,14 +1,8 @@
 import type { RequestOutputShape } from '../http/request'
-import type { HttpCommand, HttpExecuteOptions } from '../http/http'
-import type { EventStructs, EventStreamCommand, EventStreamExecuteOptions } from '../sse/sse'
+import type { HttpCommand } from '../http/http'
+import type { EventStructs, EventStreamCommand } from '../sse/sse'
 import type { AnyStruct } from '../struct'
-import type {
-  SocketStructs,
-  WebSocketCommand,
-  WebSocketExecuteOptions,
-  WebSocketIncomingData,
-  WebSocketOutgoingData,
-} from '../web_socket/web_socket'
+import type { SocketStructs, WebSocketCommand } from '../web_socket/web_socket'
 
 export const COMMAND_TYPE = Symbol.for('defjs.command.type')
 export const HTTP_COMMAND = Symbol.for('defjs.command.http')
@@ -25,17 +19,6 @@ export type Command =
   | HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>
   | EventStreamCommand<AnyStruct | undefined, EventStructs>
   | WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined>
-
-export type HttpCommandEntry = [command: HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>, options?: HttpExecuteOptions]
-export type EventStreamCommandEntry = [
-  command: EventStreamCommand<AnyStruct | undefined, EventStructs>,
-  options?: EventStreamExecuteOptions,
-]
-export type WebSocketCommandEntry = [
-  command: WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined>,
-  options?: WebSocketExecuteOptions<WebSocketIncomingData<SocketStructs>, WebSocketOutgoingData<SocketStructs | undefined>>,
-]
-export type UnknownCommandEntry = [command: Command, options?: unknown]
 
 function commandTypeOf(value: unknown): unknown {
   if (typeof value !== 'object' || value === null || !(COMMAND_TYPE in value)) {
@@ -59,14 +42,3 @@ export function isWebSocketCommand(
   return commandTypeOf(value) === WEB_SOCKET_COMMAND
 }
 
-export function isHttpCommandEntry(entry: UnknownCommandEntry): entry is HttpCommandEntry {
-  return isHttpCommand(entry[0])
-}
-
-export function isEventStreamCommandEntry(entry: UnknownCommandEntry): entry is EventStreamCommandEntry {
-  return isEventStreamCommand(entry[0])
-}
-
-export function isWebSocketCommandEntry(entry: UnknownCommandEntry): entry is WebSocketCommandEntry {
-  return isWebSocketCommand(entry[0])
-}

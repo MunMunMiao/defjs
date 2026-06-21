@@ -1,5 +1,4 @@
 import { isStruct } from './guards'
-import { DEFINITION } from './symbols'
 import type { ObjectDefinition, ObjectShape, RuntimeStruct, StructLike } from './types'
 
 export function resolveObjectShape(_struct: RuntimeStruct, definition: ObjectDefinition): ObjectShape {
@@ -13,7 +12,6 @@ export function resolveObjectShape(_struct: RuntimeStruct, definition: ObjectDef
     assertStruct(value, `object field "${key}"`)
   }
 
-  assertUniqueShapeWireKeys(shape)
   definition.cache.resolvedShape = shape
   return shape
 }
@@ -29,20 +27,6 @@ export function readObjectShape(shape: ObjectShape): ObjectShape {
   }
 
   return output as unknown as ObjectShape
-}
-
-function assertUniqueShapeWireKeys(shape: ObjectShape): void {
-  const seen = new Map<string, string>()
-  for (const [key, field] of Object.entries(shape)) {
-    const runtime = field as unknown as RuntimeStruct
-    const alias = runtime[DEFINITION].alias
-    const wireKey = alias ?? key
-    if (seen.has(wireKey)) {
-      const previous = seen.get(wireKey) as string
-      throw new TypeError(`duplicate wire key "${wireKey}" for object fields "${previous}" and "${key}"`)
-    }
-    seen.set(wireKey, key)
-  }
 }
 
 export function assertStruct(value: unknown, label: string): asserts value is StructLike<unknown, unknown, boolean> {

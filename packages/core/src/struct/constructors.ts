@@ -14,9 +14,7 @@ import type {
   RequestBodyCodec,
   RequestBodyDescriptor,
   RequestBodyStruct,
-  RequestDefinition,
   RequestStruct,
-  RequestSection,
   RequestShape,
   RuntimeStruct,
   Struct,
@@ -182,7 +180,6 @@ export function createRequestStruct<const T extends RequestShape>(shape: T): Req
     assertObjectStruct(headers, 'request.headers')
   }
   const bodyDescriptor = createRequestBodyDescriptor(body)
-  const sections = createRequestSections({ body, bodyDescriptor, headers, path, query })
 
   return castStruct<RequestStruct<T>>(
     makeStruct({
@@ -193,7 +190,6 @@ export function createRequestStruct<const T extends RequestShape>(shape: T): Req
       kind: 'request',
       path,
       query,
-      sections,
     }),
   )
 }
@@ -217,23 +213,6 @@ function createRequestBodyDescriptor(body: StructLike<unknown, unknown, boolean>
   }
 
   throw new TypeError('body must use a body wrapper struct')
-}
-
-function createRequestSections(definition: Omit<RequestDefinition, 'flags' | 'kind' | 'sections'>): readonly RequestSection[] {
-  const sections: RequestSection[] = []
-  if (definition.path) {
-    sections.push({ key: 'path', struct: definition.path as unknown as RuntimeStruct })
-  }
-  if (definition.query) {
-    sections.push({ key: 'query', struct: definition.query as unknown as RuntimeStruct })
-  }
-  if (definition.headers) {
-    sections.push({ key: 'headers', struct: definition.headers as unknown as RuntimeStruct })
-  }
-  if (definition.body) {
-    sections.push({ key: 'body', struct: definition.body as unknown as RuntimeStruct })
-  }
-  return Object.freeze(sections)
 }
 
 export function createRequestBodyStruct<const C extends RequestBodyCodec, S extends StructLike<unknown, unknown, boolean>>(

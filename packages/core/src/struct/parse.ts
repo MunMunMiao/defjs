@@ -1,6 +1,7 @@
 import { issue } from './errors'
 import { resolveObjectShape } from './shape'
 import { DEFINITION, OMIT } from './symbols'
+import { REQUEST_SECTION_KEYS } from './types'
 import type {
   ArrayDefinition,
   DiscriminatedUnionDefinition,
@@ -205,11 +206,13 @@ function parseRequestValue(definition: RequestDefinition, input: unknown, path: 
 
   const output: { [key: string]: unknown } = Object.create(null)
   const issues: StructIssue[] = []
-  const sections = definition.sections
 
-  for (const section of sections) {
-    const sectionKey = section.key
-    const sectionStruct = section.struct
+  for (const sectionKey of REQUEST_SECTION_KEYS) {
+    const sectionStruct = definition[sectionKey] as RuntimeStruct | undefined
+    if (!sectionStruct) {
+      continue
+    }
+
     const result = parseValue(sectionStruct, hasOwnKey(input, sectionKey) ? input[sectionKey] : undefined, [...path, sectionKey], 'field')
     if (result.ok) {
       if (result.value !== OMIT) {
@@ -352,9 +355,12 @@ export function buildZeroValue(struct: RuntimeStruct, path: Path): unknown {
 
     case 'request': {
       const output: { [key: string]: unknown } = Object.create(null)
-      for (const section of definition.sections) {
-        const key = section.key
-        const sectionStruct = section.struct
+      for (const key of REQUEST_SECTION_KEYS) {
+        const sectionStruct = definition[key] as RuntimeStruct | undefined
+        if (!sectionStruct) {
+          continue
+        }
+
         const value = resolveMissingValue(sectionStruct, [...path, key], 'field')
         if (value !== OMIT) {
           output[key] = value

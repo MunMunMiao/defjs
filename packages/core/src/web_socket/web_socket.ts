@@ -9,6 +9,8 @@ import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors } from '../
 import type { UseCancellationConfig } from '../internal/abort'
 import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals } from '../internal/abort'
 import { AsyncQueue } from '../internal/async_queue'
+import { createDeferred } from '../internal/deferred'
+import type { EndpointCommandBuilder } from '../internal/endpoint_command'
 import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
 import { parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpRequest } from '../internal/http_request'
@@ -173,16 +175,7 @@ export type WebSocketCommandBuilder<
   TInput extends AnyStruct | undefined,
   TIncoming extends SocketStructs,
   TOutgoing extends SocketStructs | undefined,
-> =
-  IsInputOptional<TInput> extends true
-    ? (input?: EndpointInput<TInput>) => WebSocketCommand<TInput, TIncoming, TOutgoing>
-    : (input: EndpointInput<TInput>) => WebSocketCommand<TInput, TIncoming, TOutgoing>
-
-type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
-  ? true
-  : {} extends EndpointInput<TInput>
-    ? true
-    : false
+> = EndpointCommandBuilder<TInput, WebSocketCommand<TInput, TIncoming, TOutgoing>>
 
 type WebSocketEndpoint<
   TInput extends AnyStruct | undefined = undefined,
@@ -197,8 +190,6 @@ type SocketRefState<TIncoming, TOutgoing> = {
     runtimeError: Set<(error: unknown) => void>
     stateChange: Set<(state: WebSocketState) => void>
   }
-  promise?: Promise<SocketAwaitResult<TIncoming, TOutgoing>>
-  socket?: WebSocketSession<TIncoming, TOutgoing>
   status: WebSocketState
 }
 
@@ -206,12 +197,6 @@ export type ManualSocketCloseReason = {
   code?: number
   kind: 'manual-web-socket-close'
   reason?: string
-}
-
-type Deferred<T> = {
-  promise: Promise<T>
-  reject: (reason?: unknown) => void
-  resolve: (value: T | PromiseLike<T>) => void
 }
 
 export interface WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> {
@@ -334,7 +319,6 @@ async function runWebSocketCommand<
       const sessionController = {
         currentSocket: undefined as WebSocket | undefined,
         heartbeat: undefined as HeartbeatRuntime<WebSocketIncomingData<TIncoming>> | undefined,
-        lastRuntimeError: undefined,
       }
       const sendQueue = createSendQueue(config?.queue ?? clientConfig.webSocket.queue)
       const session = createWebSocketSession(
@@ -520,7 +504,6 @@ async function runWebSocketCommand<
             setSocketState(state, 'open')
             if (!startupSettled) {
               startupSettled = true
-              state.socket = session
               // Type boundary: session is created as WebSocketSession<...> above; resolveSession expects WebSocketSessionLike (structural match).
               resolveSession(session as WebSocketSessionLike)
             }
@@ -695,26 +678,6 @@ export async function executeWebSocketCommand<
     status: 'idle',
   }
   return runWebSocketCommand(clientConfig, endpoint, input, config, controller, state)
-}
-
-function createDeferred<T>(): Deferred<T> {
-  let resolve: Deferred<T>['resolve'] | undefined
-  let reject: Deferred<T>['reject'] | undefined
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve
-    reject = innerReject
-  })
-
-  /* istanbul ignore next -- Promise executors run synchronously */
-  if (resolve === undefined || reject === undefined) {
-    throw new Error('Deferred promise executor did not initialize synchronously')
-  }
-
-  return {
-    promise,
-    reject,
-    resolve,
-  }
 }
 
 export type SocketLifecycleOutcome = {

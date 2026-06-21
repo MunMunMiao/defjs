@@ -3,6 +3,7 @@ import { selectUnionOptions } from './match'
 export { matchesDefinition } from './match'
 import { resolveObjectShape } from './shape'
 import { DEFINITION } from './symbols'
+import { REQUEST_SECTION_KEYS } from './types'
 import type { RuntimeStruct, StructDefinition } from './types'
 import { hasOwnKey, isObjectIntersectionStruct, isPlainObject } from './utils'
 
@@ -138,10 +139,9 @@ export function encodeValue(struct: RuntimeStruct, value: unknown, options: Enco
         return value
       }
       const output: { [key: string]: unknown } = Object.create(null)
-      for (const section of definition.sections) {
-        const key = section.key
-        const sectionStruct = section.struct
-        if (hasOwnKey(value, key)) {
+      for (const key of REQUEST_SECTION_KEYS) {
+        const sectionStruct = definition[key] as RuntimeStruct | undefined
+        if (sectionStruct && hasOwnKey(value, key)) {
           output[key] = encodeValue(sectionStruct, value[key], options)
         }
       }

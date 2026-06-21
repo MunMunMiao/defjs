@@ -3,6 +3,15 @@ import type { ClientConfig, ClientOptions, ClientSSEOptions, ClientWebSocketOpti
 
 export type ClientOption = (config: ClientConfig) => void
 
+function assignDefined<TTarget extends object>(target: TTarget, source: Partial<TTarget>): void {
+  for (const key in source) {
+    const value = source[key]
+    if (value !== undefined) {
+      target[key] = value
+    }
+  }
+}
+
 export function withEndpoint(endpoint: string): ClientOption {
   return (config) => {
     config.endpoint = endpoint
@@ -78,23 +87,7 @@ export function withWebSocketReconnect(options: ClientWebSocketOptions['reconnec
 }
 
 export function withSSEOptions(options: ClientSSEOptions): ClientOption {
-  return (config) => {
-    if (options.handle !== undefined) {
-      config.sse.handle = options.handle
-    }
-    if (options.onInvalidEvent !== undefined) {
-      config.sse.onInvalidEvent = options.onInvalidEvent
-    }
-    if (options.reconnect !== undefined) {
-      config.sse.reconnect = options.reconnect
-    }
-    if (options.queue !== undefined) {
-      config.sse.queue = options.queue
-    }
-    if (options.maxBufferSize !== undefined) {
-      config.sse.maxBufferSize = options.maxBufferSize
-    }
-  }
+  return (config) => assignDefined(config.sse, options)
 }
 
 export function withSSEOnInvalidEvent(handler: ClientSSEOptions['onInvalidEvent']): ClientOption {
@@ -116,26 +109,7 @@ export function withSSEQueue(options: ClientSSEOptions['queue']): ClientOption {
 }
 
 export function withWebSocketOptions(options: ClientWebSocketOptions): ClientOption {
-  return (config) => {
-    if (options.handle !== undefined) {
-      config.webSocket.handle = options.handle
-    }
-    if (options.beforeConnect !== undefined) {
-      config.webSocket.beforeConnect = options.beforeConnect
-    }
-    if (options.heartbeat !== undefined) {
-      config.webSocket.heartbeat = options.heartbeat
-    }
-    if (options.protocols !== undefined) {
-      config.webSocket.protocols = options.protocols
-    }
-    if (options.queue !== undefined) {
-      config.webSocket.queue = options.queue
-    }
-    if (options.reconnect !== undefined) {
-      config.webSocket.reconnect = options.reconnect
-    }
-  }
+  return (config) => assignDefined(config.webSocket, options)
 }
 
 export function withXSRF(options: ClientOptions['xsrf'] = {}): ClientOption {

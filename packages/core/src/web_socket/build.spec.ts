@@ -1,12 +1,32 @@
 import { describe, expect, test } from 'vitest'
+import type { QueryParamsSerializer } from '../client/config'
 import type { RequestBuildHandler } from '../internal/request_builder'
+import type { RequestBuildValue } from '../internal/request_values'
 import type { AnyStruct } from '../struct'
 import { struct } from '../struct'
-import { createWebSocketBuild, createWebSocketRequest, createWebSocketUrl, createWebSocketUrlFromRequest } from './build'
+import { createWebSocketBuild, createWebSocketRequest, createWebSocketUrlFromRequest } from './build'
 
 function unsupportedWebSocketBuild<TInput extends AnyStruct>(build: RequestBuildHandler<TInput>): RequestBuildHandler<TInput, 'webSocket'> {
   // Type boundary: this spec intentionally builds unsupported WebSocket output so the runtime guard rejects it.
   return build as unknown as RequestBuildHandler<TInput, 'webSocket'>
+}
+
+function createWebSocketUrl(
+  baseEndpoint: string,
+  path: string,
+  params: { [key: string]: RequestBuildValue } | undefined,
+  query: { [key: string]: RequestBuildValue } | undefined,
+  queryParamsSerializer: QueryParamsSerializer,
+): string {
+  const request = createWebSocketRequest({
+    abort: new AbortController().signal,
+    baseEndpoint,
+    build: { params, query },
+    path,
+    queryParamsSerializer,
+  })
+
+  return createWebSocketUrlFromRequest(request)
 }
 
 describe('web socket build helpers', () => {
@@ -56,6 +76,12 @@ describe('web socket build helpers', () => {
 
   test('should serialize query params with undefined value', () => {
     expect(createWebSocketUrl('http://localhost', '/ws', undefined, { a: undefined }, (p) => p.toString())).toBe('ws://localhost/ws')
+  })
+
+  test('should serialize query params with undefined array item', () => {
+    expect(createWebSocketUrl('http://localhost', '/ws', undefined, { tags: ['a', undefined] }, (p) => p.toString())).toBe(
+      'ws://localhost/ws?tags=a&tags=undefined',
+    )
   })
 
   test('should serialize query params with array values', () => {

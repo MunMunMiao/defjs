@@ -627,7 +627,7 @@ describe('request_builder request-shaped input', () => {
     expect(JSON.parse(built.body as string)).toEqual({ 'x-trace-id': 'trace-1' })
   })
 
-  test('bound request view rejects duplicate wire keys during shape resolution', () => {
+  test('bound request view rejects duplicate wire keys during keyed materialization', () => {
     const input = struct.request({
       body: struct.json(
         struct.object({
@@ -645,8 +645,8 @@ describe('request_builder request-shaped input', () => {
             displayName: 'Lovelace',
           },
         },
-        (_request, view) => {
-          void view.body.firstName
+        (request, view) => {
+          request.setJson(view.body)
         },
         { input },
       ),

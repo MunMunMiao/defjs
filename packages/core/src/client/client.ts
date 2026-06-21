@@ -1,5 +1,5 @@
 import type { Command } from './command'
-import { isEventStreamCommandEntry, isHttpCommandEntry, isWebSocketCommandEntry } from './command'
+import { isEventStreamCommand, isHttpCommand, isWebSocketCommand } from './command'
 import type { ClientConfig } from './config'
 import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
 import type { ClientOption } from './option'
@@ -89,17 +89,21 @@ export function createClient(...options: ClientOption[]): Client {
     options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
   function execute(command: Command, options?: unknown): Promise<unknown>
-  function execute(...entry: [command: Command, options?: unknown]): Promise<unknown> {
-    if (isHttpCommandEntry(entry)) {
-      return executeHttpCommand(conf, entry[0], entry[1])
+  function execute(command: Command, options?: unknown): Promise<unknown> {
+    if (isHttpCommand(command)) {
+      return executeHttpCommand(conf, command, options as HttpExecuteOptions | undefined)
     }
 
-    if (isEventStreamCommandEntry(entry)) {
-      return executeEventStreamCommand(conf, entry[0], entry[1])
+    if (isEventStreamCommand(command)) {
+      return executeEventStreamCommand(conf, command, options as EventStreamExecuteOptions | undefined)
     }
 
-    if (isWebSocketCommandEntry(entry)) {
-      return executeWebSocketCommand(conf, entry[0], entry[1])
+    if (isWebSocketCommand(command)) {
+      return executeWebSocketCommand(
+        conf,
+        command,
+        options as WebSocketExecuteOptions<WebSocketIncomingData<SocketStructs>, WebSocketOutgoingData<SocketStructs | undefined>> | undefined,
+      )
     }
 
     return Promise.reject(new Error('Unsupported command'))

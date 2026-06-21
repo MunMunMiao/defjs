@@ -138,7 +138,7 @@ describe('runtime.ts chain methods', () => {
     expect(() => getStructFields(User)).toThrow('duplicate wire key ""')
   })
 
-  test('keeps duplicate wire key failures stable across repeated object shape resolution', () => {
+  test('keeps duplicate wire key failures stable across repeated field resolution', () => {
     const User = struct.object({
       firstName: struct.string().alias('name'),
       displayName: struct.string().alias('name'),
@@ -150,8 +150,8 @@ describe('runtime.ts chain methods', () => {
       throw new Error('expected object definition')
     }
 
-    expect(() => resolveObjectShape(runtime, definition)).toThrow('duplicate wire key "name"')
-    expect(() => resolveObjectShape(runtime, definition)).toThrow('duplicate wire key "name"')
+    const shape = resolveObjectShape(runtime, definition)
+    expect(resolveObjectShape(runtime, definition)).toBe(shape)
     expect(() => getStructFields(User)).toThrow('duplicate wire key "name"')
     expect(() => getStructFields(User)).toThrow('duplicate wire key "name"')
   })

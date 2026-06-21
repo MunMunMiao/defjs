@@ -1,10 +1,8 @@
 import type { QueryParamsSerializer } from '../client/config'
-import { DEFAULT_QUERY_PARAMS_SERIALIZER } from '../client/config'
 import type { HttpContext } from '../internal/context'
 import type { HttpProgressFn, HttpRequest, HttpResponseType } from '../internal/http_request'
 import type { RequestBuildHandler } from '../internal/request_builder'
-import { buildRequest } from '../internal/request_builder'
-import { appendRecordToHeaders, createSearchParams, fillUrl } from '../internal/url'
+import { createBaseTransportRequest } from '../internal/transport_request'
 import type { AnyStruct } from '../struct'
 import { applyRequestContentType } from './transport/body'
 
@@ -38,38 +36,30 @@ export function createHttpRequest<TInput extends AnyStruct | undefined>(
     }
   },
 ): HttpRequest {
-  const built = buildRequest(input, build, {
-    input: options.input,
-    transport: 'http',
-  })
-  const allowComplexQuery = options.queryParamsSerializer !== DEFAULT_QUERY_PARAMS_SERIALIZER
-  const queryParams = createSearchParams(built.query, { allowComplex: allowComplexQuery })
-  const headers = new Headers()
-
-  appendRecordToHeaders(headers, built.headers)
-
-  const request: HttpRequest = {
+  const { built, request } = createBaseTransportRequest(method, path, input, build, {
     abort: options.abort,
     baseEndpoint: options.baseEndpoint,
+    context: options.context,
+    input: options.input,
+    queryParamsSerializer: options.queryParamsSerializer,
+    timeout: options.timeout,
+    transport: 'http',
+    withCredentials: options.withCredentials,
+  })
+
+  const httpRequest: HttpRequest = {
+    ...request,
     body: built.body,
     bodyContentType: built.bodyContentType,
     bodyContentTypeSource: built.body,
-    context: options.context,
     downloadProgress: options.downloadProgress,
-    endpoint: fillUrl(path, built.params),
-    headers,
-    method,
-    queryParams,
-    queryString: options.queryParamsSerializer(queryParams, built.query),
     responseType: options.responseType,
-    timeout: options.timeout,
     uploadProgress: options.uploadProgress,
-    withCredentials: options.withCredentials ?? false,
     xsrf: options.xsrf,
   }
 
-  applyRequestContentType(request, headers)
-  return request
+  applyRequestContentType(httpRequest, request.headers)
+  return httpRequest
 }
 
 export function resolveDefaultResponseType(
@@ -87,22 +77,22 @@ export function resolveDefaultResponseType(
   return 'json'
 }
 
-export function normalizeOutputShape(output: RequestOutputShape): Map<number, AnyStruct> {
-  const map = new Map<number, AnyStruct>()
+export function resolveOutputStruct(output: RequestOutputShape, status: number): AnyStruct | undefined {
+  if (isResponseOutputMap(output)) {
+    return output[status]
+  }
 
-  if (Array.isArray(output)) {
-    for (const { status, body } of output) {
-      const statuses = Array.isArray(status) ? status : [status]
-      for (const code of statuses) {
-        map.set(code, body)
-      }
+  for (let index = output.length - 1; index >= 0; index -= 1) {
+    const item = output[index]!
+    const statuses = Array.isArray(item.status) ? item.status : [item.status]
+    if (statuses.includes(status)) {
+      return item.body
     }
-    return map
   }
 
-  for (const [status, struct] of Object.entries(output)) {
-    map.set(Number(status), struct)
-  }
+  return undefined
+}
 
-  return map
+function isResponseOutputMap(output: RequestOutputShape): output is { [key: number]: AnyStruct } {
+  return !Array.isArray(output)
 }

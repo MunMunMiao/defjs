@@ -12,7 +12,6 @@ export type HeartbeatRuntime<TIncoming> = {
 export type HeartbeatSession<TIncoming> = {
   currentSocket: WebSocket | undefined
   heartbeat: HeartbeatRuntime<TIncoming> | undefined
-  lastRuntimeError: unknown
 }
 
 export function startHeartbeat<TIncoming, TOutgoing extends SocketStructs | undefined>(

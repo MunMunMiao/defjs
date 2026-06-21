@@ -17,7 +17,6 @@ describe('heartbeat', () => {
     return {
       currentSocket: undefined,
       heartbeat: undefined,
-      lastRuntimeError: undefined,
     }
   }
 

@@ -143,15 +143,11 @@ export interface ObjectStruct<T extends ObjectShape>
 }
 
 export type RequestBodyCodec = 'arrayBuffer' | 'blob' | 'formData' | 'json' | 'text' | 'urlencoded'
-export type RequestSectionKey = 'body' | 'headers' | 'path' | 'query'
+export const REQUEST_SECTION_KEYS = ['path', 'query', 'headers', 'body'] as const
+export type RequestSectionKey = (typeof REQUEST_SECTION_KEYS)[number]
 
 export type RequestBodyDescriptor = {
   codec: RequestBodyCodec
-  struct: RuntimeStruct
-}
-
-export type RequestSection = {
-  key: RequestSectionKey
   struct: RuntimeStruct
 }
 
@@ -288,7 +284,6 @@ export type RequestDefinition = BaseDefinition & {
   kind: 'request'
   path?: ObjectStruct<ObjectShape>
   query?: ObjectStruct<ObjectShape>
-  sections: readonly RequestSection[]
 }
 
 export type RecordDefinition = BaseDefinition & {

@@ -1,5 +1,8 @@
 import type { HttpRequest } from './http_request'
-import type { RequestBuildValue } from './request_values'
+import type { RequestBuildValue, RequestScalarValue } from './request_values'
+import { isRequestScalarValue, serializeRequestScalarValue } from './request_values'
+
+type UrlScalarValue = Exclude<RequestScalarValue, bigint>
 
 export function fillUrl(path: string, params?: { [key: string]: RequestBuildValue }): string {
   const paramMap = new Map<string, string>()
@@ -12,19 +15,19 @@ export function fillUrl(path: string, params?: { [key: string]: RequestBuildValu
       if (Array.isArray(value)) {
         const first = value[0]
         if (typeof first !== 'undefined') {
-          if (!isScalarSearchParamValue(first)) {
+          if (!isUrlScalarValue(first)) {
             throw new TypeError(`path value for "${key}" requires a scalar value`)
           }
-          paramMap.set(key, serializeValue(first))
+          paramMap.set(key, serializeRequestScalarValue(first))
         }
         continue
       }
 
-      if (!isScalarSearchParamValue(value)) {
+      if (!isUrlScalarValue(value)) {
         throw new TypeError(`path value for "${key}" requires a scalar value`)
       }
 
-      paramMap.set(key, serializeValue(value))
+      paramMap.set(key, serializeRequestScalarValue(value))
     }
   }
 
@@ -80,19 +83,19 @@ export function appendRecordToHeaders(headers: Headers, value?: HeadersInit | { 
 
     if (Array.isArray(headerValue)) {
       for (const item of headerValue) {
-        if (!isScalarSearchParamValue(item)) {
+        if (!isUrlScalarValue(item)) {
           throw new TypeError(`header value for "${key}" requires a scalar value`)
         }
-        headers.append(key, serializeValue(item))
+        headers.append(key, serializeRequestScalarValue(item))
       }
       continue
     }
 
-    if (!isScalarSearchParamValue(headerValue)) {
+    if (!isUrlScalarValue(headerValue)) {
       throw new TypeError(`header value for "${key}" requires a scalar value`)
     }
 
-    headers.set(key, serializeValue(headerValue))
+    headers.set(key, serializeRequestScalarValue(headerValue))
   }
 }
 
@@ -126,8 +129,8 @@ function appendToSearchParams(searchParams: URLSearchParams, key: string, value:
         continue
       }
 
-      if (isScalarSearchParamValue(item)) {
-        searchParams.append(key, serializeValue(item))
+      if (isUrlScalarValue(item)) {
+        searchParams.append(key, serializeRequestScalarValue(item))
         continue
       }
 
@@ -138,22 +141,18 @@ function appendToSearchParams(searchParams: URLSearchParams, key: string, value:
     return
   }
 
-  if (!isScalarSearchParamValue(value)) {
+  if (!isUrlScalarValue(value)) {
     if (!options.allowComplex) {
       throw new TypeError(`query value for "${key}" requires queryParamsSerializer or a scalar value`)
     }
     return
   }
 
-  searchParams.set(key, serializeValue(value))
+  searchParams.set(key, serializeRequestScalarValue(value))
 }
 
-function isScalarSearchParamValue(value: unknown): value is boolean | null | number | string {
-  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null
-}
-
-function serializeValue(value: boolean | null | number | string): string {
-  return value === null ? 'null' : String(value)
+function isUrlScalarValue(value: unknown): value is UrlScalarValue {
+  return isRequestScalarValue(value) && typeof value !== 'bigint'
 }
 
 function createEndpointDirectoryBase(baseEndpoint: string): URL {

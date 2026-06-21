@@ -1,7 +1,8 @@
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
-import { serializeHttpBody } from '../../http/transport/body'
-import { isReadableStreamBody, supportsStreamingRequestBody } from '../../http/transport/fetch'
+import { createFetchInitBase } from '../../http/transport/fetch_init'
+import { mergeAbortSignals } from '../../internal/abort'
 import { AsyncQueue } from '../../internal/async_queue'
+import { createDeferred } from '../../internal/deferred'
 import type { HttpRequest } from '../../internal/http_request'
 import type { HttpResponse } from '../../internal/http_response'
 import { makeResponse } from '../../internal/http_response'
@@ -68,12 +69,6 @@ export interface FetchEventStreamErrorContext {
   retryCount: number
   retryInterval: number
   open?: EventStreamOpenInfo
-}
-
-type Deferred<T> = {
-  promise: Promise<T>
-  resolve: (value: T | PromiseLike<T>) => void
-  reject: (reason?: unknown) => void
 }
 
 class EventStreamFatalError extends Error {
@@ -143,7 +138,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
 
   async function start(): Promise<void> {
     while (!closeController.signal.aborted) {
-      const attemptAbort = combineAbortSignals([request.abort, closeController.signal])
+      const attemptAbort = mergeAbortSignals(closeController.signal, [request.abort])
 
       try {
         const response = await fetchImpl(createEventStreamRequest(request, headers, attemptAbort))
@@ -358,35 +353,12 @@ function createOpenInfo(response: Response): EventStreamOpenInfo {
 }
 
 function createEventStreamRequestInit(request: HttpRequest, headers: Headers, abort?: AbortSignal): RequestInit & { duplex?: 'half' } {
-  /* istanbul ignore next -- unreachable: Accept is always set in fetchEventStream */
-  if (!headers.has('Accept')) {
-    headers.set('Accept', EVENT_STREAM_CONTENT_TYPE)
-  }
-
-  let credentials: 'include' | undefined
-  if (request.withCredentials) {
-    credentials = 'include'
-  }
-
-  const body = serializeHttpBody(request.body)
-  const init: RequestInit & { duplex?: 'half' } = {
-    body,
-    credentials,
+  return createFetchInitBase(request, {
+    defaultAccept: EVENT_STREAM_CONTENT_TYPE,
     headers,
-    method: request.method,
     signal: abort,
-  }
-
-  /* istanbul ignore next -- Node.js always supports streaming request body */
-  if (isReadableStreamBody(body)) {
-    if (!supportsStreamingRequestBody()) {
-      throw new Error('ERR_STREAMING_REQUEST_UNSUPPORTED')
-    }
-
-    init.duplex = 'half'
-  }
-
-  return init
+    streamingRequestUnsupportedError: new Error('ERR_STREAMING_REQUEST_UNSUPPORTED'),
+  })
 }
 
 function validateOpenResponse(open: EventStreamOpenInfo, requireContentType: boolean): void {
@@ -403,35 +375,6 @@ function validateOpenResponse(open: EventStreamOpenInfo, requireContentType: boo
   if (!contentType.toLowerCase().startsWith(EVENT_STREAM_CONTENT_TYPE)) {
     throw new EventStreamFatalError(`Expected content-type to start with ${EVENT_STREAM_CONTENT_TYPE}, got ${contentType || '(empty)'}`)
   }
-}
-
-function createDeferred<T>(): Deferred<T> {
-  let resolve!: Deferred<T>['resolve']
-  let reject!: Deferred<T>['reject']
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve
-    reject = innerReject
-  })
-
-  return {
-    promise,
-    resolve,
-    reject,
-  }
-}
-
-function combineAbortSignals(signals: (AbortSignal | undefined)[]): AbortSignal | undefined {
-  const validSignals = signals.filter((signal): signal is AbortSignal => !!signal)
-  /* istanbul ignore if -- unreachable: at least closeController.signal is always present */
-  if (validSignals.length === 0) {
-    return undefined
-  }
-
-  if (validSignals.length === 1) {
-    return validSignals[0]
-  }
-
-  return AbortSignal.any(validSignals)
 }
 
 async function wait(ms: number, signal: AbortSignal): Promise<void> {

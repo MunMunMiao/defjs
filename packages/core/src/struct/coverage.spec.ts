@@ -446,9 +446,8 @@ describe('struct coverage boundary cases', () => {
       }),
     )
     const duplicateDefinition = duplicate[DEFINITION] as ObjectDefinition
-    expect(() => resolveObjectShape(duplicate, duplicateDefinition)).toThrow(
-      'duplicate wire key "same" for object fields "first" and "second"',
-    )
+    const duplicateShape = resolveObjectShape(duplicate, duplicateDefinition)
+    expect(resolveObjectShape(duplicate, duplicateDefinition)).toBe(duplicateShape)
     expect(() => getStructFields(duplicate)).toThrow('duplicate wire key "same" for object fields "first" and "second"')
 
     const pathFields: Array<{ key: string; value: unknown }> = []

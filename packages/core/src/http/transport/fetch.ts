@@ -3,52 +3,19 @@ import type { HttpProgressFn, HttpRequest } from '../../internal/http_request'
 import type { HttpResponse } from '../../internal/http_response'
 import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
-import { applyRequestContentType, serializeHttpBody } from './body'
-import { concatChunks, getContentLength, getContentType, parseBody } from './utils'
+import { applyRequestContentType } from './body'
+import {
+  __resetStreamingRequestBodySupportForTests,
+  createFetchInitBase,
+  ERR_STREAMING_REQUEST_UNSUPPORTED,
+  isReadableStreamBody,
+  supportsStreamingRequestBody,
+} from './fetch_init'
+import { concatChunks, getContentLength, getContentType, parseBytesBody, parseJsonText } from './utils'
 
-export const ERR_STREAMING_REQUEST_UNSUPPORTED = new Error('ERR_STREAMING_REQUEST_UNSUPPORTED')
+export { __resetStreamingRequestBodySupportForTests, ERR_STREAMING_REQUEST_UNSUPPORTED, isReadableStreamBody, supportsStreamingRequestBody }
 
 const XSRF_MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
-
-export function isReadableStreamBody(body: HttpRequest['body'] | unknown): body is ReadableStream<Uint8Array> {
-  return typeof ReadableStream !== 'undefined' && body instanceof ReadableStream
-}
-
-let streamingRequestBodySupport: boolean | undefined
-
-export function supportsStreamingRequestBody(): boolean {
-  if (streamingRequestBodySupport !== undefined) {
-    return streamingRequestBodySupport
-  }
-
-  if (typeof Request !== 'function' || typeof ReadableStream === 'undefined') {
-    streamingRequestBodySupport = false
-    return streamingRequestBodySupport
-  }
-
-  try {
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.close()
-      },
-    })
-    const request = new Request('https://example.com', {
-      body: stream,
-      duplex: 'half',
-      method: 'POST',
-    } as RequestInit & { duplex?: 'half' })
-
-    streamingRequestBodySupport = request.body !== null
-    return streamingRequestBodySupport
-  } catch {
-    streamingRequestBodySupport = false
-    return streamingRequestBodySupport
-  }
-}
-
-export function __resetStreamingRequestBodySupportForTests(): void {
-  streamingRequestBodySupport = undefined
-}
 
 function isMutatingMethod(method: string): boolean {
   return XSRF_MUTATING_METHODS.has(method.toUpperCase())
@@ -180,37 +147,17 @@ function wrapUploadProgressStream(
 
 export function createFetchRequestInit(request: HttpRequest): RequestInit & { duplex?: 'half' } {
   const headers = new Headers(request.headers)
+  const uploadProgress = request.uploadProgress
   applyRequestContentType(request, headers)
   applyXSRFHeaderIfNeeded(request, headers)
 
-  if (!headers.has('Accept')) {
-    headers.set('Accept', 'application/json, text/plain, */*')
-  }
-
-  const credentials = request.withCredentials ? 'include' : undefined
-  let body = serializeHttpBody(request.body)
-  const init: RequestInit & { duplex?: 'half' } = {
+  return createFetchInitBase(request, {
+    defaultAccept: 'application/json, text/plain, */*',
     headers,
-    method: request.method,
-    body,
     signal: request.abort,
-    credentials,
-  }
-
-  if (isReadableStreamBody(body)) {
-    if (!supportsStreamingRequestBody()) {
-      throw ERR_STREAMING_REQUEST_UNSUPPORTED
-    }
-
-    if (request.uploadProgress) {
-      body = wrapUploadProgressStream(body, request.uploadProgress, getContentLength(headers))
-      init.body = body
-    }
-
-    init.duplex = 'half'
-  }
-
-  return init
+    streamingRequestUnsupportedError: ERR_STREAMING_REQUEST_UNSUPPORTED,
+    wrapReadableStreamBody: uploadProgress ? (body) => wrapUploadProgressStream(body, uploadProgress, getContentLength(headers)) : undefined,
+  })
 }
 
 export function createFetchRequest(request: HttpRequest): Request {
@@ -220,10 +167,8 @@ export function createFetchRequest(request: HttpRequest): Request {
 
 async function parseNativeResponseBody(response: Response, responseType: HttpRequest['responseType']): Promise<unknown> {
   switch (responseType) {
-    case 'json': {
-      const text = await response.text()
-      return text === '' ? null : (JSON.parse(text) as unknown)
-    }
+    case 'json':
+      return parseJsonText(await response.text())
     case 'text':
       return await response.text()
     case 'blob':
@@ -269,11 +214,7 @@ async function parseFetchResponse(httpRequest: HttpRequest, response: Response):
       const chunksAll = concatChunks(chunks, receivedLength)
 
       try {
-        body = parseBody({
-          request: httpRequest,
-          content: chunksAll,
-          contentType,
-        })
+        body = parseBytesBody(httpRequest.responseType, chunksAll, contentType)
       } catch (error) {
         return makeResponse({
           error,

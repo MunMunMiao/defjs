@@ -24,28 +24,28 @@ function toArrayBuffer(content: Uint8Array): ArrayBuffer {
   return buffer.slice(byteOffset, byteOffset + byteLength) as ArrayBuffer
 }
 
-export function parseBody(params: { request: HttpRequest; contentType: string; content: Uint8Array }): unknown {
-  const { request, content, contentType } = params
-  const responseType = request.responseType
+export function parseJsonText(text: string): unknown {
+  return text === '' ? null : JSON.parse(text)
+}
 
+export function parseBytesBody(responseType: HttpRequest['responseType'], content: Uint8Array, contentType: string): unknown {
   switch (responseType) {
-    case 'json': {
-      const text = textDecoder.decode(content)
-      if (text === '') {
-        return null
-      }
-      return JSON.parse(text)
-    }
+    case 'json':
+      return parseJsonText(textDecoder.decode(content))
     case 'text':
       return textDecoder.decode(content)
-    case 'blob': {
+    case 'blob':
       return new Blob([toArrayBuffer(content)], { type: contentType })
-    }
     case 'arraybuffer':
       return toArrayBuffer(content)
     default:
       return null
   }
+}
+
+export function parseBody(params: { request: HttpRequest; contentType: string; content: Uint8Array }): unknown {
+  const { request, content, contentType } = params
+  return parseBytesBody(request.responseType, content, contentType)
 }
 
 export function concatChunks(chunks: Uint8Array[], totalLength: number): Uint8Array {

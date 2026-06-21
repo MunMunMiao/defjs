@@ -3,7 +3,7 @@ import { StructError } from './errors'
 import { resolveStructFields } from './fields'
 import { isStruct } from './guards'
 import { parseValue, safeZeroValue } from './parse'
-import { assertStruct, resolveObjectShape } from './shape'
+import { assertStruct } from './shape'
 import { DEFINITION } from './symbols'
 import type { ObjectStruct, ObjectShape, ParseTuple, RuntimeStruct, StructLike } from './types'
 
@@ -25,7 +25,6 @@ export function getStructFields(struct: StructLike<unknown, unknown, boolean>): 
     throw new TypeError('object struct is required')
   }
 
-  resolveObjectShape(runtime, definition)
   return Object.freeze(
     resolveStructFields(runtime, definition).map((field) =>
       Object.freeze({

@@ -7,6 +7,7 @@ import { makeInterceptorChain, resolveHttpInterceptors } from '../interceptor/in
 import type { UseCancellationConfig } from '../internal/abort'
 import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals } from '../internal/abort'
 import type { HttpContext } from '../internal/context'
+import type { EndpointCommandBuilder } from '../internal/endpoint_command'
 import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
 import { parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpProgressFn, HttpResponseType } from '../internal/http_request'
@@ -17,7 +18,7 @@ import type { AnyStruct, Infer } from '../struct'
 import { decodeJson } from '../struct/codec/json'
 import { parseStructValue } from '../struct/introspection'
 import type { RequestOutputShape } from './request'
-import { createHttpRequest, normalizeOutputShape, resolveDefaultResponseType } from './request'
+import { createHttpRequest, resolveDefaultResponseType, resolveOutputStruct } from './request'
 import { fetchHandler } from './transport/fetch'
 
 export type UseRequestConfig = {
@@ -35,105 +36,44 @@ export interface HttpCommand<TInput extends AnyStruct | undefined, TOutput exten
 
 export type HttpExecuteOptions = UseRequestConfig & { signal?: AbortSignal }
 
-export type RequestCommandBuilder<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> = [TInput] extends [
-  undefined,
-]
-  ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
-  : {} extends EndpointInput<TInput>
-    ? (input?: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
-    : (input: EndpointInput<TInput>) => HttpCommand<TInput, TOutput>
+export type RequestCommandBuilder<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> = EndpointCommandBuilder<
+  TInput,
+  HttpCommand<TInput, TOutput>
+>
 
-export type RequestSuccessData<TOutput extends RequestOutputShape | undefined> = [TOutput] extends [undefined]
-  ? undefined
-  : [
-        (
-          NonNullable<TOutput> extends readonly (infer TItem)[]
-            ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-              ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
-              : never
-            : {
-                [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
-                  ? NonNullable<TOutput>[K] extends AnyStruct
-                    ? { body: NonNullable<TOutput>[K]; status: TStatus }
-                    : never
-                  : never
-              }[keyof NonNullable<TOutput>]
-        ) extends infer TPair
-          ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
-            ? `${TStatus}` extends `2${string}`
-              ? TBody
-              : never
-            : never
-          : never,
-      ] extends [never]
-    ? unknown
-    : Infer<
-        (
-          NonNullable<TOutput> extends readonly (infer TItem)[]
-            ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-              ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
-              : never
-            : {
-                [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
-                  ? NonNullable<TOutput>[K] extends AnyStruct
-                    ? { body: NonNullable<TOutput>[K]; status: TStatus }
-                    : never
-                  : never
-              }[keyof NonNullable<TOutput>]
-        ) extends infer TPair
-          ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
-            ? `${TStatus}` extends `2${string}`
-              ? TBody
-              : never
-            : never
+type ResponsePair<TOutput extends RequestOutputShape | undefined> = NonNullable<TOutput> extends readonly (infer TItem)[]
+  ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+    ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+    : never
+  : {
+      [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+        ? NonNullable<TOutput>[K] extends AnyStruct
+          ? { body: NonNullable<TOutput>[K]; status: TStatus }
           : never
-      >
+        : never
+    }[keyof NonNullable<TOutput>]
 
-export type RequestErrorData<TOutput extends RequestOutputShape | undefined> = [TOutput] extends [undefined]
+type ResponseBodyByStatus<TOutput extends RequestOutputShape | undefined, TOk extends boolean> = ResponsePair<TOutput> extends infer TPair
+  ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
+    ? `${TStatus}` extends `2${string}`
+      ? TOk extends true
+        ? TBody
+        : never
+      : TOk extends true
+        ? never
+        : TBody
+    : never
+  : never
+
+type InferResponseBodyByStatus<TOutput extends RequestOutputShape | undefined, TOk extends boolean> = [TOutput] extends [undefined]
   ? undefined
-  : [
-        (
-          NonNullable<TOutput> extends readonly (infer TItem)[]
-            ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-              ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
-              : never
-            : {
-                [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
-                  ? NonNullable<TOutput>[K] extends AnyStruct
-                    ? { body: NonNullable<TOutput>[K]; status: TStatus }
-                    : never
-                  : never
-              }[keyof NonNullable<TOutput>]
-        ) extends infer TPair
-          ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
-            ? `${TStatus}` extends `2${string}`
-              ? never
-              : TBody
-            : never
-          : never,
-      ] extends [never]
+  : [ResponseBodyByStatus<TOutput, TOk>] extends [never]
     ? unknown
-    : Infer<
-        (
-          NonNullable<TOutput> extends readonly (infer TItem)[]
-            ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-              ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
-              : never
-            : {
-                [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
-                  ? NonNullable<TOutput>[K] extends AnyStruct
-                    ? { body: NonNullable<TOutput>[K]; status: TStatus }
-                    : never
-                  : never
-              }[keyof NonNullable<TOutput>]
-        ) extends infer TPair
-          ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
-            ? `${TStatus}` extends `2${string}`
-              ? never
-              : TBody
-            : never
-          : never
-      >
+    : Infer<ResponseBodyByStatus<TOutput, TOk>>
+
+export type RequestSuccessData<TOutput extends RequestOutputShape | undefined> = InferResponseBodyByStatus<TOutput, true>
+
+export type RequestErrorData<TOutput extends RequestOutputShape | undefined> = InferResponseBodyByStatus<TOutput, false>
 
 export type RequestDefinition<
   TInput extends AnyStruct | undefined = undefined,
@@ -316,11 +256,6 @@ function getHttpErrorMessage(response: HttpResponse<unknown>): string {
   }
   /* istanbul ignore next -- unreachable: fetchHandler always sets response.error to an Error */
   return String(response.error ?? `HTTP ${response.status}`)
-}
-
-function resolveOutputStruct(output: RequestOutputShape, status: number): AnyStruct | undefined {
-  const map = normalizeOutputShape(output)
-  return map.get(status)
 }
 
 function parseStructResponse(struct: AnyStruct, body: unknown, responseType: HttpResponseType | undefined): unknown {

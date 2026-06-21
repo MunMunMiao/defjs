@@ -8,6 +8,7 @@ import { makeSSEInterceptorChain, resolveSSEInterceptors } from '../interceptor/
 import type { UseCancellationConfig } from '../internal/abort'
 import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals } from '../internal/abort'
 import type { HttpContext } from '../internal/context'
+import type { EndpointCommandBuilder } from '../internal/endpoint_command'
 import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
 import { parseEndpointInput } from '../internal/endpoint_input'
 import type { SettledResponse } from '../internal/http_response'
@@ -96,12 +97,6 @@ export interface StreamRefState<TEvent> {
   stream?: EventStreamHandle<TEvent>
 }
 
-type IsInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
-  ? true
-  : {} extends EndpointInput<TInput>
-    ? true
-    : false
-
 export interface EventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventStructs> extends BaseCommand<
   typeof EVENT_STREAM_COMMAND
 > {
@@ -111,10 +106,10 @@ export interface EventStreamCommand<TInput extends AnyStruct | undefined, TEvent
 
 export type EventStreamExecuteOptions = UseEventStreamBaseConfig & UseCancellationConfig & { signal?: AbortSignal }
 
-export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEvents extends EventStructs> =
-  IsInputOptional<TInput> extends true
-    ? (input?: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
-    : (input: EndpointInput<TInput>) => EventStreamCommand<TInput, TEvents>
+export type EventStreamCommandBuilder<TInput extends AnyStruct | undefined, TEvents extends EventStructs> = EndpointCommandBuilder<
+  TInput,
+  EventStreamCommand<TInput, TEvents>
+>
 
 type EventStreamEndpoint<
   TInput extends AnyStruct | undefined = undefined,

@@ -13,7 +13,9 @@ import type {
   RequestFormDataFileLike,
   RequestFormDataScalar,
   RequestFormDataValue,
+  RequestScalarValue,
 } from './request_values'
+import { serializeRequestScalarValue } from './request_values'
 
 type RequestFormDataArrayItem = RequestFormDataScalar | RequestFormDataFileLike
 
@@ -789,12 +791,12 @@ function appendHeaders(headers: Headers, record: { [key: string]: RequestBuildVa
 
     if (Array.isArray(headerValue)) {
       for (const item of headerValue) {
-        headers.append(key, serializeValue(item))
+        headers.append(key, serializeRequestScalarValue(item as RequestScalarValue))
       }
       continue
     }
 
-    headers.set(key, serializeValue(headerValue))
+    headers.set(key, serializeRequestScalarValue(headerValue as RequestScalarValue))
   }
 }
 
@@ -841,27 +843,10 @@ function appendUrlEncodedBodyValue(searchParams: URLSearchParams, key: string, v
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      searchParams.append(key, serializeValue(item))
+      searchParams.append(key, serializeRequestScalarValue(item as RequestScalarValue))
     }
     return
   }
 
-  searchParams.set(key, serializeValue(value))
-}
-
-function serializeValue(value: unknown): string {
-  switch (true) {
-    case typeof value === 'string':
-      return value
-    case typeof value === 'number':
-    case typeof value === 'boolean':
-      return String(value)
-    case value === null:
-      return 'null'
-    /* istanbul ignore next -- unreachable: objects are rejected by assertFlatValue before serialization */
-    case typeof value === 'object':
-      return JSON.stringify(value)
-    default:
-      return String(value)
-  }
+  searchParams.set(key, serializeRequestScalarValue(value as RequestScalarValue))
 }

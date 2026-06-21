@@ -1,10 +1,8 @@
 import type { QueryParamsSerializer } from '../client/config'
-import { DEFAULT_QUERY_PARAMS_SERIALIZER } from '../client/config'
 import type { HttpContext } from '../internal/context'
 import type { HttpRequest } from '../internal/http_request'
 import type { RequestBuildHandler } from '../internal/request_builder'
-import { buildRequest } from '../internal/request_builder'
-import { appendRecordToHeaders, createSearchParams, fillUrl } from '../internal/url'
+import { createBaseTransportRequest } from '../internal/transport_request'
 import type { AnyStruct } from '../struct'
 
 export function createEventStreamRequest<TInput extends AnyStruct | undefined>(
@@ -22,27 +20,14 @@ export function createEventStreamRequest<TInput extends AnyStruct | undefined>(
     withCredentials?: boolean
   },
 ): HttpRequest {
-  const built = buildRequest(input, build, {
-    input: options.input,
-    transport: 'sse',
-  })
-  const allowComplexQuery = options.queryParamsSerializer !== DEFAULT_QUERY_PARAMS_SERIALIZER
-  const queryParams = createSearchParams(built.query, { allowComplex: allowComplexQuery })
-  const headers = new Headers()
-
-  appendRecordToHeaders(headers, built.headers)
-
-  return {
+  return createBaseTransportRequest(method, path, input, build, {
     abort: options.abort,
     baseEndpoint: options.baseEndpoint,
-    body: built.body,
     context: options.context,
-    endpoint: fillUrl(path, built.params),
-    headers,
-    method,
-    queryParams,
-    queryString: options.queryParamsSerializer(queryParams, built.query),
+    input: options.input,
+    queryParamsSerializer: options.queryParamsSerializer,
     timeout: options.timeout,
-    withCredentials: options.withCredentials ?? false,
-  }
+    transport: 'sse',
+    withCredentials: options.withCredentials,
+  }).request
 }

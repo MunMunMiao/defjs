@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { makeHttpContext, makeHttpContextToken } from '../internal/context'
 import { struct } from '../struct'
-import { createHttpRequest, normalizeOutputShape, resolveDefaultResponseType } from './request'
+import { createHttpRequest, resolveDefaultResponseType, resolveOutputStruct } from './request'
 
 describe('http request helpers', () => {
   test('should create http request with builder helpers params query headers and custom serializer', () => {
@@ -597,8 +597,25 @@ describe('http request helpers', () => {
     expect(resolveDefaultResponseType(undefined, 'blob')).toBe('blob')
   })
 
-  test('should normalize output shape with single status value', () => {
-    const map = normalizeOutputShape([{ body: struct.string(), status: 200 }])
-    expect(map.get(200)).toBeDefined()
+  test('should resolve output struct by status', () => {
+    expect(resolveOutputStruct({ 200: struct.string() }, 200)).toBeDefined()
+    expect(resolveOutputStruct([{ body: struct.string(), status: 200 }], 200)).toBeDefined()
+    expect(resolveOutputStruct([{ body: struct.string(), status: [201, 202] }], 202)).toBeDefined()
+    expect(resolveOutputStruct([{ body: struct.string(), status: 200 }], 404)).toBeUndefined()
+  })
+
+  test('should let later grouped output status override earlier declarations', () => {
+    const first = struct.string()
+    const second = struct.number()
+
+    expect(
+      resolveOutputStruct(
+        [
+          { body: first, status: [200, 201] },
+          { body: second, status: 200 },
+        ],
+        200,
+      ),
+    ).toBe(second)
   })
 })
