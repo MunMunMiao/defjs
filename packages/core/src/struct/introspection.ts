@@ -3,7 +3,7 @@ import { StructError } from './errors'
 import { resolveStructFields } from './fields'
 import { isStruct } from './guards'
 import { parseValue, safeZeroValue } from './parse'
-import { assertStruct, resolveObjectShape, resolveRuntimeStruct } from './shape'
+import { assertStruct, resolveObjectShape } from './shape'
 import { DEFINITION } from './symbols'
 import type { ObjectStruct, ObjectShape, ParseTuple, RuntimeStruct, StructLike } from './types'
 
@@ -14,12 +14,12 @@ export interface StructField {
 }
 
 export function isObjectStruct(value: unknown): value is ObjectStruct<ObjectShape> {
-  return isStruct(value) && resolveRuntimeStruct(value as unknown as RuntimeStruct)[DEFINITION].kind === 'object'
+  return isStruct(value) && (value as RuntimeStruct)[DEFINITION].kind === 'object'
 }
 
 export function getStructFields(struct: StructLike<unknown, unknown, boolean>): readonly StructField[] {
   assertStruct(struct, 'struct')
-  const runtime = resolveRuntimeStruct(struct as unknown as RuntimeStruct)
+  const runtime = struct as unknown as RuntimeStruct
   const definition = runtime[DEFINITION]
   if (definition.kind !== 'object') {
     throw new TypeError('object struct is required')

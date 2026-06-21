@@ -18,7 +18,7 @@ import { DEFAULT_FLAGS, makeStruct } from './runtime'
 import { assertStruct, resolveObjectShape } from './shape'
 import { DEFINITION, OMIT } from './symbols'
 import type { ObjectDefinition, RuntimeStruct, StructDefinition } from './types'
-import { cloneValue, describeValue, expectedType } from './utils'
+import { describeValue, expectedType } from './utils'
 
 function runtime(value: unknown): RuntimeStruct {
   return value as RuntimeStruct
@@ -306,40 +306,7 @@ describe('struct coverage boundary cases', () => {
     }
   })
 
-  test('cloneValue fallback and describeValue cover non-structuredClone paths', () => {
-    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'structuredClone')
-    Object.defineProperty(globalThis, 'structuredClone', {
-      configurable: true,
-      value: undefined,
-    })
-
-    try {
-      expect(cloneValue(null)).toBeNull()
-      expect(cloneValue(undefined)).toBeUndefined()
-      expect(cloneValue([1, { nested: true }])).toEqual([1, { nested: true }])
-
-      const date = new Date('2026-05-12T10:00:00Z')
-      const clonedDate = cloneValue(date)
-      expect(clonedDate).not.toBe(date)
-      expect(clonedDate).toEqual(date)
-
-      const buffer = new ArrayBuffer(2)
-      const clonedBuffer = cloneValue(buffer)
-      expect(clonedBuffer).not.toBe(buffer)
-      expect(clonedBuffer.byteLength).toBe(2)
-
-      const clonedObject = cloneValue({ value: { nested: true } })
-      expect(Object.getPrototypeOf(clonedObject)).toBeNull()
-      expect(clonedObject).toEqual({ value: { nested: true } })
-      expect(cloneValue(7)).toBe(7)
-    } finally {
-      if (descriptor) {
-        Object.defineProperty(globalThis, 'structuredClone', descriptor)
-      } else {
-        Reflect.deleteProperty(globalThis, 'structuredClone')
-      }
-    }
-
+  test('describeValue covers human-readable runtime labels', () => {
     expect(describeValue(null)).toBe('null')
     expect(describeValue(undefined)).toBe('undefined')
     expect(describeValue('x')).toBe('"x"')

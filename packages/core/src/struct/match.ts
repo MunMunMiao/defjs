@@ -1,4 +1,4 @@
-import { resolveObjectShape, resolveRuntimeStruct } from './shape'
+import { resolveObjectShape } from './shape'
 import { DEFINITION } from './symbols'
 import type { RuntimeStruct, StructDefinition, StructLike } from './types'
 import { hasOwnKey, isPlainObject } from './utils'
@@ -77,8 +77,8 @@ export function matchesDefinition(definition: StructDefinition, value: unknown, 
     case 'discriminatedUnion':
       return isPlainObject(value) && definition.map.has(value[definition.discriminator])
     case 'intersection': {
-      const left = resolveRuntimeStruct(definition.left)
-      const right = resolveRuntimeStruct(definition.right)
+      const left = definition.left as RuntimeStruct
+      const right = definition.right as RuntimeStruct
       return matchesRuntimeValue(left, value) && matchesRuntimeValue(right, value)
     }
   }

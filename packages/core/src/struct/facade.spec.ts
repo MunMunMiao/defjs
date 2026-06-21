@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { struct } from './index'
 import { isStruct } from './guards'
 import { parseStructTuple as parse } from './introspection'
@@ -17,14 +17,8 @@ import {
   createStringStruct,
   createTupleStruct,
   createUnknownStruct,
-} from './struct'
+} from './constructors'
 
-const originalStructuredClone = globalThis.structuredClone
-
-afterEach(() => {
-  globalThis.structuredClone = originalStructuredClone
-  vi.restoreAllMocks()
-})
 
 describe('facade.ts', () => {
   test('exports every constructor from namespace', () => {

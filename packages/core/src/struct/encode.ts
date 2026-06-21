@@ -1,8 +1,7 @@
 import { selectUnionOptions } from './match'
-import { getRequestSections } from './request'
 
 export { matchesDefinition } from './match'
-import { resolveObjectShape, resolveRuntimeStruct } from './shape'
+import { resolveObjectShape } from './shape'
 import { DEFINITION } from './symbols'
 import type { RuntimeStruct, StructDefinition } from './types'
 import { hasOwnKey, isObjectIntersectionStruct, isPlainObject } from './utils'
@@ -139,7 +138,7 @@ export function encodeValue(struct: RuntimeStruct, value: unknown, options: Enco
         return value
       }
       const output: { [key: string]: unknown } = Object.create(null)
-      for (const section of getRequestSections(definition)) {
+      for (const section of definition.sections) {
         const key = section.key
         const sectionStruct = section.struct
         if (hasOwnKey(value, key)) {
@@ -182,8 +181,8 @@ export function encodeValue(struct: RuntimeStruct, value: unknown, options: Enco
     }
 
     case 'intersection': {
-      const leftEncoded = encodeValue(resolveRuntimeStruct(definition.left), value, options)
-      const rightEncoded = encodeValue(resolveRuntimeStruct(definition.right), value, options)
+      const leftEncoded = encodeValue(definition.left as RuntimeStruct, value, options)
+      const rightEncoded = encodeValue(definition.right as RuntimeStruct, value, options)
       return isObjectIntersectionStruct(definition.left) &&
         isObjectIntersectionStruct(definition.right) &&
         isPlainObject(leftEncoded) &&

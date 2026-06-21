@@ -18,10 +18,6 @@ export function resolveObjectShape(_struct: RuntimeStruct, definition: ObjectDef
   return shape
 }
 
-export function resolveRuntimeStruct(struct: StructLike<unknown, unknown, boolean>): RuntimeStruct {
-  return struct as RuntimeStruct
-}
-
 export function readObjectShape(shape: ObjectShape): ObjectShape {
   const output: { [key: string]: unknown } = Object.create(null)
   const descriptors = Object.getOwnPropertyDescriptors(shape)

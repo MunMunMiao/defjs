@@ -1,5 +1,4 @@
 import { DEFINITION } from './symbols'
-import { resolveRuntimeStruct } from './shape'
 import type { ParseFailure, ParseSuccess, Path, RuntimeStruct, StructDefinition, StructIssue, StructLike } from './types'
 
 export function success<T>(value: T): ParseSuccess<T> {
@@ -73,7 +72,7 @@ export function expectedType(definition: StructDefinition): string {
 }
 
 export function isObjectIntersectionStruct(struct: StructLike<unknown, unknown, boolean>): boolean {
-  const definition = resolveRuntimeStruct(struct)[DEFINITION]
+  const definition = (struct as RuntimeStruct)[DEFINITION]
   if (definition.kind === 'object') {
     return true
   }
@@ -111,38 +110,6 @@ export function isPlainObject(value: unknown): value is { [key: string]: unknown
 
   const prototype = Object.getPrototypeOf(value)
   return prototype === Object.prototype || prototype === null
-}
-
-export function cloneValue<T>(value: T): T {
-  if (value === null || value === undefined) {
-    return value
-  }
-
-  if (typeof structuredClone === 'function') {
-    return structuredClone(value)
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => cloneValue(item)) as T
-  }
-
-  if (value instanceof Date) {
-    return new Date(value.getTime()) as T
-  }
-
-  if (value instanceof ArrayBuffer) {
-    return value.slice(0) as T
-  }
-
-  if (isPlainObject(value)) {
-    const output: { [key: string]: unknown } = Object.create(null)
-    for (const [key, item] of Object.entries(value)) {
-      output[key] = cloneValue(item)
-    }
-    return output as T
-  }
-
-  return value
 }
 
 export function describeValue(value: unknown): string {

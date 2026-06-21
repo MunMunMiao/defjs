@@ -1,5 +1,4 @@
 import { issue } from './errors'
-import { getRequestSections } from './request'
 import { resolveObjectShape } from './shape'
 import { DEFINITION, OMIT } from './symbols'
 import type {
@@ -24,7 +23,7 @@ import type {
   TupleDefinition,
   UnionDefinition,
 } from './types'
-import { cloneValue, expectedType, failure, hasOwnKey, isPlainObject, success } from './utils'
+import { expectedType, failure, hasOwnKey, isPlainObject, success } from './utils'
 
 export function parseValue(struct: RuntimeStruct, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
   const definition = struct[DEFINITION]
@@ -206,7 +205,7 @@ function parseRequestValue(definition: RequestDefinition, input: unknown, path: 
 
   const output: { [key: string]: unknown } = Object.create(null)
   const issues: StructIssue[] = []
-  const sections = getRequestSections(definition)
+  const sections = definition.sections
 
   for (const section of sections) {
     const sectionKey = section.key
@@ -317,7 +316,7 @@ export function buildZeroValue(struct: RuntimeStruct, path: Path): unknown {
       return definition.zero()
 
     case 'enum':
-      return cloneValue(definition.values[0])
+      return definition.values[0]
 
     case 'intersection': {
       const leftZero = buildZeroValue(definition.left as RuntimeStruct, path)
@@ -326,7 +325,7 @@ export function buildZeroValue(struct: RuntimeStruct, path: Path): unknown {
     }
 
     case 'literal':
-      return cloneValue(definition.value)
+      return definition.value
 
     case 'object': {
       const output: { [key: string]: unknown } = Object.create(null)
@@ -353,7 +352,7 @@ export function buildZeroValue(struct: RuntimeStruct, path: Path): unknown {
 
     case 'request': {
       const output: { [key: string]: unknown } = Object.create(null)
-      for (const section of getRequestSections(definition)) {
+      for (const section of definition.sections) {
         const key = section.key
         const sectionStruct = section.struct
         const value = resolveMissingValue(sectionStruct, [...path, key], 'field')

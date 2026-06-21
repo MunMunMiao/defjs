@@ -2,7 +2,6 @@ import { encodeValue } from '../encode'
 import { matchesDefinition } from '../match'
 import { resolveStructFields } from '../fields'
 import { isObjectStruct, parseStructValue } from '../introspection'
-import { resolveRuntimeStruct } from '../shape'
 import { DEFINITION } from '../symbols'
 import type { AnyStructLike, DiscriminatedUnionDefinition, Path, RuntimeStruct } from '../types'
 import { hasOwnKey, isObjectIntersectionStruct, isPlainObject } from '../utils'
@@ -93,7 +92,7 @@ function encodeAliasedField(struct: AnyStructLike, value: unknown, label: string
 }
 
 function decodeAliasedField(struct: AnyStructLike, value: unknown, label: string, path: Path): unknown {
-  const runtime = resolveRuntimeStruct(struct as unknown as RuntimeStruct)
+  const runtime = struct as unknown as RuntimeStruct
   const definition = runtime[DEFINITION]
 
   switch (definition.kind) {
@@ -128,7 +127,7 @@ function decodeAliasedField(struct: AnyStructLike, value: unknown, label: string
         if (!decoded.ok) {
           continue
         }
-        const optionRuntime = resolveRuntimeStruct(option as unknown as RuntimeStruct)
+        const optionRuntime = option as unknown as RuntimeStruct
         if (matchesDefinition(optionRuntime[DEFINITION], decoded.value, optionRuntime)) {
           return decoded.value
         }
