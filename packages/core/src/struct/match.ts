@@ -23,32 +23,27 @@ export function selectUnionOption(options: readonly StructLike<unknown, unknown,
 }
 
 export function matchesDefinition(definition: StructDefinition, value: unknown, struct: RuntimeStruct): boolean {
-  const flagMatch = matchesFlagValue(definition, value)
-  if (typeof flagMatch === 'boolean') {
-    return flagMatch
+  if (value === null) {
+    return definition.kind === 'null' || definition.flags.nullable
+  }
+  if (typeof value === 'undefined') {
+    return definition.flags.optional
   }
 
   switch (definition.kind) {
     case 'any':
     case 'unknown':
       return true
-    case 'null':
-      return value === null
-    case 'string':
-      return typeof value === 'string'
-    case 'number':
-      return typeof value === 'number' && !Number.isNaN(value)
-    case 'boolean':
-      return typeof value === 'boolean'
-    case 'bigint':
-    case 'date':
-      return definition.runtimeIs ? definition.runtimeIs(value) : definition.is(value)
-    case 'blob':
-      return typeof Blob !== 'undefined' && value instanceof Blob
-    case 'file':
-      return typeof File !== 'undefined' && value instanceof File
     case 'arrayBuffer':
-      return value instanceof ArrayBuffer
+    case 'bigint':
+    case 'blob':
+    case 'boolean':
+    case 'date':
+    case 'file':
+    case 'null':
+    case 'number':
+    case 'string':
+      return (definition.runtimeIs ?? definition.is)(value)
     case 'literal':
       return Object.is(value, definition.value)
     case 'enum':
@@ -111,14 +106,4 @@ function matchesObjectValue(struct: RuntimeStruct, value: { [key: string]: unkno
 
 function isRequiredField(definition: StructDefinition): boolean {
   return !definition.flags.optional && !definition.flags.nullable
-}
-
-function matchesFlagValue(definition: StructDefinition, value: unknown): boolean | undefined {
-  if (value === null) {
-    return definition.kind === 'null' || definition.flags.nullable
-  }
-  if (typeof value === 'undefined') {
-    return definition.flags.optional
-  }
-  return undefined
 }

@@ -1,6 +1,6 @@
 import type { RequestBuildValue } from '../../internal/request_values'
 import type { AnyStructLike } from '../types'
-import { encodeFlatByAlias } from './flat'
+import { forEachEncodedWireField } from './flat'
 import { isSearchParamScalar } from './urlencoded'
 
 export interface QueryCodecOptions {
@@ -29,15 +29,11 @@ function encodeFlatRecord(
   label: string,
   options: QueryCodecOptions & { scalarOnly?: boolean } = {},
 ): { [key: string]: RequestBuildValue } {
-  return encodeFlatByAlias(struct, value, {
-    create: () => Object.create(null) as { [key: string]: RequestBuildValue },
-    label,
-    put: (record, key, encoded) => {
-      record[key] = options.scalarOnly
-        ? normalizeScalarRecordValue(label, key, encoded)
-        : normalizeRecordValue(label, key, encoded, options)
-    },
+  const record: { [key: string]: RequestBuildValue } = Object.create(null)
+  forEachEncodedWireField(struct, value, label, ({ key, value: encoded }) => {
+    record[key] = options.scalarOnly ? normalizeScalarRecordValue(label, key, encoded) : normalizeRecordValue(label, key, encoded, options)
   })
+  return record
 }
 
 function normalizeRecordValue(label: string, key: string, value: unknown, options: QueryCodecOptions): RequestBuildValue {

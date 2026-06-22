@@ -1,6 +1,6 @@
 import { isObjectStruct } from '../introspection'
 import type { AnyStructLike } from '../types'
-import { encodeFlatByAlias, writeRepeated } from './flat'
+import { forEachEncodedWireField, writeRepeated } from './flat'
 import { isSearchParamScalar, stringifySearchParamScalar } from './urlencoded'
 
 export function encodeMultipart(struct: AnyStructLike, value: unknown): FormData {
@@ -13,11 +13,11 @@ export function encodeMultipart(struct: AnyStructLike, value: unknown): FormData
     throw new Error('FormData is not supported in current runtime')
   }
 
-  return encodeFlatByAlias(struct, value, {
-    create: () => new FormData(),
-    label: 'multipart',
-    put: appendFormData,
+  const form = new FormData()
+  forEachEncodedWireField(struct, value, 'multipart', ({ key, value: encoded }) => {
+    appendFormData(form, key, encoded)
   })
+  return form
 }
 
 export function appendFormData(form: FormData, key: string, value: unknown): void {

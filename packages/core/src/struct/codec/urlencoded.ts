@@ -1,12 +1,12 @@
 import type { AnyStructLike } from '../types'
-import { encodeFlatByAlias } from './flat'
+import { forEachEncodedWireField } from './flat'
 
 export function encodeUrlencoded(struct: AnyStructLike, value: unknown): URLSearchParams {
-  return encodeFlatByAlias(struct, value, {
-    create: () => new URLSearchParams(),
-    label: 'urlencoded',
-    put: appendSearchParam,
+  const params = new URLSearchParams()
+  forEachEncodedWireField(struct, value, 'urlencoded', ({ key, value: encoded }) => {
+    appendSearchParam(params, key, encoded)
   })
+  return params
 }
 
 export function appendSearchParam(params: URLSearchParams, key: string, value: unknown): void {

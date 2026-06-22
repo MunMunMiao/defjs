@@ -10,12 +10,6 @@ export interface EncodedWireField {
   readonly value: unknown
 }
 
-export interface FlatEncodeOptions<TOutput> {
-  create(): TOutput
-  label: string
-  put(output: TOutput, key: string, value: unknown): void
-}
-
 export function forEachEncodedWireField(
   struct: AnyStructLike,
   value: unknown,
@@ -48,14 +42,6 @@ export function forEachEncodedWireField(
 
     visit({ key: field.wireKey, value: encoded })
   }
-}
-
-export function encodeFlatByAlias<TOutput>(struct: AnyStructLike, value: unknown, options: FlatEncodeOptions<TOutput>): TOutput {
-  const output = options.create()
-  forEachEncodedWireField(struct, value, options.label, ({ key, value: encoded }) => {
-    options.put(output, key, encoded)
-  })
-  return output
 }
 
 export function writeRepeated(key: string, value: unknown, write: (key: string, value: unknown) => void): void {

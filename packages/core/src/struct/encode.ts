@@ -4,7 +4,7 @@ export { matchesDefinition } from './match'
 import { resolveObjectShape } from './shape'
 import { DEFINITION } from './symbols'
 import { REQUEST_SECTION_KEYS } from './types'
-import type { RuntimeStruct, StructDefinition } from './types'
+import type { RuntimeStruct } from './types'
 import { hasOwnKey, isObjectIntersectionStruct, isPlainObject } from './utils'
 
 export interface EncodeOptions {
@@ -14,18 +14,6 @@ export interface EncodeOptions {
     encodeChild: (struct: RuntimeStruct, value: unknown) => unknown,
   ) => unknown
   selectUnionOptions?: typeof selectUnionOptions
-}
-
-const NO_FLAG_MATCH = Symbol('NO_FLAG_MATCH')
-
-function encodeFlagValue(definition: StructDefinition, value: unknown): unknown | typeof NO_FLAG_MATCH {
-  if (value === null && (definition.kind === 'null' || definition.flags.nullable)) {
-    return null
-  }
-  if (typeof value === 'undefined' && definition.flags.optional) {
-    return undefined
-  }
-  return NO_FLAG_MATCH
 }
 
 function sameEncodedShape(
@@ -72,9 +60,11 @@ function getComparableEncodedValue(struct: RuntimeStruct, value: unknown, option
 
 export function encodeValue(struct: RuntimeStruct, value: unknown, options: EncodeOptions = {}): unknown {
   const definition = struct[DEFINITION]
-  const flagged = encodeFlagValue(definition, value)
-  if (flagged !== NO_FLAG_MATCH) {
-    return flagged
+  if (value === null && (definition.kind === 'null' || definition.flags.nullable)) {
+    return null
+  }
+  if (typeof value === 'undefined' && definition.flags.optional) {
+    return undefined
   }
 
   switch (definition.kind) {

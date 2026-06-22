@@ -347,6 +347,7 @@ export function createBlobStruct(): Struct<Blob | undefined, Blob> {
     expected: 'Blob',
     is: (value): value is Blob => value instanceof Blob,
     kind: 'blob',
+    runtimeIs: (value): value is Blob => typeof Blob !== 'undefined' && value instanceof Blob,
     zero: () => new Blob(),
   })
 }
@@ -420,6 +421,7 @@ export function createFileStruct(): Struct<File | undefined, File> {
     expected: 'File',
     is: (value): value is File => value instanceof File,
     kind: 'file',
+    runtimeIs: (value): value is File => typeof File !== 'undefined' && value instanceof File,
     zero: () => new File([], ''),
   })
 }
@@ -429,6 +431,7 @@ export function createArrayBufferStruct(): Struct<ArrayBuffer | undefined, Array
     expected: 'ArrayBuffer',
     is: (value): value is ArrayBuffer => value instanceof ArrayBuffer,
     kind: 'arrayBuffer',
+    runtimeIs: (value): value is ArrayBuffer => typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer,
     zero: () => new ArrayBuffer(0),
   })
 }
