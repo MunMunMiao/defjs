@@ -1,4 +1,8 @@
+export type { HttpContext, HttpContextToken } from '../internal/context'
+export { isHttpContext, isHttpContextToken, makeHttpContext, makeHttpContextToken, mergeHttpContexts } from '../internal/context'
 export type { HttpProgressEvent, HttpProgressFn, HttpRequest, HttpResponseType } from '../internal/http_request'
+export type { HttpResponse, MakeResponseOptions, SettledResponse } from '../internal/http_response'
+export { makeResponse, toSettledResponse } from '../internal/http_response'
 export * from './http'
 export type { RequestOutputShape, ResponseGroupItem } from './request'
 export { fetchHandler } from './transport/fetch'

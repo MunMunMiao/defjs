@@ -183,7 +183,7 @@ type WebSocketEndpoint<
   TOutgoing extends SocketStructs | undefined = undefined,
 > = WebSocketDefinition<TInput, TIncoming, TOutgoing>
 
-type SocketRefState<TIncoming, TOutgoing> = {
+type SocketRefState = {
   connection?: WebSocketConnectionInfo
   error?: RequestError<unknown>
   listeners: {
@@ -253,7 +253,7 @@ async function runWebSocketCommand<
   input: EndpointInput<TInput> | undefined,
   config: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   controller: AbortController,
-  state: SocketRefState<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
+  state: SocketRefState,
 ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>> {
   setSocketState(state, 'connecting')
 
@@ -670,7 +670,7 @@ export async function executeWebSocketCommand<
   const { endpoint, input } = command
   const config = options ?? {}
   const controller = new AbortController()
-  const state: SocketRefState<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>> = {
+  const state: SocketRefState = {
     listeners: {
       runtimeError: new Set(),
       stateChange: new Set(),
@@ -692,7 +692,7 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | und
   queue: AsyncQueue<TIncoming>,
   closed: Promise<WebSocketCloseInfo>,
   controller: AbortController,
-  state: SocketRefState<TIncoming, WebSocketOutgoingData<TOutgoing>>,
+  state: SocketRefState,
   sessionController: {
     currentSocket: WebSocket | undefined
     heartbeat: HeartbeatRuntime<TIncoming> | undefined
@@ -741,7 +741,7 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | und
   }
 }
 
-function flushSendQueue(socket: WebSocket, queue: SendQueue, state: SocketRefState<unknown, unknown>, openState: number): void {
+function flushSendQueue(socket: WebSocket, queue: SendQueue, state: SocketRefState, openState: number): void {
   while (socket.readyState === openState) {
     const next = queue.shift()
     if (!next) {
@@ -759,7 +759,7 @@ function flushSendQueue(socket: WebSocket, queue: SendQueue, state: SocketRefSta
   }
 }
 
-function setSocketState<TIncoming, TOutgoing>(state: SocketRefState<TIncoming, TOutgoing>, next: WebSocketState): void {
+function setSocketState(state: SocketRefState, next: WebSocketState): void {
   if (state.status === next) {
     return
   }
@@ -770,7 +770,7 @@ function setSocketState<TIncoming, TOutgoing>(state: SocketRefState<TIncoming, T
   }
 }
 
-function emitRuntimeError<TIncoming, TOutgoing>(state: SocketRefState<TIncoming, TOutgoing>, error: unknown): void {
+function emitRuntimeError(state: SocketRefState, error: unknown): void {
   for (const listener of state.listeners.runtimeError) {
     listener(error)
   }
