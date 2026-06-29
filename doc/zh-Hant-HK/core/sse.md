@@ -28,9 +28,9 @@ const useNotifications = defineEventStream({
 })
 ```
 
-### 預設事件結構描述（兜底）
+### 預設事件結構描述
 
-若伺服器可能發送未在 `events` 中明確宣告的事件類型，可提供 `default` 結構描述作為兜底。若無 `default`，未知事件會被靜默捨棄。
+若伺服器可能發送未在 `events` 中明確宣告的事件類型，可提供 `default` 結構描述。若無 `default`，未知事件會被靜默捨棄。
 
 ```typescript
 const useMixedStream = defineEventStream({

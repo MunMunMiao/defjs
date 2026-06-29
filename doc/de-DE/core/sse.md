@@ -28,9 +28,9 @@ const useNotifications = defineEventStream({
 })
 ```
 
-### Default-Event-Struct (Fallback)
+### Default-Event-Struct
 
-Falls der Server Event-Typen senden könnte, die nicht explizit in `events` deklariert sind, stelle ein `default`-Struct als Fallback bereit. Ohne `default` werden unbekannte Events stillschweigend verworfen.
+Falls der Server Event-Typen senden könnte, die nicht explizit in `events` deklariert sind, stelle ein `default`-Struct bereit. Ohne `default` werden unbekannte Events stillschweigend verworfen.
 
 ```typescript
 const useMixedStream = defineEventStream({

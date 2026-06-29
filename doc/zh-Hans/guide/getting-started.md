@@ -119,15 +119,19 @@ const client = createClient(
 const createPost = defineRequest({
   method: 'POST',
   path: '/v1/posts',
-  input: struct.object({
-    title: struct.string(),
-    body: struct.string(),
-    'X-Request-ID': struct.string(),
+  input: struct.request({
+    body: struct.object({
+      title: struct.string(),
+      body: struct.string(),
+    }),
+    headers: struct.object({
+      'X-Request-ID': struct.string(),
+    }),
   }),
-  build: (input) => ({
-    body: { title: input.title, body: input.body },
-    headers: { 'X-Request-ID': input['X-Request-ID'] },
-  }),
+  build(ctx, input) {
+    ctx.setJson(input.body)
+    ctx.setHeaders(input.headers)
+  },
   output: {
     201: struct.object({
       id: struct.number(),
@@ -144,9 +148,8 @@ const createPost = defineRequest({
 async function createPost() {
   const [error, post, response] = await client.execute(
     createPost({
-      title: 'Hello',
-      body: 'World',
-      'X-Request-ID': 'uuid-123',
+      body: { title: 'Hello', body: 'World' },
+      headers: { 'X-Request-ID': 'uuid-123' },
     }),
   )
 

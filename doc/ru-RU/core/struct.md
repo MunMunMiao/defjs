@@ -216,7 +216,7 @@ if (isObjectStruct(struct)) {
 }
 ```
 
-## Zero-Value fallback и частичный input
+## Zero-Value defaults и частичный input
 
 Парсер struct следует семантике Go `encoding/json`:
 

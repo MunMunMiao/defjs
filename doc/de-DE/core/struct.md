@@ -5,7 +5,7 @@ description: Declarative struct definition, type inference, error mapping, and t
 
 # Struct
 
-`@defjs/core` bietet eine leichtgewichtige Struct-Fassade zum Deklarieren von Structta, Validieren von Inputs und Inferieren von Typen. Das Design-Intent ist modelliert nach Gos `encoding/json`: Zero-Value-Fallback, Akzeptieren partieller Input und stabiles, vorhersagbares Laufzeitverhalten.
+`@defjs/core` bietet eine leichtgewichtige Struct-Fassade zum Deklarieren von Structta, Validieren von Inputs und Inferieren von Typen. Das Design-Intent ist modelliert nach Gos `encoding/json`: Zero-Value-Defaults, Akzeptieren partieller Input und stabiles, vorhersagbares Laufzeitverhalten.
 
 ## Primitive Typen
 
@@ -216,7 +216,7 @@ if (isObjectStruct(struct)) {
 }
 ```
 
-## Zero-Value-Fallback und Partieller Input
+## Zero-Value-Defaults und Partieller Input
 
 Der Struct-Parser folgt Go-`encoding/json`-Semantik:
 

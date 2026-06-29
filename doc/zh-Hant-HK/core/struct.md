@@ -5,7 +5,7 @@ description: Declarative struct definition, type inference, error mapping, and t
 
 # 結構描述
 
-`@defjs/core` 提供輕量級的 struct 外觀，用於宣告結構描述、驗證輸入與推導類型。設計意圖參考 Go 的 `encoding/json`：零值兜底、接受部分輸入、穩定且可預測的執行階段行為。
+`@defjs/core` 提供輕量級的 struct 外觀，用於宣告結構描述、驗證輸入與推導類型。設計意圖參考 Go 的 `encoding/json`：零值預設值、接受部分輸入、穩定且可預測的執行階段行為。
 
 ## 基本類型
 
@@ -216,7 +216,7 @@ if (isObjectStruct(struct)) {
 }
 ```
 
-## 零值兜底與部分輸入
+## 零值預設值與部分輸入
 
 struct 解析器遵循 Go `encoding/json` 語義：
 

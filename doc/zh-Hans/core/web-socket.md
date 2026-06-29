@@ -18,17 +18,17 @@ description: Typed WebSocket endpoints with struct-driven messages, automatic re
 使用 `defineWebSocket` 创建类型化的命令构建器。然后通过 `client.execute()` 执行。
 
 ```typescript
-import { createClient, defineWebSocket, struct } from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const useChatSocket = defineWebSocket({
   // 可选：从输入构建连接 URL
   input: struct.request({
     query: struct.object({ roomId: struct.string() }),
   }),
-  build: (request, input) => {
-    request.setQueryParams({ roomId: input.query.roomId })
+  build(ctx, input) {
+    ctx.setQueryParams({ roomId: input.query.roomId })
   },
 
   // 服务器 → 客户端的消息
@@ -66,7 +66,7 @@ const useChatSocket = defineWebSocket({
 **出站消息**遵循相同约定。`send()` 方法接受一条 `type` 匹配 `outgoing` 键的消息：
 
 ```typescript
-socket.send({ type: 'message', text: 'hello' })
+session.send({ type: 'message', text: 'hello' })
 ```
 
 `incoming` 中可以使用特殊的 `default` 键，用共享结构捕获未声明的消息类型。
@@ -271,16 +271,16 @@ client.execute(useSocket(), { abort: signal, timeout: 10_000 })
 ## 完整示例
 
 ```typescript
-import { createClient, defineWebSocket, struct } from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const useSocket = defineWebSocket({
   input: struct.request({
     query: struct.object({ token: struct.string() }),
   }),
-  build: (request, input) => {
-    request.setQueryParams({ token: input.query.token })
+  build(ctx, input) {
+    ctx.setQueryParams({ token: input.query.token })
   },
   incoming: {
     status: struct.object({ online: struct.boolean() }),

@@ -12,32 +12,34 @@ Defjs 使用 `defineEventStream` 定义类型化的 SSE（Server-Sent Events）�
 定义 SSE 端点时，声明 `events` 字段，将事件名称映射到结构。每种事件类型的 `data` 字段会自动按匹配的结构解析。
 
 ```typescript
-import { createClient, defineEventStream, struct } from '@defjs/core'
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const useNotifications = defineEventStream({
   path: '/v1/notifications',
   events: {
-    message: struct.object({
-      id: struct.number(),
-      text: struct.string(),
-    }),
+    message: struct.json(
+      struct.object({
+        id: struct.number(),
+        text: struct.string(),
+      }),
+    ),
     heartbeat: struct.string(),
   },
 })
 ```
 
-### 默认事件结构（回退）
+### 默认事件结构
 
-如果服务器可能发送 `events` 中未显式声明的事件类型，提供 `default` 结构作为回退。没有 `default` 时，未知事件会被静默丢弃。
+如果服务器可能发送 `events` 中未显式声明的事件类型，提供 `default` 结构。没有 `default` 时，未知事件会被静默丢弃。
 
 ```typescript
 const useMixedStream = defineEventStream({
   path: '/v1/events',
   events: {
-    userconnect: struct.object({ uid: struct.number() }),
-    default: struct.object({ note: struct.string() }),
+    userconnect: struct.json(struct.object({ uid: struct.number() })),
+    default: struct.json(struct.object({ note: struct.string() })),
   },
 })
 ```
@@ -49,16 +51,18 @@ const useMixedStream = defineEventStream({
 ```typescript
 const useRoomStream = defineEventStream({
   path: '/v1/room/:roomId',
-  input: struct.object({ roomId: struct.string() }),
-  build: ({ roomId }) => ({
-    params: { roomId },
+  input: struct.request({
+    path: struct.object({ roomId: struct.string() }),
   }),
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
+  },
   events: {
-    chat: struct.object({ user: struct.string(), text: struct.string() }),
+    chat: struct.json(struct.object({ user: struct.string(), text: struct.string() })),
   },
 })
 
-const [error, stream, open] = await client.execute(useRoomStream({ roomId: '42' }))
+const [error, stream, open] = await client.execute(useRoomStream({ path: { roomId: '42' } }))
 ```
 
 ## 执行结果
@@ -86,7 +90,7 @@ if (error) {
 console.log('Connected', open?.url)
 
 for await (const event of stream) {
-  if (event.event === 'message') {
+  if (event.event === 'message' && typeof event.data === 'object' && event.data !== null) {
     console.log('Message:', event.data.text)
   }
   if (event.event === 'heartbeat') {
@@ -120,20 +124,20 @@ await stream.closed // { code: 'aborted', reason: 'user-navigated-away' }
 
 ## 无效事件处理：onInvalidEvent
 
-当服务器发送的事件无法匹配 `events` 中的任何结构（或 `default`），或结构验证失败时，触发 `onInvalidEvent` 观察者。它是客户端级配置，在 `createClient` 时通过 `sse.onInvalidEvent` 传入。
+当服务器发送的事件无法匹配 `events` 中的任何结构（或 `default`），或结构验证失败时，触发 `onInvalidEvent` 观察者。它是客户端级配置，在 `createClient` 时通过 `withSSEOptions` 传入。
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     onInvalidEvent: async (context) => {
       console.warn('Invalid event:', context.reason, context.message)
       // context.reason: 'missing-struct' | 'validation-failed'
       // context.message: { id, event, data, retry? }
       // context.cause: 验证失败时的原始错误
     },
-  },
-})
+  }),
+)
 ```
 
 `onInvalidEvent` 是一个**观察者**：
@@ -143,14 +147,14 @@ const client = createClient({
 
 ## 重连和队列配置
 
-SSE 传输内置自动重连，可通过客户端级别的 `sse.reconnect` 和 `sse.queue` 配置。
+SSE 传输内置自动重连，可通过客户端级别的 `withSSEOptions` 配置 `reconnect` 和 `queue`。`onInvalidEvent` 是一个**观察者**：
 
 ### 重连配置
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     reconnect: {
       attempts: 5, // 最大重试次数
       delayMs: 1000, // 初始重试间隔
@@ -161,8 +165,8 @@ const client = createClient({
         return attempt <= 3
       },
     },
-  },
-})
+  }),
+)
 ```
 
 重连优先级：
@@ -179,15 +183,15 @@ const client = createClient({
 事件到达后进入内部异步队列，然后由迭代器消费。你可以限制队列大小和溢出行为：
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     queue: {
       maxSize: 100,
       overflow: 'drop-oldest', // 'drop-newest' | 'drop-oldest' | 'error'
     },
-  },
-})
+  }),
+)
 ```
 
 | `overflow`    | 行为                                 |
@@ -201,16 +205,16 @@ const client = createClient({
 ```typescript
 import { createClient, defineEventStream, struct } from '@defjs/core'
 
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     reconnect: { attempts: 5, delayMs: 1000, factor: 2, maxDelayMs: 30000 },
     queue: { maxSize: 100, overflow: 'drop-oldest' },
     onInvalidEvent: async ({ reason, message }) => {
       console.warn(`Skipped invalid event [${reason}]: ${message.event}`)
     },
-  },
-})
+  }),
+)
 
 const useLogStream = defineEventStream({
   path: '/v1/logs',
@@ -230,7 +234,9 @@ async function tailLogs() {
   console.log('Connected', open.url)
 
   for await (const event of stream) {
-    console.log(`[${event.data.level}] ${event.data.msg}`)
+    if (typeof event.data === 'object' && event.data !== null) {
+      console.log(`[${event.data.level}] ${event.data.msg}`)
+    }
   }
 
   const closeInfo = await stream.closed

@@ -13,20 +13,20 @@ Defjs 围绕“命令”构建：由 `defineRequest`、`defineEventStream` 和 `
 
 ```typescript
 import { defineRequest } from '@defjs/core'
-import { number, object, string } from '@mobily/ts-belt'
+import { struct } from '@defjs/core'
 
 const GetUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  input: object({
-    path: object({ id: string() }),
+  input: struct.object({
+    path: struct.object({ id: struct.string() }),
   }),
-  build(request, input) {
-    request.setPathParams(input.path)
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
   },
   output: [
-    { status: 200, body: object({ name: string(), age: number() }) },
-    { status: 404, body: object({ message: string() }) },
+    { status: 200, body: struct.object({ name: struct.string(), age: struct.number() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
   ],
 })
 
@@ -93,14 +93,13 @@ output: {
 `defineEventStream` 定义一个 Server-Sent Events (SSE) 端点。它将事件名称映射到 Struct，实现事件级类型安全。
 
 ```typescript
-import { defineEventStream } from '@defjs/core'
-import { number, object, string } from '@mobily/ts-belt'
+import { defineEventStream, struct } from '@defjs/core'
 
 const Notifications = defineEventStream({
   path: '/notifications',
   events: {
-    message: object({ text: string() }),
-    userJoined: object({ userId: number(), name: string() }),
+    message: struct.object({ text: struct.string() }),
+    userJoined: struct.object({ userId: struct.number(), name: struct.string() }),
   },
 })
 
@@ -111,9 +110,9 @@ const command = Notifications()
 
 `events` 中的每个键对应 SSE 的 `event` 字段。消息到达时，客户端按 `event` 名称查找匹配的结构。
 
-### default 回退
+### default 事件处理
 
-如果服务器发送了未声明的事件名，你可以提供 `default` 结构作为回退：
+如果服务器发送了未声明的事件名，你可以提供 `default` 结构：
 
 ```typescript
 const Stream = defineEventStream({
@@ -157,24 +156,23 @@ SSE 的 `build` 不支持请求体或 `withCredentials`。
 `defineWebSocket` 定义一个 WebSocket 端点，区分 **incoming**（服务器 → 客户端）和 **outgoing**（客户端 → 服务器）消息结构。
 
 ```typescript
-import { defineWebSocket } from '@defjs/core'
-import { number, object, string } from '@mobily/ts-belt'
+import { defineWebSocket, struct } from '@defjs/core'
 
 const ChatSocket = defineWebSocket({
   path: '/chat/:roomId',
-  input: object({
-    path: object({ roomId: string() }),
+  input: struct.object({
+    path: struct.object({ roomId: struct.string() }),
   }),
-  build(request, input) {
-    request.setPathParams(input.path)
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
   },
   incoming: {
-    message: object({ user: string(), text: string() }),
-    system: object({ event: string() }),
+    message: struct.object({ user: struct.string(), text: struct.string() }),
+    system: struct.object({ event: struct.string() }),
   },
   outgoing: {
-    sendMessage: object({ text: string() }),
-    joinRoom: object({ roomId: string() }),
+    sendMessage: struct.object({ text: struct.string() }),
+    joinRoom: struct.object({ roomId: struct.string() }),
   },
 })
 
@@ -277,9 +275,11 @@ A() // OK
 const B = defineRequest({
   method: 'GET',
   path: '/b',
-  input: object({ query: object({ q: optional(string()) }) }),
-  build(request, input) {
-    request.setQueryParams(input.query)
+  input: struct.object({
+    query: struct.object({ q: struct.string().optional() }),
+  }),
+  build(ctx, input) {
+    ctx.setQueryParams(input.query)
   },
 })
 B() // OK
@@ -289,9 +289,11 @@ B({ query: {} }) // OK
 const C = defineRequest({
   method: 'POST',
   path: '/c',
-  input: object({ body: object({ name: string() }) }),
-  build(request, input) {
-    request.setJson(input.body)
+  input: struct.object({
+    body: struct.object({ name: struct.string() }),
+  }),
+  build(ctx, input) {
+    ctx.setJson(input.body)
   },
 })
 C() // TypeScript 错误：缺少参数

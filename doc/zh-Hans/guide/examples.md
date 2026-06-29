@@ -37,9 +37,9 @@ const createUser = defineRequest({
   method: 'POST',
   path: '/v1/users',
   input: CreateUserInput,
-  build: (input) => ({
-    body: input,
-  }),
+  build(ctx, input) {
+    ctx.setJson(input.body)
+  },
   output: {
     201: UserStruct,
     400: struct.object({ message: struct.string() }),
@@ -57,12 +57,12 @@ const listUsers = defineRequest({
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-  }),
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
+  },
   output: {
     200: UserStruct,
     404: struct.object({ message: struct.string() }),
@@ -72,15 +72,17 @@ const getUser = defineRequest({
 const updateUser = defineRequest({
   method: 'PUT',
   path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
-    name: struct.string(),
-    email: struct.string(),
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+    body: struct.object({
+      name: struct.string(),
+      email: struct.string(),
+    }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-    body: { name: input.name, email: input.email },
-  }),
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
+    ctx.setJson(input.body)
+  },
   output: {
     200: UserStruct,
     404: struct.object({ message: struct.string() }),
@@ -90,12 +92,12 @@ const updateUser = defineRequest({
 const deleteUser = defineRequest({
   method: 'DELETE',
   path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-  }),
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
+  },
   output: {
     204: struct.unknown(),
     404: struct.object({ message: struct.string() }),
@@ -127,7 +129,9 @@ async function handleList() {
 }
 
 async function handleGet(id: number) {
-  const [error, user] = await client.execute(getUser({ id }))
+  const [error, user] = await client.execute(
+    getUser({ path: { id } }),
+  )
   if (error) {
     handleError(error)
     return
@@ -136,7 +140,9 @@ async function handleGet(id: number) {
 }
 
 async function handleUpdate(id: number) {
-  const [error, user] = await client.execute(updateUser({ id, name: 'Bob', email: 'bob@example.com' }))
+  const [error, user] = await client.execute(
+    updateUser({ path: { id }, body: { name: 'Bob', email: 'bob@example.com' } }),
+  )
   if (error) {
     handleError(error)
     return
@@ -145,7 +151,7 @@ async function handleUpdate(id: number) {
 }
 
 async function handleDelete(id: number) {
-  const [error] = await client.execute(deleteUser({ id }))
+  const [error] = await client.execute(deleteUser({ path: { id } }))
   if (error) {
     handleError(error)
     return
@@ -253,12 +259,12 @@ const client = createClient(
 
 const chatRoom = defineWebSocket({
   path: '/room/:roomId',
-  input: struct.object({
-    roomId: struct.string().alias('roomId'),
+  input: struct.request({
+    path: struct.object({ roomId: struct.string() }),
   }),
-  build: (input) => ({
-    params: { roomId: input.roomId },
-  }),
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
+  },
   incoming: {
     message: struct.object({
       userId: struct.string(),
@@ -281,7 +287,7 @@ const chatRoom = defineWebSocket({
 })
 
 async function joinChat(roomId: string) {
-  const [error, session, connection] = await client.execute(chatRoom({ roomId }))
+  const [error, session, connection] = await client.execute(chatRoom({ path: { roomId } }))
 
   if (error) {
     console.error('Connection failed:', error.message)
@@ -298,18 +304,18 @@ async function joinChat(roomId: string) {
     console.error('Runtime error:', err)
   })
 
-  session.send({ type: 'sendMessage', data: { text: 'Hello everyone!' } })
+  session.send({ type: 'sendMessage', text: 'Hello everyone!' })
 
   for await (const msg of session.receive) {
     switch (msg.type) {
       case 'message':
-        console.log(`${msg.data.userId}: ${msg.data.text}`)
+        console.log(`${msg.userId}: ${msg.text}`)
         break
       case 'userJoined':
-        console.log(`${msg.data.userName} joined`)
+        console.log(`${msg.userName} joined`)
         break
       case 'userLeft':
-        console.log(`${msg.data.userId} left`)
+        console.log(`${msg.userId} left`)
         break
     }
   }
@@ -488,7 +494,7 @@ async function loadUser() {
 | `struct.string()` / `struct.number()` / `struct.boolean()`                                  | 基础类型结构        |
 | `struct.array(item)`                                                                        | 数组结构            |
 | `struct.enum(values)`                                                                       | 枚举结构            |
-| `struct.alias(name)                                                                         | 字段别名            |
+| `.alias(name)`                                                                              | 字段别名            |
 | `createHttpInterceptor(fn)` / `createSSEInterceptor(fn)` / `createWebSocketInterceptor(fn)` | 创建拦截器          |
 | `basicAuthHttpInterceptor(fn)` / `basicAuthSSEInterceptor(fn)`                              | 内置 Basic Auth     |
 

@@ -115,15 +115,15 @@ const [error, socket, connection] = await client.execute(wsCommand())
 SSE 的 `onInvalidEvent` 是观察者。内部抛出的异常会被静默忽略，不会中断流。
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     onInvalidEvent: async ({ reason, message }) => {
       console.warn(`Skipped invalid event [${reason}]: ${message.event}`)
       // 即使这里抛出异常，流也会继续
     },
-  },
-})
+  }),
+)
 ```
 
 ## 错误子模块合并
@@ -205,8 +205,8 @@ const getUser = defineRequest({
   input: struct.object({
     path: struct.object({ id: struct.number() }),
   }),
-  build(request, input) {
-    request.setPathParams({ id: input.path.id })
+  build(ctx, input) {
+    ctx.setPathParams({ id: input.path.id })
   },
   output: { 200: struct.object({ id: struct.number(), name: struct.string() }) },
 })
@@ -222,8 +222,8 @@ const listUsers = defineRequest({
 const badRequest = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  build(request, input) {
-    request.setPathParams({ id: input.id }) // TypeScript 错误：缺少 input 结构
+  build(ctx, input) {
+    ctx.setPathParams({ id: input.id }) // TypeScript 错误：缺少 input 结构
   },
   output: { 200: struct.object({ id: struct.number() }) },
 })

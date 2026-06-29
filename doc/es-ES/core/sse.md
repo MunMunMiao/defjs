@@ -28,7 +28,7 @@ const useNotifications = defineEventStream({
 })
 ```
 
-### Esquema de evento por defecto (Fallback)
+### Esquema de evento por defecto
 
 Si el servidor puede enviar tipos de evento no declarados explícitamente en `events`, proporciona un esquema `default` como respaldo. Sin `default`, los eventos desconocidos se descartan silenciosamente.
 
