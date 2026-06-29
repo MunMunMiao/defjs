@@ -14,21 +14,21 @@ Use `defineRequest` to define an HTTP endpoint, then execute it with `Client.exe
 When `input` is provided, `build` must also be provided to describe how input fields map to request parts (path params, query params, headers, body).
 
 ```typescript
-import { defineRequest, string, number, object } from '@defjs/core'
+import { defineRequest, struct } from '@defjs/core'
 
-const User = object({
-  id: number(),
-  name: string(),
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
 })
 
 const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  input: object({
-    path: object({ id: number() }),
+  input: struct.object({
+    path: struct.object({ id: struct.number() }),
   }),
-  build(request, input) {
-    request.setPathParams({
+  build(ctx, input) {
+    ctx.setPathParams({
       id: input.path.id,
     })
   },
@@ -45,8 +45,8 @@ const listUsers = defineRequest({
   method: 'GET',
   path: '/users',
   output: {
-    200: object({
-      items: array(User),
+    200: struct.object({
+      items: struct.array(User),
     }),
   },
 })
@@ -59,22 +59,22 @@ const listUsers = defineRequest({
 Both object and array forms are supported:
 
 ```typescript
-import { defineRequest, object, string } from '@defjs/core'
+import { defineRequest, struct } from '@defjs/core'
 
 // Object form: keys are status codes, values are structs
 const createUser = defineRequest({
   method: 'POST',
   path: '/users',
-  input: object({
-    body: object({ name: string() }),
+  input: struct.object({
+    body: struct.object({ name: struct.string() }),
   }),
-  build(request, input) {
-    request.setJson({ name: input.body.name })
+  build(ctx, input) {
+    ctx.setJson({ name: input.body.name })
   },
   output: {
-    201: object({ id: number(), name: string() }),
-    400: object({ message: string() }),
-    409: object({ message: string() }),
+    201: struct.object({ id: struct.number(), name: struct.string() }),
+    400: struct.object({ message: struct.string() }),
+    409: struct.object({ message: struct.string() }),
   },
 })
 
@@ -84,8 +84,8 @@ const updateUser = defineRequest({
   path: '/users/:id',
   // ...
   output: [
-    { status: 200, body: object({ id: number(), name: string() }) },
-    { status: [400, 422], body: object({ message: string() }) },
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: [400, 422], body: struct.object({ message: struct.string() }) },
   ],
 })
 ```
@@ -97,21 +97,21 @@ If the server returns a status code not declared in `output`, the request fails 
 `output` drives TypeScript type inference. `Client.execute()` returns `HttpAwaitResult` that automatically distinguishes 2xx success data from non-2xx error data.
 
 ```typescript
-import { createClient, defineRequest, object, string, number } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient(/* ... */)
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const endpoint = defineRequest({
   method: 'POST',
   path: '/items',
   output: {
-    200: object({ id: number(), name: string() }),
-    400: object({ field: string(), reason: string() }),
-    500: object({ traceId: string() }),
+    200: struct.object({ id: struct.number(), name: struct.string() }),
+    400: struct.object({ field: struct.string(), reason: struct.string() }),
+    500: struct.object({ traceId: struct.string() }),
   },
 })
 
-const [error, result, response] = await client.execute(endpoint)
+const [error, result, response] = await client.execute(endpoint())
 
 if (error === null) {
   // result is typed as { id: number; name: string }
@@ -136,7 +136,7 @@ if (error === null) {
 Call `Client.execute()` with a command. The second argument is optional `HttpExecuteOptions`:
 
 ```typescript
-const [error, result, response] = await client.execute(command, {
+const [error, result, response] = await client.execute(command(), {
   context: {
     /* custom context readable by interceptors */
   },
@@ -169,7 +169,7 @@ The returned `HttpAwaitResult` is a triplet:
 ```typescript
 const controller = new AbortController()
 
-const [error] = await client.execute(command, {
+const [error] = await client.execute(command(), {
   abort: controller.signal,
 })
 
@@ -182,7 +182,7 @@ controller.abort()
 ### Using Timeout
 
 ```typescript
-const [error] = await client.execute(command, {
+const [error] = await client.execute(command(), {
   timeout: 5000, // 5 second timeout
 })
 
@@ -196,7 +196,7 @@ If both `abort` and `signal` are passed, the framework merges them into a single
 ```typescript
 const controller = new AbortController()
 
-const [error] = await client.execute(command, {
+const [error] = await client.execute(command(), {
   abort: controller.signal,
   signal: someOtherSignal, // merged with abort
 })
@@ -219,7 +219,7 @@ Track progress via `onDownloadProgress` and `onUploadProgress`.
 ### Download Progress
 
 ```typescript
-const [error, result] = await client.execute(command, {
+const [error, result] = await client.execute(command(), {
   onDownloadProgress: (event) => {
     const percent = event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : null
     console.log(`Download: ${event.loaded} / ${event.total} (${percent ?? 'unknown'}%)`)
@@ -246,7 +246,7 @@ const stream = new ReadableStream<Uint8Array>({
   },
 })
 
-const [error, result] = await client.execute(command, {
+const [error, result] = await client.execute(command(), {
   onUploadProgress: (event) => {
     console.log(`Upload: ${event.loaded} / ${event.total}`)
   },

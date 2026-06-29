@@ -148,10 +148,12 @@ if (error) {
   return
 }
 
-session.send({ type: 'message', data: { text: 'hello' } })
+session.send({ type: 'message', text: 'hello' })
 
 for await (const msg of session.receive) {
-  console.log(msg.type, msg.data)
+  if (msg.type === 'message') {
+    console.log(msg.text)
+  }
 }
 ```
 

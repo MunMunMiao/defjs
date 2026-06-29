@@ -74,7 +74,7 @@ const merged = mergeHttpContexts(baseCtx, extraCtx)
 When executing a command, the Client processes input in this order:
 
 1. **Validate**: Validates and parses raw caller data using the `input` Struct.
-2. **Build**: Calls `build(request, parsedInput)` to map parsed data to request parts.
+2. **Build**: Calls `build(ctx, parsedInput)` to map parsed data to request parts.
 3. **Transport**: Dispatches to HTTP fetch, SSE stream, or WebSocket connection based on `kind`.
 
 ```typescript
@@ -89,8 +89,8 @@ const CreateUser = defineRequest({
       email: struct.string(),
     }),
   }),
-  build(request, input) {
-    request.setJson(input.body)
+  build(ctx, input) {
+    ctx.setJson(input.body)
   },
   output: {
     201: struct.object({ id: struct.number() }),

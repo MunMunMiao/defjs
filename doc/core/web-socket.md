@@ -18,17 +18,17 @@ Messages are JSON-encoded and validated at runtime against the declared structs.
 Use `defineWebSocket` to create a typed command builder. The builder is then executed with `client.execute()`.
 
 ```typescript
-import { createClient, defineWebSocket, struct } from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const useChatSocket = defineWebSocket({
   // Optional: build the connection URL from input
   input: struct.request({
     query: struct.object({ roomId: struct.string() }),
   }),
-  build: (request, input) => {
-    request.setQueryParams({ roomId: input.query.roomId })
+  build(ctx, input) {
+    ctx.setQueryParams({ roomId: input.query.roomId })
   },
 
   // Messages from server → client
@@ -271,16 +271,16 @@ client.execute(useSocket(), { abort: signal, timeout: 10_000 })
 ## Complete Example
 
 ```typescript
-import { createClient, defineWebSocket, struct } from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const useSocket = defineWebSocket({
   input: struct.request({
     query: struct.object({ token: struct.string() }),
   }),
-  build: (request, input) => {
-    request.setQueryParams({ token: input.query.token })
+  build(ctx, input) {
+    ctx.setQueryParams({ token: input.query.token })
   },
   incoming: {
     status: struct.object({ online: struct.boolean() }),
