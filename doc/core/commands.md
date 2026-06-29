@@ -13,20 +13,20 @@ Defjs is built around "commands": type-safe executable objects created by `defin
 
 ```typescript
 import { defineRequest } from '@defjs/core'
-import { number, object, string } from '@mobily/ts-belt'
+import { struct } from '@defjs/core'
 
 const GetUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  input: object({
-    path: object({ id: string() }),
+  input: struct.object({
+    path: struct.object({ id: struct.string() }),
   }),
-  build(request, input) {
-    request.setPathParams(input.path)
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
   },
   output: [
-    { status: 200, body: object({ name: string(), age: number() }) },
-    { status: 404, body: object({ message: string() }) },
+    { status: 200, body: struct.object({ name: struct.string(), age: struct.number() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
   ],
 })
 
@@ -93,14 +93,13 @@ Execution results are typed automatically: 2xx data enters the success branch, e
 `defineEventStream` defines a Server-Sent Events (SSE) endpoint. It maps event names to Structs for event-level type safety.
 
 ```typescript
-import { defineEventStream } from '@defjs/core'
-import { number, object, string } from '@mobily/ts-belt'
+import { defineEventStream, struct } from '@defjs/core'
 
 const Notifications = defineEventStream({
   path: '/notifications',
   events: {
-    message: object({ text: string() }),
-    userJoined: object({ userId: number(), name: string() }),
+    message: struct.object({ text: struct.string() }),
+    userJoined: struct.object({ userId: struct.number(), name: struct.string() }),
   },
 })
 
@@ -111,16 +110,18 @@ const command = Notifications()
 
 Each key in `events` corresponds to the SSE `event` field. The Client looks up the matching Struct by `event` name when a message arrives.
 
-### default Fallback
+### default Event Handling
 
-If the server sends an undeclared event name, you can provide a `default` struct as fallback:
+If the server sends an undeclared event name, you can provide a `default` struct:
 
 ```typescript
+import { defineEventStream, struct } from '@defjs/core'
+
 const Stream = defineEventStream({
   path: '/events',
   events: {
-    update: object({ version: number() }),
-    default: string(), // Unmatched events parsed as string
+    update: struct.object({ version: struct.number() }),
+    default: struct.string(), // Unmatched events parsed as string
   },
 })
 ```
@@ -134,14 +135,14 @@ SSE uses `GET` by default. If you need query parameters, provide `input` and `bu
 ```typescript
 const FilteredStream = defineEventStream({
   path: '/events',
-  input: object({
-    query: object({ category: string() }),
+  input: struct.object({
+    query: struct.object({ category: struct.string() }),
   }),
-  build(request, input) {
-    request.setQueryParams(input.query)
+  build(ctx, input) {
+    ctx.setQueryParams(input.query)
   },
   events: {
-    item: object({ id: number(), title: string() }),
+    item: struct.object({ id: struct.number(), title: struct.string() }),
   },
 })
 
@@ -157,24 +158,23 @@ SSE `build` does not support request body or `withCredentials`.
 `defineWebSocket` defines a WebSocket endpoint, distinguishing **incoming** (server → client) and **outgoing** (client → server) message structs.
 
 ```typescript
-import { defineWebSocket } from '@defjs/core'
-import { number, object, string } from '@mobily/ts-belt'
+import { defineWebSocket, struct } from '@defjs/core'
 
 const ChatSocket = defineWebSocket({
   path: '/chat/:roomId',
-  input: object({
-    path: object({ roomId: string() }),
+  input: struct.object({
+    path: struct.object({ roomId: struct.string() }),
   }),
-  build(request, input) {
-    request.setPathParams(input.path)
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
   },
   incoming: {
-    message: object({ user: string(), text: string() }),
-    system: object({ event: string() }),
+    message: struct.object({ user: struct.string(), text: struct.string() }),
+    system: struct.object({ event: struct.string() }),
   },
   outgoing: {
-    sendMessage: object({ text: string() }),
-    joinRoom: object({ roomId: string() }),
+    sendMessage: struct.object({ text: struct.string() }),
+    joinRoom: struct.object({ roomId: struct.string() }),
   },
 })
 
@@ -211,7 +211,7 @@ If you do not need to send messages to the server, omit `outgoing`:
 const ReadOnlySocket = defineWebSocket({
   path: '/feed',
   incoming: {
-    tick: object({ price: number() }),
+    tick: struct.object({ price: struct.number() }),
   },
 })
 ```
@@ -277,9 +277,11 @@ A() // OK
 const B = defineRequest({
   method: 'GET',
   path: '/b',
-  input: object({ query: object({ q: optional(string()) }) }),
-  build(request, input) {
-    request.setQueryParams(input.query)
+  input: struct.object({
+    query: struct.object({ q: struct.string().optional() }),
+  }),
+  build(ctx, input) {
+    ctx.setQueryParams(input.query)
   },
 })
 B() // OK
@@ -289,9 +291,11 @@ B({ query: {} }) // OK
 const C = defineRequest({
   method: 'POST',
   path: '/c',
-  input: object({ body: object({ name: string() }) }),
-  build(request, input) {
-    request.setJson(input.body)
+  input: struct.object({
+    body: struct.object({ name: struct.string() }),
+  }),
+  build(ctx, input) {
+    ctx.setJson(input.body)
   },
 })
 C() // TypeScript error: missing argument
