@@ -94,7 +94,7 @@ Go 区分**值类型**和**指针类型** —— 前者缺字段或收到显式 
 | `json.Marshal` 反向序列化          | 由 endpoint runtime / request build 内部执行，struct 实例不暴露反向序列化方法 |
 | 未知字段                           | 始终忽略，不提供额外严格模式                                                  |
 
-零值兜底是**设计意图**而非 bug：缺字段时拿到 Go 风格零值；struct 不提供额外严格校验入口。
+零值默认值是**设计意图**而非 bug：缺字段时拿到 Go 风格零值；struct 不提供额外严格校验入口。
 
 #### 字符串域：query / header / form
 
@@ -219,7 +219,7 @@ setErrorMap(map) // 全局拦截 issue.message，i18n 友好
 1. HTTP、SSE、WebSocket 都通过 `buildRequest(input, build, { input, transport })` 进入统一 request assembly。
 2. 没有 `build` 时，只有 `struct.request(...)` 会执行默认构建；普通 `struct.object(...)` 等非 request struct 不自动生成 request。
 3. 有 `build` 且有 `input` struct 时，当前实现创建 endpoint-local bound view，记录 `BuildPlanStep[]`，再用 parsed input materialize 成 path/query/header/body。
-4. 有 `build` 但没有 `input` 时，仍走 legacy immediate builder 兼容路径；这不是 struct-aware build 的设计中心。
+4. 有 `build` 但没有 `input` 时，仍走 immediate builder 路径；这不是 struct-aware build 的设计中心。
 5. transport gate 在 request build 之后执行：SSE 禁止 body / withCredentials，WebSocket 只允许 path params 和 query params。
 6. HTTP 的最终 `Content-Type` 在 request headers 写入后由 body 阶段统一裁决，`FormData` 会删除手写 `Content-Type` 以保留 runtime boundary。
 
@@ -451,7 +451,7 @@ build(ctx, input) {
 
 ### Binding 边界
 
-1. binding metadata 由 `struct` 包根据 endpoint input struct 创建 endpoint-local bound input；path 不能写回裸字段 struct。
+In `build(ctx, input)`, explicit object literal keys are the final wire keys and are never rewritten by source-field aliases. Whole-source bound values (e.g. `ctx.setJson(input.body)`) still recursively apply the source struct's aliases.
 2. binding metadata 使用 endpoint-local registry / private symbol / WeakMap，不能占用用户字段名 `path`、`struct`、`fieldKey`。
 3. ctx 必须校验 bound source 属于当前 endpoint input owner，不能接受伪造对象、闭包里的字段 struct 或其他 endpoint 的 bound view。
 4. root input object / nested object bound view 可以作为 direct source，但必须按 helper 支持结构校验。
