@@ -63,12 +63,15 @@ const client = createClient(withEndpoint('https://api.example.com'))
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/user',
-  output: {
-    '200': struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-  },
+  output: [
+    {
+      status: 200,
+      body: struct.object({
+        id: struct.number(),
+        name: struct.string(),
+      }),
+    },
+  ] as const,
 })
 
 async function loadUser() {

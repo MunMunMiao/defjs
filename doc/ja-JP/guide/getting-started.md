@@ -179,7 +179,7 @@ async function createPost() {
 | API                    | 説明                                 | 代表的な使い方                                                                 |
 | ---------------------- | ------------------------------------ | ------------------------------------------------------------------------------ |
 | `createClient`         | リクエストクライアントを作成         | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | HTTP エンドポイントを定義            | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
+| `defineRequest`        | HTTP エンドポイントを定義            | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
 | `defineEventStream`    | SSE エンドポイントを定義             | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | WebSocket エンドポイントを定義       | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | スキーマビルダー                     | `struct.object({ id: struct.number() })`                                       |

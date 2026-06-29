@@ -115,15 +115,17 @@ const [error, socket, connection] = await client.execute(wsCommand())
 SSE's `onInvalidEvent` is an observer. Exceptions thrown inside it are silently ignored and do not interrupt the stream.
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+import { createClient, withEndpoint, withSSEOptions } from '@defjs/core'
+
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     onInvalidEvent: async ({ reason, message }) => {
       console.warn(`Skipped invalid event [${reason}]: ${message.event}`)
       // Even if this throws, the stream continues
     },
-  },
-})
+  }),
+)
 ```
 
 ## Error Submodule Consolidation
@@ -202,30 +204,36 @@ Defjs enforces a strict rule: **when `build` is provided, `input` must also be p
 const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  input: struct.object({
+  input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  build(request, input) {
-    request.setPathParams({ id: input.path.id })
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
   },
-  output: { 200: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+  ] as const,
 })
 
 // Correct: no input and no build
 const listUsers = defineRequest({
   method: 'GET',
   path: '/users',
-  output: { 200: struct.object({ items: struct.array(struct.object({ id: struct.number() })) }) },
+  output: [
+    { status: 200, body: struct.object({ items: struct.array(struct.object({ id: struct.number() })) }) },
+  ] as const,
 })
 
 // Error: has build but no input
 const badRequest = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  build(request, input) {
-    request.setPathParams({ id: input.id }) // TypeScript error: missing input struct
+  build(ctx, input) {
+    ctx.setPathParams({ id: input.id }) // TypeScript error: missing input struct
   },
-  output: { 200: struct.object({ id: struct.number() }) },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number() }) },
+  ] as const,
 })
 ```
 

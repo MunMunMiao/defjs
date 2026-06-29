@@ -179,7 +179,7 @@ async function createPost() {
 | API                    | 說明                | 典型用法                                                                       |
 | ---------------------- | ------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | 建立請求用戶端      | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | 定義 HTTP 端點      | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
+| `defineRequest`        | 定義 HTTP 端點      | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
 | `defineEventStream`    | 定義 SSE 端點       | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | 定義 WebSocket 端點 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | 結構描述建構器      | `struct.object({ id: struct.number() })`                                       |

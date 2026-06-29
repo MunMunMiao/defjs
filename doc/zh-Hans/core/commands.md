@@ -18,16 +18,13 @@ import { struct } from '@defjs/core'
 const GetUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  input: struct.object({
+  input: struct.request({
     path: struct.object({ id: struct.string() }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-  },
   output: [
     { status: 200, body: struct.object({ name: struct.string(), age: struct.number() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  ] as const,
 })
 
 const command = GetUser({ path: { id: '42' } })
@@ -47,10 +44,10 @@ const command = GetUser({ path: { id: '42' } })
 ### input / output / build 关系
 
 1. **input**：描述调用方必须提供的数据。执行时，客户端使用 `input` Struct 验证并解析原始输入。
-2. **build**：接收 `RequestBuilder` 和解析后的输入 (`RequestBuildInput`)，将数据映射到路径参数、查询参数、请求头和请求体。
+2. **build**：接收 `RequestBuilder` 和解析后的输入 (`RequestBuildInput`)，将数据映射到路径参数、查询参数、请求头和请求体。当 `input` 为 `struct.request(...)` 形状时可省略，运行时会根据声明的各段自动构建请求。
 3. **output**：描述服务器可能返回的响应。客户端按 HTTP 状态码选择匹配的结构，并推断 2xx 成功类型和非 2xx 错误类型。
 
-如果省略 `build`，则必须同时省略 `input`。该命令不接受输入，直接发送到 `path`。
+如果省略 `input`，则必须同时省略 `build`。该命令不接受输入，直接发送到 `path`。
 
 如果提供 `build`，则必须同时提供 `input`。这是严格的设计规则。
 

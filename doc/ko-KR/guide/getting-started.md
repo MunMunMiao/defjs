@@ -179,7 +179,7 @@ async function createPost() {
 | API                    | 설명                      | 일반적인 사용법                                                                |
 | ---------------------- | ------------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | 요청 클라이언트 생성      | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | HTTP 엔드포인트 정의      | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
+| `defineRequest`        | HTTP 엔드포인트 정의      | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
 | `defineEventStream`    | SSE 엔드포인트 정의       | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | WebSocket 엔드포인트 정의 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | 스키마 빌더               | `struct.object({ id: struct.number() })`                                       |

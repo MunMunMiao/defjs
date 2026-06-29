@@ -179,7 +179,7 @@ async function createPost() {
 | API                    | Описание                          | Типичное использование                                                         |
 | ---------------------- | --------------------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | Создать клиент запросов           | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | Определить HTTP-ендпоинт          | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
+| `defineRequest`        | Определить HTTP-ендпоинт          | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
 | `defineEventStream`    | Определить SSE-ендпоинт           | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | Определить WebSocket-ендпоинт     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | Конструктор схем                  | `struct.object({ id: struct.number() })`                                       |

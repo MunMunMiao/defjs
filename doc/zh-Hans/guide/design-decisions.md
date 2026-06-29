@@ -202,20 +202,24 @@ Defjs 强制执行一条严格规则：**当提供 `build` 时，必须同时提
 const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  input: struct.object({
+  input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
   build(ctx, input) {
-    ctx.setPathParams({ id: input.path.id })
+    ctx.setPathParams(input.path)
   },
-  output: { 200: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+  ] as const,
 })
 
 // 正确：不提供 input 和 build
 const listUsers = defineRequest({
   method: 'GET',
   path: '/users',
-  output: { 200: struct.object({ items: struct.array(struct.object({ id: struct.number() })) }) },
+  output: [
+    { status: 200, body: struct.object({ items: struct.array(struct.object({ id: struct.number() })) }) },
+  ] as const,
 })
 
 // 错误：提供 build 但没有 input
@@ -225,7 +229,9 @@ const badRequest = defineRequest({
   build(ctx, input) {
     ctx.setPathParams({ id: input.id }) // TypeScript 错误：缺少 input 结构
   },
-  output: { 200: struct.object({ id: struct.number() }) },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number() }) },
+  ] as const,
 })
 ```
 

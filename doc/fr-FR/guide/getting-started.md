@@ -179,7 +179,7 @@ async function createPost() {
 | API                    | Description                               | Usage typique                                                                  |
 | ---------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | Créer un client de requête                | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | Définir un point de terminaison HTTP      | `defineRequest({ method: 'GET', path: '/user', output: { 200: UserStruct } })` |
+| `defineRequest`        | Définir un point de terminaison HTTP      | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
 | `defineEventStream`    | Définir un point de terminaison SSE       | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | Définir un point de terminaison WebSocket | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | Constructeur de schéma                    | `struct.object({ id: struct.number() })`                                       |
