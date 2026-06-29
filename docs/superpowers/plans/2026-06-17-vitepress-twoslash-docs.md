@@ -1412,7 +1412,7 @@ Expected: either Prettier reports formatted YAML, or Ruby prints:
 ci.yml parsed
 ```
 
-If both tools are unavailable, run this fallback:
+If both tools are unavailable, run this alternate command:
 
 ```bash
 python3 - <<'PY'
@@ -1432,7 +1432,7 @@ print('ci.yml contains docs job entries')
 PY
 ```
 
-Expected fallback output:
+Expected alternate output:
 
 ```text
 ci.yml contains docs job entries

@@ -157,9 +157,9 @@ git commit -m "feat(core): add Go-style option types and factories for client co
 - Modify: `packages/core/src/client/client.ts`
 - Modify: `packages/core/src/client/client.spec.ts`
 
-**Context:** 现有 `createClient(options: ClientOptions)` 需要保留兼容但改为内部包装。策略：保持 `createClient` 的 public 签名不变（仍是对象参数），新增一个 `createClientWithOptions(...options: ClientOption[])` 用于 option 模式。这是向后兼容的最小改动。
+**Context:** 现有 `createClient(options: ClientOptions)` 需要切换到 option 模式。策略：把对象参数入口收敛为内部包装，新增一个 `createClientWithOptions(...options: ClientOption[])` 用于 option 模式。这是最小化改动范围的切换方案。
 
-等等，用户说的是"切换为 option 模式"，不是保留兼容。应该是 breaking change。让我重新考虑。
+等等，用户说的是"切换为 option 模式"，不是保留对象参数入口。应该是 breaking change。让我重新考虑。
 
 如果要做 breaking change，`createClient` 直接从对象参数改为 option 参数。但这样所有现有测试都要改。从 git status 看，`feat/up` 分支上有大量改动还没提交，做 breaking change 可能跟这些改动冲突。
 
@@ -167,13 +167,13 @@ git commit -m "feat(core): add Go-style option types and factories for client co
 
 不过让我再想一下。`createClient` 当前签名是 `createClient(options: ClientOptions): Client`。改为 option 模式后是 `createClient(...options: ClientOption[]): Client`。
 
-但 `ClientOptions` 仍然是 type definition 的一部分，不应该删除，因为第三方可能引用这个类型。不过既然要做 option 模式，`ClientOptions` 可以保留为 deprecated 类型。
+但 `ClientOptions` 仍然是 type definition 的一部分，不应该删除，因为第三方可能引用这个类型。不过既然要做 option 模式，`ClientOptions` 可以保留为过时类型。
 
 实际上，从用户的语气来看，他是希望完全切换。让我这样做：
 
 - `createClient` 改为 `createClient(...options: ClientOption[]): Client`
 - `cloneClient` 改为 `cloneClient(client: Client, ...options: ClientOption[]): Client`
-- `ClientOptions` 类型标记为 deprecated 但保留
+- `ClientOptions` 类型标记为过时但保留
 
 让我写具体的实现。
 
@@ -305,12 +305,12 @@ export function resolveClientConfig(client?: Client): ClientConfig {
 }
 ```
 
-- [ ] **Step 2: 保留 ClientOptions 类型（deprecated）**
+- [ ] **Step 2: 保留 ClientOptions 类型（过时标记）**
 
-在 `packages/core/src/client/config.ts` 中不需要修改 `ClientOptions` 类型，它仍然作为类型定义存在。可以在 `public_api.ts` 中将其标记为 deprecated：
+在 `packages/core/src/client/config.ts` 中不需要修改 `ClientOptions` 类型，它仍然作为类型定义存在。可以在 `public_api.ts` 中将其标记为过时：
 
 ```ts
-/** @deprecated Use ClientOption[] with option factories instead. */
+/** Use ClientOption[] with option factories instead. */
 export type { ClientOptions } from './config'
 ```
 
@@ -1456,7 +1456,7 @@ if (req.baseEndpoint) {
   try {
     url = new URL(req.endpoint, req.baseEndpoint).toString()
   } catch {
-    // fallback to endpoint only
+    // use endpoint only
   }
 }
 ```

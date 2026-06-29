@@ -1151,7 +1151,7 @@ describe('injectClient', () => {
 ## 待确认问题
 
 1. **Interceptor 类型导出**: @defjs/core 的 Interceptor 类型是否通过 public_api.ts 稳定导出？
-2. **withHost 回退策略**: Angular 包装器的 withHost 默认回退到 document.location.origin，Vue 包装器是否也需要类似的浏览器环境检测？
+2. **withHost 默认策略**: Angular 包装器的 withHost 默认使用 document.location.origin，Vue 包装器是否也需要类似的浏览器环境检测？
 3. **Suspense 支持**: 是否需要支持 Vue 3 的 Suspense 组件集成？
 4. **peerDependencies 版本**: Vue 包装器是否应沿用 @defjs/core 的 peerDependencies: "^0.4.0"？
 

@@ -82,7 +82,7 @@ alias 不改变：
 
 ### 3. 不引入第二套 tag 语义
 
-本修复延续 alias-only 设计：这是破坏性 cleanup，不保留 tag 兼容 shim。
+本修复延续 alias-only 设计：这是破坏性 cleanup，不保留 tag shim。
 
 删除或保持删除：
 
@@ -163,7 +163,7 @@ ctx.setJson(input.body)
 2. 不改变 transport 自动猜 JSON 的策略；content-codec/SSE/WebSocket 原始值规则作为独立变更处理。
 3. 不引入 per-target alias。
 4. 不引入字段隐藏/filter/expose。
-5. 不支持 tag 兼容 shim。
+5. 不支持 tag shim。
 6. 不把 normal parse 改成同时接受 local key 和 wire key。
 7. 不把所有 struct 解释逻辑一次性改成宏大 visitor；只在重复语义已清晰时抽小内核。
 
@@ -328,7 +328,7 @@ interface ResolvedStructField {
 设计：
 
 - 对纯 object intersection 可收集 flattened object fields 并一次遍历。
-- 有重复 local key/wire key、非 object branch、或需要保持 right-side projection 时回退现有双分支实现。
+- 有重复 local key/wire key、非 object branch、或需要保持 right-side projection 时走现有双分支实现。
 
 目标是优化明确对象组合，不改变非对象 intersection 兼容语义。
 
@@ -488,7 +488,7 @@ parse/encode/zero/request_builder 都遍历该列表，而不是每次 `getReque
 - 同 object shape 内 wire key 冲突：抛错。
 - union 多分支匹配且输出 wire key 不同：抛歧义错误。
 - discriminatedUnion alias discriminator 多 key 冲突：抛歧义错误。
-- intersection 中 object 合并 wire key 冲突：优先抛错；若保持 right-side 覆盖，则必须限定为 legacy fallback 并测试锁定。
+- intersection 中 object 合并 wire key 冲突：优先抛错；若保持 right-side 覆盖，则必须限定为明确的双分支行为并测试锁定。
 
 ## 文档策略
 

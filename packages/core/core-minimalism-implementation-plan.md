@@ -10,7 +10,7 @@
 
 1. 减少同一概念在 HTTP、SSE、WebSocket、struct、client 层的重复实现。
 2. 删除没有运行时价值的 wrapper、死字段、测试专用入口和重复 helper。
-3. 保持 public API 兼容，除非某一阶段明确标记为 breaking。
+3. 保持 public API 稳定，除非某一阶段明确标记为 breaking。
 4. 保持 `struct` 的 Go 风格零值语义、alias wire key 语义、prototype pollution 防御和 request build bound view 约束。
 5. 每一波改动都能独立验证、独立回滚。
 
@@ -33,7 +33,7 @@
 
 以下内容不纳入本轮实施，避免为了少代码破坏设计骨架：
 
-1. 不移除 `struct` 缺失字段零值兜底。
+1. 不移除 `struct` 缺失字段零值默认值。
 2. 不把 `Object.create(null)` 改成普通 `{}`。
 3. 不把 `build(ctx, input)` 的 bound view 改成 raw input。
 4. 不强行合并 HTTP、SSE、WebSocket 三套 executor 生命周期。
@@ -75,13 +75,13 @@
 3. 保留 public 类型名：
    - `RequestSuccessData<TOutput>`
    - `RequestErrorData<TOutput>`
-4. 保留 `[never] -> unknown` fallback 语义。
+4. 保留 `[never] -> unknown` 默认语义。
 5. 可读性要求：中间类型最多两层，名字必须表达“从 output 取 response pair”和“按 status 取 body”，不要把重复条件类型改成更难读的嵌套 `infer` 迷宫。
 6. 补最小 type tests：
    - object output 的 2xx / 4xx 推断。
    - array output 的单 status / 多 status 推断。
-   - 只有 2xx 时 error data fallback。
-   - 只有非 2xx 时 success data fallback。
+   - 只有 2xx 时 error data 默认值。
+   - 只有非 2xx 时 success data 默认值。
    - `output` 缺省时的现有行为。
 
 验证：
@@ -423,7 +423,9 @@ pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core exec vit
 4. 如果扩展 `createSearchParams()`，必须显式传策略：
 
    ```ts
-   { complex: 'skip' | 'reject' | 'json' }
+   {
+     complex: 'skip' | 'reject' | 'json'
+   }
    ```
 
 5. 不允许隐式把 HTTP/SSE 复杂 query 放宽为 JSON。
@@ -638,7 +640,7 @@ pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core exec vit
 2. primitive match 使用：
 
    ```ts
-   (definition.runtimeIs ?? definition.is)(value)
+   ;(definition.runtimeIs ?? definition.is)(value)
    ```
 
 3. parse 仍使用 `definition.is`，不要混淆 input 与 runtime output。
@@ -808,15 +810,15 @@ pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test:typ
 
 ## 风险清单
 
-| 风险 | 说明 | 应对 |
-| --- | --- | --- |
-| public type 推断回归 | HTTP output data、command builder 属于 public 类型体验 | 先补 type tests，再重构 |
-| 错误抛出时机变化 | duplicate wire key 检查从 shape 阶段挪到 fields 阶段 | 同步测试语义，确认调用路径仍会抛 |
-| query 复杂值策略被混同 | HTTP/SSE 与 WebSocket 当前策略不同 | 只抽 scalar，复杂策略显式传参 |
-| SSE last-event-id header 断链 | fetch init helper 若 clone headers 可能破坏重连更新 | helper 接收并复用 headers 对象 |
-| WebSocket queue `maxSize: 0` 语义改变 | 数组改写容易漏掉特殊行为 | 保留并单测该行为 |
-| Abort/timeout 错误归一化改变 | 合并 helper 时可能改变 reason | 跑 abort/retry 专项测试 |
-| `internal` export 误删 | 已经进入 root public API | 不在瘦身 PR 中处理 |
+| 风险                                  | 说明                                                   | 应对                             |
+| ------------------------------------- | ------------------------------------------------------ | -------------------------------- |
+| public type 推断回归                  | HTTP output data、command builder 属于 public 类型体验 | 先补 type tests，再重构          |
+| 错误抛出时机变化                      | duplicate wire key 检查从 shape 阶段挪到 fields 阶段   | 同步测试语义，确认调用路径仍会抛 |
+| query 复杂值策略被混同                | HTTP/SSE 与 WebSocket 当前策略不同                     | 只抽 scalar，复杂策略显式传参    |
+| SSE last-event-id header 断链         | fetch init helper 若 clone headers 可能破坏重连更新    | helper 接收并复用 headers 对象   |
+| WebSocket queue `maxSize: 0` 语义改变 | 数组改写容易漏掉特殊行为                               | 保留并单测该行为                 |
+| Abort/timeout 错误归一化改变          | 合并 helper 时可能改变 reason                          | 跑 abort/retry 专项测试          |
+| `internal` export 误删                | 已经进入 root public API                               | 不在瘦身 PR 中处理               |
 
 ## 完成标准
 

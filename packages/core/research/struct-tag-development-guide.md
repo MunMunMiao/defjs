@@ -29,7 +29,7 @@ const input = struct.object({
 
 ## 二、推荐文件结构
 
-实现入口应落在 `packages/core/src/struct`，旧字段建模入口不再作为 public API 暴露。
+实现入口应落在 `packages/core/src/struct`，tag 字段建模入口不再作为 public API 暴露。
 
 推荐目标结构：
 
@@ -81,7 +81,7 @@ packages/core/src/index.ts
 type TagScalar = string | number | boolean
 ```
 
-不要允许 object 直接作为 tag config value。复杂配置应由 adapter 自己定义更高层 helper，然后降级成稳定的 scalar config。
+不要允许 object 直接作为 tag config value。复杂配置应由 adapter 自己定义更高层 helper，然后转换成稳定的 scalar config。
 
 ### 3.2 Tag namespace
 
@@ -666,7 +666,7 @@ function encodeRequestBody(
 
 - [ ] README 示例统一使用 `struct`。
 - [ ] 示例统一使用 `tag.*` helper。
-- [ ] 删除旧字段名入口文档。
+- [ ] 删除 tag 字段名入口文档。
 - [ ] 补 ORM adapter 示例。
 - [ ] 补 query serializer 示例。
 - [ ] 补 multipart upload 示例。

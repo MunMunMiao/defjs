@@ -28,7 +28,7 @@
 rg "setGlobalClient|resetGlobalClient|getGlobalClient|resolveClientConfig|provideGlobalClient|\.with\(\{ client" packages
 ```
 
-Expected: `packages/**/src`、`packages/**/test` 和 `packages/opentelemetry-server/e2e.spec.ts` 无旧 API 命中。
+Expected: `packages/**/src`、`packages/**/test` 和 `packages/opentelemetry-server/e2e.spec.ts` 无移除目标 API 命中。
 
 - 本迁移是 public API breaking change。最终文档任务必须新增 `.changeset/*.md`，覆盖 `@defjs/core`、`@defjs/angular`、`@defjs/vue` 的迁移说明；不要添加不存在的根 `CHANGELOG.md`。
 
@@ -55,8 +55,8 @@ Expected: `packages/**/src`、`packages/**/test` 和 `packages/opentelemetry-ser
 | `packages/core/src/client/client.spec.ts`                                           | 删除 `cloneClient` 与 global client 相关测试                                                                                          |
 | `packages/core/src/client/client.type.test.ts`                                      | 删除 `cloneClient` 类型测试                                                                                                           |
 | `packages/core/src/client/execute.spec.ts`                                          | 新增：Client.execute 与顶层 execute 测试                                                                                              |
-| `packages/core/src/client/global.ts`                                                | 删除（旧 API 调用点清零后）                                                                                                           |
-| `packages/core/src/client/resolve.spec.ts`                                          | 删除（旧 API 调用点清零后）                                                                                                           |
+| `packages/core/src/client/global.ts`                                                | 删除（移除目标 API 调用点清零后）                                                                                                     |
+| `packages/core/src/client/resolve.spec.ts`                                          | 删除（移除目标 API 调用点清零后）                                                                                                     |
 | `packages/core/src/client/public_api.ts`                                            | 修改：移除 `cloneClient` / global client 导出                                                                                         |
 | `packages/core/src/http/http.ts`                                                    | 修改：定义 `HttpCommand` / `RequestCommandBuilder`；改写 `defineRequest`；`executeHttpEndpoint` → `executeHttpCommand`；移除 Ref      |
 | `packages/core/src/http/public_api.ts`                                              | 修改：导出 Command 类型，移除 Ref                                                                                                     |
@@ -958,7 +958,7 @@ git commit -m "feat(core): Client.execute dispatcher, top-level execute, remove 
 - Modify: `packages/vue/src/core.browser.spec.ts`
 - Modify: `packages/vue/test/core.spec.ts`
 
-- [ ] **Step 1: 记录旧 API 调用点 baseline，不删除 core global**
+- [ ] **Step 1: 记录移除目标 API 调用点 baseline，不删除 core global**
 
 ```bash
 rg "setGlobalClient|resetGlobalClient|getGlobalClient|resolveClientConfig|provideGlobalClient|\.with\(\{ client" packages
@@ -1123,13 +1123,13 @@ Expected: PASS。
 Run: `cd packages/opentelemetry-server && pnpm test`  
 Expected: PASS。
 
-- [ ] **Step 4: 旧 API 扫描清零后删除 core global**
+- [ ] **Step 4: 移除目标 API 扫描清零后删除 core global**
 
 ```bash
 rg "setGlobalClient|resetGlobalClient|getGlobalClient|resolveClientConfig|provideGlobalClient|\.with\(\{ client" packages
 ```
 
-Expected: `packages/**/src`、`packages/**/test` 和 `packages/opentelemetry-server/e2e.spec.ts` 无旧 API 命中。
+Expected: `packages/**/src`、`packages/**/test` 和 `packages/opentelemetry-server/e2e.spec.ts` 无移除目标 API 命中。
 
 删除：
 
@@ -1234,4 +1234,4 @@ git commit -m "docs(core,angular,vue): update READMEs for command/execute migrat
 
 ## 执行方式
 
-默认按 Task 顺序执行。可以根据当时上下文选择 inline 执行或拆分子任务；硬性要求是每个 commit 前通过该 Task 的验证命令，并且删除 public API 前先通过旧 API 扫描门禁。
+默认按 Task 顺序执行。可以根据当时上下文选择 inline 执行或拆分子任务；硬性要求是每个 commit 前通过该 Task 的验证命令，并且删除 public API 前先通过移除目标 API 扫描门禁。

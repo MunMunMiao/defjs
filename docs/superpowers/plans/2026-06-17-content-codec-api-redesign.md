@@ -1,27 +1,44 @@
-# SSE / WebSocket Struct JSON Codec Contract Plan
+# Content Codec Annotation Redesign Plan
 
-> **For agentic workers:** 本文聚焦 SSE / WebSocket 的消息值转换边界。Transport / protocol 层只负责产出 raw source value，不允许根据 payload 内容自动 JSON.parse。`struct.json(inner)` 是一个 **JSON codec 标注**：当运行时走到 `kind=json` 的 struct 时，才执行 JSON 序列化 / 反序列化，然后继续交给 inner struct 校验。它不是 SSE 专用 decoder，也不是 payload-shape guessing。
+> **For agentic workers:** 本文把 `struct.json(...)`、`struct.formData(...)`、`struct.text()`、`struct.urlencoded(...)`、`struct.blob()`、`struct.arrayBuffer()` 统一看作 **content boundary annotation**：它们声明“某个已选边界期望什么 content codec”。这些 annotation 只有被具体 boundary adapter 选中时才形成 codec 语义；普通 struct parse / encode 仍保持 logical value 语义。Transport / protocol 层只负责产出 raw source value；运行时必须先选中用户声明的 struct / descriptor，再根据这个声明调用对应 codec 或 primitive decoder。不得因为 payload 看起来像 JSON、text、form data 或 binary 就自动猜测并改写值。
+
+Status: revised on 2026-06-22. This document is a development plan, not a statement that the target API already exists.
 
 ---
 
 ## 0. Scope Boundary
 
-### In scope
+### 0.1 In Scope
 
-- SSE parser 到 struct 解析之间每一步 value 的形状。
-- WebSocket text / binary / JSON envelope 与 struct 解析之间的边界。
-- `struct.json(inner)` 的职责：标注某个字段 / body / message part 需要 JSON codec。
-- 移除 SSE 当前 `try JSON.parse -> fallback string` 的隐式反序列化。
-- 明确 plain `struct.object(...)` 收到 SSE string 时必须失败。
-- 明确 `events` 内字段不应该被限定为固定字段；字段 struct 本身决定该字段如何解析。
+- 重新定义 request body wrapper 的概念：它不只是 HTTP 专用 wrapper，而是 content codec annotation 在 HTTP body 边界上的当前实现形态。
+- 明确 logical value、wire/source content、codec metadata 三者的边界。
+- 明确 `struct.json(inner)` 的目标职责：声明 JSON content，进入边界时 JSON decode / encode，再交给 inner struct 校验 / 编码。
+- 明确 primitive content decoder 的职责：在文本型 source boundary 中，`struct.string()`、`struct.number()`、`struct.boolean()` 可以按“已选 struct”触发对应 primitive decoder；这不是 payload shape guessing。
+- 明确 structured content 的职责：object / array / record 等结构化文本必须通过显式 content codec（例如 `struct.json(inner)`）解码，plain `struct.object(...)` 不自动 JSON.parse。
+- 明确 HTTP request body、SSE `message.data`、WebSocket JSON envelope 各自如何选择 struct，再如何应用 codec。
+- 移除 SSE 当前 `try JSON.parse -> raw string on parse error` 的隐式反序列化。
+- 保留现有 HTTP request body authoring input：用户传 logical object，而不是 JSON string。
+- 保留 `alias` 作为 field-level wire-key metadata；content codec 不替代 alias、placement、routing 或 responseType。
 
-### Out of scope
+### 0.2 First Landing Scope
 
-- 不重写 HTTP responseType / fetch body reader。
+首批实现应该收敛在可审查、可回滚的阶段：
+
+1. 文档与概念对齐。
+2. 类型词汇桥接，不改变行为。
+3. HTTP request body dispatcher consolidation，保持当前行为不变。
+4. SSE source-boundary decoder，作为明确的行为变更单独落地。
+
+### 0.3 Deferred / Out Of Scope
+
+- 不重写 HTTP responseType / fetch body reader。HTTP response parsing 继续由 `responseType` 驱动。
 - 不新增独立于 struct 的 message transformer / response mapper。
 - 不按 payload shape 猜测业务类型。
 - 不让 SSE transport 因 `data` 看起来像 JSON 就自动反序列化。
 - 不把 WebSocket binary frame 默认当 UTF-8 JSON。
+- 不在首批实现里承诺 raw `ws.text(...)` / `ws.binary(...)` public API；当前 WebSocket contract 是 typed JSON envelope。
+- 不把 `defineEventStream.events` 从 event-name map 改成 full source-object API；这属于单独的 breaking design。
+- 不把 content codec metadata 公开成新的稳定 public type，除非同时更新 public type tests 和导出策略。
 
 ---
 
@@ -29,102 +46,209 @@
 
 ### 1.1 One Sentence
 
-Raw source value 先进入对应字段 struct；只有 struct 本身标注了 JSON codec，才执行 JSON 序列化 / 反序列化。
+**Boundary selection comes first; codec dispatch comes second.**
 
-### 1.2 Transport Source Values
+运行时先根据边界规则选中用户声明的 struct / descriptor：
 
-SSE parser 的 source value 来自 SSE fields：
+- HTTP request 先由 `struct.request({ body })` 选中 body descriptor。
+- SSE 先由 `message.event || 'message'` 选中 `events[eventName] ?? events.default`。
+- WebSocket JSON envelope 先由 envelope 的 `type` 选中 message struct。
+
+只有被选中的声明可以触发 JSON parse/stringify、primitive text decode、form serialization、text handling 或 binary pass-through。`formData`、`urlencoded`、`blob`、`arrayBuffer` 等 annotation 是否可用取决于具体 boundary；不要从 HTTP request body 支持推导出 SSE / WebSocket 也自动支持。Transport 不根据 payload 内容自行猜测。
+
+### 1.2 Logical Value vs Wire / Source Content
+
+Content codec annotation 必须区分两种值：
+
+```text
+logical authoring value
+  -> inner struct parse / encode
+  -> content codec encode
+  -> wire content
+
+wire / source content
+  -> content codec decode or primitive decoder
+  -> inner struct parse
+  -> logical output value
+```
+
+关键约束：
+
+- Inner struct 继续拥有 TypeScript input / output 和 validation。
+- Codec metadata 不应污染 `_struct.input` / `_struct.output`。
+- `struct.request({ body: struct.json(objectStruct) })` 的调用者继续传 logical object，而不是 JSON string。
+- SSE `message.data` 的 raw source 是 string；选中的 event struct 决定这个 string 是 raw text、primitive text、JSON content，还是 invalid source。
+
+### 1.3 No Transport Guessing
+
+Rejected behavior:
 
 ```ts
-{
-  data: string
-  event: string
-  id: string
-  retry?: number
+try {
+  return JSON.parse(data)
+} catch {
+  return data
 }
 ```
 
-其中 `data` 一定是 string。`data: {"a":1}` 到达 struct 前仍然是字符串：
+原因：
 
-```ts
-'{"a":1}'
-```
+- 结果类型取决于 payload spelling，而不是用户声明。
+- malformed JSON 会被当作 string 继续处理，隐藏协议 / 数据错误。
+- `struct.object(...)` 会因为 transport 偷偷 JSON.parse 而在 string source 上意外成功。
+- 用户无法区分“我声明了 JSON content”与“transport 猜中了 JSON”。
 
-WebSocket source value 由 frame 决定：
+### 1.4 Primitive Decoder vs Structured Codec
 
-- text frame: string
-- binary frame: ArrayBuffer / Blob / typed binary value
-- explicit JSON envelope helper: helper 自己先解析 envelope，再把 payload 交给 payload struct
+文本型 source boundary 可以根据 **已选 struct** 调用 primitive decoder：
 
-### 1.3 Plain Struct Semantics
+| Selected struct                                      | Raw text source | Target behavior                          |
+| ---------------------------------------------------- | --------------- | ---------------------------------------- |
+| `struct.string()`                                    | `hello`         | `'hello'`                                |
+| `struct.string()`                                    | `{"a":1}`       | `'{"a":1}'`，仍是文本                    |
+| `struct.number()`                                    | `123`           | `123`，由 number decoder 产生            |
+| `struct.boolean()`                                   | `true`          | `true`，由 boolean decoder 产生          |
+| `struct.object({ a: struct.number() })`              | `{"a":1}`       | invalid source；object 不自动 JSON.parse |
+| `struct.array(struct.number())`                      | `[1,2]`         | invalid source；array 不自动 JSON.parse  |
+| `struct.json(struct.object({ a: struct.number() }))` | `{"a":1}`       | JSON.parse 后 inner object parse         |
 
-Plain struct 原样解析 source，不做预处理：
+这不是 payload shape guessing，因为 decoder 由 selected struct 决定。结构化文本仍然必须使用显式 content codec，例如 `struct.json(inner)`。
 
-```ts
-parseStructValue(struct.string(), 'hello')
-// => 'hello'
+### 1.5 Alias, Placement, Routing Stay Separate
 
-parseStructValue(struct.string(), '{"a":1}')
-// => '{"a":1}'
+- `alias(...)` 继续是 field-level wire-key metadata。
+- `struct.request({ path, query, headers, body })` 继续负责 HTTP placement。
+- SSE event-name grouping 继续负责 event routing。
+- WebSocket envelope `type` 继续负责 message routing。
+- HTTP responseType 继续负责 response body reader 和 response parse strategy。
 
-parseStructValue(struct.number(), '123')
-// => invalid_type, source is string, not number
-
-parseStructValue(struct.object({ a: struct.number() }), '{"a":1}')
-// => invalid_type, source is string, not object
-```
-
-### 1.4 JSON Codec Annotation
-
-`struct.json(inner)` 表示该字段 / body / message part 的 wire value 是 JSON encoded content。
-
-```ts
-const dataStruct = struct.json(
-  struct.object({
-    a: struct.string(),
-    b: struct.number(),
-  }),
-)
-```
-
-当 source 是：
-
-```ts
-'{"a":"x","b":2}'
-```
-
-转换流程是：
-
-```text
-'{"a":"x","b":2}'
-  -> kind=json
-  -> JSON.parse(source)
-  -> { a: 'x', b: 2 }
-  -> inner struct.object parse
-  -> { a: 'x', b: 2 }
-```
-
-如果 struct 是 plain object：
-
-```ts
-struct.object({ a: struct.string(), b: struct.number() })
-```
-
-则同一个 source 必须失败：
-
-```text
-'{"a":"x","b":2}'
-  -> struct.object(...)
-  -> invalid_type, expected object, received string
-```
+Content codec annotation 只回答：“已选边界上的 content 应该如何从 wire/source 进入 logical value，或者反向出去？”
 
 ---
 
-## 2. Current Code Findings
+## 2. Current Code Facts
 
-### 2.1 SSE Parser Produces String Data
+### 2.1 Struct Type Model Already Preserves Logical Input / Output
 
-`packages/core/src/sse/transport/parser.ts` 当前事实：
+Current type layer has a single logical input/output pair:
+
+```ts
+export interface StructLike<I = unknown, O = unknown, OO extends boolean = boolean> {
+  readonly _struct: StructTypes<I, O, OO>
+}
+```
+
+Request body wrappers preserve inner input/output:
+
+```ts
+export interface RequestBodyStructTypes<C extends RequestBodyCodec, S extends StructLike<unknown, unknown, boolean>> extends StructTypes<
+  StructInput<S>,
+  StructOutput<S>,
+  false
+> {
+  codec: C
+  input: StructInput<S>
+  output: StructOutput<S>
+}
+```
+
+Evidence:
+
+- `packages/core/src/struct/types.ts:12-20`
+- `packages/core/src/struct/types.ts:158-171`
+- `packages/core/src/struct/types.ts:184-189`
+
+Implication: content codec metadata should stay beside the wrapper / descriptor, while logical authoring input stays derived from inner struct.
+
+### 2.2 Current `struct.json(...)` Is A Request Body Wrapper
+
+Current constructors:
+
+```ts
+export function createJsonBodyStruct<S extends StructLike<unknown, unknown, boolean>>(struct: S): RequestBodyStruct<'json', S> {
+  return createRequestBodyStruct('json', struct)
+}
+```
+
+Current request-body parse delegates to inner struct:
+
+```ts
+function parseRequestBodyValue(definition: RequestBodyDefinition, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
+  return parseValue(definition.struct as RuntimeStruct, input, path, mode)
+}
+```
+
+Evidence:
+
+- `packages/core/src/struct/constructors.ts:239-268`
+- `packages/core/src/struct/parse.ts:227-229`
+- `packages/core/src/struct/facade.ts:64`
+
+Implication: target `struct.json(inner)` should be documented as content annotation, but implementation must not globally change ordinary `parseStructValue()` to require string source. Boundary adapters must opt into wire/source codec behavior.
+
+### 2.3 HTTP Request Materialization Is The Existing Codec Boundary
+
+Current request builder switches on body descriptor:
+
+```ts
+function setRequestShapeBody(state: RequestBuilderState, descriptor: RequestBodyDescriptor, bodyValue: unknown): void {
+  switch (descriptor.codec) {
+    case 'json':
+      setJsonBody(state, encodeKeyedValue(descriptor.struct, bodyValue))
+      return
+    case 'urlencoded':
+      setFormUrlEncodedBody(state, encodeFlatRecord(descriptor.struct, bodyValue, 'urlencoded'))
+      return
+    case 'formData':
+      setFormDataBody(state, encodeFlatRecord(descriptor.struct, bodyValue, 'formData'))
+      return
+    case 'text':
+      setTextBody(state, String(encodeValue(descriptor.struct, bodyValue) ?? ''))
+      return
+    case 'blob': {
+      const encoded = encodeValue(descriptor.struct, bodyValue) as HttpRequest['body']
+      const contentType = typeof Blob !== 'undefined' && encoded instanceof Blob && encoded.type ? encoded.type : undefined
+      setRawBody(state, encoded, { contentType })
+      return
+    }
+    case 'arrayBuffer':
+      setRawBody(state, encodeValue(descriptor.struct, bodyValue) as HttpRequest['body'], { contentType: 'application/octet-stream' })
+      return
+  }
+}
+```
+
+JSON then stringifies once and records JSON content type:
+
+```ts
+function setJsonBody(state: RequestBuilderState, value: unknown, options?: RequestBodyOptions): void {
+  setBody(state, JSON.stringify(value), resolveBodyContentTypeOption(options, 'application/json'))
+}
+```
+
+Evidence:
+
+- `packages/core/src/internal/request_builder.ts:252-280`
+- `packages/core/src/internal/request_builder.ts:95-123`
+- `packages/core/src/internal/request_builder.ts:369-468`
+- `packages/core/src/internal/http_request.ts:13-19`
+- `packages/core/src/http/transport/body.ts:5-81`
+- `packages/core/src/http/transport/fetch_init.ts:4-82`
+- `packages/core/src/http/http.ts:326-330`
+
+Implications:
+
+- HTTP request body is already a content boundary.
+- JSON body must not be double-stringified.
+- JSON body must preserve codec-derived `application/json`; a string body without metadata would look like `text/plain`.
+- Manual builder paths are stable behavior: `setJson`, `setText`, `setHtml`, `setFormData`, `setFormUrlEncoded`, `setBlob`, `setArrayBuffer`, and additive form/urlencoded helpers must keep their projection semantics.
+- Existing HTML / XML text requests depend on `setHtml(...)` and `text/html;charset=UTF-8`.
+- Existing streaming uploads may use `ReadableStream<Uint8Array>` body; fetch init must preserve streaming support detection, upload-progress wrapping, `ERR_STREAMING_REQUEST_UNSUPPORTED`, and `duplex: 'half'`.
+- HTTP response parsing stays out of this redesign; `responseType === 'json'` still uses existing alias-aware JSON value decode.
+
+### 2.4 SSE Parser Produces Raw String Data
+
+Current parser contract:
 
 ```ts
 export interface EventStreamMessage {
@@ -135,878 +259,508 @@ export interface EventStreamMessage {
 }
 ```
 
-`createMessageParser()` 对 `data:` 行只做字符串拼接：
+`createMessageParser()` concatenates `data:` lines as strings.
 
-```ts
-case 'data':
-  message.data = message.data ? `${message.data}\n${value}` : value
-  break
-```
+Evidence:
 
-结论：parser 层没有、也不应该做业务 JSON 反序列化。
+- `packages/core/src/sse/transport/parser.ts:6-10`
+- `packages/core/src/sse/transport/parser.ts:145-194`
 
-### 2.2 SSE Runtime Currently Violates The Contract
+Implication: SSE transport is already correct. The problematic behavior is in runtime pre-parse, not parser.
 
-`packages/core/src/sse/sse.ts` 当前行为：
+### 2.5 SSE Runtime Currently Guesses JSON
+
+Current runtime:
 
 ```ts
 const rawData = decodeEventData(message.data)
 ```
 
-而 `decodeEventData()` 是：
+Current invalid-event reasons:
 
 ```ts
-function decodeEventData(data: string): unknown {
-  if (!data) {
-    return data
-  }
-
-  try {
-    return JSON.parse(data) as unknown
-  } catch {
-    return data
-  }
-}
+reason: 'missing-struct' | 'validation-failed'
 ```
 
-这是需要删除的隐式反序列化。它会让 `struct.object(...)` 在 SSE JSON-looking string 下意外成功，违反 struct 明确标注原则。
+Evidence:
 
-### 2.3 `struct.object(...)` Correctly Rejects String
+- `packages/core/src/sse/sse.ts:277-323`
+- `packages/core/src/sse/sse.ts:326-349`
+- `packages/core/src/sse/sse.ts:365-379`
 
-`packages/core/src/struct/parse.ts` 当前事实：
+Implications:
 
-```ts
-function parseObjectValue(..., input: unknown, ...): ParseResult<{ [key: string]: unknown }> {
-  if (!isPlainObject(input)) {
-    return failure(issue(path, 'invalid_type', 'object', input))
-  }
-}
-```
+- `decodeEventData()` is the seam to remove.
+- Unknown event handling must keep current `missing-struct` naming unless a separate breaking rename is planned.
+- `onInvalidEvent` is observer-only; observer exceptions must not tear down the stream.
 
-结论：`struct.object(...)` 收到 SSE `data` string 时失败是正确行为，不是要绕开的错误。
+### 2.6 SSE Public Shape Is Event-Name Map
 
-### 2.4 Current `struct.json(...)` Is Request Body Wrapper
-
-`packages/core/src/struct/facade.ts` 当前事实：
-
-```ts
-export const struct = {
-  json: createJsonBodyStruct,
-}
-```
-
-`packages/core/src/struct/constructors.ts` 当前事实：
-
-```ts
-export function createJsonBodyStruct<S extends StructLike<unknown, unknown, boolean>>(struct: S): RequestBodyStruct<'json', S> {
-  return createRequestBodyStruct('json', struct)
-}
-```
-
-当前 `requestBody` parse 只是委托 inner struct：
-
-```ts
-function parseRequestBodyValue(definition: RequestBodyDefinition, input: unknown, path: Path, mode: ParseMode): ParseResult<unknown> {
-  return parseValue(definition.struct as RuntimeStruct, input, path, mode)
-}
-```
-
-结论：现有 `struct.json(...)` 还没有实现通用 JSON codec 标注行为。后续实现要让 `kind=json` 真正成为 JSON codec 标记，而不是在 SSE 层临时 JSON.parse。
-
-### 2.5 Current Event Struct Shape Is Also A Legacy Constraint
-
-当前 `EventStructs` 是：
+Current public shape:
 
 ```ts
 export type EventStructs = { [key: string]: AnyStruct }
 ```
 
-当前输出类型固定成：
+Output is an event union with payload in `data`:
 
 ```ts
-{
-  data: Infer<TEvents[K]>
-  event: K
-  id?: string
-  retry?: number
-}
+export type EventStreamData<TEvents extends EventStructs> = KnownEventUnion<TEvents> | DefaultEventUnion<TEvents>
 ```
 
-这表示当前代码把 `events` 当成 event-name -> data-struct map。目标设计需要重新明确 `events` 的字段语义：字段不应被限定为固定事件名或固定 payload 形状；运行时应按字段 struct 通用解析 source object。
+Evidence:
 
-### 2.6 Why The Old Behavior Is Misleading
+- `packages/core/src/sse/sse.ts:27-55`
 
-旧实现有一个容易误导的链路：
+Implication: this plan keeps event-name grouping. A full source-object SSE API is deferred.
 
-1. SSE parser 正确产出 `message.data` string。
-2. SSE runtime 在进入 struct 之前调用 `decodeEventData()`。
-3. `decodeEventData()` 对 JSON-looking string 执行 `JSON.parse`。
-4. `struct.object(...)` 因为收到的已经是 object，所以看起来“支持 SSE JSON object”。
+### 2.7 Current WebSocket Is Typed JSON Envelope
 
-这不是设计正确，而是 transport 层提前改写了 source value。它隐藏了两个事实：
+Current outgoing path:
 
-- 用户声明 `struct.object(...)` 时，真实 wire source 仍然是 string。
-- 用户没有用 struct 明确标注 JSON codec，却得到了 JSON decode 后的值。
+```ts
+return JSON.stringify(normalizeSocketPayload(message.type, serializeStructPayload(struct, payload)))
+```
 
-正确的因果关系应该反过来：只有 struct 显式标注 `kind=json`，运行时才允许进入 JSON codec 流程。
+Current incoming path decodes frame text and JSON.parses envelope before selecting struct:
+
+```ts
+const decoded = await decodeWebSocketData(raw)
+if (!isRecord(decoded) || typeof decoded['type'] !== 'string') {
+  return undefined
+}
+const struct = incoming[messageType] ?? incoming['default']
+```
+
+Evidence:
+
+- `packages/core/src/web_socket/codec.ts:10-35`
+- `packages/core/src/web_socket/codec.ts:39-87`
+- `packages/core/src/web_socket/web_socket.ts:33-82`
+- `packages/core/src/web_socket/public_api.ts:1`
+
+Implication: raw `ws.text(...)` / `ws.binary(...)` helpers are not first-landing APIs. WebSocket should first gain an explicit JSON envelope marker only if public API is approved.
 
 ---
 
-## 3. Value Conversion Flow
+## 3. Target Boundary Model
 
-### 3.1 Plain Text SSE
+### 3.1 Shared Vocabulary
 
-Raw SSE:
+Conceptually, the project should use one vocabulary:
+
+```ts
+type ContentCodecKind = 'json' | 'urlencoded' | 'formData' | 'text' | 'blob' | 'arrayBuffer'
+```
+
+Do not rush this into public API. First landing may keep existing internal names:
+
+- `RequestBodyCodec`
+- `RequestBodyStruct<C, S>`
+- `RequestBodyDescriptor`
+- runtime kind `requestBody`
+
+The semantic shift is: those request body names are the first concrete consumer of a more general content-boundary annotation model. `struct.blob()` and `struct.arrayBuffer()` remain binary primitive structs in ordinary parsing; they are accepted as HTTP body descriptors by `createRequestBodyDescriptor()`. `formData` and `urlencoded` remain HTTP request body codecs unless another boundary explicitly defines support.
+
+### 3.2 Ordinary Struct Parse / Encode Remains Logical
+
+Ordinary struct operations remain logical schema-tree operations:
 
 ```text
-event: log
-id: 1
-data: hello
+parseStructValue(struct.json(inner), logicalValue)
+  -> delegates to inner for logical validation
 
+encodeStructValue(struct.json(inner), logicalValue)
+  -> delegates to inner for logical encoding
 ```
 
-Parser output:
-
-```ts
-{
-  event: 'log',
-  id: '1',
-  data: 'hello',
-  retry: undefined,
-}
-```
-
-Field struct:
-
-```ts
-events: {
-  data: struct.string(),
-}
-```
-
-Conversion:
+Wire/source conversion only happens when a boundary adapter explicitly asks for it:
 
 ```text
-source.data = 'hello'
-  -> struct.string()
-  -> 'hello'
+HTTP request body adapter
+SSE selected event data adapter
+WebSocket envelope adapter
+future raw WebSocket text/binary adapter
 ```
 
-Output value:
+This avoids the `_struct.input` conflict: `struct.json(inner)` does not make every call site pass JSON strings.
+
+### 3.3 HTTP Request Boundary
+
+HTTP remains section-shaped:
 
 ```ts
-{
-  data: 'hello',
-}
-```
-
-### 3.2 JSON Object Without Annotation
-
-Raw SSE:
-
-```text
-event: patch
-id: 2
-data: {"a":"x","b":2}
-
-```
-
-Parser output:
-
-```ts
-{
-  event: 'patch',
-  id: '2',
-  data: '{"a":"x","b":2}',
-  retry: undefined,
-}
-```
-
-Field struct:
-
-```ts
-events: {
-  data: struct.object({
-    a: struct.string(),
-    b: struct.number(),
-  }),
-}
-```
-
-Conversion:
-
-```text
-source.data = '{"a":"x","b":2}'
-  -> struct.object({ a, b })
-  -> invalid_type, expected object, received string
-```
-
-Expected result: validation failure. This is correct.
-
-### 3.3 JSON Object With `struct.json(...)`
-
-Raw SSE:
-
-```text
-event: patch
-id: 2
-data: {"a":"x","b":2}
-
-```
-
-Parser output:
-
-```ts
-{
-  event: 'patch',
-  id: '2',
-  data: '{"a":"x","b":2}',
-  retry: undefined,
-}
-```
-
-Field struct:
-
-```ts
-events: {
-  data: struct.json(
+struct.request({
+  path: struct.object({ id: struct.string() }),
+  query: struct.object({ q: struct.string().optional() }),
+  headers: struct.object({ authorization: struct.string() }),
+  body: struct.json(
     struct.object({
-      a: struct.string(),
-      b: struct.number(),
+      name: struct.string(),
     }),
   ),
-}
+})
 ```
 
-Conversion:
-
-```text
-source.data = '{"a":"x","b":2}'
-  -> struct kind=json
-  -> JSON.parse(source.data)
-  -> { a: 'x', b: 2 }
-  -> inner struct.object parse
-  -> { a: 'x', b: 2 }
-```
-
-Output value:
+Authoring input remains logical:
 
 ```ts
 {
-  data: {
-    a: 'x',
-    b: 2,
+  body: {
+    name: 'MunMun'
+  }
+}
+```
+
+Wire body is produced at the HTTP boundary:
+
+```text
+logical body
+  -> inner object encode with alias-aware JSON value mapping
+  -> JSON.stringify once
+  -> Content-Type: application/json
+```
+
+### 3.4 SSE Event Data Boundary
+
+Current API stays event-name grouping:
+
+```ts
+defineEventStream({
+  path: '/events',
+  events: {
+    log: struct.string(),
+    progress: struct.number(),
+    patch: struct.json(
+      struct.object({
+        op: struct.string(),
+        value: struct.number(),
+      }),
+    ),
   },
-}
+})
 ```
 
-### 3.4 JSON Boolean Field
-
-Raw SSE:
+Runtime flow:
 
 ```text
-event: ok
-data: true
-
+SSE bytes
+  -> EventStreamMessage { event, id, data: string, retry }
+  -> eventName = message.event || 'message'
+  -> selected = events[eventName] ?? events.default
+  -> if selected is missing: notify missing-struct with raw message.data and return
+  -> selected struct drives source-boundary decode
+  -> EventStreamData<TEvents> with data = decoded logical value
 ```
 
-Parser output:
+Examples:
+
+| Selected event struct                                | Raw `data:`  | Target output / behavior                  |
+| ---------------------------------------------------- | ------------ | ----------------------------------------- |
+| `struct.string()`                                    | `hello`      | `'hello'`                                 |
+| `struct.string()`                                    | `{"a":1}`    | `'{"a":1}'`                               |
+| `struct.number()`                                    | `123`        | `123`                                     |
+| `struct.boolean()`                                   | `true`       | `true`                                    |
+| `struct.object({ a: struct.number() })`              | `{"a":1}`    | invalid source; no JSON guessing          |
+| `struct.json(struct.object({ a: struct.number() }))` | `{"a":1}`    | `{ a: 1 }`                                |
+| `struct.json(struct.string())`                       | `"hello"`    | `'hello'`                                 |
+| `struct.json(struct.number())`                       | `"123"`      | inner validation failure after JSON.parse |
+| `struct.json(struct.object(...))`                    | `{bad json}` | invalid JSON, no raw-text retry           |
+
+The important rule: `struct.object(...)` never means “parse JSON text into object”. The user must declare `struct.json(struct.object(...))` for JSON object content.
+
+SSE textual primitive semantics for first landing:
+
+- `struct.string()` returns the raw untrimmed text.
+- `struct.number()` trims text, applies `Number(trimmed)`, and accepts only finite, non-`NaN` values; empty text is invalid.
+- `struct.boolean()` trims text and accepts only exact `true` / `false`.
+- `struct.text()` is treated as raw text, equivalent to `struct.string()` at the SSE data boundary.
+- `struct.json(inner)` is recognized as a JSON request-body/content wrapper: unwrap the inner struct, `JSON.parse(rawText)`, then run alias-aware decode / inner parse. Do not pass the wrapper itself to the current alias mapper.
+- `struct.any()` / `struct.unknown()` receive raw string as logical value.
+- Plain `literal` / `enum` / `union` / `intersection` / `object` / `array` / `record` / `date` / `bigint` structs receive raw string through ordinary logical parse; they only pass if ordinary parse accepts that string.
+- `urlencoded`, `formData`, `blob`, and `arrayBuffer` wrappers / primitives are unsupported at the SSE string boundary in the first landing and should produce `validation-failed`, not ad-hoc coercion.
+
+### 3.5 WebSocket Boundary
+
+Current WebSocket contract remains JSON envelope:
 
 ```ts
-{
-  event: 'ok',
-  id: '',
-  data: 'true',
-  retry: undefined,
-}
-```
-
-Without JSON annotation:
-
-```ts
-events: {
-  data: struct.boolean(),
-}
-```
-
-Conversion:
-
-```text
-source.data = 'true'
-  -> struct.boolean()
-  -> invalid_type, expected boolean, received string
-```
-
-With JSON annotation:
-
-```ts
-events: {
-  data: struct.json(struct.boolean()),
-}
-```
-
-Conversion:
-
-```text
-source.data = 'true'
-  -> struct kind=json
-  -> JSON.parse('true')
-  -> true
-  -> inner struct.boolean parse
-  -> true
-```
-
-### 3.5 JSON String Field
-
-Raw SSE:
-
-```text
-event: title
-data: "hello"
-
-```
-
-Parser output:
-
-```ts
-{
-  event: 'title',
-  id: '',
-  data: '"hello"',
-  retry: undefined,
-}
-```
-
-Plain string struct:
-
-```ts
-events: {
-  data: struct.string(),
-}
-```
-
-Output:
-
-```ts
-{
-  data: '"hello"',
-}
-```
-
-JSON string struct:
-
-```ts
-events: {
-  data: struct.json(struct.string()),
-}
-```
-
-Output:
-
-```ts
-{
-  data: 'hello',
-}
-```
-
-This distinction is intentional.
-
-### 3.6 Correct Full Flow
-
-Raw SSE:
-
-```text
-event: patch
-id: 42
-data: {"a":"hello","b":7}
-
-```
-
-User struct:
-
-```ts
-events: {
-  event: struct.string(),
-  id: struct.string(),
-  data: struct.json(
-    struct.object({
-      a: struct.string(),
-      b: struct.number(),
-    }),
-  ),
-}
-```
-
-Correct value flow:
-
-```text
-raw bytes
-  -> TextDecoder
-  -> lines:
-     'event: patch'
-     'id: 42'
-     'data: {"a":"hello","b":7}'
-     ''
-  -> parser message:
-     {
-       event: 'patch',
-       id: '42',
-       data: '{"a":"hello","b":7}',
-       retry: undefined,
-     }
-  -> source object:
-     {
-       event: 'patch',
-       id: '42',
-       data: '{"a":"hello","b":7}',
-       retry: undefined,
-     }
-  -> events.event: struct.string()
-     source.event = 'patch'
-     output.event = 'patch'
-  -> events.id: struct.string()
-     source.id = '42'
-     output.id = '42'
-  -> events.data: struct.json(inner)
-     source.data = '{"a":"hello","b":7}'
-     JSON.parse(source.data)
-     parsed = { a: 'hello', b: 7 }
-     inner struct.object parse
-     output.data = { a: 'hello', b: 7 }
-  -> final output:
-     {
-       event: 'patch',
-       id: '42',
-       data: { a: 'hello', b: 7 },
-     }
-```
-
-Why this is correct:
-
-- The parser never changes `data` from string to object.
-- The runtime does not infer JSON from payload shape.
-- JSON parsing is caused only by the `data` field struct being `kind=json`.
-
-### 3.7 Incorrect Full Flow
-
-Raw SSE:
-
-```text
-event: patch
-id: 42
-data: {"a":"hello","b":7}
-
-```
-
-User struct:
-
-```ts
-events: {
-  event: struct.string(),
-  id: struct.string(),
-  data: struct.object({
-    a: struct.string(),
-    b: struct.number(),
-  }),
-}
-```
-
-Incorrect old flow:
-
-```text
-parser message.data = '{"a":"hello","b":7}'
-  -> decodeEventData(message.data)
-  -> JSON.parse(message.data)
-  -> { a: 'hello', b: 7 }
-  -> struct.object({ a, b })
-  -> success
-```
-
-Why this is wrong:
-
-- `struct.object(...)` was declared against an object source, but the actual SSE source is string.
-- The runtime silently inserted JSON parsing before struct parsing.
-- The success depends on data content looking like JSON, not on an explicit struct marker.
-
-Correct behavior for the same struct:
-
-```text
-parser message.data = '{"a":"hello","b":7}'
-  -> no pre-parse
-  -> struct.object({ a, b })
-  -> invalid_type, expected object, received string
-```
-
-To make it valid, the user must mark the field:
-
-```ts
-events: {
-  data: struct.json(
-    struct.object({
-      a: struct.string(),
-      b: struct.number(),
-    }),
-  ),
-}
-```
-
-### 3.8 Real User Case
-
-用户想消费一个 SSE stream，服务端发送的是 JSON encoded business payload：
-
-```text
-event: position_snapshot
-id: 1001
-data: {"account":"U10086","positionId":9527,"closed":false}
-
-```
-
-The desired parsed value:
-
-```ts
-{
-  event: 'position_snapshot',
-  id: '1001',
-  data: {
-    account: 'U10086',
-    positionId: 9527,
-    closed: false,
+defineWebSocket({
+  path: '/ws',
+  incoming: {
+    patch: struct.object({ op: struct.string() }),
   },
-}
+  outgoing: {
+    ack: struct.object({ id: struct.string() }),
+  },
+})
 ```
 
-Correct struct:
-
-```ts
-events: {
-  event: struct.string(),
-  id: struct.string(),
-  data: struct.json(
-    struct.object({
-      account: struct.string(),
-      positionId: struct.number(),
-      closed: struct.boolean(),
-    }),
-  ),
-}
-```
-
-Wrong struct:
-
-```ts
-events: {
-  data: struct.object({
-    account: struct.string(),
-    positionId: struct.number(),
-    closed: struct.boolean(),
-  }),
-}
-```
-
-Why the wrong struct must fail:
-
-- SSE `data` arrives as `'{"account":"U10086","positionId":9527,"closed":false}'`.
-- `struct.object(...)` cannot parse string.
-- Allowing it to pass would mean the transport layer performed implicit JSON decoding.
-
-### 3.9 Custom Events Fields And Uncertainty
-
-`events` must not be treated as a closed, fixed shape. SSE has familiar fields (`event`, `id`, `data`, `retry`), but the user-facing struct should stay generic:
-
-```ts
-events: {
-  data: struct.string(),
-}
-```
-
-```ts
-events: {
-  id: struct.string(),
-  data: struct.json(orderStruct),
-}
-```
-
-```ts
-events: {
-  event: struct.string(),
-  data: struct.json(orderStruct),
-  receivedAt: struct.date(),
-}
-```
-
-This creates uncertainty for the runtime:
-
-- It cannot assume `data` is always present in the user's output shape.
-- It cannot assume all users want `event`, `id`, or `retry`.
-- It cannot assume a field should be JSON parsed because the field name is `data`.
-- It cannot assume a field should be ignored because it is not one of the SSE protocol fields.
-
-The resolution is simple: build a source object from whatever transport facts are available, then parse only through the user-provided field struct. Standard SSE facts can provide `event`, `id`, `data`, and `retry`; any extra field such as `receivedAt` must come from an explicit source builder / adapter, not from magic. If a field needs JSON, the field struct says so with `struct.json(...)`. If it does not, the source value stays unchanged.
-
----
-
-## 4. Target API Direction
-
-### 4.1 `struct.json(inner)` Becomes A Codec Annotation
-
-The target behavior for `struct.json(inner)`:
-
-```ts
-function parseJsonCodec(inner, source, path) {
-  if (typeof source !== 'string') {
-    return failure(issue(path, 'invalid_type', 'JSON string', source))
-  }
-
-  let parsed
-  try {
-    parsed = JSON.parse(source)
-  } catch (cause) {
-    return failure(issue(path, 'invalid_json', 'valid JSON string', source, cause))
-  }
-
-  return parseStructTuple(inner, parsed, path)
-}
-
-function encodeJsonCodec(inner, value) {
-  const encoded = encodeStructValue(inner, value)
-  return JSON.stringify(encoded)
-}
-```
-
-Properties:
-
-- It is triggered by struct kind, not by payload shape.
-- JSON.parse failure is a validation failure, not fallback to string.
-- Inner struct validation happens after JSON.parse.
-- The output type is inner output.
-- This mechanism is reusable across SSE, WebSocket, HTTP body, and any future field source.
-
-### 4.2 SSE Runtime
-
-Target SSE handling:
-
-```ts
-function handleSseMessage(events, message) {
-  const source = {
-    data: message.data,
-    event: message.event || 'message',
-    id: message.id || undefined,
-    retry: message.retry,
-  }
-
-  return parseStructValue(struct.object(events), source)
-}
-```
-
-If the public API keeps event-name grouping, event selection must happen separately from data field parsing. It must not introduce a pre-parse step:
-
-```ts
-function handleNamedSseEvent(eventsByName, message) {
-  const eventName = message.event || 'message'
-  const struct = eventsByName[eventName] ?? eventsByName.default
-
-  if (!struct) {
-    return invalidEvent('missing-struct', message)
-  }
-
-  return parseStructValue(struct, message.data)
-}
-```
-
-The important rule is unchanged: `message.data` is passed as string. No `decodeEventData()`.
-
-### 4.3 WebSocket Runtime
-
-Raw text frame:
-
-```ts
-function handleWebSocketText(struct, data) {
-  return parseStructValue(struct, data)
-}
-```
-
-Raw binary frame:
-
-```ts
-function handleWebSocketBinary(struct, data) {
-  return parseStructValue(struct, data)
-}
-```
-
-Explicit JSON envelope helper:
-
-```ts
-function handleWebSocketJsonEnvelope(messageMap, data) {
-  const envelope = JSON.parse(data)
-  const type = envelope.type
-  const struct = messageMap[type] ?? messageMap.default
-
-  if (!struct) {
-    return undefined
-  }
-
-  const payload = 'data' in envelope ? envelope.data : omitType(envelope)
-  return parseStructValue(struct, payload)
-}
-```
-
-`ws.json(map)` is a protocol helper for a JSON envelope. It is not a generic source decoder and should not affect raw text or binary handlers.
-
----
-
-## 5. Contract Examples
-
-### 5.1 SSE Data Field
-
-| Field declaration                                          | Raw `data:`  | Source to field struct | Expected result                     |
-| ---------------------------------------------------------- | ------------ | ---------------------- | ----------------------------------- |
-| `data: struct.string()`                                    | `hello`      | `'hello'`              | `'hello'`                           |
-| `data: struct.string()`                                    | `{"a":1}`    | `'{"a":1}'`            | `'{"a":1}'`                         |
-| `data: struct.string()`                                    | `"hello"`    | `'"hello"'`            | `'"hello"'`                         |
-| `data: struct.number()`                                    | `123`        | `'123'`                | invalid type                        |
-| `data: struct.boolean()`                                   | `true`       | `'true'`               | invalid type                        |
-| `data: struct.object({ a: struct.number() })`              | `{"a":1}`    | `'{"a":1}'`            | invalid type                        |
-| `data: struct.array(struct.number())`                      | `[1,2]`      | `'[1,2]'`              | invalid type                        |
-| `data: struct.json(struct.number())`                       | `123`        | `'123'`                | `123`                               |
-| `data: struct.json(struct.boolean())`                      | `true`       | `'true'`               | `true`                              |
-| `data: struct.json(struct.string())`                       | `"hello"`    | `'"hello"'`            | `'hello'`                           |
-| `data: struct.json(struct.object({ a: struct.number() }))` | `{"a":1}`    | `'{"a":1}'`            | `{ a: 1 }`                          |
-| `data: struct.json(struct.array(struct.number()))`         | `[1,2]`      | `'[1,2]'`              | `[1, 2]`                            |
-| `data: struct.json(struct.number())`                       | `"123"`      | `'"123"'`              | invalid type after JSON.parse       |
-| `data: struct.json(struct.object(...))`                    | `{bad json}` | `'{bad json}'`         | invalid JSON, no fallback           |
-| `data: struct.arrayBuffer()`                               | `SGVsbG8=`   | `'SGVsbG8='`           | invalid type without explicit codec |
-
-### 5.2 SSE Full Message Shape
-
-If the API exposes the full SSE source object:
-
-```ts
-events: {
-  event: struct.string(),
-  id: struct.string().optional(),
-  data: struct.json(
-    struct.object({
-      a: struct.string(),
-      b: struct.number(),
-    }),
-  ),
-  retry: struct.number().optional(),
-}
-```
-
-Raw SSE:
+Current runtime:
 
 ```text
-event: patch
-id: 2
-retry: 1000
-data: {"a":"x","b":2}
-
+raw frame
+  -> text decode where applicable
+  -> JSON.parse envelope
+  -> envelope.type chooses struct
+  -> payload passes through alias-aware struct decode
 ```
 
-Output:
+Target first landing does **not** promise raw frame helpers. If a public marker is approved later, prefer explicit envelope wording:
 
 ```ts
-{
-  event: 'patch',
-  id: '2',
-  data: { a: 'x', b: 2 },
-  retry: 1000,
-}
+incoming: ws.json({
+  patch: struct.object({ op: struct.string() }),
+})
 ```
 
-### 5.3 WebSocket
+Raw helpers are deferred because current `receive`, `send`, queue, and heartbeat semantics assume typed envelopes.
 
-| Frame / helper         | Declaration                       | Source value            | Expected result                    |
-| ---------------------- | --------------------------------- | ----------------------- | ---------------------------------- |
-| raw text frame         | `struct.string()`                 | string                  | raw string                         |
-| raw text frame         | `struct.number()`                 | string                  | invalid type                       |
-| raw text frame         | `struct.json(struct.object(...))` | JSON string             | object after kind=json             |
-| raw binary frame       | `struct.arrayBuffer()`            | ArrayBuffer             | ArrayBuffer                        |
-| raw binary frame       | `struct.json(inner)`              | ArrayBuffer             | invalid type, expected JSON string |
-| explicit JSON envelope | `ws.json({ message: struct })`    | parsed envelope payload | `struct` output                    |
+### 3.6 Boundary Capability Matrix
 
----
-
-## 6. Compatibility Strategy
-
-### Phase 0: Characterization Tests
-
-- [ ] Capture current SSE parser output: `data` is string.
-- [ ] Capture current invalid behavior: `decodeEventData()` auto JSON.parse makes object data accidentally succeed.
-- [ ] Capture plain `struct.object(...)` rejecting string.
-- [ ] Capture current `struct.json(...)` as requestBody wrapper.
-- [ ] Capture current WebSocket JSON envelope behavior.
-
-### Phase 1: Struct JSON Codec
-
-- [ ] Introduce a real `kind=json` struct / wrapper.
-- [ ] Preserve existing request body API shape where possible.
-- [ ] Parse path: string source -> JSON.parse -> inner struct parse.
-- [ ] Encode path: inner encode -> JSON.stringify.
-- [ ] JSON.parse failure produces explicit validation error.
-- [ ] Inner struct failure preserves inner issue path.
-- [ ] Non-string source for `kind=json` fails unless a future codec explicitly supports other sources.
-
-### Phase 2: SSE Stops Guessing
-
-- [ ] Remove `decodeEventData()`.
-- [ ] Pass `message.data` string directly into the relevant field / payload struct.
-- [ ] Update tests so `struct.object(...)` with JSON-looking SSE data fails.
-- [ ] Add tests so `struct.json(struct.object(...))` succeeds.
-- [ ] Keep `onInvalidEvent` observer behavior for validation failures.
-
-### Phase 3: Revisit SSE Public Shape
-
-- [ ] Decide whether `defineEventStream.events` is a full source field struct or still an event-name grouping.
-- [ ] If event-name grouping remains, keep field parsing rules inside each selected struct.
-- [ ] If full source struct is adopted, infer output from custom fields instead of fixed `{ event, data, id, retry }`.
-- [ ] In either shape, no transport-level JSON.parse is allowed.
-
-### Phase 4: WebSocket Helpers
-
-- [ ] Keep current JSON envelope behavior only behind explicit `ws.json(map)` or documented legacy shorthand.
-- [ ] Add / document `ws.text(struct)` for raw text source.
-- [ ] Add / document `ws.binary(struct)` for raw binary source.
-- [ ] Do not decode binary frame as UTF-8 JSON unless an explicit future codec marks that behavior.
-
-### Phase 5: Docs And Migration
-
-- [ ] Add conversion diagrams for SSE raw values.
-- [ ] Document `struct.json(...)` as JSON codec annotation.
-- [ ] Remove docs that describe `struct.json(...)` as generic source decoder.
-- [ ] Add migration notes from auto JSON SSE to `data: struct.json(...)`.
+| Boundary                                         | Current support                                                                                                                    | Target first landing                                                                         | Deferred                                                                     |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| HTTP request body via `struct.request({ body })` | `json`, `urlencoded`, `formData`, `text`, raw `blob`, raw `arrayBuffer`                                                            | Preserve behavior, consolidate dispatcher, document as content annotation                    | Internal rename from requestBody to contentCodec                             |
+| Manual HTTP request builder                      | `setJson`, `setText`, `setHtml`, `setFormData`, `setFormUrlEncoded`, `setBlob`, `setArrayBuffer`, additive form/urlencoded helpers | Preserve projection semantics and content-type metadata, including `text/html;charset=UTF-8` | Unify only where it does not require a single inner struct                   |
+| Raw / streaming HTTP request body                | `ReadableStream<Uint8Array>` body, fetch streaming probe, upload-progress wrapping, `duplex: 'half'`                               | Preserve existing transport behavior                                                         | Separate stream codec design if needed                                       |
+| HTTP response body                               | `responseType` driven                                                                                                              | Out of scope; keep existing behavior                                                         | Separate response codec design if needed                                     |
+| SSE event data                                   | raw parser string, runtime currently guesses JSON                                                                                  | Remove guessing; selected event struct drives defined text primitive / JSON decode           | Full source-object event API                                                 |
+| WebSocket JSON envelope                          | current typed JSON envelope contract                                                                                               | Keep current behavior in first landing                                                       | Optional explicit `ws.json(map)` marker in follow-up                         |
+| WebSocket raw binary                             | current frames are still decoded through the typed JSON envelope path                                                              | unchanged in first landing                                                                   | Separate receive/send/queue/heartbeat design for raw `ws.text` / `ws.binary` |
 
 ---
 
-## 7. Test Matrix
+## 4. Implementation Phases
+
+### Phase 0 — Plan Rewrite And Baseline
+
+- [x] Rewrite this plan around content boundary annotations.
+- [ ] Start implementation from a clean worktree / branch or explicitly isolate existing dirty changes.
+- [ ] Record baseline `git status --short --branch`.
+- [ ] Confirm old `packages/core/src/handler/**` deletion / migration is not part of this plan.
+- [ ] Confirm HTTP path is current `packages/core/src/http/**` and `packages/core/src/internal/request_builder.ts`.
+
+Verification for doc-only patch:
+
+```sh
+pnpm --filter doc test
+pnpm --filter doc typecheck
+pnpm --filter doc docs:build
+```
+
+### Phase 1 — Type Vocabulary Bridge, No Behavior Change
+
+- [ ] Optionally add internal aliases such as `ContentCodecKind = RequestBodyCodec` and `ContentCodecDescriptor = RequestBodyDescriptor`.
+- [ ] Keep public `RequestBody*` surface unchanged unless public type tests are intentionally updated.
+- [ ] Keep runtime kind `requestBody` as a delegation node.
+- [ ] Add type tests proving wrapper input/output remains inner input/output.
+- [ ] Add type tests proving `struct.request({ body: struct.json(inner) })` still accepts logical body input, not JSON string.
+
+Core verification:
+
+```sh
+pnpm --filter @defjs/core test:type
+pnpm --filter @defjs/core typecheck
+```
+
+### Phase 2 — HTTP Request Body Dispatcher Consolidation
+
+- [ ] Refactor `setRequestShapeBody()` around a narrow content-boundary dispatcher.
+- [ ] Preserve JSON alias-aware encode and single `JSON.stringify`.
+- [ ] Preserve URLSearchParams / FormData serialization.
+- [ ] Preserve `text/plain;charset=UTF-8`, `text/html;charset=UTF-8`, `application/json`, `application/x-www-form-urlencoded;charset=UTF-8`, FormData header deletion, Blob type detection, ArrayBuffer octet-stream defaults.
+- [ ] Preserve manual build-plan projection semantics; do not force manual `ctx.setJson(...)` / `ctx.setHtml(...)` into a single-inner-struct API.
+- [ ] Preserve `setHtml(...)` / HTML / XML request tests.
+- [ ] Preserve `ReadableStream<Uint8Array>` request bodies, streaming support probe, upload-progress wrapping, `ERR_STREAMING_REQUEST_UNSUPPORTED`, and fetch `duplex: 'half'`.
+- [ ] Preserve `contentType: null` suppression and stale body-content-type protection.
+
+Core verification:
+
+```sh
+pnpm --filter @defjs/core test
+pnpm --filter @defjs/core typecheck
+```
+
+`pnpm --filter @defjs/core test` already runs `test:type`; use the explicit `test:type` command only for type-only phases.
+
+### Phase 3 — SSE Source-Boundary Decoder
+
+- [ ] Remove `decodeEventData()` guessing from `packages/core/src/sse/sse.ts`.
+- [ ] Keep `packages/core/src/sse/transport/parser.ts` transport-only; `data` remains string.
+- [ ] Enforce this exact order: compute `eventName`, resolve `eventStruct = events[eventName] ?? events.default`, notify `missing-struct` with raw `message.data` and return if absent, and only then call a new SSE boundary-only decoder with `(eventStruct, message.data)`.
+- [ ] Unknown / missing events must never attempt JSON.parse, primitive decode, or any other data decode.
+- [ ] The new decoder is SSE boundary-only. It must not change `_struct.input`, primitive struct constructors, or ordinary `parseStructValue()` semantics.
+- [ ] Apply selected-struct boundary decode:
+  - `struct.string()` gets raw untrimmed text.
+  - `struct.number()` trims text, applies `Number(trimmed)`, accepts only finite non-`NaN` values, and rejects empty text.
+  - `struct.boolean()` trims text and accepts only exact `true` / `false`.
+  - `struct.text()` behaves like raw text at this boundary.
+  - `struct.json(inner)` unwraps the JSON content wrapper, uses JSON.parse, then inner parse / alias decode.
+  - plain object / array / record do not parse JSON text.
+  - unsupported codecs (`urlencoded`, `formData`, `blob`, `arrayBuffer`) fail through `validation-failed`.
+- [ ] Unknown event remains `missing-struct`.
+- [ ] Selected payload failure remains `validation-failed`.
+- [ ] `onInvalidEvent` observer errors remain swallowed.
+- [ ] The same PR that removes SSE JSON guessing must update `doc/core/sse.md` with the migration note from unwrapped `struct.object(...)` to `struct.json(struct.object(...))`.
+
+Required tests:
 
 ```ts
 test('sse parser emits data as string')
-test('sse runtime does not JSON.parse data before struct parsing')
-test('sse data struct.string returns json-looking text as raw string')
-test('sse data struct.number rejects numeric text')
-test('sse data struct.boolean rejects boolean text')
-test('sse data struct.object rejects json object text without json codec')
-test('sse data struct.array rejects json array text without json codec')
-test('sse data struct.json number parses numeric json text')
-test('sse data struct.json boolean parses boolean json text')
-test('sse data struct.json string parses json string text')
-test('sse data struct.json object parses json object text')
-test('sse data struct.json array parses json array text')
-test('sse data struct.json reports invalid json without fallback')
-test('sse data struct.json reports inner struct errors after JSON.parse')
-test('websocket raw text struct receives string source as-is')
-test('websocket raw binary struct receives binary source as-is')
-test('websocket json envelope is explicit protocol behavior')
-test('existing http request body struct.json remains compatible')
+test('sse struct.string returns raw json-looking text')
+test('sse struct.number decodes finite numeric text by selected struct')
+test('sse struct.number rejects empty, NaN, and Infinity text')
+test('sse struct.boolean accepts only exact true and false text')
+test('sse struct.object rejects json object text without json codec')
+test('sse struct.array rejects json array text without json codec')
+test('sse struct.json object parses json object text')
+test('sse struct.json preserves aliased fields')
+test('sse struct.json reports invalid json without raw-text retry')
+test('sse struct.json preserves inner issue paths')
+test('sse unsupported codecs fail through validation-failed')
+test('sse missing event reports missing-struct without decoding data')
+test('sse selected parse failure reports validation-failed')
+test('sse onInvalidEvent observer errors do not tear down stream')
 ```
+
+### Deferred Follow-up — WebSocket Explicit JSON Envelope Marker
+
+This is not part of first landing. First landing preserves the current typed JSON envelope behavior, including the current frame decoding path. Do not mix a WebSocket public API change with the HTTP/SSE phases.
+
+If a later WebSocket phase is explicitly approved:
+
+- [ ] Add `ws.json(map)` as explicit marker for the current typed JSON envelope protocol.
+- [ ] Store marker metadata on a non-string `unique symbol` so metadata cannot enter `keyof` message maps.
+- [ ] Add `defineWebSocket` overloads or normalization types that unwrap marked incoming / outgoing maps before deriving `WebSocketIncomingData` and `WebSocketOutgoingData`.
+- [ ] Export through `packages/core/src/web_socket/public_api.ts`, `packages/core/src/web_socket/index.ts`, and root public API only after type tests pass.
+- [ ] If a later phase keeps plain map syntax, test it as an explicit current syntax decision.
+- [ ] Keep raw text / binary helpers deferred until receive / send / queue / heartbeat shapes are designed.
+- [ ] If a future phase changes binary frame behavior away from the current typed JSON envelope path, document it as a breaking WebSocket change with dedicated tests.
+
+Required tests if this follow-up lands:
+
+```ts
+test('websocket json envelope marker metadata does not enter message keys')
+test('websocket json envelope marker preserves incoming union inference')
+test('websocket json envelope marker preserves outgoing send inference')
+test('websocket plain map behavior is explicitly specified')
+```
+
+### Phase 5 — Docs And Migration Gates
+
+Docs must be split by the phase that changes behavior:
+
+- [ ] Concept / struct docs: update `packages/core/src/struct/README.md`, `doc/core/struct.md`, and `doc/guide/design-decisions.md` when the project adopts content-boundary terminology.
+- [ ] HTTP docs: update `doc/core/http.md` only if Phase 2 changes wording, examples, or request-builder documentation; preserve `setHtml(...)` and streaming upload behavior.
+- [ ] SSE migration docs: the Phase 3 PR that removes JSON guessing must update `doc/core/sse.md` with the migration example below.
+- [ ] WebSocket docs: update `doc/core/web-socket.md` only in the deferred WebSocket follow-up, not in first landing.
+
+SSE migration docs must include:
+
+```ts
+// Old accidental SSE behavior: object schema passed only because runtime guessed JSON.
+events: {
+  patch: struct.object({ op: struct.string() }),
+}
+
+// Target explicit behavior.
+events: {
+  patch: struct.json(
+    struct.object({ op: struct.string() }),
+  ),
+}
+```
+
+Localized docs under `doc/*/` are a separate follow-up unless explicitly in scope for the implementation PR.
+
+### Phase 6 — Cleanup After Migration Window
+
+- [ ] Consider renaming internal `requestBody` concepts to `contentCodec` only after behavior is covered by tests.
+- [ ] Audit public API and generated declarations before deleting alias entries.
+- [ ] Remove any temporary SSE raw-text retry if one was introduced.
 
 ---
 
-## 8. Rejected Alternatives
+## 5. Acceptance Criteria
 
-### 8.1 Transport-Level JSON Guessing
+### 5.1 Plan / Documentation Acceptance
+
+- [ ] The first page states the accepted model: codecs are content-boundary annotations for expected content.
+- [ ] The plan separates current behavior from target behavior.
+- [ ] The plan keeps HTTP response parsing out of scope.
+- [ ] The plan uses current SSE invalid-event reason `missing-struct`, not `missing-schema`.
+- [ ] The plan marks raw WebSocket text / binary helpers as deferred.
+- [ ] The first-landing docs PR contains no WebSocket breaking-change language and no raw `ws.text` / `ws.binary` migration instructions.
+- [ ] The plan keeps `struct.request` as placement owner and `alias` as field-level wire-key metadata.
+- [ ] The plan includes a boundary capability matrix.
+- [ ] The plan includes exact verification commands.
+
+### 5.2 Core Runtime Acceptance
+
+- [ ] Existing HTTP request body `struct.json(inner)` call sites remain valid.
+- [ ] JSON request body is stringified exactly once.
+- [ ] JSON request body preserves `application/json` content type.
+- [ ] `setHtml(...)` preserves `text/html;charset=UTF-8` and existing HTML / XML request behavior.
+- [ ] `ReadableStream<Uint8Array>` request bodies preserve streaming support detection, upload-progress wrapping, unsupported-runtime error, and fetch `duplex: 'half'`.
+- [ ] FormData request body still deletes / avoids explicit `Content-Type` unless user overrides with supported semantics.
+- [ ] HTTP response `responseType: 'json'` remains response-driven and does not require response body to be string.
+- [ ] SSE parser still emits `data: string`.
+- [ ] SSE runtime checks `missing-struct` before any data decode.
+- [ ] SSE runtime no longer calls JSON.parse before selected struct is known.
+- [ ] SSE primitive decoders are selected by struct, not payload shape, and follow the documented text semantics.
+- [ ] SSE plain object / array structs do not parse JSON text.
+- [ ] SSE explicit `struct.json(inner)` parses JSON text and validates inner struct.
+- [ ] JSON parse failure is a validation failure with no raw-text retry.
+- [ ] `onInvalidEvent` behavior stays stable.
+
+### 5.3 Type Acceptance
+
+- [ ] `struct.json(inner)` wrapper input/output remain inner input/output in logical contexts.
+- [ ] `RequestInput<typeof request>` with JSON body accepts inner logical object, not JSON string.
+- [ ] SSE event data inference is based on selected event struct output.
+- [ ] Follow-up only: WebSocket envelope helper, if added, preserves literal message type union and `send()` payload inference through unwrapped message maps.
+- [ ] No new public `ContentCodec*` or WebSocket marker type is exported accidentally in first landing.
+
+### 5.4 Verification Commands
+
+For doc-only changes:
+
+```sh
+pnpm --filter doc test
+pnpm --filter doc typecheck
+pnpm --filter doc docs:build
+```
+
+For core type-only phases:
+
+```sh
+pnpm --filter @defjs/core test:type
+pnpm --filter @defjs/core typecheck
+```
+
+For core behavior phases:
+
+```sh
+pnpm --filter @defjs/core test
+pnpm --filter @defjs/core typecheck
+```
+
+`pnpm --filter @defjs/core test` already runs `test:type`, so do not list both unless you intentionally want a redundant gate.
+
+Final workspace gate after implementation and docs:
+
+```sh
+pnpm check
+pnpm test
+```
+
+Only report these as passing if they were actually run and passed.
+
+---
+
+## 6. Rejected Alternatives
+
+### 6.1 Transport-Level JSON Guessing
 
 Rejected:
 
@@ -1018,51 +772,78 @@ try {
 }
 ```
 
-Reasons:
+Reason: it makes runtime values depend on payload spelling instead of declarations, hides malformed JSON, and makes `struct.object(...)` indistinguishable from explicit JSON content.
 
-- It makes result type depend on payload shape instead of struct.
-- `struct.string()` can unexpectedly receive object / number / boolean.
-- `struct.object(...)` can accidentally succeed on SSE string data.
-- JSON parse failure fallback hides protocol/data errors.
-- It bypasses the explicit `kind=json` marker.
-
-### 8.2 `struct.object(...)` Auto JSON.parse
+### 6.2 `struct.object(...)` Auto JSON.parse
 
 Rejected:
 
-- Plain object struct must mean object source.
-- Auto JSON.parse would make `struct.object(...)` and `struct.json(struct.object(...))` indistinguishable in practice.
+- Plain object struct means object source.
+- Auto JSON.parse would make `struct.object(...)` and `struct.json(struct.object(...))` operationally identical.
 - It prevents users from seeing the true wire/source type.
 
-### 8.3 Independent Message Transformer
+### 6.3 Global `parseStructValue()` JSON-String Behavior
+
+Rejected:
+
+```ts
+parseStructValue(struct.json(inner), '{"a":1}')
+```
+
+should not become the universal meaning of `struct.json(inner)` in every logical context. JSON source decode belongs to content boundaries. Otherwise HTTP request authoring input would become ambiguous and existing call sites could start requiring JSON strings.
+
+### 6.4 Independent Message Transformer
 
 Rejected:
 
 - It creates a second parsing path outside struct.
-- It can bypass field tags, zero value behavior, issue paths, and encode/decode symmetry.
-- The JSON behavior already has a natural home: struct kind / codec annotation.
+- It can bypass aliases, zero value behavior, issue paths, and encode/decode symmetry.
+- The behavior belongs in boundary adapters that consume struct annotations.
 
-### 8.4 Restricting Messages To Object Payloads
+### 6.5 First-Landing Raw WebSocket Text / Binary Helpers
 
-Rejected:
+Rejected for this plan:
 
-- SSE data can be plain text.
-- JSON primitive content such as `true`, `123`, or `"hello"` is valid when explicitly marked with `struct.json(...)`.
-- Binary and other future codecs should be expressed explicitly, not by forcing object-only payloads.
+- Current receive / send / queue / heartbeat logic assumes typed JSON envelopes.
+- Raw frames have no `type` field for message routing.
+- Supporting them safely requires a separate result-shape and queue design.
 
 ---
 
-## 9. Source References
+## 7. Traceability Matrix
+
+| Target behavior                                           | Source files                                                                                                                                    | Test locations                                           | Docs                                                                           |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Request body wrapper preserves logical input/output       | `packages/core/src/struct/types.ts`, `packages/core/src/struct/constructors.ts`, `packages/core/src/struct/parse.ts`                            | `packages/core/src/struct/*.type.test.ts`, request tests | `packages/core/src/struct/README.md`, `doc/core/struct.md`, `doc/core/http.md` |
+| JSON request body stringifies once and keeps content type | `packages/core/src/internal/request_builder.ts`, `packages/core/src/http/transport/body.ts`                                                     | HTTP request/body specs                                  | `doc/core/http.md`                                                             |
+| HTML and streaming request paths stay compatible          | `packages/core/src/internal/request_builder.ts`, `packages/core/src/internal/http_request.ts`, `packages/core/src/http/transport/fetch_init.ts` | request builder and fetch streaming specs                | `doc/core/http.md`                                                             |
+| HTTP response parsing remains responseType-driven         | `packages/core/src/http/http.ts`, `packages/core/src/http/request.ts`                                                                           | HTTP response type specs                                 | `doc/core/http.md`                                                             |
+| SSE parser emits raw string data                          | `packages/core/src/sse/transport/parser.ts`                                                                                                     | `packages/core/src/sse/transport/parser.spec.ts`         | `doc/core/sse.md`                                                              |
+| SSE removes JSON guessing                                 | `packages/core/src/sse/sse.ts`                                                                                                                  | `packages/core/src/sse/sse.spec.ts`                      | `doc/core/sse.md`, migration notes                                             |
+| SSE selected struct drives primitive / JSON decode        | `packages/core/src/sse/sse.ts`, new content decoder helper                                                                                      | `packages/core/src/sse/sse.spec.ts`, type tests          | `doc/core/sse.md`                                                              |
+| WebSocket current envelope stays stable                   | `packages/core/src/web_socket/codec.ts`, `packages/core/src/web_socket/web_socket.ts`                                                           | `packages/core/src/web_socket/*.spec.ts`, type tests     | `doc/core/web-socket.md`                                                       |
+| Optional `ws.json(map)` marker preserves inference        | `packages/core/src/web_socket/public_api.ts`, `packages/core/src/web_socket/index.ts`, `packages/core/src/public_api.ts`                        | WebSocket type tests                                     | `doc/core/web-socket.md`                                                       |
+
+---
+
+## 8. Source References
 
 Internal:
 
-- `packages/core/src/sse/transport/parser.ts`
-- `packages/core/src/sse/sse.ts`
+- `packages/core/src/struct/types.ts`
 - `packages/core/src/struct/constructors.ts`
 - `packages/core/src/struct/parse.ts`
+- `packages/core/src/struct/encode.ts`
 - `packages/core/src/struct/codec/json.ts`
-- `packages/core/src/web_socket/codec.ts`
+- `packages/core/src/internal/request_builder.ts`
+- `packages/core/src/http/request.ts`
+- `packages/core/src/http/transport/body.ts`
 - `packages/core/src/http/http.ts`
+- `packages/core/src/sse/transport/parser.ts`
+- `packages/core/src/sse/sse.ts`
+- `packages/core/src/web_socket/codec.ts`
+- `packages/core/src/web_socket/web_socket.ts`
+- `packages/core/src/web_socket/public_api.ts`
 
 External:
 

@@ -76,7 +76,7 @@
 - `StructError` 与错误映射
 - `tag` 系统：HeaderTag、QueryTag、JsonTag、MultipartTag、UriTag、UrlencodedTag
 - 字段标签与内省（getStructFields / getFieldTag）
-- 零值兜底与 Partial Input 的 Go 风格设计说明
+- 零值默认值与 Partial Input 的 Go 风格设计说明
 
 #### 3.7 拦截器 (`core/interceptors.md`)
 
@@ -124,7 +124,7 @@
 - SSE 连接级追踪与自定义指标（defjs.client.sse.\*）
 - WebSocket 连接级追踪与自定义指标（defjs.client.websocket.\*）
 - WebSocket query 传播的安全风险与关闭方式
-- 迁移指南：旧 API 到新配置的映射表
+- 当前 API 配置指南
 
 ### 6. 示例 (`examples.md`)
 

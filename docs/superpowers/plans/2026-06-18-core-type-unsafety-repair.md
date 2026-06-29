@@ -15,7 +15,7 @@
 - `!` 非空断言和 definite assignment assertion 是例外中的重点治理对象：不能只因为删除它会产生 JS diff 就保留；必须先尝试用条件分支判断、早返回/抛错、局部初始化数据、状态对象初始化或更精确的类型建模消除。
 - `!` 清理允许产生最小 JS diff，但必须证明不改变可观察行为：成功路径返回值不变、错误类型/错误消息不变、序列化输出不变、Promise/queue/abort 时序不变、公开 API 不变。无法证明时停止并单独汇报。
 - 只有在“没有任何可表达方式”或“需求必须依赖该断言表示 TypeScript 无法表达的不变量”时，才允许保留 `!`；保留处必须写明为什么条件分支或初始化数据不可行。
-- 允许的生产源码改动类型：类型注解、类型别名、`import type`、接口/类型定义调整、`as` 目标类型调整、`as unknown as` 降级为直接 assertion、`as unknown` 标注 JSON 边界、注释、用于移除 `!` 的最小条件分支或初始化重写。
+- 允许的生产源码改动类型：类型注解、类型别名、`import type`、接口/类型定义调整、`as` 目标类型调整、`as unknown as` 收敛为直接 assertion、`as unknown` 标注 JSON 边界、注释、用于移除 `!` 的最小条件分支或初始化重写。
 - 禁止的生产源码改动类型：无关运行时函数调用、改变既有 `switch` 业务分支、改变对象对外字段、改变错误类型/错误消息、改变序列化结果、改变默认值、改变 promise/queue/abort 时序。
 - 不新增依赖。
 - 不机械删除 `as const` 和 `satisfies`；它们是字面量保持与推理锚点。
@@ -49,7 +49,7 @@
 | Commented boundary         | 仅在无解/需求必须时允许 | 保留不可避免 assertion，并写明原因                            | 只加注释或移动注释                     | 不影响运行时，但必须解释为什么不能用判断或初始化替代 |
 | Test-only mock typing      | 有条件允许              | 给 mock 加类型签名或测试 helper                               | 修改测试代码                           | 不影响生产运行时；会影响测试运行代码，需跑测试       |
 | Runtime helper / guard     | 本计划禁止              | 例如 `toRuntimeStruct()`、`parseJsonUnknown()` 被生产路径调用 | 新增函数调用或分支                     | 会改变 JS 输出或执行路径；需另开计划审批             |
-| Runtime behavior hardening | 本计划禁止              | 新增验证、抛错、默认值、fallback                              | 改变控制流                             | 可能改变用户可见行为；不在本计划内                   |
+| Runtime behavior hardening | 本计划禁止              | 新增验证、抛错、默认值、默认分支                              | 改变控制流                             | 可能改变用户可见行为；不在本计划内                   |
 
 ---
 
@@ -196,7 +196,7 @@ cp -R packages/core/dist /tmp/zen-kit-core-dist-after
 diff -ru /tmp/zen-kit-core-dist-before /tmp/zen-kit-core-dist-after
 ```
 
-Expected: `diff` 输出为空。若非空，说明改动影响生产 JS 输出；停止并回退该任务，除非用户明确批准 runtime change。唯一例外是专门清理 `!` 的任务：该任务允许 JS diff，但 diff 必须只局限于去除 `!` 所需的初始化/条件分支，并且必须用 focused tests 证明成功路径、错误路径和时序不变。
+Expected: `diff` 输出为空。若非空，说明改动影响生产 JS 输出；停止并撤销该任务改动，除非用户明确批准 runtime change。唯一例外是专门清理 `!` 的任务：该任务允许 JS diff，但 diff 必须只局限于去除 `!` 所需的初始化/条件分支，并且必须用 focused tests 证明成功路径、错误路径和时序不变。
 
 ---
 
@@ -528,7 +528,7 @@ Add a boundary comment if absent:
 // Type boundary: copying preserves runtime immutability while the const generic preserves tuple inference.
 ```
 
-- [ ] **Step 3: 在 `parse.ts` / `encode.ts` / `introspection.ts` 中把可直接 assertion 的 `as unknown as RuntimeStruct` 降级为 `as RuntimeStruct`。**
+- [ ] **Step 3: 在 `parse.ts` / `encode.ts` / `introspection.ts` 中把可直接 assertion 的 `as unknown as RuntimeStruct` 收敛为 `as RuntimeStruct`。**
 
 Example allowed replacement:
 
@@ -672,7 +672,7 @@ Expected: empty diff.
 
 - [ ] **Step 1: 保持 `Client` overload surface 不变。**
 
-Do not remove this fallback overload from `packages/core/src/client/resolve.ts`:
+Do not remove this broad overload from `packages/core/src/client/resolve.ts`:
 
 ```ts
 execute(command: Command, options?: unknown): Promise<unknown>

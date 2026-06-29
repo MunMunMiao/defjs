@@ -212,7 +212,7 @@ Oxlint 配置应尽量覆盖当前 Biome lint 与新增类型安全约束。具�
 | non-null assertion                  | Oxlint TypeScript rule 若支持则启用              |
 | `as` 必须有备注                     | 本次重构消除 + 保留项人工备注 + code review 维护 |
 
-本设计不声称工具能完全防止未来回退；本次验收要求是当前代码按约束修干净，并通过 Oxlint/Oxfmt/TypeScript/test/build 验证。
+本设计不声称工具能完全阻止问题再次出现；本次验收要求是当前代码按约束修干净，并通过 Oxlint/Oxfmt/TypeScript/test/build 验证。
 
 ## 实施阶段
 
@@ -255,7 +255,7 @@ Biome 的部分规则可能没有 Oxlint 一比一规则。处理方式是只迁
 
 ### 没有独立 checker
 
-`public_api.ts` 和 “`as` 必须备注” 不能完全自动防回退。处理方式是当前修干净，并在设计文档和后续 code review 中维持约束。
+`public_api.ts` 和 “`as` 必须备注” 不能完全自动阻止再次出现。处理方式是当前修干净，并在设计文档和后续 code review 中维持约束。
 
 ### 深度类型治理牵动公共泛型
 

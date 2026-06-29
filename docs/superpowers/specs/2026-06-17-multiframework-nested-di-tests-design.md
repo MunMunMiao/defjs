@@ -267,7 +267,7 @@ pnpm typecheck
 
 React/Vue 已有 100% coverage 配置；Angular 新增 coverage 后可能要求覆盖所有分支。
 
-处理：Angular 测试应覆盖 `withEndpoint`、`withInterceptors`、默认 endpoint fallback、`provideClient`、`injectClient` 的主要路径。若 coverage 报告暴露未覆盖分支，优先补行为测试，不降低阈值。
+处理：Angular 测试应覆盖 `withEndpoint`、`withInterceptors`、默认 endpoint 行为、`provideClient`、`injectClient` 的主要路径。若 coverage 报告暴露未覆盖分支，优先补行为测试，不降低阈值。
 
 ## 完成标准
 

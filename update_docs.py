@@ -194,19 +194,15 @@ if (error) {
 }
 ```
 
-## API 重命名
+## 当前 API
 
-部分 API 名称已标准化，以提高清晰度：
+API 名称已经标准化，直接使用当前入口：
 
-| 旧 API | 新 API | 说明 |
-|---------|---------|------|
-| `withSseOptions` | `withSSEOptions` | SSE 配置辅助函数，命名标准化为大写缩写 |
-| `createGlobalClient` | `createClient` | 创建客户端；不再使用全局单例 |
-| `getGlobalClient` | — | 已移除；使用显式客户端实例 |
-| `setGlobalClient` | — | 已移除；使用显式客户端实例 |
-| `resetGlobalClient` | — | 已移除；使用显式客户端实例 |
-| `cloneClient` | `createClient(...)` | 通过创建新实例来克隆 |
-| `provideGlobalClient` | `provideClient` | Angular/Vue Provider，统一命名 |
+- `withSSEOptions` 配置 SSE。
+- `createClient` 创建显式客户端实例。
+- 通过再次调用 `createClient(...)` 创建独立客户端实例。
+- Angular/Vue Provider 使用 `provideClient`。
+- 错误类型和辅助函数都从 `@defjs/core` 主入口导入。
 
 ## 更严格的端点定义规则
 
@@ -708,19 +704,15 @@ if (error) {
 }
 ```
 
-## API 名称変更
+## 現在の API
 
-一部の API 名は、明確性のために標準化されました：
+API 名は標準化済みです。現在のエントリを直接使用してください：
 
-| 旧 API | 新 API | 備考 |
-|---------|---------|------|
-| `withSseOptions` | `withSSEOptions` | SSE 設定ヘルパー。大文字略語に統一 |
-| `createGlobalClient` | `createClient` | クライアントを作成。グローバルシングルトンなし |
-| `getGlobalClient` | — | 削除。明示的なクライアントインスタンスを使用 |
-| `setGlobalClient` | — | 削除。明示的なクライアントインスタンスを使用 |
-| `resetGlobalClient` | — | 削除。明示的なクライアントインスタンスを使用 |
-| `cloneClient` | `createClient(...)` | 新規インスタンスを作成してクローン |
-| `provideGlobalClient` | `provideClient` | Angular/Vue プロバイダー。名称統一 |
+- `withSSEOptions` で SSE を設定します。
+- `createClient` で明示的なクライアントインスタンスを作成します。
+- 独立したクライアントインスタンスは `createClient(...)` を再度呼び出して作成します。
+- Angular/Vue Provider は `provideClient` を使用します。
+- エラー型とヘルパー関数は `@defjs/core` のメインエントリから import します。
 
 ## より厳密なエンドポイント定義ルール
 

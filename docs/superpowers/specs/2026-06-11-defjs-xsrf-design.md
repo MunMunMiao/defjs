@@ -302,4 +302,4 @@ xsrf?: ClientXSRFConfig
 - non-browser runtime 不自动处理上下文，仅允许通过同步 `tokenProvider` 提供 token
 - `withCredentials` 与 `withXSRF` 解耦，前者只管 credentials，后者只管 XSRF header
 - XSRF 逻辑在 fetch transport 最终执行，不扩散到 request 定义层或 interceptor 主逻辑
-- 后端仍需逐次验证 token；如果启用 credentialed CORS 或 Fetch Metadata，属于服务端额外防线，不由 core 自动兜底
+- 后端仍需逐次验证 token；如果启用 credentialed CORS 或 Fetch Metadata，属于服务端额外防线，不由 core 自动替代后端校验

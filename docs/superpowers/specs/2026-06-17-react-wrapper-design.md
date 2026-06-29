@@ -75,7 +75,7 @@
 2. **客户端创建**: 使用 `useState(() => createClient(...))` 确保 Client 在客户端创建
 3. **Context 不导出**: 内部 Context 不暴露，用户只通过 `useClient` 访问
 4. **命名一致**: `withEndpoint`、`withInterceptors` 与 Vue/Angular 完全一致
-5. **无 endpoint fallback**: 默认 endpoint 为 `''`，避免 SSR 环境下读取 `document.location.origin` 崩溃
+5. **无 endpoint 环境读取**: 默认 endpoint 为 `''`，避免 SSR 环境下读取 `document.location.origin` 崩溃
 
 ## API 设计
 

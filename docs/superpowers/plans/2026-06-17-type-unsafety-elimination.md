@@ -5174,7 +5174,7 @@ Important inference note: Appendix A 的“修复后目标”是审计总账的�
       修复前：
 
   ```ts
-  // @ts-expect-error temporarily removing btoa to test runtime fallback behavior
+  // @ts-expect-error temporarily removing btoa to test unsupported-runtime behavior
   ```
 
   修复后目标：

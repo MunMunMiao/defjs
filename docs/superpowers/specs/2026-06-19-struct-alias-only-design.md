@@ -463,7 +463,7 @@ id: struct.number().tag(db('column', 'user_id'), db('primaryKey'))
 1. `.alias(name)` 不改变类型推断。
 2. `.alias(name)` immutable chaining。
 3. object JSON encode/decode 使用 alias。
-4. 无 alias 字段 fallback 字段名。
+4. 无 alias 字段使用字段名。
 5. nested JSON object/array/tuple/record/union/discriminatedUnion/intersection 递归 alias。
 6. `struct.request` 的 path/query/headers/body 使用 alias。
 7. urlencoded/formData 使用 alias。
@@ -534,7 +534,7 @@ struct.string().alias('wire_name')
 
 core 不再支持 struct 字段挂任意 metadata。
 
-这是有意删除，不提供兼容替代。
+这是有意删除，不提供替代入口。
 
 ### 多 target 不同别名能力删除
 
@@ -558,7 +558,7 @@ core 不再支持 struct 字段挂任意 metadata。
 1. public API 不再导出 tag 系统。
 2. struct 不再有 `.tag(...)`。
 3. struct 有 `.alias(name: string)`。
-4. 所有自动 codec/request builder 路径使用 alias 或 fallback 字段名。
+4. 所有自动 codec/request builder 路径使用 alias 或字段名。
 5. explicit build projection 的 object key 不被 alias 自动改写。
 6. `requireTag` 被删除。
 7. 文档中不再把 tag 作为当前用户 API。

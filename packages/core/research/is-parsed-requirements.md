@@ -183,11 +183,11 @@ Object-like outputs should be marked when parse succeeds. Current object parsing
 
 ### Composition structs
 
-| Struct                                    | `isParsed` implementation                                                                        |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------ | --- | -------------------------------------------------------------- |
-| `struct.or(a, b)`                         | `hasParsedBrand(struct, value)                                                                   |     | options.some(option => option.isParsed(value))`                |
-| `struct.discriminatedUnion(key, options)` | `hasParsedBrand(struct, value)                                                                   |     | option selected by discriminator calls option.isParsed(value)` |
-| `struct.intersection(a, b)`               | Prefer `hasParsedBrand(struct, value)`; fallback may be `a.isParsed(value) && b.isParsed(value)` |
+| Struct                                    | `isParsed` implementation                                                                               |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- | --- | -------------------------------------------------------------- |
+| `struct.or(a, b)`                         | `hasParsedBrand(struct, value)                                                                          |     | options.some(option => option.isParsed(value))`                |
+| `struct.discriminatedUnion(key, options)` | `hasParsedBrand(struct, value)                                                                          |     | option selected by discriminator calls option.isParsed(value)` |
+| `struct.intersection(a, b)`               | Prefer `hasParsedBrand(struct, value)`; alternate check may be `a.isParsed(value) && b.isParsed(value)` |
 
 Intersection parsing can merge object outputs into a new final object. The final merged value must be marked with the intersection struct brand if provenance checking is used.
 

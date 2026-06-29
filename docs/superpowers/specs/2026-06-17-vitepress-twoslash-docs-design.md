@@ -19,7 +19,7 @@
 11. [性能与缓存设计](#性能与缓存设计)
 12. [文件结构设计](#文件结构设计)
 13. [实施边界](#实施边界)
-14. [风险与回退](#风险与回退)
+14. [风险与应对](#风险与应对)
 
 ## 概述
 
@@ -69,9 +69,9 @@ VitePress 已经支持在 Markdown 中使用 Vue 组件和 Shiki 高亮。Shiki 
 - 需求核心是 TypeScript 示例跟随真实类型，而不是 JSX/MDX 组件语法。
 - 完整 MDX 会增加 Markdown pipeline 复杂度，并可能影响 VitePress alpha 版本兼容性。
 
-### 保留外部 snippet 作为回退
+### 保留外部 snippet 作为替代方案
 
-如果 Twoslash 在多语言站点中导致明显 OOM 或启动过慢，可以回退到“外部 `.ts` snippets + 自定义类型检测脚本”。该回退方案不作为第一阶段实现目标。
+如果 Twoslash 在多语言站点中导致明显 OOM 或启动过慢，可以切换到“外部 `.ts` snippets + 自定义类型检测脚本”。该替代方案不作为第一阶段实现目标。
 
 ## 架构设计
 
@@ -488,7 +488,7 @@ pnpm-workspace.yaml           # 加入 doc workspace 与 Twoslash catalog
 
 不在第一阶段批量迁移 11 个 locale 的所有代码块，避免一次性引入大量类型错误与性能风险。
 
-## 风险与回退
+## 风险与应对
 
 | 风险                                                  | 应对                                                                   |
 | ----------------------------------------------------- | ---------------------------------------------------------------------- |
@@ -497,7 +497,7 @@ pnpm-workspace.yaml           # 加入 doc workspace 与 Twoslash catalog
 | VitePress dev/build 明显变慢                          | 只对关键代码块启用 `twoslash`，并启用文件系统缓存                      |
 | 多 locale 重复代码导致检查时间过长                    | 第一阶段只迁移 root 文档关键示例，后续按页面推进                       |
 | CI 纯文档变更跑太多任务                               | 独立 docs job，通过 paths filter 精确触发                              |
-| Twoslash 出现 OOM                                     | 回退到外部 snippet + 自定义 `tsc` 校验方案                             |
+| Twoslash 出现 OOM                                     | 切换到外部 snippet + 自定义 `tsc` 校验方案                             |
 | 展示错误示例导致 CI 失败                              | 使用 Twoslash 预期错误标注，或保持普通 `typescript` 代码块             |
 
 ## 最终判断

@@ -1743,12 +1743,12 @@ cat dist/package.json
 | 某些 source 依赖 `Bun` 全局                                            | 已移除；若后续发现残留，直接替换为 Node.js 等价 API，不再保留 Bun 兼容                                |
 | Vitest 多个 project 并发时 `test/setup.ts` 的模块级单例可能冲突        | 已将 XSRF 逻辑改为无状态的 Hono 中间件；若 `testServer` 端口冲突，将 global setup 改为按 project 隔离 |
 
-- [ ] **Step 4: 切换原则（不回退到旧架构）**
+- [ ] **Step 4: 切换原则（保持 Node/pnpm 架构）**
 
 本次迁移为**全新架构切换**，不保留 Bun 旧流程作为后备：
 
 - `bun.lock`、`bunfig.toml`、`.github/actions/setup-bun-deps` 等旧文件直接删除，不保留可恢复副本。
-- 若迁移后主分支出现不稳定，策略是**在 pnpm + Node + tsdown + Playwright + tsgo 新架构内修复**，而不是回退到 Bun。
+- 若迁移后主分支出现不稳定，策略是**在 pnpm + Node + tsdown + Playwright + tsgo 新架构内修复**，而不是切回 Bun。
 - 紧急情况下可通过 Git revert 回滚本次迁移的 PR/提交，但回滚后的代码基线仍是新架构（只是回到迁移前的状态）。
 - 所有 CI、构建、测试、发布脚本均以新架构为唯一事实来源。
 

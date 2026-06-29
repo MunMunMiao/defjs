@@ -181,7 +181,7 @@ Beego 把输入 helper 分成两类：
 
 - 显式 source/format 操作是 Go-style。
 - 接口只该接受一种 body 格式时，显式 body format 比自动多格式更好。
-- 逃生舱要足够顺手，否则用户会要求自动 binder 覆盖所有 legacy shape。
+- 逃生舱要足够顺手，否则用户会要求自动 binder 覆盖所有非目标 shape。
 
 ## GoFrame
 

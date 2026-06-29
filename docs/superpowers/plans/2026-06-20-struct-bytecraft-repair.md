@@ -1467,7 +1467,7 @@ export function forEachEncodedWireField(
 ): void
 ```
 
-- `encodeFlatByAlias()` remains as compatibility wrapper over this kernel.
+- `encodeFlatByAlias()` remains as a thin wrapper over this kernel.
 
 - [ ] **Step 1: Record working tree**
 
