@@ -5,7 +5,7 @@ description: Declarative struct definition, type inference, error mapping, and t
 
 # Struct
 
-`@defjs/core` provides a lightweight struct facade for declaring structs, validating inputs, and inferring types. The design intent is modeled after Go's `encoding/json`: zero-value fallback, accepting partial input, and stable, predictable runtime behavior.
+`@defjs/core` provides a lightweight struct facade for declaring structs, validating inputs, and inferring types. The design intent is modeled after Go's `encoding/json`: zero-value defaulting, accepting partial input, and stable, predictable runtime behavior.
 
 ## Primitive Types
 
@@ -216,7 +216,7 @@ if (isObjectStruct(struct)) {
 }
 ```
 
-## Zero-Value Fallback and Partial Input
+## Zero-Value Defaults and Partial Input
 
 The struct parser follows Go `encoding/json` semantics:
 
