@@ -72,7 +72,7 @@ In `packages/core/src/internal/request_builder.ts`, delete line 137:
 export type HttpRequestBuildContext = RequestBuilder
 ```
 
-Then replace the fallback branch of `RequestBuildContext` (lines 152-156) with:
+Then replace the catch-all branch of `RequestBuildContext` (lines 152-156) with:
 
 ```ts
 export type RequestBuildContext<TTransport extends RequestTransport = 'http'> = TTransport extends 'webSocket'
@@ -210,16 +210,12 @@ to:
   encodeObject?: (struct: RuntimeStruct, value: { [key: string]: unknown }, encodeChild: (struct: RuntimeStruct, value: unknown) => unknown) => unknown
 ```
 
-- [ ] **Step 9: Inline `TaggedObject` and `TagObjectOptions` in common.ts**
+- [ ] **Step 9: Inline `TaggedObject` in common.ts**
 
 In `packages/core/src/struct/codec/common.ts`, delete lines 9-13:
 
 ```ts
 export type TaggedObject = { [key: string]: unknown }
-
-export type TagObjectOptions = {
-  requireTag?: boolean
-}
 ```
 
 Replace every `TaggedObject` in the file with `{ [key: string]: unknown }`. There are usages on lines 26, 27, 50, 55, 66, 71, 97, 169. For example, line 26 becomes:
@@ -228,11 +224,7 @@ Replace every `TaggedObject` in the file with `{ [key: string]: unknown }`. Ther
 const output: { [key: string]: unknown } = Object.create(null)
 ```
 
-Replace every `TagObjectOptions` with `{ requireTag?: boolean }`. There are usages on lines 18, 35, 53, 65, 80, 106, 139, 143, 163, 207. For example, line 18 becomes:
-
-```ts
-options: { requireTag?: boolean } = {},
-```
+`TagObjectOptions` was removed in the alias-only redesign; the codec no longer accepts `requireTag` options.
 
 - [ ] **Step 10: Inline `SearchParamScalar` in urlencoded.ts**
 

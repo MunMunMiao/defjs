@@ -1,5 +1,7 @@
 # struct.json 与 requireTag 语义冲突分析背景
 
+> Historical note: this document analyzes the pre-alias struct tag system. The accepted redesign removes `tag.*(...)`, `.tag(...)`, custom tag metadata, and `requireTag`; current field wire names use `struct.alias(name)`.
+
 本文整理 `struct.json(...)`、`tag.json(...)` 和 `requireTag` 之间的设计冲突，供后续做更深入的 API 与 runtime 边界分析。
 
 ## 结论摘要
@@ -8,7 +10,7 @@
 
 这个语义已经超出 Go struct tag 风格的 alias model。按照当前 README 和 `struct.request({ body: struct.json(...) })` 的设计，`struct.json(...)` 应该决定 body codec 和 request section；`tag.json(...)` 应该只负责字段在 JSON wire form 中的别名。未写 `tag.json(...)` 的字段应默认使用 TypeScript 字段名，而不应被视为“不属于 JSON”。
 
-因此，`requireTag` 在当前 `struct.json(...)` 设计下很可能是历史遗留或过渡开关，建议作为架构分析重点，而不是继续默认扩展它的使用面。
+因此，`requireTag` 在当前 `struct.json(...)` 设计下是应删除的语义开关，建议作为架构分析重点，而不是继续默认扩展它的使用面。
 
 ## 背景
 
@@ -224,7 +226,7 @@ README 说 `tag` 只改名；`requireTag` 却让 `tag` 变成字段是否参与 
 - 如果已有外部用户直接调用 `encodeJson/decodeJson(..., { requireTag: true })`，会破坏兼容。
 - 需要决定是否做 breaking change、deprecation 或先标记 internal。
 
-### 方向 B：保留 requireTag，但改名并降级为内部过滤能力
+### 方向 B：删除 requireTag，以独立内部过滤能力重设需求
 
 如果确实需要显式字段白名单，可以把它从 JSON alias 语义中剥离出来。
 

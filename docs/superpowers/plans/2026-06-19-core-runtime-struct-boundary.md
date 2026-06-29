@@ -619,8 +619,6 @@ public entry 先 assert，递归 helper 内部接收 `RuntimeStruct`：
 function decodeTaggedField(
   struct: RuntimeStruct,
   value: unknown,
-  namespace: TagNamespace,
-  options: { requireTag?: boolean },
   path: Path,
 ): unknown {
   const definition = struct[DEFINITION]
@@ -628,21 +626,21 @@ function decodeTaggedField(
 }
 ```
 
-`decodeObjectByTag` 的 public entry 形状：
+`decodeObjectByAlias` 的 public entry 形状：
 
 ```ts
-export function decodeObjectByTag(
+export function decodeObjectByAlias(
   struct: StructLike<unknown, unknown, boolean>,
   value: unknown,
-  namespace: TagNamespace,
-  options: { requireTag?: boolean } = {},
+  label = 'json',
 ): unknown {
   assertStruct(struct, 'struct')
   if (struct[DEFINITION].kind !== 'object') {
-    return parseStructValue(struct, decodeTaggedField(struct, value, namespace, options, []))
+    return parseStructValue(struct, decodeTaggedField(struct, value, []))
   }
+```
 
-  return parseStructValue(struct, normalizeObjectByTag(struct, value, namespace, options, []))
+  return parseStructValue(struct, normalizeObjectByAlias(struct, value, label, []))
 }
 ```
 

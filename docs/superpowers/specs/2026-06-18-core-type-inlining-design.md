@@ -30,7 +30,7 @@
 | `ScalarRequestBuildValue`  | `struct/codec/query.ts`       | 内联为 `boolean \| null \| number \| string`                     |
 | `EncodeChild`              | `struct/encode.ts`            | 内联函数签名                                                     |
 | `TaggedObject`             | `struct/codec/common.ts`      | 内联为 `{ [key: string]: unknown }` 或 `Record<string, unknown>` |
-| `TagObjectOptions`         | `struct/codec/common.ts`      | 内联为 `{ requireTag?: boolean }`                                |
+| `TagObjectOptions`         | `struct/codec/common.ts`      | 已在 alias-only 重构中移除；`requireTag` 不再存在               |
 
 ### 第二波：HTTP 局部推导链内联
 

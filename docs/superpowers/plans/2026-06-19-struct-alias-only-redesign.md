@@ -1,5 +1,7 @@
 # Struct Alias-Only Redesign Implementation Plan
 
+> Historical note: this plan describes the migration away from the pre-alias struct tag system. The accepted redesign removes `tag.*(...)`, `.tag(...)`, custom tag metadata, and `requireTag`; current field wire names use `struct.alias(name)`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 删除 core struct 的 `tag` 系统和 `requireTag` 过滤语义，新增 `struct.alias(name: string)`，并让自动 codec/request builder 使用 `field.alias ?? fieldKey`。
@@ -11,7 +13,7 @@
 ## Global Constraints
 
 - 这是破坏性变更：完整删除 `.tag(...)`、`tag.*(...)`、`createTagNamespace`、`tagKind`、`FieldTag*`、`TagNamespace*`、`JsonTag`、`QueryTag`、`HeaderTag`、`UriTag`、`UrlencodedTag`、`MultipartTag`。
-- 不再支持 struct custom metadata extension；不要保留 custom tag namespace、config tag、metadata map 或兼容别名。
+- 不再支持 struct custom metadata extension；不要保留 custom tag namespace、config tag、metadata map 或 alias 入口。
 - 新 API 只有 `struct.alias(name: string)`；只支持一个 string name。
 - `alias` 不改变 `Infer`、parse output、request input/output 类型。
 - `alias` 不决定 placement、field exposure、field filtering 或 body codec。
@@ -1789,7 +1791,7 @@ tag.defineConfig
 createTagNamespace
 tag.kind
 tag.query/header/uri explicit-name runtime error
-tag.multipart() or tag.json() implicit field-key fallback
+tag.multipart() or tag.json() implicit field-key default
 getFieldTag/getFieldTags
 field.tags
 requireTag ignores untagged fields
@@ -1808,7 +1810,7 @@ test('runtime alias guard rejects invalid alias names', () => {
 
 - [ ] **Step 4: Keep positive semantic assertions for alias-only**
 
-Where tests previously asserted renamed wire keys, preserve the same wire key expectation with `.alias(...)`. Where tests previously asserted namespace mismatch fallback, rewrite the expected behavior to single-alias semantics:
+Where tests previously asserted renamed wire keys, preserve the same wire key expectation with `.alias(...)`. Where tests previously asserted namespace mismatch field-key behavior, rewrite the expected behavior to single-alias semantics:
 
 ```ts
 const field = struct.object({
