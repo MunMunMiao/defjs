@@ -18,16 +18,13 @@ import { struct } from '@defjs/core'
 const GetUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  input: struct.object({
+  input: struct.request({
     path: struct.object({ id: struct.string() }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-  },
   output: [
     { status: 200, body: struct.object({ name: struct.string(), age: struct.number() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  ] as const,
 })
 
 const command = GetUser({ path: { id: '42' } })
@@ -47,10 +44,10 @@ const command = GetUser({ path: { id: '42' } })
 ### input / output / build Relationship
 
 1. **input**: Describes the data the caller must provide. At execution time, the Client validates and parses raw input using the `input` Struct.
-2. **build**: Receives a `RequestBuilder` and parsed input (`RequestBuildInput`), mapping data to path params, query params, headers, and body.
+2. **build**: Receives a `RequestBuilder` and parsed input (`RequestBuildInput`), mapping data to path params, query params, headers, and body. Optional when `input` is a `struct.request(...)` shape — the runtime then builds the request automatically from the declared sections.
 3. **output**: Describes possible server responses. The Client selects the matching Struct by HTTP status code and derives success (2xx) and error (non-2xx) types.
 
-If `build` is omitted, `input` must also be omitted. The command then accepts no input and sends directly to `path`.
+If `input` is omitted, `build` must also be omitted. The command then accepts no input and sends directly to `path`.
 
 If `build` is provided, `input` must also be provided. This is a strict design rule.
 

@@ -21,10 +21,10 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
 const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
@@ -32,7 +32,7 @@ const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
 if (error) {
   console.error(error)
 } else {
-  console.log((user as { id: number; name: string }).id, (user as { id: number; name: string }).name)
+  console.log(user.id, user.name)
 }
 ```
 
