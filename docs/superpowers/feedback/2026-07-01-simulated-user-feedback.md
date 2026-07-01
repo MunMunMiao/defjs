@@ -7,7 +7,7 @@
 
 ## 1. Executive Summary
 
-- **总体印象**：类型安全、显式 Client、Go 风格 struct、状态码驱动类型收窄是最大亮点；但文档漂移、框架封装层过薄、缺少显式严格模式、实时传输调试能力不足是主要落地障碍。
+- **总体印象**：类型安全、显式 Client、Go 风格 struct、状态码驱动类型收窄是最大亮点；但文档漂移、框架包定位为 thin adapter 导致高级抽象不足、缺少显式严格模式、实时传输调试与 fail-closed 选项不足是主要落地障碍。
 - **平均评分**：**3.2 / 5**（24 份样本）。
 - ** persona 总数**：24。
   - React 前端：4
@@ -23,9 +23,9 @@
   - 2.0：1
 - **Top 主题**：
   1. 文档与示例 API 签名不一致（`doc/guide/examples.md` 旧 `build` vs `packages/core/design.md` 新 `build(ctx, input)`）。
-  2. 框架封装层（React/Vue/Angular）太薄，缺少 `useCommand` / `useMutation` / `useEventStream` / RxJS 适配等高级抽象。
+  2. 框架包（React/Vue/Angular）定位为 thin adapter，但 persona 期望看到官方高级抽象示例或独立包（`useCommand` / `useMutation` / `useEventStream` / RxJS 适配）。
   3. 缺少显式严格校验模式（金融、医疗、表单场景需要 fail-fast，但当前零值默认是 Go 风格设计意图，不是 bug）。
-  4. SSE / WebSocket 非法事件默认静默跳过，调试与合规风险高。
+  4. SSE / WebSocket 非法事件默认静默跳过是设计选择，但缺少 opt-in fail-closed 模式与消息级可观测性。
   5. `timeout` 与 `abort` 互斥、WebSocket 握手 header 不支持、缺少 OpenAPI / codegen、HTTP 重试缺失。
 
 ---
@@ -49,7 +49,7 @@
 - **`struct.date()` 的 boolean footgun**：`packages/core/design.md` 警告 `new Date(true)` 会被接受为 Valid Date，默认不抛错，多个 persona 险些因此上线 bug。
 - **`struct.bigint()` 拒绝 number 输入**：`packages/core/design.md` 第 84 行说明拒绝 number 以避免精度丢失，但大量现有 JSON API 把 64 位 ID 作为 number 返回，迁移成本高。
 - **`timeout` 与 `abort` 互斥**：`doc/core/http.md` 第 165 行写明两者不能同时使用，需手动用 `AbortSignal.any` 组合。
-- **SSE / WebSocket 非法事件静默跳过**：`doc/core/sse.md` 第 139–143 行说明未声明事件与校验失败事件均直接跳过，没有 fail-closed 选项。
+- **SSE / WebSocket 非法事件默认静默跳过是设计选择，但缺少 fail-closed 选项**：`doc/core/sse.md` 第 139–143 行说明未声明事件与校验失败事件均直接跳过。这是默认 fail-open 策略，但医疗 / 物流 / 金融等场景需要可选的 `strictEventValidation: true` 或 `onInvalidEvent: 'throw'`。
 - **`output` 数组形式需要手动 `as const`**：`packages/core/README.md` 与 `doc/core/commands.md` 示例均需 `as const`，初学者容易忘记导致类型退化。
 - **缺少字段级校验 DSL**：`packages/core/design.md` 第 186 行把长度、范围、业务规则推到应用层，导致各团队规范发散。
 - **缺少 OpenAPI / JSON Schema / codegen**：`packages/core/design.md` 第 871 行把“OpenAPI 生成与 struct 导出”列为当前不提供。
@@ -75,20 +75,20 @@
 
 **Top pains**
 
-- **几乎没有 React 体验**：`packages/react/README.md` 只给了 `useClient()` + `useEffect` 示例，开发者需自己管理 loading/error/data/refetch。
-- **没有请求缓存、去重、失效机制**：重度 React Query 用户认为迁移后必须再包一层。
+- **作为 thin adapter 定位清晰，但 README 缺少常见 React 用法的官方示例**：`packages/react/README.md` 只给了 `useClient()` + `useEffect` 示例，开发者需自己管理 loading/error/data/refetch。
+- **thin adapter 不内置服务端状态管理，但缺少与 TanStack Query / SWR 集成的官方示例**：重度 React Query 用户认为迁移后必须再包一层，缺少官方 adapter 或 cookbook。
 - **缺少 RSC / SSR 预取官方模式**：`packages/react/README.md` 未提及如何在 Server Component 中调用 `client.execute` 并透传 cookie/header。
 - **`withInterceptors` 签名与 core 不一致**：core 文档直接传 interceptor 对象，React 包 `packages/react/src/core.tsx:36` 要求传工厂函数 `() => Interceptor`。
-- **没有 Suspense / Error Boundary 集成**：错误是值而非异常，需手动 throw。
+- **错误是值而非异常（设计选择），但缺少 Suspense / Error Boundary 的集成示例**：需手动 throw 或封装，初学者不知如何衔接。
 - **版本兼容表不具体**：`packages/react/README.md` 写 `workspace:^`，终端用户看不到 semver 范围。
 
 **Actionable suggestions**
 
-1. 提供官方 `useCommand` / `useMutation` hook，返回 `{ data, error, loading, execute }`。
+1. 在 `packages/react/README.md` 提供官方 `useCommand` / `useMutation` / `useSuspenseCommand` 示例，或另建 `@defjs/react-query` 等独立包。
 2. 给出 TanStack Query 官方 adapter 或集成示例。
 3. 在 `packages/react/README.md` 中增加 RSC 预取 + hydration 完整示例。
 4. 统一 `withInterceptors` 签名：React 侧支持直接传 interceptor 对象，工厂作为可选。
-5. 增加 `client.execute(cmd, { throwOnError: true })` 或 `useSuspenseCommand` 以支持 Error Boundary / Suspense。
+5. 在 README 增加 `client.execute(cmd, { throwOnError: true })` 或 `useSuspenseCommand` 的 Suspense / Error Boundary 集成示例。
 6. 把 README 版本兼容表替换为具体 semver 范围。
 
 ### 2.3 `@defjs/vue`
@@ -101,14 +101,14 @@
 
 **Top pains**
 
-- **包太薄**：`@defjs/vue` 只导出 `provideClient` / `injectClient` / `withEndpoint` / `withInterceptors`（`packages/vue/README.md` 第 37–54 行），没有 `useCommand` / `useMutation` / `useEventStream` / `useWebSocket`。
+- **定位为 thin adapter，但缺少官方高级抽象示例**：`@defjs/vue` 只导出 `provideClient` / `injectClient` / `withEndpoint` / `withInterceptors`（`packages/vue/README.md` 第 37–54 行）， persona 期望看到 `useCommand` / `useMutation` / `useEventStream` / `useWebSocketMessages` 等官方示例或独立包。
 - **文档示例与 core 不同步**：`doc/guide/examples.md` 仍使用旧 `build: (input) => ({ ... })`，与 `packages/core/design.md` 冲突。
 - **`struct.request` 与普通 `struct.object` 边界不清**：新手容易直接写 `body: struct.object(...)` 而报类型错误，需用 `struct.json(...)` 包裹（`packages/core/design.md` 第 311 行）。
 - **README 为中文，与其他框架 README 语言不一致**，影响跨团队评估。
 
 **Actionable suggestions**
 
-1. 提供 `useCommand` / `useMutation` / `useEventStream` / `useWebSocketMessages` 等轻量 composables，只做 iterator-to-ref + cleanup。
+1. 在 README 提供 `useCommand` / `useMutation` / `useEventStream` / `useWebSocketMessages` 等官方示例，或另建独立包；保持 thin adapter 的同时给出常见用法模板。
 2. 在 `packages/vue/README.md` 增加“何时需要 `build`”决策树与 `struct.request` 示例。
 3. 统一框架 README 语言或提供双语版本。
 4. 刷新 `doc/guide/examples.md` 为 `build(ctx, input)` 新签名。
@@ -128,7 +128,7 @@
 - **单 Token 无法命名注入**：`HTTP_CLIENT` 硬编码一个 token，多 Client 场景需自行封装。
 - **缺少 RxJS / Signal 适配层**：`client.execute` 返回 Promise，Angular 生态习惯 Observable / signal，需手动 `from(...)` / `toSignal`。
 - **没有 Angular 测试工具**：缺少类似 `HttpTestingController` 的 mock helper。
-- **SSE 事件校验失败静默跳过**：调试困难。
+- **SSE 事件校验失败静默跳过是 core 设计选择，Angular 层未提供封装示例**：调试困难，企业场景需要可选的 fail-closed 包装示例。
 
 **Actionable suggestions**
 
@@ -136,7 +136,7 @@
 2. 提供命名 Client provider：`provideClient({ identifier: 'market', ... })` + `injectClient('market')`。
 3. 提供 `@defjs/angular/rxjs` 或官方 `from(client.execute(...))` 最佳实践示例。
 4. 提供 Angular Testing Utilities / mock client helper。
-5. 增加 SSE 严格模式选项。
+5. 在 Angular SSE 示例中展示如何配置 `strictEventValidation` / `onInvalidEvent` 实现 fail-closed。
 
 ### 2.5 `@defjs/opentelemetry-server`
 
@@ -196,9 +196,9 @@
 - **代表背景**：电商 SaaS、金融科技、医疗信息化、教育科技、独立开发者。
 - **共性好评**：类型推导准确、显式 Client、框架注入自然、`alias` 处理 snake_case、错误三元组直观。
 - **共性痛点**：
-  - 框架包只是 core 的薄封装，缺少 `useQuery` / `useMutation` / `useCommand` / `useEventStream` / `useWebSocket`。
-  - 仍需手写 `useEffect + useState` 管理 loading/error/data。
-  - 缺少与 TanStack Query / React Query / VueUse / RxJS async pipe 的集成。
+  - 框架包定位为 thin adapter，但缺少 `useQuery` / `useMutation` / `useCommand` / `useEventStream` / `useWebSocket` 的官方示例或独立包。
+  - README 示例停留在 `useClient()` + `useEffect`，缺少常见数据获取模式的官方模板。
+  - 缺少与 TanStack Query / React Query / VueUse / RxJS async pipe 的官方集成示例。
   - 文档示例 API 签名不一致导致复制粘贴后编译失败。
 - **典型评分**：3.0–4.5 / 5。
 
@@ -209,7 +209,7 @@
 - **共性痛点**：
   - 无法强制缺失字段报错，KYC / 临床 / 金融payload 不能接受零值默认。
   - 缺少 OpenAPI / JSON Schema / codegen，无法从后端 Swagger 生成 command。
-  - SSE / WebSocket 非法事件静默跳过。
+  - SSE / WebSocket 非法事件默认静默跳过是设计选择，但后端场景需要可选的 fail-closed 模式。
   - HTTP 没有 retry/backoff；`timeout` / `abort` 互斥。
   - `struct.bigint()` 与现有 JSON-number ID 合同冲突。
 - **典型评分**：3.0–4.0 / 5。
@@ -219,7 +219,7 @@
 - **代表背景**：金融科技 Staff Engineer、物流 Principal Engineer、游戏 CTO、健康科技 Tech Lead。
 - **共性好评**：显式 Client 适合多租户 / 多环境、跨传输层模型统一、OTel 指标对齐稳定语义、框架 API 对称便于收购后整合。
 - **共性痛点**：
-  - 目前更像“类型安全的 fetch 封装”，缺少服务端状态管理、缓存、去重、SSR 预取等企业落地必需能力。
+  - 框架包是 thin adapter，企业落地需要官方提供或认可的服务端状态管理、缓存、去重、SSR 预取等高级抽象示例或独立包。
   - 缺少 server-side struct 复用入口，无法前后端共享同一份定义。
   - `opentelemetry-server` 仅覆盖 outbound client，不是完整平台方案。
   - WebSocket 握手 header 限制、重连时 token 刷新、二进制消息支持影响实时场景。
@@ -235,11 +235,11 @@
 |----:|------|------|------|----------|
 | 1 | **刷新并锁定 `doc/guide/examples.md` API 签名** | 高 | 低 | 多份 persona 复制旧 `build: (input) =>` 后编译失败；React/Vue/Angular 均提到 |
 | 2 | **提供 struct 严格模式（缺失字段报错）作为 opt-in** | 高 | 中 | 零值默认是 Go 风格设计意图；金融 KYC、医疗、表单场景需要显式 fail-fast 开关 |
-| 3 | **为 React/Vue 提供官方数据获取 hooks/composables** | 高 | 中 | React 4 persona、Vue 4 persona 均吐槽“回到手写 useEffect”；影响生产采用 |
+| 3 | **为 React/Vue 提供官方数据获取 hooks/composables 示例或独立包** | 高 | 中 | 框架包是 thin adapter；React 4 persona、Vue 4 persona 均期望官方示例而非自己手写 useEffect |
 | 4 | **统一 `withInterceptors` 签名：支持直接传 interceptor 对象** | 高 | 低 | React/Angular/Vue 均要求工厂函数，与 `doc/core/interceptors.md` 不一致 |
 | 5 | **修复 `struct.date()` boolean footgun 或增加 `.strict()`** | 中 | 低 | `packages/core/design.md` 已警告；多位 persona 险些上线 bug |
 | 6 | **允许 `timeout` 与 `abort` 同时存在** | 中 | 低 | `doc/core/http.md` 写明互斥；金融/电商/后端均需组合取消 |
-| 7 | **SSE / WebSocket 增加严格事件校验选项** | 中 | 低 | `doc/core/sse.md` 默认静默跳过；医疗/物流/游戏/金融均要求 fail-closed |
+| 7 | **SSE / WebSocket 提供 opt-in 严格事件校验 / fail-closed 模式** | 中 | 低 | 默认静默跳过是设计选择；医疗/物流/游戏/金融需要可选的严格模式 |
 | 8 | **扩展 Angular README + 提供命名 Client / RxJS 适配 / 测试 helper** | 中 | 中 | Angular persona 1/2/3/4 均指出 README 单薄、工厂签名坑、无测试工具 |
 | 9 | **增加 HTTP retry / backoff 配置** | 中 | 中 | `doc/core/http.md` 无 retry；物流/医疗/后端均需要 |
 | 10 | **提供 OpenAPI / JSON Schema 双向生成能力** | 高 | 高 | `packages/core/design.md` 已列为不提供；后端/平台/决策型 persona 反复列为 adoption 障碍 |
