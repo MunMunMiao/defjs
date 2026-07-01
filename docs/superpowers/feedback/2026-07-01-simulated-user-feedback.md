@@ -7,7 +7,7 @@
 
 ## 1. Executive Summary
 
-- **总体印象**：类型安全、显式 Client、Go 风格 struct、状态码驱动类型收窄是最大亮点；但文档漂移、框架封装层过薄、零值默认语义、实时传输调试能力不足是主要落地障碍。
+- **总体印象**：类型安全、显式 Client、Go 风格 struct、状态码驱动类型收窄是最大亮点；但文档漂移、框架封装层过薄、缺少显式严格模式、实时传输调试能力不足是主要落地障碍。
 - **平均评分**：**3.2 / 5**（24 份样本）。
 - ** persona 总数**：24。
   - React 前端：4
@@ -24,7 +24,7 @@
 - **Top 主题**：
   1. 文档与示例 API 签名不一致（`doc/guide/examples.md` 旧 `build` vs `packages/core/design.md` 新 `build(ctx, input)`）。
   2. 框架封装层（React/Vue/Angular）太薄，缺少 `useCommand` / `useMutation` / `useEventStream` / RxJS 适配等高级抽象。
-  3. struct 零值默认与严格校验的矛盾（金融、医疗、表单场景强烈需要 fail-fast）。
+  3. 缺少显式严格校验模式（金融、医疗、表单场景需要 fail-fast，但当前零值默认是 Go 风格设计意图，不是 bug）。
   4. SSE / WebSocket 非法事件默认静默跳过，调试与合规风险高。
   5. `timeout` 与 `abort` 互斥、WebSocket 握手 header 不支持、缺少 OpenAPI / codegen、HTTP 重试缺失。
 
@@ -45,7 +45,7 @@
 
 **Top pains**
 
-- **零值默认在表单 / 金融 / 医疗场景是硬伤**：缺失字段不会抛 `missing_key`，而是填充零值（`doc/core/struct.md` 第 219–240 行）。例如 `struct.string()` 缺失返回 `''`，`struct.number()` 缺失返回 `0`，KYC / 临床数据无法区分“未填”与“填了 0”。
+- **零值默认是 Go 风格设计意图，但缺少显式严格模式**：`packages/core/design.md` 第 56–87 行明确说明零值兜底与 Partial Input 是对齐 `encoding/json` 的设计选择，不是 bug。问题在于缺少一个 opt-in 的严格模式（`struct.strict(...)` / `.required()` / 全局开关），让金融 / 医疗 / 表单场景在需要时可以 fail-fast。
 - **`struct.date()` 的 boolean footgun**：`packages/core/design.md` 警告 `new Date(true)` 会被接受为 Valid Date，默认不抛错，多个 persona 险些因此上线 bug。
 - **`struct.bigint()` 拒绝 number 输入**：`packages/core/design.md` 第 84 行说明拒绝 number 以避免精度丢失，但大量现有 JSON API 把 64 位 ID 作为 number 返回，迁移成本高。
 - **`timeout` 与 `abort` 互斥**：`doc/core/http.md` 第 165 行写明两者不能同时使用，需手动用 `AbortSignal.any` 组合。
@@ -57,7 +57,7 @@
 
 **Actionable suggestions**
 
-1. 提供 opt-in 严格模式：`struct.strict(...)` / `.required()` / 全局开关，让缺失字段抛 `missing_key`。
+1. 提供 opt-in 严格模式：`struct.strict(...)` / `.required()` / 全局开关，让需要 fail-fast 的场景可以显式启用，同时保留零值默认作为默认行为。
 2. 给 `struct.bigint()` 增加 `.fromNumber()` 修饰符，显式接受有限 number。
 3. 内部合并 `AbortSignal.timeout()` 与用户 signal，允许 `timeout` + `abort` 共存。
 4. 给 SSE / WebSocket 增加 `strictEventValidation: true` 或 `onInvalidEvent: 'throw'` 选项。
@@ -173,7 +173,7 @@
 
 - **`doc/guide/examples.md` 使用旧 API**：多处仍用 `build: (input) => ({ body: input, params: {...} })`，与 `packages/core/design.md`、`doc/core/context.md` 的 `build(ctx, input) { ctx.setJson(...); ctx.setPathParams(...) }` 冲突。
 - **`output` 写法不统一**：`packages/core/README.md` 用数组 + `as const`，`packages/angular/README.md` 用对象；`doc/core/http.md` 同时出现 `200:` 与 `'200':` 两种 key。
-- **快速开始未说明零值语义**：多位新手第一次见 `struct.object({ count: struct.number() }).parse({})` 返回 `{ count: 0 }` 时感到惊慌。
+- **快速开始未显式说明零值设计意图**：多位新手第一次见 `struct.object({ count: struct.number() }).parse({})` 返回 `{ count: 0 }` 时误以为这是 bug。需要在 `doc/guide/getting-started.md` 中明确这是 Go 风格设计选择，并链接到严格模式选项（如果有）。
 - **`struct.request` 与 `build` 的边界分散在多处**：没有一页纸决策树。
 - **框架 README 语言不一致**：`packages/vue/README.md` 为中文，React/Angular 为英文。
 - **缺少 React 表单与 `StructError.flatten()` 的映射示例**。
@@ -181,7 +181,7 @@
 **Actionable suggestions**
 
 1. 全面刷新 `doc/guide/examples.md` 为新 `build(ctx, input)` 签名，并加 CI 检查防止旧写法回潮。
-2. 在 `doc/guide/getting-started.md` 顶部加醒目警告：“缺失字段不会报错，会填充零值”。
+2. 在 `doc/guide/getting-started.md` 顶部明确说明零值默认是 Go 风格设计意图（对齐 `encoding/json`），并给出启用严格模式的入口。
 3. 提供“何时需要 `build` / 何时可用 `struct.request`”决策表。
 4. 统一 `output` 推荐写法并在各框架 README 中说明数组/对象形式的差异。
 5. 统一框架 README 语言或提供双语版本。
@@ -234,7 +234,7 @@
 | 排名 | 建议 | 影响 | 成本 | 关键证据 |
 |----:|------|------|------|----------|
 | 1 | **刷新并锁定 `doc/guide/examples.md` API 签名** | 高 | 低 | 多份 persona 复制旧 `build: (input) =>` 后编译失败；React/Vue/Angular 均提到 |
-| 2 | **提供 struct 严格模式（缺失字段报错）** | 高 | 中 | 金融 KYC、医疗、表单场景无法接受零值默认；backend-fullstack persona 1/3/4、frontend-vue persona 4 均列为 blocker |
+| 2 | **提供 struct 严格模式（缺失字段报错）作为 opt-in** | 高 | 中 | 零值默认是 Go 风格设计意图；金融 KYC、医疗、表单场景需要显式 fail-fast 开关 |
 | 3 | **为 React/Vue 提供官方数据获取 hooks/composables** | 高 | 中 | React 4 persona、Vue 4 persona 均吐槽“回到手写 useEffect”；影响生产采用 |
 | 4 | **统一 `withInterceptors` 签名：支持直接传 interceptor 对象** | 高 | 低 | React/Angular/Vue 均要求工厂函数，与 `doc/core/interceptors.md` 不一致 |
 | 5 | **修复 `struct.date()` boolean footgun 或增加 `.strict()`** | 中 | 低 | `packages/core/design.md` 已警告；多位 persona 险些上线 bug |
