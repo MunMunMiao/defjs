@@ -47,3 +47,4 @@ doc/.vitepress/cache/
 /playwright/.cache/
 
 junit.xml
+.omo/
