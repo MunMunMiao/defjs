@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: Use defineEventStream to define typed Server-Sent Events endpoints and consume streaming events through the client.
+description: استخدم defineEventStream لتعريف نقاط نهاية SSE (Server-Sent Events) مكتوبة واستهلاك الأحداث المدفوعة من الخادم عبر العميل.
 ---
 
 # SSE
@@ -9,20 +9,22 @@ description: Use defineEventStream to define typed Server-Sent Events endpoints 
 
 ## تعريف دفق الأحداث
 
-عند تعريف نقطة نهاية SSE، أعلن حقل `events` يعيّن أسماء الأحداث إلى مخططات struct. يُحلّل حقل `data` لكل نوع حدث تلقائيًا حسب المخطط المطابق.
+عند تعريف نقطة نهاية SSE، أعلن حقل `events` يعيّن أسماء الأحداث إلى مخططات struct. ينقل نقل SSE كل حمولة `data:` كنص خام؛ يختار Defjs المخطط المطابق ويفكّك النص وفق نوع المحتوى الخاص بهذا المخطط.
 
 ```typescript
-import { createClient, defineEventStream, struct } from '@defjs/core'
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const useNotifications = defineEventStream({
   path: '/v1/notifications',
   events: {
-    message: struct.object({
-      id: struct.number(),
-      text: struct.string(),
-    }),
+    message: struct.json(
+      struct.object({
+        id: struct.number(),
+        text: struct.string(),
+      }),
+    ),
     heartbeat: struct.string(),
   },
 })
@@ -36,29 +38,58 @@ const useNotifications = defineEventStream({
 const useMixedStream = defineEventStream({
   path: '/v1/events',
   events: {
-    userconnect: struct.object({ uid: struct.number() }),
-    default: struct.object({ note: struct.string() }),
+    userconnect: struct.json(struct.object({ uid: struct.number() })),
+    default: struct.json(struct.object({ note: struct.string() })),
   },
 })
 ```
 
+### فك ترميز محتوى بيانات الحدث
+
+ينقل نقل SSE كل حمولة `data:` كنص. يختار Defjs أولاً struct الحدث من `events[eventName] ?? events.default`، ثم يفكّك النص وفق struct المختار.
+
+استخدم `struct.json(inner)` عندما يرسل الخادم نص JSON للحدث. يشغّل `struct.json(inner)` أولاً `JSON.parse` على نص SSE الخام، ثم يحلّل القيمة الناتجة باستخدام `inner`:
+
+```typescript
+const useProfileStream = defineEventStream({
+  path: '/v1/profile-events',
+  events: {
+    profile: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  },
+})
+```
+
+بالنسبة لحمولات النص الأولية:
+
+- `struct.string()` و `struct.text()` تقرآن نص الحدث الخام.
+- `struct.number()` تزيل الفراغات وتقبل فقط القيم العددية المحدودة.
+- `struct.boolean()` تزيل الفراغات وتقبل فقط `true` أو `false` بالضبط.
+
+لا تحلّل `struct.object(...)` و `struct.array(...)` و `struct.record(...)` البسيطة نص JSON من تلقاء نفسها. لفّها داخل `struct.json(...)` لبيانات أحداث JSON.
+
 ### دفق الأحداث مع مدخلات
 
-عندما يحتاج الدفق إلى معاملات استعلام أو جسم طلب، قدّم مخطط `input` ودالة `build`. توقيع `build` مطابق لـ `defineRequest`، ويدعم المعلمات والاستعلام والرؤوس.
+عندما يحتاج الدفق إلى معاملات استعلام أو جسم طلب، قدّم `input` struct ودالة `build`. توقيع `build` مطابق لـ `defineRequest`، ويدعم المعلمات والاستعلام والرؤوس.
 
 ```typescript
 const useRoomStream = defineEventStream({
   path: '/v1/room/:roomId',
-  input: struct.object({ roomId: struct.string() }),
-  build: ({ roomId }) => ({
-    params: { roomId },
+  input: struct.request({
+    path: struct.object({ roomId: struct.string() }),
   }),
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
+  },
   events: {
-    chat: struct.object({ user: struct.string(), text: struct.string() }),
+    chat: struct.json(struct.object({ user: struct.string(), text: struct.string() })),
   },
 })
 
-const [error, stream, open] = await client.execute(useRoomStream({ roomId: '42' }))
+const [error, stream, open] = await client.execute(useRoomStream({ path: { roomId: '42' } }))
 ```
 
 ## نتيجة التنفيذ
@@ -86,7 +117,7 @@ if (error) {
 console.log('Connected', open?.url)
 
 for await (const event of stream) {
-  if (event.event === 'message') {
+  if (event.event === 'message' && typeof event.data === 'object' && event.data !== null) {
     console.log('Message:', event.data.text)
   }
   if (event.event === 'heartbeat') {
@@ -123,20 +154,22 @@ await stream.closed // { code: 'aborted', reason: 'user-navigated-away' }
 عندما يرسل الخادم حدثًا لا يمكن مطابقته مع أي مخطط في `events` (أو `default`)، أو فشل التحقق من المخطط، يُطلَب مراقب `onInvalidEvent`. هو إعداد على مستوى العميل يُمرّر عبر `sse.onInvalidEvent` وقت `createClient`.
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     onInvalidEvent: async (context) => {
       console.warn('Invalid event:', context.reason, context.message)
       // context.reason: 'missing-struct' | 'validation-failed'
       // context.message: { id, event, data, retry? }
       // context.cause: الخطأ الأصلي عند فشل التحقق
     },
-  },
-})
+  }),
+)
 ```
 
 `onInvalidEvent` هو **مراقب**:
+
+من الأخطاء الشائعة في التحقق هو الإعلان عن `struct.object(...)` لحدث يحتوي حقل `data:` على نص JSON. استخدم `struct.json(struct.object(...))` بدلاً من ذلك. يُبلّغ JSON غير صالح داخل `struct.json(...)` على أنه `validation-failed` ولا يُعاد محاولة معالجته كنص خام.
 
 - حتى لو رمى داخليًا، يُتجاهل الاستثناء بهدوء ويستمر الدفق.
 - لا يحجب الأحداث اللاحقة عن الاستهلاك.
@@ -148,9 +181,9 @@ const client = createClient({
 ### إعداد إعادة الاتصال
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     reconnect: {
       attempts: 5, // عدد محاولات إعادة المحاولة القصوى
       delayMs: 1000, // الفاصل الزمني الأولي لإعادة المحاولة
@@ -161,8 +194,8 @@ const client = createClient({
         return attempt <= 3
       },
     },
-  },
-})
+  }),
+)
 ```
 
 أولوية إعادة الاتصال:
@@ -179,15 +212,15 @@ const client = createClient({
 تدخل الأحداث طابورًا غير متزامن داخليًا بعد الوصول، ثم تُستهلك من المكرر. يمكنك تحديد حجم الطابور وسلوك الانتشار:
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     queue: {
       maxSize: 100,
       overflow: 'drop-oldest', // 'drop-newest' | 'drop-oldest' | 'error'
     },
-  },
-})
+  }),
+)
 ```
 
 | `overflow`    | السلوك                                                          |
@@ -199,23 +232,23 @@ const client = createClient({
 ## مثال كامل
 
 ```typescript
-import { createClient, defineEventStream, struct } from '@defjs/core'
+import { createClient, defineEventStream, struct, withEndpoint, withSSEOptions } from '@defjs/core'
 
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     reconnect: { attempts: 5, delayMs: 1000, factor: 2, maxDelayMs: 30000 },
     queue: { maxSize: 100, overflow: 'drop-oldest' },
     onInvalidEvent: async ({ reason, message }) => {
       console.warn(`Skipped invalid event [${reason}]: ${message.event}`)
     },
-  },
-})
+  }),
+)
 
 const useLogStream = defineEventStream({
   path: '/v1/logs',
   events: {
-    log: struct.object({ level: struct.string(), msg: struct.string() }),
+    log: struct.json(struct.object({ level: struct.string(), msg: struct.string() })),
   },
 })
 
@@ -230,7 +263,9 @@ async function tailLogs() {
   console.log('Connected', open.url)
 
   for await (const event of stream) {
-    console.log(`[${event.data.level}] ${event.data.msg}`)
+    if (typeof event.data === 'object' && event.data !== null) {
+      console.log(`[${event.data.level}] ${event.data.msg}`)
+    }
   }
 
   const closeInfo = await stream.closed

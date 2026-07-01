@@ -9,7 +9,7 @@ Defjs 使用 `defineEventStream` 定义类型化的 SSE（Server-Sent Events）�
 
 ## 定义事件流
 
-定义 SSE 端点时，声明 `events` 字段，将事件名称映射到结构。每种事件类型的 `data` 字段会自动按匹配的结构解析。
+定义 SSE 端点时，声明 `events` 字段，将事件名称映射到结构。SSE 传输层将每个 `data:` 负载作为原始文本投递；Defjs 选择匹配的结构，并按照该结构的内容 kind 解码文本。
 
 ```typescript
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
@@ -43,6 +43,33 @@ const useMixedStream = defineEventStream({
   },
 })
 ```
+
+### 事件数据内容解码
+
+SSE 传输层将每个 `data:` 负载作为原始文本投递。Defjs 首先从 `events[eventName] ?? events.default` 中选择事件结构，然后按照所选结构解码该文本。
+
+当服务器为事件发送 JSON 文本时，使用 `struct.json(inner)`。`struct.json(inner)` 会先在原始 SSE 文本上执行 `JSON.parse`，再用 `inner` 解析结果值：
+
+```typescript
+const useProfileStream = defineEventStream({
+  path: '/v1/profile-events',
+  events: {
+    profile: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  },
+})
+```
+
+对于原始文本负载：
+
+- `struct.string()` 与 `struct.text()` 直接读取原始事件文本。
+- `struct.number()` 会去除空白，并只接受有限数值。
+- `struct.boolean()` 会去除空白，并只接受精确的 `true` 或 `false`。
+
+普通 `struct.object(...)`、`struct.array(...)`、`struct.record(...)` 不会自行解析看起来像 JSON 的文本。对于 JSON 事件数据，请将它们包裹在 `struct.json(...)` 中。
 
 ### 带输入的事件流
 
@@ -219,7 +246,7 @@ const client = createClient(
 const useLogStream = defineEventStream({
   path: '/v1/logs',
   events: {
-    log: struct.object({ level: struct.string(), msg: struct.string() }),
+    log: struct.json(struct.object({ level: struct.string(), msg: struct.string() })),
   },
 })
 

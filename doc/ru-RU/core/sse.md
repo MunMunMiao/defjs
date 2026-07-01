@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: Use defineEventStream to define typed Server-Sent Events endpoints and consume streaming events through the client.
+description: Используйте defineEventStream для определения типизированных SSE (Server-Sent Events) ендпоинтов и потребления потоковых событий через клиент.
 ---
 
 # SSE
@@ -9,20 +9,22 @@ Defjs использует `defineEventStream` для определения т�
 
 ## Определение потока событий
 
-При определении SSE-ендпоинта объявите поле `events`, отображающее имена событий на struct-схемы. Поле `data` каждого типа события автоматически парсится по подходящей схеме.
+При определении SSE-ендпоинта объявите поле `events`, отображающее имена событий на struct-схемы. SSE-транспорт доставляет каждый `data:` payload как raw-текст; Defjs выбирает подходящую схему и декодирует текст в соответствии с content kind этой схемы.
 
 ```typescript
-import { createClient, defineEventStream, struct } from '@defjs/core'
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const useNotifications = defineEventStream({
   path: '/v1/notifications',
   events: {
-    message: struct.object({
-      id: struct.number(),
-      text: struct.string(),
-    }),
+    message: struct.json(
+      struct.object({
+        id: struct.number(),
+        text: struct.string(),
+      }),
+    ),
     heartbeat: struct.string(),
   },
 })
@@ -36,29 +38,58 @@ const useNotifications = defineEventStream({
 const useMixedStream = defineEventStream({
   path: '/v1/events',
   events: {
-    userconnect: struct.object({ uid: struct.number() }),
-    default: struct.object({ note: struct.string() }),
+    userconnect: struct.json(struct.object({ uid: struct.number() })),
+    default: struct.json(struct.object({ note: struct.string() })),
   },
 })
 ```
 
+### Декодирование содержимого данных события
+
+SSE-транспорт доставляет каждый `data:` payload как текст. Defjs сначала выбирает схему события из `events[eventName] ?? events.default`, затем декодирует текст в соответствии с выбранной схемой.
+
+Используйте `struct.json(inner)`, когда сервер отправляет JSON-текст для события. `struct.json(inner)` сначала выполняет `JSON.parse` над raw SSE-текстом, затем парсит полученное значение через `inner`:
+
+```typescript
+const useProfileStream = defineEventStream({
+  path: '/v1/profile-events',
+  events: {
+    profile: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  },
+})
+```
+
+Для примитивных текстовых payloads:
+
+- `struct.string()` и `struct.text()` читают raw-текст события.
+- `struct.number()` обрезает текст и принимает только конечные числовые значения.
+- `struct.boolean()` обрезает текст и принимает только exact `true` или `false`.
+
+Plain `struct.object(...)`, `struct.array(...)` и `struct.record(...)` сами по себе не парсят JSON-похожий текст. Оберните их в `struct.json(...)`, если данные события приходят в JSON.
+
 ### Потоки событий с input
 
-Когда потоку нужны query-параметры или тело запроса, предоставьте `input` схему и `build` функцию как в `defineRequest`:
+Когда потоку нужны query-параметры или тело запроса, предоставьте `input` схему и `build` функцию. Сигнатура `build` такая же, как у `defineRequest`, с поддержкой params, query и headers.
 
 ```typescript
 const useRoomStream = defineEventStream({
   path: '/v1/room/:roomId',
-  input: struct.object({ roomId: struct.string() }),
-  build: ({ roomId }) => ({
-    params: { roomId },
+  input: struct.request({
+    path: struct.object({ roomId: struct.string() }),
   }),
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
+  },
   events: {
-    chat: struct.object({ user: struct.string(), text: struct.string() }),
+    chat: struct.json(struct.object({ user: struct.string(), text: struct.string() })),
   },
 })
 
-const [error, stream, open] = await client.execute(useRoomStream({ roomId: '42' }))
+const [error, stream, open] = await client.execute(useRoomStream({ path: { roomId: '42' } }))
 ```
 
 ## Результат выполнения
@@ -86,7 +117,7 @@ if (error) {
 console.log('Connected', open?.url)
 
 for await (const event of stream) {
-  if (event.event === 'message') {
+  if (event.event === 'message' && typeof event.data === 'object' && event.data !== null) {
     console.log('Message:', event.data.text)
   }
   if (event.event === 'heartbeat') {
@@ -123,20 +154,22 @@ await stream.closed // { code: 'aborted', reason: 'user-navigated-away' }
 Когда сервер отправляет событие, которое не может соответствовать ни одной схеме в `events` (или `default`), или валидация схемы не проходит, срабатывает наблюдатель `onInvalidEvent`. Это клиент-уровневая конфигурация, передаваемая через `sse.onInvalidEvent` при `createClient`.
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     onInvalidEvent: async (context) => {
       console.warn('Invalid event:', context.reason, context.message)
       // context.reason: 'missing-struct' | 'validation-failed'
       // context.message: { id, event, data, retry? }
       // context.cause: Исходная ошибка при валидационном сбое
     },
-  },
-})
+  }),
+)
 ```
 
 `onInvalidEvent` — это **наблюдатель**:
+
+Распространенная причина валидационного сбоя — объявление `struct.object(...)` для события, чье поле `data:` содержит JSON-текст. Используйте вместо этого `struct.json(struct.object(...))`. Невалидный JSON под `struct.json(...)` сообщается как `validation-failed` и не ретраится как raw-текст.
 
 - Даже если он выбрасывает внутри, исключение молча игнорируется и поток продолжается.
 - Он не блокирует потребление последующих событий.
@@ -148,9 +181,9 @@ SSE-транспорт имеет встроенное авто-переподк
 ### Конфигурация переподключения
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     reconnect: {
       attempts: 5, // Макс. попыток retry
       delayMs: 1000, // Начальный интервал retry
@@ -161,8 +194,8 @@ const client = createClient({
         return attempt <= 3
       },
     },
-  },
-})
+  }),
+)
 ```
 
 Приоритет переподключения:
@@ -179,15 +212,15 @@ const client = createClient({
 События попадают во внутреннюю async-очередь после прибытия, затем потребляются итератором. Можно ограничить размер очереди и поведение переполнения:
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     queue: {
       maxSize: 100,
       overflow: 'drop-oldest', // 'drop-newest' | 'drop-oldest' | 'error'
     },
-  },
-})
+  }),
+)
 ```
 
 | `overflow`    | Поведение                                                  |
@@ -199,23 +232,23 @@ const client = createClient({
 ## Полный пример
 
 ```typescript
-import { createClient, defineEventStream, struct } from '@defjs/core'
+import { createClient, defineEventStream, struct, withEndpoint, withSSEOptions } from '@defjs/core'
 
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     reconnect: { attempts: 5, delayMs: 1000, factor: 2, maxDelayMs: 30000 },
     queue: { maxSize: 100, overflow: 'drop-oldest' },
     onInvalidEvent: async ({ reason, message }) => {
       console.warn(`Skipped invalid event [${reason}]: ${message.event}`)
     },
-  },
-})
+  }),
+)
 
 const useLogStream = defineEventStream({
   path: '/v1/logs',
   events: {
-    log: struct.object({ level: struct.string(), msg: struct.string() }),
+    log: struct.json(struct.object({ level: struct.string(), msg: struct.string() })),
   },
 })
 
@@ -230,7 +263,9 @@ async function tailLogs() {
   console.log('Connected', open.url)
 
   for await (const event of stream) {
-    console.log(`[${event.data.level}] ${event.data.msg}`)
+    if (typeof event.data === 'object' && event.data !== null) {
+      console.log(`[${event.data.level}] ${event.data.msg}`)
+    }
   }
 
   const closeInfo = await stream.closed

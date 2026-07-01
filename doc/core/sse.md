@@ -9,7 +9,7 @@ Defjs uses `defineEventStream` to define typed SSE (Server-Sent Events) endpoint
 
 ## Defining an Event Stream
 
-When defining an SSE endpoint, declare the `events` field mapping event names to structs. SSE parser keeps each `data:` payload as raw text. At runtime, Defjs first selects `events[eventName] ?? events.default`, then decodes that text according to the selected struct.
+When defining an SSE endpoint, declare the `events` field mapping event names to structs. The SSE transport delivers each `data:` payload as raw text; Defjs selects the matching struct and decodes the text according to that struct's content kind.
 
 ```typescript
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'

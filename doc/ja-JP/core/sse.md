@@ -9,56 +9,87 @@ Defjs は `defineEventStream` を使って型付き SSE（Server-Sent Events）�
 
 ## イベントストリームの定義
 
-SSE エンドポイントを定義する際は、`events` フィールドでイベント名を struct スキーマにマッピングします。各イベントタイプの `data` フィールドは、一致するスキーマに従って自動的にパースされます。
+SSE エンドポイントを定義する際は、`events` フィールドでイベント名を struct にマッピングします。SSE トランスポートは各イベントの `data:` ペイロードを生テキストとして届け、Defjs は一致する struct を選び、その struct のコンテンツ種別に従ってテキストをデコードします。
 
 ```typescript
-import { createClient, defineEventStream, struct } from '@defjs/core'
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const useNotifications = defineEventStream({
   path: '/v1/notifications',
   events: {
-    message: struct.object({
-      id: struct.number(),
-      text: struct.string(),
-    }),
+    message: struct.json(
+      struct.object({
+        id: struct.number(),
+        text: struct.string(),
+      }),
+    ),
     heartbeat: struct.string(),
   },
 })
 ```
 
-### デフォルトイベントスキーマ（フォールバック）
+### デフォルトイベント struct
 
-サーバーが `events` に明示的に宣言されていないイベントタイプを送信する場合、`default` スキーマをフォールバックとして提供できます。`default` がない場合、未知のイベントは静かに破棄されます。
+サーバーが `events` に明示的に宣言されていないイベントタイプを送信する場合、`default` struct を提供します。`default` がない場合、未知のイベントは静かに破棄されます。
 
 ```typescript
 const useMixedStream = defineEventStream({
   path: '/v1/events',
   events: {
-    userconnect: struct.object({ uid: struct.number() }),
-    default: struct.object({ note: struct.string() }),
+    userconnect: struct.json(struct.object({ uid: struct.number() })),
+    default: struct.json(struct.object({ note: struct.string() })),
   },
 })
 ```
 
+### イベントデータのコンテンツデコード
+
+SSE トランスポートは各 `data:` ペイロードをテキストとして届けます。Defjs はまず `events[eventName] ?? events.default` からイベント用 struct を選び、選ばれた struct に従ってテキストをデコードします。
+
+サーバーがイベントに対して JSON テキストを送信する場合は `struct.json(inner)` を使います。`struct.json(inner)` は生の SSE テキストに対してまず `JSON.parse` を実行し、その結果の値を `inner` でパースします：
+
+```typescript
+const useProfileStream = defineEventStream({
+  path: '/v1/profile-events',
+  events: {
+    profile: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  },
+})
+```
+
+プリミティブなテキストペイロードの場合：
+
+- `struct.string()` と `struct.text()` は生のイベントテキストを読み取ります。
+- `struct.number()` はテキストをトリムし、有限の数値のみを受け入れます。
+- `struct.boolean()` はテキストをトリムし、正確な `true` または `false` のみを受け入れます。
+
+素の `struct.object(...)`、`struct.array(...)`、`struct.record(...)` は、JSON のように見えるテキストを自動的にパースしません。JSON イベントデータを扱うには `struct.json(...)` でラップしてください。
+
 ### 入力付きイベントストリーム
 
-ストリームにクエリパラメーターやリクエストボディが必要な場合は、`defineRequest` と同様に `input` スキーマと `build` 関数を提供します。`build` のシグネチャは `defineRequest` と同じで、params、query、headers をサポートします。
+ストリームにクエリパラメーターやリクエストボディが必要な場合は、`input` struct と `build` 関数を提供します。`build` のシグネチャは `defineRequest` と同じで、params、query、headers をサポートします。
 
 ```typescript
 const useRoomStream = defineEventStream({
   path: '/v1/room/:roomId',
-  input: struct.object({ roomId: struct.string() }),
-  build: ({ roomId }) => ({
-    params: { roomId },
+  input: struct.request({
+    path: struct.object({ roomId: struct.string() }),
   }),
+  build(ctx, input) {
+    ctx.setPathParams(input.path)
+  },
   events: {
-    chat: struct.object({ user: struct.string(), text: struct.string() }),
+    chat: struct.json(struct.object({ user: struct.string(), text: struct.string() })),
   },
 })
 
-const [error, stream, open] = await client.execute(useRoomStream({ roomId: '42' }))
+const [error, stream, open] = await client.execute(useRoomStream({ path: { roomId: '42' } }))
 ```
 
 ## 実行結果
@@ -86,7 +117,7 @@ if (error) {
 console.log('Connected', open?.url)
 
 for await (const event of stream) {
-  if (event.event === 'message') {
+  if (event.event === 'message' && typeof event.data === 'object' && event.data !== null) {
     console.log('Message:', event.data.text)
   }
   if (event.event === 'heartbeat') {
@@ -120,23 +151,25 @@ await stream.closed // { code: 'aborted', reason: 'user-navigated-away' }
 
 ## 無効イベント処理: onInvalidEvent
 
-サーバーが `events`（または `default`）内のスキーマに一致できないイベントを送信した場合、またはスキーマ検証に失敗した場合、`onInvalidEvent` オブザーバーがトリガーされます。これはクライアントレベルの設定で、`createClient` 時に `sse.onInvalidEvent` として渡されます。
+サーバーが `events`（または `default`）内の struct に一致できないイベントを送信した場合、または struct 検証に失敗した場合、`onInvalidEvent` オブザーバーがトリガーされます。これはクライアントレベルの設定で、`createClient` 時に `sse.onInvalidEvent` として渡されます。
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     onInvalidEvent: async (context) => {
       console.warn('Invalid event:', context.reason, context.message)
       // context.reason: 'missing-struct' | 'validation-failed'
       // context.message: { id, event, data, retry? }
       // context.cause: 検証失敗時の元のエラー
     },
-  },
-})
+  }),
+)
 ```
 
 `onInvalidEvent` は**オブザーバー**です：
+
+よくある検証失敗は、イベントの `data:` フィールドが JSON テキストであるのに対して `struct.object(...)` を宣言してしまうことです。そのような場合は `struct.json(struct.object(...))` を宣言してください。`struct.json(...)` の下で無効な JSON が届いた場合、それは `validation-failed` として報告され、生テキストとして再試行されることはありません。
 
 - 内部でスローしても、例外は静かに無視され、ストリームは継続します。
 - 後続のイベントの消費をブロックしません。
@@ -148,9 +181,9 @@ SSE トランスポートはビルトインの自動再接続を持ち、クラ�
 ### 再接続設定
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     reconnect: {
       attempts: 5, // 最大リトライ回数
       delayMs: 1000, // 初回リトライ間隔
@@ -161,8 +194,8 @@ const client = createClient({
         return attempt <= 3
       },
     },
-  },
-})
+  }),
+)
 ```
 
 再接続の優先順位：
@@ -179,15 +212,15 @@ const client = createClient({
 イベントは到着後に内部非同期キューに入り、その後イテレーターによって消費されます。キューのサイズとオーバーフロー動作を制限できます：
 
 ```typescript
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     queue: {
       maxSize: 100,
       overflow: 'drop-oldest', // 'drop-newest' | 'drop-oldest' | 'error'
     },
-  },
-})
+  }),
+)
 ```
 
 | `overflow`    | 動作                                                         |
@@ -199,23 +232,23 @@ const client = createClient({
 ## 完全な例
 
 ```typescript
-import { createClient, defineEventStream, struct } from '@defjs/core'
+import { createClient, defineEventStream, struct, withEndpoint, withSSEOptions } from '@defjs/core'
 
-const client = createClient({
-  endpoint: 'https://api.example.com',
-  sse: {
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOptions({
     reconnect: { attempts: 5, delayMs: 1000, factor: 2, maxDelayMs: 30000 },
     queue: { maxSize: 100, overflow: 'drop-oldest' },
     onInvalidEvent: async ({ reason, message }) => {
       console.warn(`Skipped invalid event [${reason}]: ${message.event}`)
     },
-  },
-})
+  }),
+)
 
 const useLogStream = defineEventStream({
   path: '/v1/logs',
   events: {
-    log: struct.object({ level: struct.string(), msg: struct.string() }),
+    log: struct.json(struct.object({ level: struct.string(), msg: struct.string() })),
   },
 })
 
@@ -230,7 +263,9 @@ async function tailLogs() {
   console.log('Connected', open.url)
 
   for await (const event of stream) {
-    console.log(`[${event.data.level}] ${event.data.msg}`)
+    if (typeof event.data === 'object' && event.data !== null) {
+      console.log(`[${event.data.level}] ${event.data.msg}`)
+    }
   }
 
   const closeInfo = await stream.closed
