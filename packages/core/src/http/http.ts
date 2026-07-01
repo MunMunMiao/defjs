@@ -36,34 +36,36 @@ export interface HttpCommand<TInput extends AnyStruct | undefined, TOutput exten
 
 export type HttpExecuteOptions = UseRequestConfig & { signal?: AbortSignal }
 
-export type RequestCommandBuilder<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> = EndpointCommandBuilder<
-  TInput,
-  HttpCommand<TInput, TOutput>
->
+export type RequestCommandBuilder<
+  TInput extends AnyStruct | undefined,
+  TOutput extends RequestOutputShape | undefined,
+> = EndpointCommandBuilder<TInput, HttpCommand<TInput, TOutput>>
 
-type ResponsePair<TOutput extends RequestOutputShape | undefined> = NonNullable<TOutput> extends readonly (infer TItem)[]
-  ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-    ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
-    : never
-  : {
-      [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
-        ? NonNullable<TOutput>[K] extends AnyStruct
-          ? { body: NonNullable<TOutput>[K]; status: TStatus }
+type ResponsePair<TOutput extends RequestOutputShape | undefined> =
+  NonNullable<TOutput> extends readonly (infer TItem)[]
+    ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
+      ? { body: TBody; status: TStatus extends readonly (infer U extends number)[] ? U : TStatus extends number ? TStatus : never }
+      : never
+    : {
+        [K in keyof NonNullable<TOutput>]: K extends `${infer TStatus extends number}`
+          ? NonNullable<TOutput>[K] extends AnyStruct
+            ? { body: NonNullable<TOutput>[K]; status: TStatus }
+            : never
           : never
-        : never
-    }[keyof NonNullable<TOutput>]
+      }[keyof NonNullable<TOutput>]
 
-type ResponseBodyByStatus<TOutput extends RequestOutputShape | undefined, TOk extends boolean> = ResponsePair<TOutput> extends infer TPair
-  ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
-    ? `${TStatus}` extends `2${string}`
-      ? TOk extends true
-        ? TBody
-        : never
-      : TOk extends true
-        ? never
-        : TBody
+type ResponseBodyByStatus<TOutput extends RequestOutputShape | undefined, TOk extends boolean> =
+  ResponsePair<TOutput> extends infer TPair
+    ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
+      ? `${TStatus}` extends `2${string}`
+        ? TOk extends true
+          ? TBody
+          : never
+        : TOk extends true
+          ? never
+          : TBody
+      : never
     : never
-  : never
 
 type InferResponseBodyByStatus<TOutput extends RequestOutputShape | undefined, TOk extends boolean> = [TOutput] extends [undefined]
   ? undefined

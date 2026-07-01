@@ -203,7 +203,7 @@ export async function setup({ provide }: TestProject) {
   app.get('/sse/mixed', (c) => {
     return streamSSE(c, async (stream) => {
       await stream.writeSSE({ data: JSON.stringify({ uid: 1 }), event: 'userconnect', id: '1' })
-      await stream.writeSSE({ data: JSON.stringify({ note: 'fallback' }), event: 'something-else', id: '2' })
+      await stream.writeSSE({ data: JSON.stringify({ note: 'default' }), event: 'something-else', id: '2' })
     })
   })
 

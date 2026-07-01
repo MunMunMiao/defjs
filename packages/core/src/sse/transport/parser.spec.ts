@@ -134,6 +134,25 @@ describe('sse parser', () => {
     ])
   })
 
+  test('should keep json-looking data as raw string at parser boundary', async () => {
+    const messages: EventStreamMessage[] = []
+    const parseMessage = createMessageParser(noop, noop, async (message) => {
+      messages.push(message)
+    })
+    const parseLine = createLineParser(parseMessage)
+
+    await parseLine(encoder.encode('event: profile\ndata: {"display_name":"Miao"}\n\n'))
+
+    expect(messages).toEqual([
+      {
+        id: '',
+        event: 'profile',
+        data: '{"display_name":"Miao"}',
+        retry: undefined,
+      },
+    ])
+  })
+
   test('should ignore comments malformed retry and lines without field', async () => {
     const ids: string[] = []
     const retries: number[] = []

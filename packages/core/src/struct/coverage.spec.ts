@@ -70,7 +70,7 @@ describe('struct coverage boundary cases', () => {
     expect(error).toBeInstanceOf(StructError)
   })
 
-  test('encode fallback paths and branch matchers are explicit', () => {
+  test('encode non-matching paths and branch matchers are explicit', () => {
     expect(encodeValue(runtime(struct.array(struct.string())), 'not-array')).toBe('not-array')
     expect(encodeValue(runtime(struct.tuple([struct.string()])), 'not-tuple')).toBe('not-tuple')
     expect(encodeValue(runtime(struct.tuple([struct.string()])), ['x', 1])).toEqual(['x', 1])
@@ -508,14 +508,14 @@ describe('struct coverage boundary cases', () => {
     })
     expect(decodeObjectByAlias(nonObjectDiscriminator, { type: 'text' })).toEqual({ type: 'text' })
 
-    const discriminatorFallbackOption = struct.object({ payload: struct.string().alias('body') })
+    const bodyAliasOption = struct.object({ payload: struct.string().alias('body') })
     const rawDiscriminator = makeStruct({
       discriminator: 'type',
       expected: '"text"',
       flags: DEFAULT_FLAGS,
       kind: 'discriminatedUnion',
-      map: new Map([['text', discriminatorFallbackOption]]),
-      options: [discriminatorFallbackOption],
+      map: new Map([['text', bodyAliasOption]]),
+      options: [bodyAliasOption],
     })
     expect(() => decodeObjectByAlias(rawDiscriminator, { body: 'hello', type: 'text' })).toThrow(StructError)
 

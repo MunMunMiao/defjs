@@ -75,10 +75,10 @@ describe('runtime.ts chain methods', () => {
     const Alias = User.alias('user')
     const Optional = User.optional()
     const Nullish = User.nullish()
-    const baseRuntime = (User as unknown as RuntimeStruct)
-    const aliasRuntime = (Alias as unknown as RuntimeStruct)
-    const optionalRuntime = (Optional as unknown as RuntimeStruct)
-    const nullishRuntime = (Nullish as unknown as RuntimeStruct)
+    const baseRuntime = User as unknown as RuntimeStruct
+    const aliasRuntime = Alias as unknown as RuntimeStruct
+    const optionalRuntime = Optional as unknown as RuntimeStruct
+    const nullishRuntime = Nullish as unknown as RuntimeStruct
     const baseDefinition = baseRuntime[DEFINITION]
     const aliasDefinition = aliasRuntime[DEFINITION]
     const optionalDefinition = optionalRuntime[DEFINITION]
@@ -143,7 +143,7 @@ describe('runtime.ts chain methods', () => {
       firstName: struct.string().alias('name'),
       displayName: struct.string().alias('name'),
     })
-    const runtime = (User as unknown as RuntimeStruct)
+    const runtime = User as unknown as RuntimeStruct
     const definition = runtime[DEFINITION]
 
     if (definition.kind !== 'object') {

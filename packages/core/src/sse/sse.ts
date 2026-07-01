@@ -16,6 +16,9 @@ import { makeResponse, toSettledResponse } from '../internal/http_response'
 import type { RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct, Infer } from '../struct'
 import { decodeJson } from '../struct/codec/json'
+import { parseStructValue } from '../struct/introspection'
+import { DEFINITION } from '../struct/symbols'
+import type { RuntimeStruct } from '../struct/types'
 import { createEventStreamRequest } from './request'
 import type { EventStreamHandle, EventStreamOpenInfo } from './transport/event_stream'
 import { fetchEventStream, getErrorOpenInfo } from './transport/event_stream'
@@ -280,7 +283,6 @@ async function transformStreamMessage<TEvents extends EventStructs>(
 ): Promise<EventStreamData<TEvents> | undefined> {
   const eventName = message.event || 'message'
   const eventStruct = resolveEventStruct(events, eventName)
-  const rawData = decodeEventData(message.data)
 
   if (!eventStruct) {
     await notifyInvalidEvent(onInvalidEvent, {
@@ -297,7 +299,7 @@ async function transformStreamMessage<TEvents extends EventStructs>(
 
   try {
     return {
-      data: await parseEventData(eventStruct, rawData),
+      data: await parseEventData(eventStruct, message.data),
       event: eventName,
       id: message.id || undefined,
       retry: message.retry,
@@ -349,28 +351,74 @@ function resolveEventStruct<TEvents extends EventStructs>(events: TEvents, event
     return exact
   }
 
-  const fallback = events['default']
-  if (fallback) {
-    return fallback
+  const defaultStruct = events['default']
+  if (defaultStruct) {
+    return defaultStruct
   }
 
   return undefined
 }
 
-function parseEventData(struct: AnyStruct, data: unknown): unknown {
-  return decodeJson(struct, data)
+function parseEventData(struct: AnyStruct, data: string): unknown {
+  return decodeSSEEventData(struct, data)
 }
 
-function decodeEventData(data: string): unknown {
-  if (!data) {
-    return data
+function decodeSSEEventData(struct: AnyStruct, data: string): unknown {
+  const runtime = struct as unknown as RuntimeStruct
+  const definition = runtime[DEFINITION]
+
+  switch (definition.kind) {
+    case 'any':
+    case 'unknown':
+    case 'string':
+      return parseStructValue(struct, data)
+    case 'number':
+      return parseStructValue(struct, parseSSENumber(data))
+    case 'boolean':
+      return parseStructValue(struct, parseSSEBoolean(data))
+    case 'requestBody':
+      if (definition.codec === 'json') {
+        return parseSSEJsonBody(definition.struct as RuntimeStruct, data)
+      }
+      if (definition.codec === 'text') {
+        return parseStructValue(struct, data)
+      }
+      throw new TypeError(`SSE event data does not support ${definition.codec} content codec`)
+    case 'arrayBuffer':
+    case 'blob':
+      throw new TypeError(`SSE event data does not support ${definition.kind} content codec`)
+    default:
+      return parseStructValue(struct, data)
+  }
+}
+
+function parseSSENumber(data: string): number {
+  const trimmed = data.trim()
+  if (!trimmed) {
+    throw new TypeError('SSE number event data must not be empty')
   }
 
-  try {
-    return JSON.parse(data) as unknown
-  } catch {
-    return data
+  const value = Number(trimmed)
+  if (!Number.isFinite(value)) {
+    throw new TypeError('SSE number event data must be finite')
   }
+
+  return value
+}
+
+function parseSSEBoolean(data: string): boolean {
+  const trimmed = data.trim()
+  if (trimmed === 'true') {
+    return true
+  }
+  if (trimmed === 'false') {
+    return false
+  }
+  throw new TypeError('SSE boolean event data must be true or false')
+}
+
+function parseSSEJsonBody(struct: RuntimeStruct, data: string): unknown {
+  return decodeJson(struct, JSON.parse(data) as unknown)
 }
 
 function normalizeOpenInfo(open?: {

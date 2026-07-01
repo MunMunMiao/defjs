@@ -6,21 +6,21 @@ describe('codec/multipart.ts', () => {
   test('encodes multipart/form-data body as FormData and keeps file values', () => {
     const upload = struct.object({
       avatar: struct.blob().alias('avatar'),
-      fallbackName: struct.string(),
+      plainName: struct.string(),
       name: struct.string().alias('name'),
     })
     const avatar = new Blob(['avatar'], { type: 'image/png' })
 
     const form = encodeMultipart(upload, {
       avatar,
-      fallbackName: 'field-key',
+      plainName: 'field-key',
       name: 'Miao',
     })
 
     expect(form).toBeInstanceOf(FormData)
     expect(form.get('avatar')).toBeInstanceOf(Blob)
     expect((form.get('avatar') as Blob).size).toBe(avatar.size)
-    expect(form.get('fallbackName')).toBe('field-key')
+    expect(form.get('plainName')).toBe('field-key')
     expect(form.get('name')).toBe('Miao')
   })
 

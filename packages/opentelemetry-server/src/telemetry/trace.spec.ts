@@ -133,7 +133,7 @@ describe('trace helpers', () => {
     expect(spans[0]?.recordException).toHaveBeenCalledWith(new Error('boom'))
   })
 
-  test('runSpanHook uses Error fallback when Error name is empty', () => {
+  test('runSpanHook uses Error default name when Error name is empty', () => {
     const { tracer, spans } = createMockTracer()
     const span = tracer.startSpan('test')
     const error = new Error('boom')

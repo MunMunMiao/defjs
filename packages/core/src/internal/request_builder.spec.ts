@@ -68,6 +68,34 @@ describe('request_builder general', () => {
     expect(built.bodyContentType).toBe('application/json')
   })
 
+  test('request-shaped json body applies aliases and stringifies exactly once', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          displayName: struct.string().alias('display_name'),
+          nested: struct.object({
+            traceId: struct.string().alias('trace_id'),
+          }),
+        }),
+      ),
+    })
+
+    const built = buildRequest(
+      {
+        body: {
+          displayName: 'Miao',
+          nested: { traceId: 'trace-1' },
+        },
+      },
+      undefined,
+      { input },
+    )
+
+    expect(built.body).toBe('{"display_name":"Miao","nested":{"trace_id":"trace-1"}}')
+    expect(JSON.parse(built.body as string)).toEqual({ display_name: 'Miao', nested: { trace_id: 'trace-1' } })
+    expect(built.bodyContentType).toBe('application/json')
+  })
+
   test('json with custom content type', () => {
     const input = struct.request({
       body: struct.json(
@@ -129,6 +157,24 @@ describe('request_builder general', () => {
     )
     expect(built.body).toBe('<?xml version="1.0"?>')
     expect(built.bodyContentType).toBe('text/html;charset=UTF-8')
+  })
+
+  test('manual html builder remains separate from request-shaped text body defaulting', () => {
+    const input = struct.request({ body: struct.text() })
+
+    const defaultBuilt = buildRequest({ body: '<p>plain</p>' }, undefined, { input })
+    const htmlBuilt = buildRequest(
+      { body: '<p>html</p>' },
+      (request, view) => {
+        request.setHtml(view.body)
+      },
+      { input },
+    )
+
+    expect(defaultBuilt.body).toBe('<p>plain</p>')
+    expect(defaultBuilt.bodyContentType).toBe('text/plain;charset=UTF-8')
+    expect(htmlBuilt.body).toBe('<p>html</p>')
+    expect(htmlBuilt.bodyContentType).toBe('text/html;charset=UTF-8')
   })
 
   test('body helpers preserve explicit null content type opt-out', () => {
@@ -760,6 +806,36 @@ describe('request_builder request-shaped input', () => {
     expect((multipart.body as FormData).get('avatar')).toBeInstanceOf(Blob)
     expect(((multipart.body as FormData).get('avatar') as Blob).size).toBe(avatar.size)
     expect((multipart.body as FormData).get('name')).toBe('Miao')
+  })
+
+  test('request-shaped urlencoded and formData bodies keep their boundary materializers', () => {
+    const urlencodedInput = struct.request({
+      body: struct.urlencoded({
+        page: struct.number(),
+        q: struct.string(),
+      }),
+    })
+    const formDataInput = struct.request({
+      body: struct.formData({
+        avatar: struct.blob(),
+        title: struct.string(),
+      }),
+    })
+    const avatar = new Blob(['avatar'], { type: 'image/png' })
+
+    const urlencoded = buildRequest({ body: { page: 1, q: 'zen kit' } }, undefined, { input: urlencodedInput })
+    const multipart = buildRequest({ body: { avatar, title: 'profile' } }, undefined, { input: formDataInput })
+
+    expect(urlencoded.body).toBeInstanceOf(URLSearchParams)
+    expect((urlencoded.body as URLSearchParams).toString()).toBe('page=1&q=zen+kit')
+    expect(urlencoded.bodyContentType).toBe('application/x-www-form-urlencoded;charset=UTF-8')
+
+    expect(multipart.body).toBeInstanceOf(FormData)
+    expect((multipart.body as FormData).get('avatar')).toBeInstanceOf(Blob)
+    expect(((multipart.body as FormData).get('avatar') as Blob).size).toBe(avatar.size)
+    expect(((multipart.body as FormData).get('avatar') as Blob).type).toBe(avatar.type)
+    expect((multipart.body as FormData).get('title')).toBe('profile')
+    expect(multipart.bodyContentType).toBeUndefined()
   })
 
   test('materializes explicit build plan from bound input view', () => {

@@ -82,8 +82,7 @@ export function resolveOutputStruct(output: RequestOutputShape, status: number):
     return output[status]
   }
 
-  for (let index = output.length - 1; index >= 0; index -= 1) {
-    const item = output[index]!
+  for (const item of [...output].reverse()) {
     const statuses = Array.isArray(item.status) ? item.status : [item.status]
     if (statuses.includes(status)) {
       return item.body

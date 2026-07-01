@@ -156,7 +156,9 @@ export function createFetchRequestInit(request: HttpRequest): RequestInit & { du
     headers,
     signal: request.abort,
     streamingRequestUnsupportedError: ERR_STREAMING_REQUEST_UNSUPPORTED,
-    wrapReadableStreamBody: uploadProgress ? (body) => wrapUploadProgressStream(body, uploadProgress, getContentLength(headers)) : undefined,
+    wrapReadableStreamBody: uploadProgress
+      ? (body) => wrapUploadProgressStream(body, uploadProgress, getContentLength(headers))
+      : undefined,
   })
 }
 

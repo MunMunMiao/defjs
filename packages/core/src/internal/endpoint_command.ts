@@ -7,6 +7,5 @@ export type IsEndpointInputOptional<TInput extends AnyStruct | undefined> = [TIn
     ? true
     : false
 
-export type EndpointCommandBuilder<TInput extends AnyStruct | undefined, TCommand> = IsEndpointInputOptional<TInput> extends true
-  ? (input?: EndpointInput<TInput>) => TCommand
-  : (input: EndpointInput<TInput>) => TCommand
+export type EndpointCommandBuilder<TInput extends AnyStruct | undefined, TCommand> =
+  IsEndpointInputOptional<TInput> extends true ? (input?: EndpointInput<TInput>) => TCommand : (input: EndpointInput<TInput>) => TCommand

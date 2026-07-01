@@ -82,7 +82,7 @@ describe('Basic Auth Interceptor', () => {
 
   test('should throw error if btoa is not supported', () => {
     const _btoa = globalThis.btoa
-    // @ts-expect-error temporarily removing btoa to test runtime fallback behavior
+    // @ts-expect-error temporarily removing btoa to test unsupported-runtime behavior
     globalThis.btoa = undefined
 
     expect(() => basicAuthHttpInterceptor(() => credential)).toThrowError()

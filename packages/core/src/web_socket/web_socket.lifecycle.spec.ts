@@ -26,7 +26,7 @@ describe('web socket runtime lifecycle', () => {
     const source = readFileSync(new URL('./web_socket.ts', import.meta.url), 'utf8')
     expect(source).toMatch(/socket\.addEventListener\('message', onMessage\)/)
     expect(source).toMatch(/socket\.removeEventListener\('message', onMessage\)/)
-    // 反向断言:旧的 anonymous arrow wrap 已彻底消失
+    // 反向断言：不能重新引入 anonymous arrow wrap
     expect(source).not.toMatch(/socket\.addEventListener\('message', event =>/)
     expect(source).not.toMatch(/socket\.removeEventListener\('message', handleMessage\)/)
   })

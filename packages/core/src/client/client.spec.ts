@@ -217,7 +217,7 @@ describe('Client', () => {
     expect(config.maxBufferSize).toBeUndefined()
   })
 
-  test('should support legacy withWebSocketOptions helper', () => {
+  test('should support grouped withWebSocketOptions helper', () => {
     const beforeConnect = vi.fn()
 
     class MockWebSocket extends EventTarget {
@@ -249,7 +249,7 @@ describe('Client', () => {
     expect(config.reconnect).toEqual({ attempts: 2 })
   })
 
-  test('legacy withWebSocketOptions ignores undefined fields', () => {
+  test('withWebSocketOptions ignores undefined fields', () => {
     class MockWebSocket extends EventTarget {
       static CONNECTING = 0
       static OPEN = 1

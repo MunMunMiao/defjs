@@ -140,8 +140,47 @@ struct.string().parseAsync('x')
 // @ts-expect-error request body requires a body wrapper or binary body struct.
 struct.request({ body: struct.object({ id: struct.string() }) })
 
+const JsonBody = struct.json(
+  struct.object({
+    displayName: struct.string().alias('display_name'),
+    score: struct.number(),
+  }),
+)
+type JsonBodyCase = Expect<StrictEqual<Infer<typeof JsonBody>, { displayName: string; score: number }>>
+expectTypeOf<(typeof JsonBody)['_struct']['input']>().toEqualTypeOf<{ displayName?: string | undefined; score?: number | undefined }>()
+expectTypeOf<(typeof JsonBody)['_struct']['output']>().toEqualTypeOf<{ displayName: string; score: number }>()
+
+const FormDataBody = struct.formData({
+  file: struct.blob(),
+  title: struct.string(),
+})
+type FormDataBodyCase = Expect<StrictEqual<Infer<typeof FormDataBody>, { file: Blob; title: string }>>
+expectTypeOf<(typeof FormDataBody)['_struct']['input']>().toEqualTypeOf<{ file?: Blob | undefined; title?: string | undefined }>()
+expectTypeOf<(typeof FormDataBody)['_struct']['output']>().toEqualTypeOf<{ file: Blob; title: string }>()
+
+const UrlencodedBody = struct.urlencoded({
+  page: struct.number(),
+  q: struct.string(),
+})
+type UrlencodedBodyCase = Expect<StrictEqual<Infer<typeof UrlencodedBody>, { page: number; q: string }>>
+expectTypeOf<(typeof UrlencodedBody)['_struct']['input']>().toEqualTypeOf<{ page?: number | undefined; q?: string | undefined }>()
+expectTypeOf<(typeof UrlencodedBody)['_struct']['output']>().toEqualTypeOf<{ page: number; q: string }>()
+
+const TextBody = struct.text()
+type TextBodyCase = Expect<StrictEqual<Infer<typeof TextBody>, string>>
+expectTypeOf<(typeof TextBody)['_struct']['input']>().toEqualTypeOf<string | undefined>()
+expectTypeOf<(typeof TextBody)['_struct']['output']>().toEqualTypeOf<string>()
+
+const RequestWithJsonBody = struct.request({ body: JsonBody })
+expectTypeOf<(typeof RequestWithJsonBody)['_struct']['input']>().toEqualTypeOf<{
+  body?: { displayName?: string | undefined; score?: number | undefined } | undefined
+}>()
+expectTypeOf<(typeof RequestWithJsonBody)['_struct']['output']>().toEqualTypeOf<{
+  body: { displayName: string; score: number }
+}>()
+
 // @ts-expect-error default was removed from the Go-style API.
-struct.string().default('fallback')
+struct.string().default('default-value')
 
 // @ts-expect-error passthrough was removed from the Go-style API.
 struct.object({ id: struct.string() }).passthrough()
@@ -155,4 +194,16 @@ struct.object({ id: struct.string() }).pick({ id: true })
 // @ts-expect-error struct.recursive was removed from the public API.
 struct.recursive(() => struct.object({ id: struct.string() }))
 
-export type Cases = AliasOutputCase | AnyGuard | DateCase | IntersectionCase | MatrixCase | ProfileCase | SingleIntersectionCase | UnionCase
+export type Cases =
+  | AliasOutputCase
+  | AnyGuard
+  | DateCase
+  | FormDataBodyCase
+  | IntersectionCase
+  | JsonBodyCase
+  | MatrixCase
+  | ProfileCase
+  | SingleIntersectionCase
+  | TextBodyCase
+  | UnionCase
+  | UrlencodedBodyCase

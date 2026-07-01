@@ -143,6 +143,7 @@ export interface ObjectStruct<T extends ObjectShape>
 }
 
 export type RequestBodyCodec = 'arrayBuffer' | 'blob' | 'formData' | 'json' | 'text' | 'urlencoded'
+export type ContentCodecKind = RequestBodyCodec
 export const REQUEST_SECTION_KEYS = ['path', 'query', 'headers', 'body'] as const
 export type RequestSectionKey = (typeof REQUEST_SECTION_KEYS)[number]
 
@@ -150,6 +151,7 @@ export type RequestBodyDescriptor = {
   codec: RequestBodyCodec
   struct: RuntimeStruct
 }
+export type ContentBoundaryDescriptor = RequestBodyDescriptor
 
 export interface RequestBodyStructTypes<C extends RequestBodyCodec, S extends StructLike<unknown, unknown, boolean>> extends StructTypes<
   StructInput<S>,

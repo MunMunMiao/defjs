@@ -41,4 +41,3 @@ export function isWebSocketCommand(
 ): value is WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined> {
   return commandTypeOf(value) === WEB_SOCKET_COMMAND
 }
-

@@ -19,7 +19,6 @@ import {
   createUnknownStruct,
 } from './constructors'
 
-
 describe('facade.ts', () => {
   test('exports every constructor from namespace', () => {
     expect(struct.string).toBe(createStringStruct)

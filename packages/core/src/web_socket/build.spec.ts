@@ -56,7 +56,7 @@ describe('web socket build helpers', () => {
     expect(createWebSocketUrl('wss://localhost', '/ws', undefined, undefined, (p) => p.toString())).toBe('wss://localhost/ws')
   })
 
-  test('should fill url params with undefined fallback', () => {
+  test('should reject undefined url params', () => {
     expect(() => createWebSocketUrl('http://localhost', '/ws/:id', { id: undefined }, undefined, (p) => p.toString())).toThrow(
       'Missing path param: id',
     )

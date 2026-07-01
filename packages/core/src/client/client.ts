@@ -102,7 +102,9 @@ export function createClient(...options: ClientOption[]): Client {
       return executeWebSocketCommand(
         conf,
         command,
-        options as WebSocketExecuteOptions<WebSocketIncomingData<SocketStructs>, WebSocketOutgoingData<SocketStructs | undefined>> | undefined,
+        options as
+          | WebSocketExecuteOptions<WebSocketIncomingData<SocketStructs>, WebSocketOutgoingData<SocketStructs | undefined>>
+          | undefined,
       )
     }
 
