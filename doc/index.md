@@ -25,7 +25,7 @@ features:
     details: Per-transport onion-model interceptors for logging, authentication, retry, and cross-cutting concerns. HTTP, SSE, and WebSocket each have their own interceptor chain.
   - icon: 📡
     title: Streaming
-    details: Native SSE and WebSocket support with automatic reconnect, heartbeat, message queueing, and backpressure control. Built for real-time applications.
+    details: Native SSE event streams with automatic reconnect and configurable event queue handling, plus WebSocket connections with reconnect, heartbeat, and queued sends. Built for real-time applications.
   - icon: ⚡
     title: Universal Runtime
     details: Works in browsers, Node.js, Bun, and Deno. No polyfills needed. Pure ESM with zero runtime dependencies for the core package.
@@ -36,44 +36,41 @@ features:
 
 ## Quick Start
 
-Install `@defjs/core` with your preferred package manager:
+This homepage quick start targets the current repository source/workspace API.
 
-::: code-group
+Repository workspace baseline: use Node `>=26`, `pnpm@11.6.0`, and `engine-strict=true`. That is the current floor for this source checkout and for packages built from the repository's current manifests; if you later install a published package, follow the `engines` field and release notes shipped with that published version.
 
-```bash [npm]
-npm install @defjs/core
+Use these commands to install the workspace and verify the docs examples:
+
+```bash
+pnpm install
+pnpm --dir doc run typecheck
 ```
 
-```bash [yarn]
-yarn add @defjs/core
-```
+To experiment with the snippet, paste it into a workspace package or docs twoslash block that resolves `@defjs/core` from source. The repository root itself is not an app package that imports `@defjs/core`.
 
-```bash [pnpm]
-pnpm add @defjs/core
-```
+> Published npm/CDN users: the current public release line may lag behind this page. This homepage does not teach the legacy `@defjs/core@0.3.3` API. Before copying `withEndpoint(...)` or `struct.request(...)` into an external app, use a published release whose package table or release notes explicitly includes this API.
 
-```bash [bun]
-bun add @defjs/core
-```
-
-:::
-
-Define a typed request and execute it in three lines:
+Define a typed request and execute it:
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  path: '/v1/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-const [error, user] = await client.execute(getUser())
+const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
 if (!error) {
   console.log(user.id, user.name) // fully typed
 }
@@ -105,7 +102,7 @@ if (!error) {
 
 ## What's Next
 
-- [Getting Started →](/guide/getting-started) — Installation, CDN usage, and your first request
+- [Getting Started →](/guide/getting-started) — Repository source/workspace onboarding, published package caveats, and your first request
 - [Core Concepts →](/core/client) — Client, commands, context, and error handling
 - [Examples →](/guide/examples) — REST CRUD, SSE notifications, WebSocket chat, interceptor patterns
 

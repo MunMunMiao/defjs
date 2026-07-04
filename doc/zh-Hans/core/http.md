@@ -11,7 +11,10 @@ description: Use defineRequest to define HTTP endpoints, master status-code-to-s
 
 `defineRequest` 接受一个定义对象，包含 `method`、`path`、`input`（可选）、`output`（可选）和 `build`（可选）。
 
-提供 `input` 时，必须同时提供 `build`，以描述输入字段如何映射到请求各部分（路径参数、查询参数、请求头、请求体）。
+`input` 用来描述命令输入形状，常见映射方式有两种：
+
+1. 当字段可以直接映射到 HTTP 传输部分（如 `path`、`query`、`headers`、`body`）时，使用 `struct.request(...)`，Defjs 会自动构建这些请求部分。
+2. 当公开输入形状与实际传输形状不同，或者你需要自定义映射逻辑时，使用 `build(ctx, input)`。
 
 ```typescript
 import { defineRequest, struct } from '@defjs/core'
@@ -24,17 +27,14 @@ const User = struct.object({
 const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
-  input: struct.object({
+  input: struct.request({
     path: struct.object({ id: struct.number() }),
+    query: struct.object({ includePosts: struct.boolean() }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams({
-      id: input.path.id,
-    })
-  },
-  output: {
-    200: User,
-  },
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 ```
 
@@ -44,11 +44,37 @@ const getUser = defineRequest({
 const listUsers = defineRequest({
   method: 'GET',
   path: '/users',
-  output: {
-    200: struct.object({
-      items: struct.array(User),
-    }),
+  output: [
+    {
+      status: 200,
+      body: struct.object({
+        items: struct.array(User),
+      }),
+    },
+  ] as const,
+})
+```
+
+当公开输入形状与实际传输形状不同时，添加 `build(ctx, input)` 并显式映射字段：
+
+```typescript
+const updateUser = defineRequest({
+  method: 'PATCH',
+  path: '/users/:id',
+  input: struct.object({
+    id: struct.number(),
+    preview: struct.boolean(),
+    body: struct.object({ name: struct.string() }),
+  }),
+  build(ctx, input) {
+    ctx.setPathParams({ id: input.id })
+    ctx.setQueryParams({ preview: input.preview })
+    ctx.setJson(input.body)
   },
+  output: [
+    { status: 200, body: User },
+    { status: 400, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 ```
 
@@ -56,7 +82,7 @@ const listUsers = defineRequest({
 
 `output` 将 HTTP 状态码映射到结构。运行时按响应状态码选择匹配的结构。
 
-同时支持对象和数组形式：
+本指南主要使用数组形式，因为它能更明确地表达状态码 / 响应体配对，也便于将多个状态码归到同一组。对象形式依然受支持，适合较紧凑的参考示例。
 
 ```typescript
 import { defineRequest, struct } from '@defjs/core'
@@ -65,12 +91,9 @@ import { defineRequest, struct } from '@defjs/core'
 const createUser = defineRequest({
   method: 'POST',
   path: '/users',
-  input: struct.object({
+  input: struct.request({
     body: struct.object({ name: struct.string() }),
   }),
-  build(ctx, input) {
-    ctx.setJson({ name: input.body.name })
-  },
   output: {
     201: struct.object({ id: struct.number(), name: struct.string() }),
     400: struct.object({ message: struct.string() }),
@@ -79,14 +102,13 @@ const createUser = defineRequest({
 })
 
 // 数组形式：支持将多个状态码映射到同一个结构
-const updateUser = defineRequest({
+const updateUserOutput = defineRequest({
   method: 'PUT',
   path: '/users/:id',
-  // ...
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: [400, 422], body: struct.object({ message: struct.string() }) },
-  ],
+  ] as const,
 })
 ```
 
@@ -136,29 +158,29 @@ if (error === null) {
 调用 `Client.execute()` 并传入命令。第二个参数是可选的 `HttpExecuteOptions`：
 
 ```typescript
-const [error, result, response] = await client.execute(command, {
-  context: {
-    /* 拦截器可读取的自定义上下文 */
-  },
+import { makeHttpContext } from '@defjs/core'
+
+const context = makeHttpContext()
+
+const [error, result, response] = await client.execute(command(), {
+  context,
   onDownloadProgress: (event) => {
     /* ... */
   },
   onUploadProgress: (event) => {
     /* ... */
   },
-  abort: abortSignal,
-  timeout: 5000,
-  signal: abortSignal, // 别名，等价于 abort
+  signal: abortSignal, // 直接传入 AbortSignal 的别名
 })
 ```
 
 返回的 `HttpAwaitResult` 是一个三元组：
 
-| 位置 | 类型                                     | 含义                                              |
-| ---- | ---------------------------------------- | ------------------------------------------------- |
-| 0    | `RequestError<TErrorData> \| null`       | 错误对象；成功时为 `null`                         |
-| 1    | `TSuccess \| undefined`                  | 成功数据；失败时为 `undefined`                    |
-| 2    | `SettledResponse<TSuccess> \| undefined` | 原始响应包装，包含 `status`、`headers`、`body` 等 |
+| 位置 | 类型                                     | 含义                                                                 |
+| ---- | ---------------------------------------- | -------------------------------------------------------------------- |
+| 0    | `RequestError<TErrorData> \| null`       | 错误对象；成功时为 `null`                                            |
+| 1    | `TSuccess \| undefined`                  | 成功数据；失败时为 `undefined`，如果省略 `output` 也会是 `undefined` |
+| 2    | `SettledResponse<TSuccess> \| undefined` | 原始响应包装，包含 `status`、`headers`、`body` 等；当省略 `output` 时，已完成请求仍会返回该包装，但其中的 `body` 会被设为 `null` |
 
 ## 取消和超时
 
@@ -169,7 +191,7 @@ const [error, result, response] = await client.execute(command, {
 ```typescript
 const controller = new AbortController()
 
-const [error] = await client.execute(command, {
+const [error] = await client.execute(command(), {
   abort: controller.signal,
 })
 
@@ -182,7 +204,7 @@ controller.abort()
 ### 使用超时
 
 ```typescript
-const [error] = await client.execute(command, {
+const [error] = await client.execute(command(), {
   timeout: 5000, // 5 秒超时
 })
 
@@ -191,14 +213,23 @@ const [error] = await client.execute(command, {
 
 ### 合并外部信号
 
-如果同时传入 `abort` 和 `signal`，框架会将它们合并为单个 `AbortSignal`。`timeout` 也作为 `AbortSignal.timeout()` 参与。任何信号触发都会中止请求。
+如果同时传入 `abort` 和 `signal`，框架会将它们合并为单个 `AbortSignal`。任何一个信号触发都会中止请求。`timeout` 仍然是单独的另一种控制方式，不能与 `abort` 组合使用。
 
 ```typescript
 const controller = new AbortController()
 
-const [error] = await client.execute(command, {
+const [error] = await client.execute(command(), {
   abort: controller.signal,
   signal: someOtherSignal, // 与 abort 合并
+})
+```
+
+如果你需要“超时限制 + 另一个外部信号”，可以把 `timeout` 和 `signal` 搭配使用：
+
+```typescript
+const [error] = await client.execute(command(), {
+  timeout: 5000,
+  signal: someOtherSignal,
 })
 ```
 
@@ -219,7 +250,7 @@ const [error] = await client.execute(command, {
 ### 下载进度
 
 ```typescript
-const [error, result] = await client.execute(command, {
+const [error, result] = await client.execute(command(), {
   onDownloadProgress: (event) => {
     const percent = event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : null
     console.log(`Download: ${event.loaded} / ${event.total} (${percent ?? 'unknown'}%)`)
@@ -246,7 +277,7 @@ const stream = new ReadableStream<Uint8Array>({
   },
 })
 
-const [error, result] = await client.execute(command, {
+const [error, result] = await client.execute(command(), {
   onUploadProgress: (event) => {
     console.log(`Upload: ${event.loaded} / ${event.total}`)
   },
@@ -255,24 +286,34 @@ const [error, result] = await client.execute(command, {
 
 ## 响应类型
 
-默认情况下，如果声明了 `output`，框架自动将响应解析为 `json`。你可以通过 `responseType` 覆盖，或在 `output` 为 `undefined` 时指定。
+默认情况下，如果声明了 `output`，框架会自动按 `json` 解析响应。你也可以通过 `responseType` 覆盖这一点。当 `output` 为 `undefined` 时，`responseType` 只会影响内部响应解析路径；调用方拿到的结果数据仍然是 `undefined`，响应包装里的 `body` 也会被设为 `null`。
 
 ```typescript
-import { defineRequest } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-// 显式响应类型
+const client = createClient(withEndpoint('https://api.example.com'))
+
+// 已声明 output，并显式指定响应类型
 const getImage = defineRequest({
   method: 'GET',
   path: '/images/:id',
   responseType: 'blob',
+  output: [
+    { status: 200, body: struct.blob() },
+  ] as const,
 })
 
-// 不关心 output，只关注原始响应
+// 未声明 output：适合只检查状态码 / 响应头
 const healthCheck = defineRequest({
   method: 'GET',
   path: '/health',
   responseType: 'text',
 })
+
+const [healthError, healthResult, healthResponse] = await client.execute(healthCheck())
+// healthResult 是 undefined
+// healthResponse?.body 在这条路径上会被设为 null
+// 如果你需要读取响应体，请声明与 responseType 匹配的 output。
 ```
 
 支持的 `responseType` 值：
@@ -285,6 +326,8 @@ const healthCheck = defineRequest({
 | `arraybuffer` | 返回 `ArrayBuffer`                             |
 
 当 `responseType` 为 `json` 且 `output` 为返回状态码定义了结构时，框架会针对该结构验证解析后的 JSON。如果验证失败，返回 `code: 'RESPONSE_VALIDATION_FAILED'` 的 `DefinitionError`。
+
+如果省略 `output`，请求仍然会以状态码和响应头完成，但三元组中的第二项仍然是 `undefined`，响应包装里的 `body` 也会被设为 `null`。这种写法适合健康检查、类似 HEAD 的用法，或只断言状态码 / 响应头的场景。如果你需要响应体数据，请声明与所选 `responseType` 匹配的 `output`。
 
 ## 下一步
 

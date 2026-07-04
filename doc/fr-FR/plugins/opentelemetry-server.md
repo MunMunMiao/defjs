@@ -13,11 +13,13 @@ Package d'intégration OpenTelemetry côté serveur, fournissant la collecte de 
 - **N'initialise pas le SDK** — Tu dois initialiser le SDK OpenTelemetry de manière externe, puis passer le `Tracer` créé (et optionnellement `Meter`).
 - **Séparation par transport** — HTTP, SSE et WebSocket ont chacun leurs intercepteurs, cycles de vie de span et dimensions de métriques indépendants.
 
-## Installation
+## Configuration du workspace du dépôt
 
-```bash
-bun add @defjs/opentelemetry-server @opentelemetry/api @opentelemetry/core
-```
+Cette page documente actuellement l’usage source/workspace dans ce dépôt. `@defjs/opentelemetry-server` se trouve dans `packages/opentelemetry-server`, et sa peer dependency attend la version workspace correspondante de `@defjs/core` dans `packages/core`.
+
+Les import specifiers ci-dessous utilisent des noms de paquet, mais dans ce dépôt ils se résolvent vers des paquets source du workspace, et non vers une paire de paquets publiés sur une registry. Continue d’installer et d’initialiser séparément les dépendances SDK OpenTelemetry de ton application.
+
+Le npm public ne fournit pas actuellement `@defjs/opentelemetry-server`, et la dernière version autonome de `@defjs/core` disponible là-bas n’est pas un peer compatible pour ce paquet du workspace. Si tu publies plus tard à la fois `@defjs/opentelemetry-server` et une version compatible de `@defjs/core` dans une registry que tu contrôles, ou dans une autre registry qui distribue les deux versions, installe ces deux versions publiées ensemble dans cet environnement au lieu de mélanger ce paquet du workspace avec une version autonome incompatible de `@defjs/core`.
 
 ## Usage de base
 
@@ -98,15 +100,30 @@ const client = createClient(
 | Option             | Type                      | Défaut      | Description                                                                                         |
 | ------------------ | ------------------------- | ----------- | --------------------------------------------------------------------------------------------------- |
 | `enabled`          | `boolean`                 | `true`      | Activer le tracing WebSocket                                                                        |
-| `queryPropagation` | `boolean`                 | `true`      | Injecter le contexte de trace dans la chaîne de requête de l'URL WebSocket                          |
+| `queryPropagation` | `boolean`                 | `true`      | Injecter le contexte de trace dans la chaîne de requête de l'URL WebSocket pour la compatibilité navigateur. Pour un trafic de production sensible à la sécurité, la baseline recommandée est de le définir explicitement sur `false`. |
 | `requestHook`      | `(span, req) => void`     | `undefined` | Personnaliser la span WebSocket avant la requête de connexion                                       |
 | `responseHook`     | `(span, session) => void` | `undefined` | Personnaliser la span WebSocket après le retour de la session, `session` est `WebSocketSessionLike` |
 
 > **Gestion des exceptions de hooks** : Si `requestHook` ou `responseHook` lève une exception, l'erreur est enregistrée sur l'événement `defjs.otel.hook.error` de la span, mais la requête/flux/session client **continue normalement**.
+>
+> **Hygiène des attributs** : Dans `requestHook` / `responseHook`, privilégie des allowlists explicites, la redaction et des attributs stables à faible cardinalité. N’attache pas de chaînes de requête brutes, de corps de requête ou de réponse, d’en-têtes complets, de valeurs de baggage ou de payloads de message tant que ton application n’a pas déjà validé les exigences de confidentialité, cardinalité, rétention et redaction.
+
+## Migration depuis l'ancienne API
+
+| Ancienne configuration    | Nouvelle configuration                                          |
+| ------------------------- | --------------------------------------------------------------- |
+| `http: false`             | `http: { enabled: false }`                                      |
+| `sse: false`              | `sse: { enabled: false }`                                       |
+| `webSocket: false`        | `webSocket: { enabled: false }`                                 |
+| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
+| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                  |
+
+Les anciens hooks de niveau supérieur et les bascules booléennes de transport ont été supprimés intentionnellement afin que chaque transport expose les bons types de requête/réponse. Passer maintenant ces anciennes options JavaScript supprimées déclenche une erreur de migration au lieu de les interpréter silencieusement comme une instrumentation activée.
 
 ## Conventions sémantiques HTTP et métriques
 
-Le tracing HTTP suit les conventions sémantiques stables des clients HTTP OpenTelemetry. Par défaut, il enregistre des spans `SpanKind.CLIENT` avec les attributs de faible cardinalité suivants :
+Le tracing HTTP suit les conventions sémantiques stables des clients HTTP OpenTelemetry. Par défaut, il enregistre des spans `SpanKind.CLIENT` avec les attributs de base suivants :
 
 - `http.request.method`
 - `url.full`
@@ -120,7 +137,9 @@ Quand `meter` est fourni, les métriques stables suivantes sont collectées :
 | ------------------------------ | ----- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `http.client.request.duration` | `s`   | `http.request.method`, `http.response.status_code` optionnel, `server.address` optionnel, `server.port` optionnel, `error.type` optionnel |
 
-Par défaut, **les corps de requête/réponse, tous les en-têtes, les chaînes de requête brutes, les tailles de payload et les détails d'événements réseau ne sont pas collectés**. Ce sont généralement des données de haute cardinalité ou sensibles. Ajoute-les explicitement via `requestHook` / `responseHook` si nécessaire.
+Par défaut, **ce package n’ajoute pas les corps de requête/réponse, les en-têtes complets, les valeurs de baggage, les tailles de payload ni les payloads de message comme champs de télémétrie personnalisés**. Il **ne crée pas non plus d’attributs de span ni de métriques séparés pour les chaînes de requête brutes**. En revanche, `url.full` reflète l’URL réellement construite par ton application ; si cette URL contient déjà une chaîne de requête, elle peut donc toujours y apparaître. Évite autant que possible de placer des tokens, des user ids ou d’autres entrées sensibles ou à forte cardinalité dans les URL.
+
+N’ajoute pas de chaînes de requête brutes, de corps de requête/réponse, d’en-têtes complets, de valeurs de baggage ou de payloads de message aux spans ou aux métriques tant que l’application n’a pas déjà validé les exigences de confidentialité, cardinalité, rétention et redaction. Quand tu étends la télémétrie via des hooks, privilégie des allowlists explicites, la redaction et des attributs stables à faible cardinalité.
 
 ## Tracing au niveau connexion SSE et métriques personnalisées
 
@@ -173,11 +192,11 @@ Par défaut, **les spans par message ne sont pas créées**, et **les payloads d
 
 ## Risque de sécurité de la propagation de requête WebSocket
 
-Les clients WebSocket navigateur ne peuvent généralement pas définir des en-têtes HTTP arbitraires, donc ce package injecte par défaut le contexte de trace dans la chaîne de requête de l'URL WebSocket pour la compatibilité navigateur.
+Les clients WebSocket côté navigateur ne peuvent généralement pas définir des en-têtes HTTP arbitraires, donc `webSocket.queryPropagation` vaut par défaut `true` pour la compatibilité. Cette valeur par défaut injecte le contexte de trace dans la chaîne de requête de l’URL WebSocket.
 
-Ce choix a un compromis de sécurité : les chaînes de requête peuvent apparaître dans les logs d'accès, les logs de proxy, les outils de débogage navigateur/réseau, et les champs d'URL d'APM. Si le propagateur inclut `baggage`, les valeurs de baggage sont aussi écrites dans l'URL, potentiellement portant des données sensibles.
+Les chaînes de requête peuvent être enregistrées par des proxies, des navigateurs, des outils APM, des logs d’accès et des outils de débogage réseau. Elles peuvent aussi contenir des tokens, des user ids ou d’autres entrées à forte cardinalité. Si le propagateur inclut `baggage`, les valeurs de baggage peuvent aussi être écrites dans l’URL et contenir des données sensibles.
 
-Pour du trafic WebSocket sensible à la sécurité, désactive explicitement la propagation de requête :
+Pour un trafic WebSocket de production sensible à la sécurité, désactive explicitement la propagation par query en tant que baseline recommandée :
 
 ```typescript
 withOpenTelemetryServer({
@@ -186,7 +205,7 @@ withOpenTelemetryServer({
 })
 ```
 
-Après désactivation, le contexte de trace ne se propage plus via l'URL. Le serveur doit s'appuyer sur d'autres mécanismes pour la corrélation de traces (ex. champs d'ID de trace dans le protocole de messages de niveau applicatif).
+Après désactivation, le contexte de trace ne circule plus dans l’URL WebSocket. Si ton serveur doit encore rattacher la connexion à une trace, utilise au niveau applicatif un autre mécanisme de corrélation déjà revu.
 
 ## Prochaines étapes
 

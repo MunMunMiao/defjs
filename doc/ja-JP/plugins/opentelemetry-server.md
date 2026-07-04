@@ -13,11 +13,13 @@ description: Server-side outbound tracing without SDK initialization. Supports H
 - **SDK は初期化しない** — OpenTelemetry SDK は外部で初期化し、作成した `Tracer`（およびオプションで `Meter`）を渡す必要があります。
 - **トランスポートごとの分離** — HTTP、SSE、WebSocket それぞれに独立したインターセプター、スパンライフサイクル、メトリクスディメンションを持ちます。
 
-## インストール
+## リポジトリのワークスペース利用について
 
-```bash
-bun add @defjs/opentelemetry-server @opentelemetry/api @opentelemetry/core
-```
+このページは現在、このリポジトリ内での source/workspace 利用を前提に説明しています。`@defjs/opentelemetry-server` は `packages/opentelemetry-server` にあり、その peer dependency は `packages/core` にある対応する `@defjs/core` のワークスペース版を前提にしています。
+
+以下の import specifier はパッケージ名で書かれていますが、このリポジトリ内では公開 registry から一緒にインストールしたパッケージ対ではなく、ワークスペースのソースパッケージへ解決されます。アプリケーション側の OpenTelemetry SDK 依存関係は、引き続き別途インストールし、初期化してください。
+
+公開 npm では現在 `@defjs/opentelemetry-server` は提供されておらず、そこで入手できる最新の単独 `@defjs/core` リリースも、このワークスペースパッケージと互換性のある peer ではありません。今後 `@defjs/opentelemetry-server` と互換性のある `@defjs/core` を、あなたが管理する registry や両方のバージョンを配布する別の registry に公開した場合は、その環境では公開済みの両パッケージを組み合わせてインストールし、このワークスペースパッケージと互換性のない単独 `@defjs/core` リリースを混在させないでください。
 
 ## 基本的な使い方
 
@@ -98,15 +100,30 @@ const client = createClient(
 | オプション         | 型                        | デフォルト  | 説明                                                                                   |
 | ------------------ | ------------------------- | ----------- | -------------------------------------------------------------------------------------- |
 | `enabled`          | `boolean`                 | `true`      | WebSocket トレースを有効化                                                             |
-| `queryPropagation` | `boolean`                 | `true`      | WebSocket URL クエリ文字列にトレースコンテキストを注入                                 |
+| `queryPropagation` | `boolean`                 | `true`      | ブラウザ互換性のために WebSocket URL のクエリ文字列へトレースコンテキストを注入します。セキュリティ重視の本番トラフィックでは、`false` を推奨ベースラインとして明示してください。 |
 | `requestHook`      | `(span, req) => void`     | `undefined` | 接続リクエスト前に WebSocket スパンをカスタマイズ                                      |
 | `responseHook`     | `(span, session) => void` | `undefined` | セッション返却後に WebSocket スパンをカスタマイズ。`session` は `WebSocketSessionLike` |
 
 > **フック例外処理**: `requestHook` または `responseHook` がスローしても、エラーはスパンの `defjs.otel.hook.error` イベントとして記録されますが、クライアントのリクエスト／ストリーム／セッションは**正常に継続します**。
+>
+> **属性衛生**: `requestHook` / `responseHook` では、明示的な allowlist、redaction、安定した低カーディナリティ属性を優先してください。アプリケーション側でプライバシー、カーディナリティ、保持、redaction 要件を確認済みでない限り、生のクエリ文字列、リクエスト／レスポンスボディ、完全なヘッダー、baggage 値、メッセージペイロードを付加しないでください。
+
+## 旧 API からの移行
+
+| 旧設定                    | 新設定                                                           |
+| ------------------------- | ---------------------------------------------------------------- |
+| `http: false`             | `http: { enabled: false }`                                       |
+| `sse: false`              | `sse: { enabled: false }`                                        |
+| `webSocket: false`        | `webSocket: { enabled: false }`                                  |
+| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
+| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                   |
+
+各トランスポートが正しいリクエスト／レスポンス型を公開できるように、旧トップレベルフックと真偽値のトランスポート切り替えは意図的に削除されています。削除されたこれらの旧 JavaScript オプションを渡すと、現在は有効化済み計測として黙って解釈されるのではなく、移行エラーがスローされます。
 
 ## HTTP セマンティック規約とメトリクス
 
-HTTP トレースは、安定した OpenTelemetry HTTP クライアントセマンティック規約に従います。デフォルトでは、以下の低カーディナリティ属性を持つ `SpanKind.CLIENT` スパンを記録します：
+HTTP トレースは、安定した OpenTelemetry HTTP クライアントセマンティック規約に従います。デフォルトでは、以下の主要属性を持つ `SpanKind.CLIENT` スパンを記録します：
 
 - `http.request.method`
 - `url.full`
@@ -120,7 +137,9 @@ HTTP トレースは、安定した OpenTelemetry HTTP クライアントセマ�
 | ------------------------------ | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `http.client.request.duration` | `s`  | `http.request.method`、オプションで `http.response.status_code`、オプションで `server.address`、オプションで `server.port`、オプションで `error.type` |
 
-デフォルトでは、**リクエスト／レスポンスボディ、すべてのヘッダー、生のクエリ文字列、ペイロードサイズ、ネットワークイベントの詳細は収集されません**。これらは通常、高カーディナリティまたは機密性を持ちます。必要に応じて `requestHook` / `responseHook` で明示的に追加してください。
+デフォルトでは、**リクエスト／レスポンスボディ、完全なヘッダー、baggage 値、ペイロードサイズ、メッセージペイロードはカスタムテレメトリ項目として追加されません**。また、このパッケージは**生のクエリ文字列専用の個別スパン属性やメトリクスも作成しません**。ただし `url.full` はアプリケーションが実際に構築したリクエスト URL を反映するため、その URL 自体にクエリ文字列が含まれていれば、そこに現れる可能性があります。可能であれば、URL にトークン、ユーザー ID、その他の機密性または高カーディナリティな入力を含めないでください。
+
+アプリケーション側でプライバシー、カーディナリティ、保持、redaction 要件を確認済みでない限り、生のクエリ文字列、リクエスト／レスポンスボディ、完全なヘッダー、baggage 値、メッセージペイロードをスパンやメトリクスに追加しないでください。フックでテレメトリを拡張する場合は、明示的な allowlist、redaction、安定した低カーディナリティ属性を優先してください。
 
 ## SSE 接続レベルトレースとカスタムメトリクス
 
@@ -173,11 +192,11 @@ WebSocket スパンは `session.closed` が解決するまで開いたままに�
 
 ## WebSocket クエリ伝播のセキュリティリスク
 
-ブラウザの WebSocket クライアントは通常、任意の HTTP ヘッダーを設定できないため、このパッケージはブラウザ互換性のために、デフォルトでトレースコンテキストを WebSocket URL のクエリ文字列に注入します。
+ブラウザの WebSocket クライアントは通常、任意の HTTP ヘッダーを設定できないため、`webSocket.queryPropagation` の実行時デフォルトは互換性のため `true` です。このデフォルトにより、トレースコンテキストが WebSocket URL のクエリ文字列へ注入されます。
 
-この選択にはセキュリティ上のトレードオフがあります：クエリ文字列はアクセスログ、プロキシログ、ブラウザ／ネットワークデバッグツール、APM URL フィールドに表示される可能性があります。伝播器が `baggage` を含む場合、バゲージ値も URL に書き込まれ、機密データを含む可能性があります。
+クエリ文字列は、プロキシ、ブラウザ、APM ツール、アクセスログ、ネットワークデバッグツールによって記録される可能性があります。また、トークン、ユーザー ID、その他の高カーディナリティ入力を含む場合もあります。伝播器が `baggage` を含む場合、baggage 値も URL に書き込まれ、機密データを含む可能性があります。
 
-セキュリティが重要な WebSocket 通信では、クエリ伝播を明示的に無効化してください：
+セキュリティ重視の本番 WebSocket 通信では、推奨される安全ベースラインとしてクエリ伝播を明示的に無効化してください：
 
 ```typescript
 withOpenTelemetryServer({
@@ -186,7 +205,7 @@ withOpenTelemetryServer({
 })
 ```
 
-無効化後、トレースコンテキストは URL 経由で伝播されなくなります。サーバーはトレース相関のために他のメカニズム（例: アプリケーションレイヤーメッセージプロトコル内のトレース ID フィールド）に依存する必要があります。
+無効化すると、トレースコンテキストは WebSocket URL では運ばれなくなります。サーバー側で引き続き接続を trace に関連付ける必要がある場合は、アプリケーション層で別のレビュー済み相関手段を使ってください。
 
 ## 次に読む
 

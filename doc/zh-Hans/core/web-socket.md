@@ -142,18 +142,18 @@ idle → connecting → open → closing → closed
          (retry)      aborted
 ```
 
-| 状态           | 含义                                                 |
-| -------------- | ---------------------------------------------------- |
-| `idle`         | 在 `execute()` 被调用之前。                          |
-| `connecting`   | 首次打开连接尝试中。                                 |
-| `open`         | 连接已建立，消息可以流动。                           |
-| `closing`      | `close()` 或 `abort` 被触发，等待关闭事件。          |
-| `closed`       | 干净关闭（无错误，或手动关闭）。                     |
-| `reconnecting` | 连接断开，等待重试。                                 |
-| `error`        | 终端失败（验证错误、传输错误、非中止关闭且带原因）。 |
-| `aborted`      | 通过 `AbortSignal` 或 `close()` 显式中止。           |
+| 状态           | 含义                                                         |
+| -------------- | ------------------------------------------------------------ |
+| `idle`         | 在 `execute()` 被调用之前。                                                                 |
+| `connecting`   | 首次打开连接尝试中。                                                                        |
+| `open`         | 连接已建立，消息可以流动。                                                                  |
+| `closing`      | 当前处于 `CONNECTING`/`OPEN` 的套接字正在关闭，通常由外部 abort 驱动，并等待关闭事件。手动 `close()` 不保证会对外暴露这个状态。       |
+| `closed`       | 干净关闭（无错误，包括手动 `close()`）。                                                    |
+| `reconnecting` | 连接断开，等待重试。                                                                        |
+| `error`        | 终端失败（验证错误、传输错误、带原因的非中止关闭，或 abort reason 未被归一化为 `ABORTED` 的外部 abort）。 |
+| `aborted`      | 套接字生命周期开始后，外部取消被归一化为传输层 `ABORTED`（例如默认 `controller.abort()`、`ERR_ABORTED`，或名称为 `AbortError` 的 DOMException）。 |
 
-状态转换通过 `onStateChange` 发出。`receive` 异步迭代器在套接字到达终端状态（`closed`、`error` 或 `aborted`）时结束。
+状态转换通过 `onStateChange` 发出。启动后，外部 abort 只有在当前存在处于 `CONNECTING` 或 `OPEN` 的套接字时才会先进入 `closing`。如果运行时正处于重连等待阶段，则可能没有当前套接字可关闭，session 会直接进入 `aborted` 或 `error` 这样的终态，而不会重新经过 `closing`。只有当合并后的 abort reason 被归一化为传输层 `ABORTED` 时，最终状态才会进入 `aborted`（例如默认 abort reason、`ERR_ABORTED`，或名称为 `AbortError` 的 DOMException）；其他自定义 reason 会进入 `error`。手动 `close()` 最终仍会进入 `closed`，但调用方不能依赖这一条路径一定会先观察到公开的 `closing` 状态。`receive` 异步迭代器会在套接字到达终端状态（`closed`、`error` 或 `aborted`）时结束。
 
 ## 心跳
 
@@ -177,7 +177,33 @@ const [error, socket] = await client.execute(useSocket(), {
 | `timeoutMs`  | 如果设置，当未及时收到 ack 时，套接字以 code `4000` 关闭。 |
 | `isAck`      | 判断入站消息是否为心跳响应的谓词。                         |
 
-心跳可以在客户端级别配置（通过 `createClient({ webSocket: { heartbeat: ... } })`）或在请求级别配置（通过 `execute()` 选项）。请求级别配置优先。
+心跳可以在客户端级别通过 `withWebSocketHeartbeat(...)` 或 `withWebSocketOptions({ heartbeat: ... })` 配置，也可以在请求级别通过 `execute()` 选项配置。请求级别配置优先。
+
+```typescript
+import {
+  createClient,
+  withEndpoint,
+  withWebSocketHeartbeat,
+  withWebSocketReconnect,
+} from '@defjs/core'
+
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withWebSocketHeartbeat({
+    intervalMs: 30_000,
+    message: () => ({ type: 'ping' }),
+    timeoutMs: 10_000,
+    isAck: (message) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'pong',
+  }),
+  withWebSocketReconnect({
+    attempts: 5,
+    delayMs: 1_000,
+    factor: 2,
+  }),
+)
+```
+
+已配置的心跳消息仍然必须匹配该端点的 `outgoing` schema。
 
 ## 重连
 
@@ -209,7 +235,7 @@ const [error, socket] = await client.execute(useSocket(), {
 
 延迟公式：`min(delayMs * factor^(attempt - 1), maxDelayMs)`，然后加上抖动。
 
-重连也可在客户端级别通过 `createClient({ webSocket: { reconnect: ... } })` 配置。
+重连也可以在客户端级别通过 `withWebSocketReconnect(...)` 或 `withWebSocketOptions({ reconnect: ... })` 配置。
 
 ## 发送队列
 
@@ -239,8 +265,10 @@ const [error, socket] = await client.execute(useSocket(), {
 
 1. 调用原生 `WebSocket.close(code, reason)`。
 2. 以 `manual-web-socket-close` 原因中止内部 `AbortController`。
-3. 套接字经过 `closing` → `closed` 转换。
+3. session 最终以 `closed` 结束。
 4. `socket.closed` 解析为提供的 `code` 和 `reason`。
+
+由于 `session.close()` 会先调用原生 close，再中止内部 signal，调用方不能依赖手动关闭时一定能观察到公开的 `closing` 状态。从 `onStateChange` 监听器视角看，运行时可能直接进入终态 `closed`。
 
 ### `AbortSignal`（外部）
 
@@ -251,10 +279,10 @@ const controller = new AbortController()
 const promise = client.execute(useSocket(), { signal: controller.signal })
 
 // 稍后：
-controller.abort() // 立即关闭套接字并转换为 'aborted'
+controller.abort() // 如果当前存在套接字，就会关闭它；最终状态通常是 'aborted'
 ```
 
-在套接字打开**之前**中止，`execute()` 解析为传输错误且 `socket` 为 `undefined`。在打开**之后**中止，套接字转换为 `aborted` 且 `receive` 结束。
+在套接字打开**之前**中止，`execute()` 解析为传输错误且 `socket` 为 `undefined`。在启动**之后**中止时，外部取消只有在当前存在处于 `CONNECTING` 或 `OPEN` 的套接字时才会驱动 `closing`；如果正处于重连等待阶段，则可能没有当前套接字可关闭，session 会直接进入终态。只有当合并后的 abort reason 被归一化为传输层 `ABORTED` 时，最终状态才会进入 `aborted`（例如默认 `controller.abort()` reason、`ERR_ABORTED`，或名字为 `AbortError` 的 DOMException）；其他自定义 reason 会进入 `error`。手动 `socket.close()` 最终仍会进入 `closed`，但不保证 `onStateChange` 监听器一定会先看到公开的 `closing` 状态。无论哪种情况，`receive` 都会结束。
 
 ### `timeout`
 

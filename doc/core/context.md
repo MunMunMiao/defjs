@@ -74,8 +74,8 @@ const merged = mergeHttpContexts(baseCtx, extraCtx)
 When executing a command, the Client processes input in this order:
 
 1. **Validate**: Validates and parses raw caller data using the `input` Struct.
-2. **Build**: Calls `build(ctx, parsedInput)` to map parsed data to request parts.
-3. **Transport**: Dispatches to HTTP fetch, SSE stream, or WebSocket connection based on `kind`.
+2. **Build**: Calls `build(request, parsedInput)` when a custom build handler is present, mapping parsed data to request parts.
+3. **Transport**: Dispatches to HTTP fetch, SSE stream, or WebSocket connection based on the command transport.
 
 ```typescript
 import { defineRequest, struct } from '@defjs/core'
@@ -112,13 +112,14 @@ Different transports support different `build` operations:
 | `setFormData` / `addFormData`             | ✓    | ✗   | ✗         |
 | `setFormUrlEncoded` / `addFormUrlEncoded` | ✓    | ✗   | ✗         |
 | `setBlob` / `setArrayBuffer`              | ✓    | ✗   | ✗         |
-| `withCredentials`                         | ✓    | ✗   | ✗         |
 
 Using a transport-unsupported method in `build` throws `REQUEST_VALIDATION_FAILED` at execution time.
 
+`withCredentials(...)` is a client-level option, not a public `build`-context method. Current runtime tests also confirm SSE can use client-level `withCredentials(true)`.
+
 ### Auto Build
 
-If you omit `build`, you must also omit `input`. However, you can use Struct's `request` shape to let the framework auto-infer build logic:
+If you omit `build`, you can still provide `input` when that input uses `struct.request(...)`. Defjs will auto-map parsed `path` / `query` / `headers` / `body` sections into the outgoing request:
 
 ```typescript
 import { defineRequest, struct } from '@defjs/core'
@@ -128,13 +129,13 @@ const GetUser = defineRequest({
   path: '/users/:id',
   input: struct.request({
     path: struct.object({ id: struct.string() }),
-    query: struct.object({ include: struct.optional(struct.string()) }),
+    query: struct.object({ include: struct.string().optional() }),
   }),
   // No build needed; framework auto-maps path/query
 })
 ```
 
-If `build` is provided, `input` must also be provided. This is a strict design rule.
+If `build` is provided, `input` must also be provided. Without `build`, `input` is still allowed when it is a `struct.request(...)` shape because Defjs can materialize the request automatically.
 
 ---
 
@@ -330,10 +331,18 @@ withWebSocketHeartbeat({
 Configuration functions apply in order; later ones override earlier ones. Execution-time options (`client.execute(cmd, { timeout: 5000 })`) have the highest priority, followed by client-level configuration.
 
 ```typescript
-const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEOptions({ reconnect: { attempts: 3 } }))
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withCredentials(true),
+  withSSEReconnect({ attempts: 3 }),
+)
 
-// Override SSE reconnect at execution time
-const [error, stream] = await client.execute(watchLogs(), { reconnect: { attempts: 10 } })
+// Override the earlier client default with a later client option
+const clientWithMoreRetries = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEReconnect({ attempts: 3 }),
+  withSSEOptions({ reconnect: { attempts: 10, delayMs: 1000 } }),
+)
 ```
 
 ## What's Next

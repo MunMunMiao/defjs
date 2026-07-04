@@ -144,16 +144,16 @@ idle → connecting → open → closing → closed
 
 | State          | Meaning                                                                           |
 | -------------- | --------------------------------------------------------------------------------- |
-| `idle`         | Before `execute()` is called.                                                     |
-| `connecting`   | Opening the first connection attempt.                                             |
-| `open`         | Connection established, messages can flow.                                        |
-| `closing`      | `close()` or `abort` was triggered, waiting for the close event.                  |
-| `closed`       | Clean close (no error, or manual close).                                          |
-| `reconnecting` | Connection dropped, waiting before retry.                                         |
-| `error`        | Terminal failure (validation error, transport error, non-abort close with cause). |
-| `aborted`      | Explicitly aborted via `AbortSignal` or `close()`.                                |
+| `idle`         | Before `execute()` is called.                                                                                                            |
+| `connecting`   | Opening the first connection attempt.                                                                                                    |
+| `open`         | Connection established, messages can flow.                                                                                               |
+| `closing`      | A current `CONNECTING`/`OPEN` socket is being shut down, typically by an external abort, while waiting for the close event. Manual `close()` is not guaranteed to expose this state publicly. |
+| `closed`       | Clean close (no error, including manual `close()`).                                                                                      |
+| `reconnecting` | Connection dropped, waiting before retry.                                                                                                |
+| `error`        | Terminal failure (validation error, transport error, non-abort close with cause, or an external abort whose reason does not normalize to `ABORTED`). |
+| `aborted`      | External cancellation normalized to transport code `ABORTED` after the socket lifecycle has started (for example default `controller.abort()`, `ERR_ABORTED`, or a DOMException named `AbortError`). |
 
-State transitions are emitted via `onStateChange`. The `receive` async iterator ends when the socket reaches a terminal state (`closed`, `error`, or `aborted`).
+State transitions are emitted via `onStateChange`. After startup, an external abort only passes through `closing` when there is a current socket in `CONNECTING` or `OPEN`. If the runtime is between attempts during reconnect delay, the session finishes directly in `aborted` or `error` without re-entering `closing`. It reaches `aborted` only when the merged abort reason normalizes to transport code `ABORTED` (for example the default abort reason, `ERR_ABORTED`, or a DOMException named `AbortError`); other custom reasons finish in `error`. Manual `close()` still ends in `closed`, but consumers must not rely on observing a public `closing` state for that path. The `receive` async iterator ends when the socket reaches a terminal state (`closed`, `error`, or `aborted`).
 
 ## Heartbeat
 
@@ -177,7 +177,33 @@ const [error, socket] = await client.execute(useSocket(), {
 | `timeoutMs`  | If set, the socket is closed with code `4000` when no ack arrives in time. |
 | `isAck`      | Predicate to recognize an incoming message as a heartbeat ack.             |
 
-Heartbeat can be configured per-client (via `createClient({ webSocket: { heartbeat: ... } })`) or per-request (via `execute()` options). Request-level config wins.
+Heartbeat can be configured per-client with `withWebSocketHeartbeat(...)` or `withWebSocketOptions({ heartbeat: ... })`, and per-request via `execute()` options. Request-level config wins.
+
+```typescript
+import {
+  createClient,
+  withEndpoint,
+  withWebSocketHeartbeat,
+  withWebSocketReconnect,
+} from '@defjs/core'
+
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withWebSocketHeartbeat({
+    intervalMs: 30_000,
+    message: () => ({ type: 'ping' }),
+    timeoutMs: 10_000,
+    isAck: (message) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'pong',
+  }),
+  withWebSocketReconnect({
+    attempts: 5,
+    delayMs: 1_000,
+    factor: 2,
+  }),
+)
+```
+
+The configured heartbeat message still needs to match the endpoint's outgoing schema.
 
 ## Reconnect
 
@@ -209,7 +235,7 @@ const [error, socket] = await client.execute(useSocket(), {
 
 Delay formula: `min(delayMs * factor^(attempt - 1), maxDelayMs)`, then jittered.
 
-Reconnection is also configurable at the client level via `createClient({ webSocket: { reconnect: ... } })`.
+Reconnection is also configurable at the client level via `withWebSocketReconnect(...)` or `withWebSocketOptions({ reconnect: ... })`.
 
 ## Send Queue
 
@@ -239,8 +265,10 @@ Performs a graceful close:
 
 1. Calls the native `WebSocket.close(code, reason)`.
 2. Aborts the internal `AbortController` with a `manual-web-socket-close` reason.
-3. The socket transitions through `closing` → `closed`.
+3. The session terminates as `closed`.
 4. `socket.closed` resolves with the provided `code` and `reason`.
+
+Because `session.close()` calls the native close before aborting the internal signal, consumers must not rely on observing a public `closing` state during manual close. The runtime may move directly to the terminal `closed` state from the perspective of `onStateChange` listeners.
 
 ### `AbortSignal` (external)
 
@@ -251,10 +279,10 @@ const controller = new AbortController()
 const promise = client.execute(useSocket(), { signal: controller.signal })
 
 // Later:
-controller.abort() // immediately closes the socket and transitions to 'aborted'
+controller.abort() // if a current socket exists, it is closed; the final state is usually 'aborted'
 ```
 
-When aborted **before** the socket opens, `execute()` resolves with a transport error and `socket` is `undefined`. When aborted **after** open, the socket transitions to `aborted` and `receive` ends.
+When aborted **before** the socket opens, `execute()` resolves with a transport error and `socket` is `undefined`. When aborted **after** startup, external cancellation only drives `closing` if there is a current socket in `CONNECTING` or `OPEN`; during reconnect delay there may be no current socket to close, so the session finishes directly in a terminal state instead. The terminal state becomes `aborted` only when the merged abort reason normalizes to transport code `ABORTED` (for example the default `controller.abort()` reason, `ERR_ABORTED`, or a DOMException named `AbortError`); other custom reasons finish in `error`. Manual `socket.close()` still ends in `closed`, but it does not guarantee that `onStateChange` observers will see a public `closing` state first. In every case, `receive` ends.
 
 ### `timeout`
 

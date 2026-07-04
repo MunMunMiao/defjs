@@ -1,102 +1,132 @@
 # @defjs/react
 
-React wrapper for [@defjs/core](../core) — provides dependency injection helpers for using defjs clients in React applications.
+Thin React adapter for `@defjs/core`. It provides `ClientProvider`, `useClient`, and React-specific option wiring so a typed defjs client can be shared through a component tree.
 
 Supports React 18+.
 
-## Installation
+## Repository workspace setup
 
-```bash
-npm install @defjs/react @defjs/core
-# or
-pnpm add @defjs/react @defjs/core
-# or
-bun add @defjs/react @defjs/core
-```
+This README documents source/workspace usage from this repository. `@defjs/react` lives at `packages/react`, and its peer dependency expects the matching workspace version of `@defjs/core` from `packages/core`.
+
+The imports below use package names, but in this repository they resolve to workspace source packages rather than a registry-published package pair. Public npm does not currently provide `@defjs/react`, and the latest standalone `@defjs/core` release available there does not match the API shown here. If you later publish compatible `@defjs/react` and `@defjs/core` versions, install those published versions together in that environment instead of mixing this package with an older standalone `@defjs/core` release.
+
+Current workspace/package baseline: this repository uses `Node >=26`, `pnpm@11.6.0`, and `engine-strict=true`, and `packages/react/package.json` currently declares `engines.node >=26`. That means this source checkout and any package built from the current manifests have a Node >=26 floor. If you install a future published package, follow the engine field and release notes that ship with that published version.
+
+## What this package does
+
+`ClientProvider` creates one `@defjs/core` client per provider mount and exposes it through React Context. `useClient()` reads the nearest provided client. `withEndpoint` and `withInterceptors` are React-specific option glue for provider setup.
+
+This package is a thin adapter over `@defjs/core`. It does not add a query layer, data cache, Suspense integration, or application state management. Compose those patterns in your own React code by calling `client.execute(...)` from hooks, loaders, or third-party libraries.
 
 ## Quick Start
 
-### 1. Provide a client
+Define requests in a shared module with `@defjs/core`:
 
 ```tsx
-// App.tsx
-import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
+// api.ts
+import { defineRequest, struct } from '@defjs/core'
 
-function App() {
+export const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({
+      id: struct.number(),
+    }),
+  }),
+  output: [
+    {
+      status: 200,
+      body: struct.object({
+        id: struct.number(),
+        name: struct.string(),
+      }),
+    },
+  ] as const,
+})
+```
+
+Provide one shared client to the part of the tree that needs it:
+
+```tsx
+// app.tsx
+import { ClientProvider, withEndpoint } from '@defjs/react'
+import { UserProfile } from './user-profile'
+
+export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(authInterceptor)]}>
-      <Router />
+    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+      <UserProfile id={1} />
     </ClientProvider>
   )
 }
 ```
 
-`ClientProvider` creates a `@defjs/core` client and exposes it through a private React Context. It is marked with `"use client"`, so it is safe to use in React Server Component apps.
-
-### 2. Use the client
+Read the client inside child components and handle the error-first tuple yourself:
 
 ```tsx
+// user-profile.tsx
+import { useEffect, useState } from 'react'
 import { useClient } from '@defjs/react'
 import { getUser } from './api'
 
-function UserProfile() {
+export function UserProfile({ id }: { id: number }) {
   const client = useClient()
+  const [name, setName] = useState<string>('loading...')
 
   useEffect(() => {
-    client.execute(getUser()).then(([error, user]) => {
-      // ...
-    })
-  }, [client])
+    let cancelled = false
 
-  return <div>{/* ... */}</div>
+    client.execute(getUser({ path: { id } })).then(([error, user]) => {
+      if (cancelled) {
+        return
+      }
+
+      if (error) {
+        setName(error.message)
+        return
+      }
+
+      setName(user.name)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [client, id])
+
+  return <div>{name}</div>
 }
 ```
+
+## Cookbook
+
+When browsing this repository, see `doc/plugins/react.md` for recipes covering Next.js App Router request boundaries, application-owned header and cookie forwarding, TanStack Query integration, hydration boundaries, and `ClientProvider` lifecycle notes.
 
 ## API
 
 ### `<ClientProvider options?: ClientOption[]>`
 
-Creates a client and provides it to child components. Nested `ClientProvider`s are supported: components read the nearest provider, so an inner provider creates a separate client for its subtree while siblings continue using the outer client.
+Creates a client once per provider mount and exposes it to descendant components.
 
 ### `useClient(): Client`
 
-Returns the client provided by the nearest `ClientProvider`. Throws if called outside a provider.
+Returns the client from the nearest `ClientProvider`. Throws if called outside a provider.
 
 ### `withEndpoint(endpoint: string): ClientOption`
 
-Sets the base endpoint URL for the client. If omitted, the client defaults to an empty endpoint.
+Sets the base endpoint URL for the client created by `ClientProvider`.
 
 ### `withInterceptors(...fns: (() => Interceptor)[]): ClientOption`
 
-Registers interceptors for the client.
+Registers interceptor factories evaluated when `ClientProvider` creates the client. In this adapter, `withInterceptors(...)` replaces `config.interceptors` with the interceptors produced by the factories you pass, so group all interceptors for that provider in one `withInterceptors(...)` call.
 
-```tsx
-import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
+## Notes
 
-function App() {
-  return (
-    <ClientProvider
-      options={[
-        withEndpoint('https://api.example.com'),
-        withInterceptors(() => ({
-          request({ request }) {
-            request.headers.set('Authorization', 'Bearer token')
-          },
-        })),
-      ]}
-    >
-      <Router />
-    </ClientProvider>
-  )
-}
-```
-
-## Version Compatibility
-
-| @defjs/react | @defjs/core |
-| ------------ | ----------- |
-| 0.x          | workspace:^ |
+- `ClientProvider` is marked with `"use client"`, so render it from a client component boundary in React Server Component applications.
+- If you need a different client instance, remount the provider. It does not recreate the client on every render.
+- `@defjs/react` does not change the request, command, interceptor, or error model from `@defjs/core`.
 
 ## License
 
-[MIT](../../LICENSE)
+MIT License.

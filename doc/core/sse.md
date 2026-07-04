@@ -32,7 +32,7 @@ const useNotifications = defineEventStream({
 
 ### Default Event Struct
 
-If the server may send event types not explicitly declared in `events`, provide a `default` struct. Without `default`, unknown events are silently discarded.
+If the server may send event types not explicitly declared in `events`, provide a `default` struct. Without `default`, unknown events are discarded from the stream. If `onInvalidEvent` is configured, they are still observable there with reason `missing-struct`.
 
 ```typescript
 const useMixedStream = defineEventStream({
@@ -73,7 +73,7 @@ Plain `struct.object(...)`, `struct.array(...)`, and `struct.record(...)` do not
 
 ### Event Streams with Input
 
-When a stream needs query parameters or request body, provide `input` struct and `build` function. The `build` signature is the same as `defineRequest`, supporting params, query, and headers.
+When a stream needs path parameters, query parameters, or headers, provide an `input` struct. If that input uses `struct.request({ path, query, headers })`, Defjs maps those sections automatically. Add `build` only when the public input shape differs from the wire shape.
 
 ```typescript
 const useRoomStream = defineEventStream({
@@ -81,9 +81,6 @@ const useRoomStream = defineEventStream({
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-  },
   events: {
     chat: struct.json(struct.object({ user: struct.string(), text: struct.string() })),
   },
@@ -91,6 +88,8 @@ const useRoomStream = defineEventStream({
 
 const [error, stream, open] = await client.execute(useRoomStream({ path: { roomId: '42' } }))
 ```
+
+SSE `build` only supports mapping path, query, and header request parts. Configure credentials at the client level with `withCredentials(...)`; `build(ctx, input)` does not expose a public credentials setter. SSE `build` also does not expose request-body mapping.
 
 ## Execution Result
 
@@ -102,9 +101,9 @@ type StreamAwaitResult<TEvent> =
   | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
 ```
 
-- **`error`** — Non-null on connection or validation failure; `null` on success.
+- **`error`** — Non-null only when the connection or startup fails, or when request input validation fails during `client.execute()` startup. It is `null` once the stream opens successfully. Event-level `validation-failed` / `missing-struct` cases do not populate this `error`; they are reported through `onInvalidEvent`, the invalid event is dropped from the stream, and the stream can continue.
 - **`stream`** — On success, an `EventStreamHandle` consumable via `for await...of`; `undefined` on failure.
-- **`open`** — Contains first-connection response info (`response` and `url`). May be `undefined` on connection failure.
+- **`open`** — The startup open snapshot returned when `client.execute()` successfully completes startup, containing the validated startup response info (`response` and `url`). If reconnects happen later, read `stream.open` for the handle's latest open-response / latest connection-attempt response snapshot; it updates as soon as a response is received, so it is not guaranteed to represent a successful connection or a response that passed later validation, and a reconnect response such as HTTP 4xx/5xx or an invalid `content-type` can overwrite it. If you need to keep the startup snapshot from `client.execute()`, store this third tuple item separately. May be `undefined` on connection failure or startup-time validation failure.
 
 ```typescript
 const [error, stream, open] = await client.execute(useNotifications())
@@ -128,11 +127,11 @@ for await (const event of stream) {
 
 ## EventStreamHandle and stream.closed
 
-`EventStreamHandle` implements `AsyncIterable`, so it can be directly used with `for await...of`. It also provides these properties:
+`EventStreamHandle` implements `AsyncIterable`, so it can be directly used with `for await...of`. It also provides these properties. Note that `stream.open` is live handle state updated on every newly received open response: it is the latest open-response / latest connection-attempt response snapshot, not a guarantee of a successful connection or of having passed later validation. By contrast, `const [error, stream, open] = await client.execute(...)` returns a startup snapshot in its third tuple item; store that separately if you need to keep it.
 
 | Property / Method          | Description                                                               |
 | -------------------------- | ------------------------------------------------------------------------- |
-| `open`                     | First connection `EventStreamOpenInfo` (contains `response` and `url`)    |
+| `open`                     | Latest open-response / latest connection-attempt `EventStreamOpenInfo` (contains `response` and `url`); updates on every new open response, including reconnect responses that may fail later validation |
 | `closed`                   | `Promise<EventStreamCloseInfo>`, resolves when the stream is fully closed |
 | `close(reason?)`           | Actively close the stream, optionally passing a reason                    |
 | `[Symbol.asyncIterator]()` | Returns an async iterator consuming the event queue                       |
@@ -151,7 +150,7 @@ await stream.closed // { code: 'aborted', reason: 'user-navigated-away' }
 
 ## Invalid Event Handling: onInvalidEvent
 
-When the server sends an event that cannot match any struct in `events` (or `default`), or struct validation fails, the `onInvalidEvent` observer is triggered. It is a client-level configuration passed via `sse.onInvalidEvent` at `createClient` time.
+When the server sends an event that cannot match any struct in `events` (or `default`), or struct validation fails, the `onInvalidEvent` observer is triggered. Configure it with `withSSEOptions({ onInvalidEvent })` or `withSSEOnInvalidEvent(...)` at `createClient` time.
 
 ```typescript
 const client = createClient(
@@ -169,14 +168,17 @@ const client = createClient(
 
 `onInvalidEvent` is an **observer**:
 
-A common validation failure is declaring `struct.object(...)` for an event whose `data:` field is JSON text. Declare `struct.json(struct.object(...))` instead. Invalid JSON under `struct.json(...)` is reported as `validation-failed` and is not retried as raw text.
+- It receives `reason: 'missing-struct' | 'validation-failed'` plus the raw `message` context, so you can log, alert, or collect metrics from invalid events.
+- The invalid event is dropped and is not yielded through `stream`; later valid events can still be consumed.
+- Even if it throws internally, the exception is silently ignored and does not interrupt the stream.
+- However, if `onInvalidEvent` is async, runtime awaits it for that invalid event before continuing later message processing, so slow handlers can delay subsequent event delivery to consumers.
+- Keep handlers lightweight; for slow logging, reporting, or other background work, fire-and-forget that work inside the handler.
 
-- Even if it throws internally, the exception is silently ignored and the stream continues.
-- It does not block subsequent events from being consumed.
+A common validation failure is declaring `struct.object(...)` for an event whose `data:` field is JSON text. Declare `struct.json(struct.object(...))` instead. Invalid JSON under `struct.json(...)` is reported as `validation-failed` and is not retried as raw text.
 
 ## Reconnect and Queue Configuration
 
-The SSE transport has built-in auto-reconnect, configurable via `sse.reconnect` and `sse.queue` at the client level.
+The SSE transport has built-in auto-reconnect. Configure it at the client level with `withSSEReconnect(...)`, `withSSEQueue(...)`, or `withSSEOptions(...)`.
 
 ### Reconnect Configuration
 
@@ -198,12 +200,11 @@ const client = createClient(
 )
 ```
 
-Reconnect priority:
+Reconnect decision flow:
 
-1. If `onerror` returns `null`, stop reconnecting.
-2. If `shouldReconnect` returns `false`, stop reconnecting.
-3. If `attempts` limit exceeded, stop reconnecting.
-4. Otherwise, compute next retry interval using `delayMs` + `factor` exponential backoff + `jitter`.
+1. If `shouldReconnect` returns `false`, stop reconnecting.
+2. If `attempts` limit exceeded, stop reconnecting.
+3. Otherwise, compute the next retry interval using `delayMs` + `factor` exponential backoff + `jitter`.
 
 > Reconnect automatically carries the `Last-Event-ID` header so the server can resume from the breakpoint.
 

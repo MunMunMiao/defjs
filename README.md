@@ -17,91 +17,110 @@
 
 `def` is an abbreviation for `define`, so it can be read as `define js`.
 
-Defjs is a TypeScript library for defining typed request APIs and executing them across multiple transports and JavaScript runtimes.
+Defjs is a TypeScript library for defining typed HTTP, SSE, and WebSocket APIs and executing them across JavaScript runtimes.
 
-- Typed request definitions for [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API), custom transports, and more.
-- Functional API.
+- Typed HTTP, SSE, and WebSocket command definitions.
+- Runtime validation and full TypeScript inference.
 - Streaming support.
-- Full TypeScript inference.
-- Works in any JavaScript runtime.
 - Interceptor support.
+- Works across browsers, Node.js, Bun, and Deno.
 - ESM.
 
 ## Quick Start
 
-> Install with a package manager
+The example below is for the current repository source/workspace API, not for the current latest npm release of `@defjs/core`.
 
-```shell
-npm install @defjs/core
-// or
-yarn add @defjs/core
-// or
-pnpm add @defjs/core
-// or
-bun add @defjs/core
+Use these commands to install the workspace and verify the docs examples:
+
+```sh
+pnpm install
+pnpm --dir doc run typecheck
 ```
 
-> Use via CDN
+To experiment with the snippet, paste it into a workspace package or docs twoslash block that resolves `@defjs/core` from repository source. The repository root itself is not an app package that imports `@defjs/core`.
 
-**ES modules only**
+If an external application installs `@defjs/core` from npm today, this sample may not apply until a published release explicitly includes this API. Use this sample for repository source/workspace onboarding only, and wait for a release whose package table below or release notes confirm that this API has shipped before using it in an external app.
 
-```javascript
-import { createClient, defineRequest, struct, withEndpoint } from 'https://unpkg.com/@defjs/core/index.min.js'
+```ts
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-/**
- * @title Step 1
- * @file src/main.ts
- * @description Set up a client
- */
-const client = createClient(withEndpoint('https://example.com'))
+const client = createClient(withEndpoint('https://api.example.com'))
 
-/**
- * @title Step 2
- * @file src/lib/api/user.ts
- * @description Define the request in the lib/api directory
- */
-const useGetUser = defineRequest({
+const getUser = defineRequest({
   method: 'GET',
-  output: {
-    200: struct.object({
+  path: '/v1/users/:id',
+  input: struct.request({
+    path: struct.object({
       id: struct.number(),
-      name: struct.string(),
     }),
-  },
-  path: '/v1/user',
+  }),
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-/**
- * @title Step 3
- * @file src/pages/home.ts
- * @description Use the defined request in business code
- */
-const [error, user] = await client.execute(useGetUser())
+const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
 if (error) {
   console.error(error)
+} else {
+  console.log(user.name)
 }
-console.log(user)
 ```
 
 ## Documentation
 
-Visit [defjs.org](https://defjs.org) to get started.
+Documentation source lives in `doc/`. This README and the repository docs source now both target the current source/workspace API. This repository does not currently claim a live online documentation site; use the local preview commands below if you want to inspect the docs source.
 
-## Packages
+> Note: some already-published npm package READMEs may lag behind this repository and may still mention an unavailable online site. Published npm users should check the repository package table and release notes before assuming the current source/workspace API has shipped in a public package.
 
-| Package                            | Version                                                                                         |
-| ---------------------------------- | :---------------------------------------------------------------------------------------------- |
-| [@defjs/core](packages/core)       | ![core version](https://img.shields.io/npm/v/%40defjs%2Fcore?color=%23000&style=flat-square)    |
-| [@defjs/angular](packages/angular) | ![core version](https://img.shields.io/npm/v/%40defjs%2Fangular?color=%23000&style=flat-square) |
+- Primary repository onboarding: this root README and `doc/index.md` / `doc/guide/getting-started.md`
+- Docs source directory: `doc/`
+- Local preview of docs source: `pnpm --dir doc docs:dev`
+- Local build of docs source: `pnpm --dir doc docs:build`
+- Local preview of the built docs site: `pnpm --dir doc docs:preview`
 
-## Roadmap
+## Repository packages
 
-- Documentation official website
-- CLI Tool
-  - Generate API from OpenAPI
-  - Generate Full SDK Package (Like the [S3 SDK](https://www.npmjs.com/package/@aws-sdk/client-s3))
-- Vue wrapper package
-- React wrapper package
+| Package | Purpose | Repository status | npm status |
+| --- | --- | --- | --- |
+| [`@defjs/core`](packages/core) | Typed HTTP, SSE, and WebSocket client definitions and execution. | Manifest version `0.4.0` in this repository. | Latest npm release: `0.3.3`. |
+| [`@defjs/react`](packages/react) | React thin adapter for sharing a typed core client through `ClientProvider` and `useClient`. | Manifest version `0.0.1` in this repository. | No public npm package found. |
+| [`@defjs/vue`](packages/vue) | Vue thin adapter for providing and injecting a typed core client. | Manifest version `0.0.1` in this repository. | No public npm package found. |
+| [`@defjs/angular`](packages/angular) | Angular DI thin adapter for providing and injecting a typed core client. | Manifest version `19.0.0` in this repository. | Latest npm release: `18.0.7`, so the repository is ahead of npm. |
+| [`@defjs/opentelemetry-server`](packages/opentelemetry-server) | Server-side outbound OpenTelemetry instrumentation for core clients. | Manifest version `0.2.0` in this repository. | No public npm package found. |
+
+## Status and Roadmap
+
+### Implemented in this repository source today
+
+- Typed HTTP, SSE, and WebSocket command definitions in `@defjs/core`.
+- Thin framework adapters for React, Vue, and Angular.
+- Server-side outbound OpenTelemetry instrumentation for defjs clients.
+- Documentation source and local VitePress tooling in `doc/`.
+
+See the repository packages table above for current npm availability.
+
+### Planned
+
+- CLI tool.
+- Generate API definitions from OpenAPI.
+- Generate full SDK packages for larger API surfaces.
+
+### Non-goals / boundaries
+
+- Framework adapters are not query/cache/state libraries.
+- OpenTelemetry integration does not initialize the OpenTelemetry SDK for you.
+- Request/response bodies, full headers, raw query strings, and stream/message payloads are not captured by default.
+- CLI and code generation are not delivered packages yet.
+
+## Adoption note
+
+Repository development baseline: Node `>=26`, `pnpm@11.6.0`, `engine-strict=true`.
+
+These values describe this repository's contributor baseline, not a blanket requirement for every consumer application that installs a published package.
+
+Most defjs packages are still evolving before stable 1.0; `@defjs/angular` follows Angular ecosystem versioning; overall API may evolve.
 
 ## License
 

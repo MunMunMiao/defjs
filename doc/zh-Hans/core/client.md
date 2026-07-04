@@ -56,7 +56,7 @@ SSE 和 WebSocket 的具体配置，请参阅 [SSE](/core/sse) 和 [WebSocket](/
 传入由 `defineRequest` 构建的命令。返回三元组：
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
 
@@ -98,7 +98,7 @@ import { defineEventStream, struct } from '@defjs/core'
 const watchLogs = defineEventStream({
   path: '/v1/logs/stream',
   events: {
-    log: struct.object({ level: struct.string(), message: struct.string() }),
+    log: struct.json(struct.object({ level: struct.string(), message: struct.string() })),
   },
 })
 
@@ -146,10 +146,12 @@ if (error) {
   return
 }
 
-session.send({ type: 'message', data: { text: 'hello' } })
+session.send({ type: 'message', text: 'hello' })
 
 for await (const msg of session.receive) {
-  console.log(msg.type, msg.data)
+  if (msg.type === 'message') {
+    console.log(msg.text)
+  }
 }
 ```
 

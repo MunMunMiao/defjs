@@ -45,16 +45,24 @@ const sseAuthInterceptor = createSSEInterceptor(async (req: HttpRequest, next: S
 
 ### WebSocket 拦截器
 
-WebSocket 拦截器操作 `HttpRequest`（握手前的 HTTP 请求）并返回 `Promise<WebSocketSessionLike>`。典型用途：在 WebSocket 握手前修改 URL 或注入子协议请求头。
+WebSocket 拦截器操作 `HttpRequest`（打开 socket 之前的请求）并返回 `Promise<WebSocketSessionLike>`。典型用途：检查或改写最终 URL、添加日志，或者包装返回的 session。
+
+WebSocket 子协议协商应通过公开的 WebSocket 选项 API 配置，而不是在拦截器里直接改握手请求头。可以使用这些公开入口：
+
+- 端点级 `protocols: ['v1']`
+- `withWebSocketProtocols(['v1'])`
+- `withWebSocketOptions({ protocols: ['v1'] })`
+- `client.execute(command, { protocols: ['v1'] })`
 
 ```typescript
 import { createWebSocketInterceptor } from '@defjs/core'
 import type { HttpRequest, WebSocketHandler } from '@defjs/core'
 
-const wsProtocolInterceptor = createWebSocketInterceptor(async (req: HttpRequest, next: WebSocketHandler) => {
-  const headers = new Headers(req.headers)
-  headers.set('Sec-WebSocket-Protocol', 'v1')
-  const session = await next({ ...req, headers })
+const wsLoggingInterceptor = createWebSocketInterceptor(async (req: HttpRequest, next: WebSocketHandler) => {
+  const target = req.queryString ? `${req.endpoint}?${req.queryString}` : req.endpoint
+  console.log(`[WS] ${target}`)
+  const session = await next(req)
+  console.log('[WS] protocol:', session.connection.protocol)
   return session
 })
 ```
@@ -64,8 +72,7 @@ const wsProtocolInterceptor = createWebSocketInterceptor(async (req: HttpRequest
 三种拦截器链都使用**洋葱模型**：请求阶段按注册顺序进入，响应阶段按逆序返回。
 
 ```typescript
-import { createHttpInterceptor, makeInterceptorChain } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext, HttpResponse } from '@defjs/core'
+import { createHttpInterceptor } from '@defjs/core'
 
 const order: number[] = []
 
@@ -90,7 +97,7 @@ const c = createHttpInterceptor(async (req, next) => {
   return res
 })
 
-// 注册顺序：a -> b -> c
+// 通过 withInterceptors(a, b, c) 注册
 // 执行顺序：1 -> 2 -> 3 -> 3.1 -> 2.1 -> 1.1
 ```
 
@@ -272,19 +279,22 @@ const client = createClient(
 
 客户端按命令类型过滤拦截器：
 
-| 命令类型                      | 过滤条件                | 内部函数                       |
-| ----------------------------- | ----------------------- | ------------------------------ |
-| HTTP (`defineRequest`)        | `kind === 'http'`       | `resolveHttpInterceptors`      |
-| SSE (`defineEventStream`)     | `kind === 'sse'`        | `resolveSSEInterceptors`       |
-| WebSocket (`defineWebSocket`) | `kind === 'web-socket'` | `resolveWebSocketInterceptors` |
+| 命令类型                      | 过滤条件                |
+| ----------------------------- | ----------------------- |
+| HTTP (`defineRequest`)        | `kind === 'http'`       |
+| SSE (`defineEventStream`)     | `kind === 'sse'`        |
+| WebSocket (`defineWebSocket`) | `kind === 'web-socket'` |
 
 过滤后的拦截器保持原始注册顺序，然后形成洋葱链。
 
 ```typescript
-// 简化的内部执行逻辑
-const httpInterceptors = resolveHttpInterceptors(clientConfig.interceptors)
-const chain = makeInterceptorChain(httpInterceptors)
-const response = await chain(request, (req) => fetchHandler(req, clientConfig.http.fetch))
+// 概念性执行示意：公开 API 会在内部完成过滤和组链。
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withInterceptors(loggingInterceptor, authInterceptor, retryInterceptor),
+)
+
+const [error, result] = await client.execute(command)
 ```
 
 ### 拦截器顺序和组合

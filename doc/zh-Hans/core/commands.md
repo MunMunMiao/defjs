@@ -5,7 +5,7 @@ description: Master defineRequest, defineEventStream, and defineWebSocket, inclu
 
 # 命令
 
-Defjs 围绕“命令”构建：由 `defineRequest`、`defineEventStream` 和 `defineWebSocket` 创建的类型安全可执行对象。每个命令携带 `kind`（传输类型）、`definition`（端点结构）和 `input`（调用数据）。客户端根据 `kind` 分发到正确的传输逻辑。
+Defjs 围绕“命令”构建：由 `defineRequest`、`defineEventStream` 和 `defineWebSocket` 创建的类型安全可执行值。运行时它们会携带端点元数据以及可选的调用输入，`Client.execute` 会使用内部传输元数据完成分发。把命令当作不透明值即可：用户代码应将它们传给 `Client.execute(...)`，而不是依赖公开的传输标签判断或内部反射。
 
 ## defineRequest：HTTP 端点定义
 
@@ -15,11 +15,11 @@ Defjs 围绕“命令”构建：由 `defineRequest`、`defineEventStream` 和 `
 import { defineRequest } from '@defjs/core'
 import { struct } from '@defjs/core'
 
-const GetUser = defineRequest({
+const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({
-    path: struct.object({ id: struct.string() }),
+    path: struct.object({ id: struct.number() }),
   }),
   output: [
     { status: 200, body: struct.object({ name: struct.string(), age: struct.number() }) },
@@ -27,7 +27,7 @@ const GetUser = defineRequest({
   ] as const,
 })
 
-const command = GetUser({ path: { id: '42' } })
+const command = getUser({ path: { id: 42 } })
 ```
 
 ### 定义对象字段
@@ -44,12 +44,14 @@ const command = GetUser({ path: { id: '42' } })
 ### input / output / build 关系
 
 1. **input**：描述调用方必须提供的数据。执行时，客户端使用 `input` Struct 验证并解析原始输入。
-2. **build**：接收 `RequestBuilder` 和解析后的输入 (`RequestBuildInput`)，将数据映射到路径参数、查询参数、请求头和请求体。当 `input` 为 `struct.request(...)` 形状时可省略，运行时会根据声明的各段自动构建请求。
+2. **build**：接收 `RequestBuilder` 和解析后的输入 (`RequestBuildInput`)，将数据映射到路径参数、查询参数、请求头和请求体。当公开输入形状与实际传输形状不同，或者你需要自定义映射逻辑时使用它。
 3. **output**：描述服务器可能返回的响应。客户端按 HTTP 状态码选择匹配的结构，并推断 2xx 成功类型和非 2xx 错误类型。
+
+当 `input` 使用 `struct.request({ path, query, headers, body })` 时，运行时可以自动构建请求各部分，此时无需提供 `build`。
 
 如果省略 `input`，则必须同时省略 `build`。该命令不接受输入，直接发送到 `path`。
 
-如果提供 `build`，则必须同时提供 `input`。这是严格的设计规则。
+如果提供 `build`，则必须同时提供 `input`。
 
 ### 无输入快捷方式
 
@@ -64,16 +66,16 @@ const command = ListUsers() // 无需参数
 
 ### 输出类型推断
 
-`output` 同时支持数组和对象形式，行为等价：
+`output` 同时支持数组和对象形式，行为等价。
+
+本指南主要使用数组形式，因为它能更明确地表达状态码 / 响应体配对，也便于将多个状态码归到同一组。对象形式依然受支持，适合较紧凑的参考示例。
 
 ```typescript
-// 数组形式（推荐）
 output: [
   { status: 200, body: UserStruct },
   { status: [401, 403], body: AuthErrorStruct },
-]
+] as const
 
-// 对象形式
 output: {
   200: UserStruct,
   '401': AuthErrorStruct,
@@ -95,8 +97,8 @@ import { defineEventStream, struct } from '@defjs/core'
 const Notifications = defineEventStream({
   path: '/notifications',
   events: {
-    message: struct.object({ text: struct.string() }),
-    userJoined: struct.object({ userId: struct.number(), name: struct.string() }),
+    message: struct.json(struct.object({ text: struct.string() })),
+    userJoined: struct.json(struct.object({ userId: struct.number(), name: struct.string() })),
   },
 })
 
@@ -112,16 +114,18 @@ const command = Notifications()
 如果服务器发送了未声明的事件名，你可以提供 `default` 结构：
 
 ```typescript
+import { defineEventStream, struct } from '@defjs/core'
+
 const Stream = defineEventStream({
   path: '/events',
   events: {
-    update: object({ version: number() }),
-    default: string(), // 未匹配的事件解析为字符串
+    update: struct.json(struct.object({ version: struct.number() })),
+    default: struct.string(), // 未匹配的事件解析为字符串
   },
 })
 ```
 
-没有 `default` 时，未匹配的事件将被丢弃。如果配置了 `onInvalidEvent` 拦截器，它会收到通知。
+没有 `default` 时，未匹配的事件将被丢弃。如果通过 `withSSEOptions({ onInvalidEvent })` 或 `withSSEOnInvalidEvent(...)` 配置了无效事件处理，该观察者会收到通知。
 
 ### 带输入的 SSE
 
@@ -130,21 +134,21 @@ SSE 默认使用 `GET`。如果需要查询参数，提供 `input` 和 `build`�
 ```typescript
 const FilteredStream = defineEventStream({
   path: '/events',
-  input: object({
-    query: object({ category: string() }),
+  input: struct.object({
+    category: struct.string(),
   }),
-  build(request, input) {
-    request.setQueryParams(input.query)
+  build(ctx, input) {
+    ctx.setQueryParams({ category: input.category })
   },
   events: {
-    item: object({ id: number(), title: string() }),
+    item: struct.json(struct.object({ id: struct.number(), title: struct.string() })),
   },
 })
 
-const command = FilteredStream({ query: { category: 'news' } })
+const command = FilteredStream({ category: 'news' })
 ```
 
-SSE 的 `build` 不支持请求体或 `withCredentials`。
+SSE 的 `build` 只支持映射 path、query 和 headers 这些请求部分。凭证应在客户端级别通过 `withCredentials(...)` 配置；`build(ctx, input)` 不暴露公开的凭证设置方法。
 
 ---
 
@@ -157,12 +161,9 @@ import { defineWebSocket, struct } from '@defjs/core'
 
 const ChatSocket = defineWebSocket({
   path: '/chat/:roomId',
-  input: struct.object({
+  input: struct.request({
     path: struct.object({ roomId: struct.string() }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-  },
   incoming: {
     message: struct.object({ user: struct.string(), text: struct.string() }),
     system: struct.object({ event: struct.string() }),
@@ -174,6 +175,25 @@ const ChatSocket = defineWebSocket({
 })
 
 const command = ChatSocket({ path: { roomId: 'lobby' } })
+```
+
+仅当公开输入形状与实际传输形状不同时，才使用 `build(ctx, input)`：
+
+```typescript
+const ChatSocketWithManualBuild = defineWebSocket({
+  path: '/chat/:roomId',
+  input: struct.object({
+    roomId: struct.string(),
+    tenant: struct.string(),
+  }),
+  build(ctx, input) {
+    ctx.setPathParams({ roomId: input.roomId })
+    ctx.setQueryParams({ tenant: input.tenant })
+  },
+  incoming: {
+    message: struct.object({ text: struct.string() }),
+  },
+})
 ```
 
 ### incoming 消息结构
@@ -189,14 +209,30 @@ const command = ChatSocket({ path: { roomId: 'lobby' } })
 
 ### outgoing 消息结构
 
-`outgoing` 定义客户端发送的消息类型。`type` 自动从键名填充。你只需提供负载：
+`outgoing` 定义客户端发送的消息类型。`WebSocketSession.send(message)` 要求调用方传入一个消息对象，其中 `type` 必须是字符串，并匹配某个 `outgoing` 键；运行时不会在发送时根据 schema 键名自动补上 `type`。
 
 ```typescript
-// 发送：{ type: 'sendMessage', text: 'Hello' }
-// 或：   { type: 'sendMessage', data: { text: 'Hello' } }
+session.send({ type: 'sendMessage', text: 'hello' })
+session.send({ type: 'joinRoom', roomId: 'lobby' })
 ```
 
-如果 outgoing 消息负载是对象，两种形式都支持。如果是标量，必须使用 `{ type: 'xxx', data: <value> }`。
+当 outgoing 负载 schema 是对象时，把它的字段直接放在与 `type` 同一层；当 schema 是标量时，用 `data` 承载该值：
+
+```typescript
+import { defineWebSocket, struct } from '@defjs/core'
+
+const BinarySocket = defineWebSocket({
+  path: '/binary',
+  incoming: {
+    ack: struct.boolean(),
+  },
+  outgoing: {
+    chunk: struct.string(),
+  },
+})
+
+session.send({ type: 'chunk', data: 'hello' })
+```
 
 ### 只接收的 WebSocket
 
@@ -206,7 +242,7 @@ const command = ChatSocket({ path: { roomId: 'lobby' } })
 const ReadOnlySocket = defineWebSocket({
   path: '/feed',
   incoming: {
-    tick: object({ price: number() }),
+    tick: struct.object({ price: struct.number() }),
   },
 })
 ```
@@ -219,79 +255,55 @@ WebSocket 的 `build` 仅支持 `setPathParams` 和 `setQueryParams`。不支持
 
 ## 命令对象结构
 
-无论定义类型如何，构建后的命令遵循统一的结构：
+无论定义类型如何，构建后的命令都是一个不透明的可执行值，对外主要承担两件事：
+
+- 保存由 `defineRequest`、`defineEventStream` 或 `defineWebSocket` 创建的端点定义
+- 保存你传给构建器的可选调用输入
+
+运行时内部还会附加传输元数据，让 `Client.execute(...)` 能分发到正确的执行器（HTTP fetch、SSE 流或 WebSocket 连接）。这些元数据属于实现细节，不是公开 API 的一部分。
 
 ```typescript
-interface BaseCommand<TKind extends string> {
-  readonly kind: TKind
-}
+const getUser = defineRequest({ method: 'GET', path: '/users/:id' })
+const command = getUser({ path: { id: 42 } })
 
-// HTTP 命令
-interface HttpCommand<TInput, TOutput> extends BaseCommand<'http'> {
-  readonly definition: RequestDefinition<TInput, TOutput>
-  readonly input: EndpointInput<TInput> | undefined
-}
-
-// SSE 命令
-interface EventStreamCommand<TInput, TEvents> extends BaseCommand<'event-stream'> {
-  readonly endpoint: EventStreamEndpoint<TInput, TEvents>
-  readonly input: EndpointInput<TInput> | undefined
-}
-
-// WebSocket 命令
-interface WebSocketCommand<TInput, TIncoming, TOutgoing> extends BaseCommand<'web-socket'> {
-  readonly endpoint: WebSocketEndpoint<TInput, TIncoming, TOutgoing>
-  readonly input: EndpointInput<TInput> | undefined
-}
+await client.execute(command)
 ```
 
-`kind` 是传输类型标签。`Client.execute` 根据它分发到相应的执行器（HTTP fetch、SSE 流、WebSocket 连接）。
+从公开 API 视角看，把返回的命令值当作要传给 `Client.execute(...)` 的不透明对象即可。不要在应用代码里依赖公开 `.kind` 判断、内部 symbol，或结构反射。
 
 ---
 
-## 输入可选规则（IsInputOptional）
+## 输入可选规则
 
-命令构建器的参数是否可选由 `IsInputOptional` 自动推断：
+命令构建器参数是否可选，取决于声明的 `input` 形状：
 
-```typescript
-type IsInputOptional<TInput> = [TInput] extends [undefined] ? true : {} extends EndpointInput<NonNullable<TInput>> ? true : false
-```
-
-规则：
-
-1. **未定义 `input`**：`TInput` 为 `undefined`，参数完全可选。
-2. **有 `input` 但所有字段可选**：`{} extends EndpointInput<...>` 为 true，参数仍然可选。
-3. **有 `input` 且包含必填字段**：参数必填。
+1. **没有定义 `input`**：构建器可以不传参数调用。
+2. **定义了 `input`，但其中所有字段都可选**：构建器参数仍然可选。
+3. **`input` 中存在任意必填字段**：构建器参数变为必填。
 
 ```typescript
 // 无 input — 可选
 const A = defineRequest({ method: 'GET', path: '/a' })
 A() // OK
 
-// 所有字段可选 — 可选
+// input 中所有字段都可选 — 仍然可选
 const B = defineRequest({
   method: 'GET',
   path: '/b',
-  input: struct.object({
+  input: struct.request({
     query: struct.object({ q: struct.string().optional() }),
   }),
-  build(ctx, input) {
-    ctx.setQueryParams(input.query)
-  },
 })
 B() // OK
 B({ query: {} }) // OK
 
-// 必填字段 — 必填
+// 存在必填字段 — 参数必填
 const C = defineRequest({
   method: 'POST',
   path: '/c',
-  input: struct.object({
+  input: struct.request({
     body: struct.object({ name: struct.string() }),
   }),
-  build(ctx, input) {
-    ctx.setJson(input.body)
-  },
 })
 C() // TypeScript 错误：缺少参数
 C({ body: { name: 'defjs' } }) // OK

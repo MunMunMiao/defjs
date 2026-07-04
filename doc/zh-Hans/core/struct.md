@@ -57,7 +57,7 @@ const Profile = struct.object({
 
 ```typescript
 const Status = struct.enum(['pending', 'done', 'cancelled'])
-const Priority = struct.objectEnum({ Low: 1, Medium: 2, High: 3 })
+const Priority = struct.enum({ Low: 1, Medium: 2, High: 3 })
 
 const Flag = struct.literal(true)
 ```
@@ -73,7 +73,7 @@ const Dict = struct.record(struct.number())
 ### 联合和交集
 
 ```typescript
-const Id = struct.union([struct.string(), struct.number()])
+const Id = struct.or(struct.string(), struct.number())
 const Named = struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
 ```
 
@@ -130,26 +130,33 @@ type Person = Infer<typeof Person>
 // { name: string; age?: number }
 ```
 
-`Infer` 也适用于 `struct.array(...)`、`struct.union(...)`、`struct.request(...)`：
+`Infer` 也适用于 `struct.array(...)`、`struct.or(...)`、`struct.request(...)`：
 
 ```typescript
 type Tags = Infer<typeof Tags> // string[]
 type Id = Infer<typeof Id> // string | number
-type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
+type Req = Infer<typeof CreateUser>
+// { path: { orgId: number }; query: { dryRun?: boolean }; headers: { 'X-Api-Key': string }; body: { name: string } }
 ```
 
 ## StructError 和错误映射
 
-验证失败时，运行时返回 `StructError`，包含完整的 `StructIssue[]`。
+`StructError` 是承载 `StructIssue[]` 的运行时错误容器。Defjs 在请求/响应验证失败时可能把它作为底层 `cause` 使用；你在需要格式化或传递已收集问题时，也可以直接构造它。对象缺失字段会被零值补齐，因此常见失败更接近“类型不对”“枚举/字面量不匹配”或“联合不匹配”，而不是 `missing_key`。公开包也不会导出 `struct.parseTuple(...)`、`struct.parseValue(...)` 这类通用解析辅助；解析发生在 Defjs 消费命令输入或传输数据时。
 
 ```typescript
-import { struct, StructError } from '@defjs/core'
+import { StructError } from '@defjs/core'
 
-const [error, value] = struct.parseTuple(User, { id: 42 })
-if (error) {
-  console.log(error.issues)
-  // [{ code: 'missing_key', path: ['name'], expected: 'string', received: undefined, message: '...' }]
-}
+const error = new StructError([
+  {
+    code: 'invalid_type',
+    path: ['name'],
+    expected: 'string',
+    received: 42,
+    message: 'Expected string at [name], received 42',
+  },
+])
+
+console.log(error.issues)
 ```
 
 ### 错误格式化
@@ -157,7 +164,7 @@ if (error) {
 ```typescript
 error.format() // 树对象 { _errors: [], name: { _errors: ['...'] } }
 error.flatten() // 扁平对象 { formErrors: [], fieldErrors: { name: ['...'] } }
-error.prettify() // 字符串："× name: Expected string, received undefined"
+error.prettify() // 字符串："× name: Expected string at [name], received 42"
 ```
 
 ### 全局错误映射
@@ -168,14 +175,14 @@ error.prettify() // 字符串："× name: Expected string, received undefined"
 import { setErrorMap } from '@defjs/core'
 
 setErrorMap((issue) => {
-  if (issue.code === 'missing_key') {
-    return `Field ${issue.path.join('.')} is required`
+  if (issue.code === 'invalid_type') {
+    return `Field ${issue.path.join('.')} has the wrong type`
   }
   return undefined // 未覆盖的问题使用默认消息
 })
 ```
 
-## Field Aliases
+## 字段别名
 
 `.alias(name)` 是唯一内建字段 wire-name 机制。它只改变 JSON、query、headers、path、urlencoded 和 FormData 编解码使用的外部 key；不改变 TypeScript 属性名、输出类型、request section、body codec，也不会改写 `build(ctx, input)` 中手写的对象 key。未设置 alias 的字段使用对象字段名作为 wire key。
 
@@ -188,33 +195,11 @@ const UserBody = struct.object({
 })
 ```
 
-The same alias is used by JSON, query, path params, headers, urlencoded bodies, and multipart bodies. If the same logical value needs different names in different targets, split the struct or write explicit keys in `build(ctx, input)`.
+同一个 alias 会同时用于 JSON、query、path params、headers、urlencoded body 和 multipart body。如果同一个逻辑字段在不同目标中需要不同名字，就拆分 struct，或在 `build(ctx, input)` 中显式写出目标 key。
 
-## Field Introspection
+## 字段内省
 
-`getStructFields` expands an object struct into a readable field list containing field key, alias, and sub-struct.
-
-```typescript
-import { getStructFields } from '@defjs/core'
-
-const fields = getStructFields(UserBody)
-// [
-//   { key: 'id', alias: 'user_id', struct: NumberStruct },
-//   { key: 'name', alias: 'user_name', struct: StringStruct },
-// ]
-```
-
-Combined with `isObjectStruct` for safe type checking before introspection:
-
-```typescript
-import { isObjectStruct, getStructFields } from '@defjs/core'
-
-if (isObjectStruct(struct)) {
-  for (const field of getStructFields(struct)) {
-    console.log(field.key, field.alias)
-  }
-}
-```
+`getStructFields(...)`、`isObjectStruct(...)` 这类字段内省辅助确实存在于内部模块和核心测试中，但它们不属于公开的 `@defjs/core` 导出面。公开文档应把 alias 视为编码/解码时生效的字段映射能力，而不是承诺运行时反射 API。
 
 ## 零值默认值和部分输入
 
@@ -227,8 +212,9 @@ if (isObjectStruct(struct)) {
 ```typescript
 const Point = struct.object({ x: struct.number(), y: struct.number() })
 
-struct.parseValue(Point, {}) // { x: 0, y: 0 }
-struct.parseValue(Point, { x: 1 }) // { x: 1, y: 0 }
+// 命令输入或响应数据在解析后遵循同样的零值行为：
+// {} -> { x: 0, y: 0 }
+// { x: 1 } -> { x: 1, y: 0 }
 ```
 
 这是设计意图，不是 bug。优点：
@@ -237,7 +223,7 @@ struct.parseValue(Point, { x: 1 }) // { x: 1, y: 0 }
 - 避免 `undefined` 在对象中传播；输出总是可安全遍历。
 - 与 Go 的 json 反序列化保持一致的思维模型，统一跨语言协作。
 
-如果你需要严格验证（缺失字段应报错），在端点的 `build` 函数中显式检查，或使用 `struct.parseTuple` 自行处理 `[error, value]` 结果。
+如果你需要严格验证（缺失字段应报错），请在端点的 `build` 函数里或创建命令输入之前，显式检查业务上必须存在的字段。
 
 ## 下一步
 

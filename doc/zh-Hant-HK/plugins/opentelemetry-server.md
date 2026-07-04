@@ -13,11 +13,13 @@ description: Server-side outbound tracing without SDK initialization. Supports H
 - **不初始化 SDK** — 你必須在外部初始化 OpenTelemetry SDK，再傳入已建立的 `Tracer`（與選擇性的 `Meter`）。
 - **依傳輸協定分離** — HTTP、SSE 與 WebSocket 各自擁有獨立攔截器、span 生命週期與指標維度。
 
-## 安裝
+## 儲存庫工作區使用說明
 
-```bash
-bun add @defjs/opentelemetry-server @opentelemetry/api @opentelemetry/core
-```
+本頁目前記錄的是本儲存庫裡的 source/workspace 用法。`@defjs/opentelemetry-server` 位於 `packages/opentelemetry-server`，它的 peer dependency 期望使用 `packages/core` 中與之相匹配的 `@defjs/core` 工作區版本。
+
+下面示例中的 import specifier 使用套件名稱，但在這個儲存庫裡它們解析到的是工作區原始碼套件，而不是一對已發佈到 registry 的套件。你的應用程式仍然需要另外安裝並初始化自己的 OpenTelemetry SDK 相關依賴。
+
+公開 npm 目前沒有提供 `@defjs/opentelemetry-server`，而且那裡最新的獨立 `@defjs/core` 發佈版本也不是這個工作區套件的相容 peer。以後如果你把 `@defjs/opentelemetry-server` 和相容版本的 `@defjs/core` 一起發佈到你控制的 registry，或發佈到同時承載這兩個版本的其他 registry，請在對應環境裡成對安裝那些已發佈版本，而不要把這裡的工作區套件和不相容的獨立 `@defjs/core` 發佈版本混用。
 
 ## 基本用法
 
@@ -98,15 +100,30 @@ const client = createClient(
 | 選項               | 類型                      | 預設值      | 說明                                                                     |
 | ------------------ | ------------------------- | ----------- | ------------------------------------------------------------------------ |
 | `enabled`          | `boolean`                 | `true`      | 啟用 WebSocket 追蹤                                                      |
-| `queryPropagation` | `boolean`                 | `true`      | 將追蹤上下文注入 WebSocket URL 查詢字串                                  |
+| `queryPropagation` | `boolean`                 | `true`      | 為確保瀏覽器相容性，將追蹤脈絡注入 WebSocket URL 查詢字串；對安全敏感的生產流量，建議明確設為 `false` 作為基準。 |
 | `requestHook`      | `(span, req) => void`     | `undefined` | 在連線請求前自訂 WebSocket span                                          |
 | `responseHook`     | `(span, session) => void` | `undefined` | 在工作階段回傳後自訂 WebSocket span，`session` 為 `WebSocketSessionLike` |
 
 > **鉤子例外處理**：若 `requestHook` 或 `responseHook` 拋出錯誤，該錯誤會記錄在 span 的 `defjs.otel.hook.error` 事件中，但用戶端請求／串流／工作階段**會繼續正常執行**。
+>
+> **屬性衛生**：在 `requestHook` / `responseHook` 中，請優先使用明確的 allowlist、redaction 與穩定的低基數屬性。除非你的應用程式已經審查隱私、基數、保留與脫敏要求，否則不要附加原始查詢字串、請求／回應主體、完整標頭、baggage 值或訊息承載。
+
+## 從舊 API 遷移
+
+| 舊設定                    | 新設定                                                           |
+| ------------------------- | ---------------------------------------------------------------- |
+| `http: false`             | `http: { enabled: false }`                                       |
+| `sse: false`              | `sse: { enabled: false }`                                        |
+| `webSocket: false`        | `webSocket: { enabled: false }`                                  |
+| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
+| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                   |
+
+舊的頂層 Hook 與布林傳輸開關是刻意移除的，這樣每個傳輸協定都能暴露正確的請求／回應型別。現在如果繼續從 JavaScript 傳入這些已移除的舊選項，會直接拋出遷移錯誤，而不是被靜默解讀成已啟用遙測。
 
 ## HTTP 語義規範與指標
 
-HTTP 追蹤遵循穩定的 OpenTelemetry HTTP 用戶端語義規範。預設記錄 `SpanKind.CLIENT` span，並附帶以下低基數屬性：
+HTTP 追蹤遵循穩定的 OpenTelemetry HTTP 用戶端語義規範。預設記錄 `SpanKind.CLIENT` span，並附帶以下核心屬性：
 
 - `http.request.method`
 - `url.full`
@@ -120,7 +137,9 @@ HTTP 追蹤遵循穩定的 OpenTelemetry HTTP 用戶端語義規範。預設記�
 | ------------------------------ | ---- | --------------------------------------------------------------------------------------------------------------------- |
 | `http.client.request.duration` | `s`  | `http.request.method`、選填 `http.response.status_code`、選填 `server.address`、選填 `server.port`、選填 `error.type` |
 
-預設情況下，**請求／回應主體、所有標頭、原始查詢字串、承載大小與網路事件細節皆不收集**。這些通常為高基數或敏感資料。若需要，請透過 `requestHook` / `responseHook` 明確添加。
+預設情況下，**本套件不會把請求／回應主體、完整標頭、baggage 值、承載大小或訊息承載當成自訂遙測欄位附加**。它也**不會為原始查詢字串另外建立單獨的 span 屬性或指標**。但 `url.full` 反映的是應用程式實際構造的請求 URL，因此只要 URL 本身包含查詢字串，這些值仍可能出現在該屬性裡。請盡量避免在 URL 中放入 token、user id 或其他敏感、高基數輸入。
+
+除非你的應用程式已經審查隱私、基數、保留與脫敏要求，否則不要把原始查詢字串、請求／回應主體、完整標頭、baggage 值或訊息承載附加到 span 或指標裡。透過鉤子擴充遙測時，請優先使用明確的 allowlist、redaction 與穩定的低基數屬性。
 
 ## SSE 連線層級追蹤與自訂指標
 
@@ -173,11 +192,11 @@ WebSocket span 會持續開啟直到 `session.closed` 解析，並記錄以下�
 
 ## WebSocket 查詢傳播安全風險
 
-瀏覽器 WebSocket 用戶端通常無法設定任意 HTTP 標頭，因此本套件預設將追蹤上下文注入 WebSocket URL 查詢字串，以確保瀏覽器相容性。
+瀏覽器 WebSocket 用戶端通常無法設定任意 HTTP 標頭，因此 `webSocket.queryPropagation` 的執行期預設值是 `true`，用來確保瀏覽器相容性。這個預設值會把追蹤脈絡注入到 WebSocket URL 查詢字串裡。
 
-此選項存在安全權衡：查詢字串可能出現在存取紀錄、代理紀錄、瀏覽器／網路除錯工具與 APM URL 欄位中。若傳播器套件含 `baggage`，baggage 值也會寫入 URL，可能攜帶敏感資料。
+查詢字串可能被代理、瀏覽器、APM 工具、存取紀錄與網路除錯工具記錄。它們也可能包含 token、user id 或其他高基數輸入。如果傳播器包含 `baggage`，baggage 值也可能寫入 URL，並帶出敏感資料。
 
-對於安全敏感的 WebSocket 流量，請明確停用查詢傳播：
+對於安全敏感的生產 WebSocket 流量，建議把查詢傳播明確停用，作為推薦的安全基準：
 
 ```typescript
 withOpenTelemetryServer({
@@ -186,7 +205,7 @@ withOpenTelemetryServer({
 })
 ```
 
-停用後，追蹤上下文不再透過 URL 傳播。伺服器必須相依其他機制進行追蹤關聯（例如應用層訊息協定中的 trace ID 欄位）。
+停用後，追蹤脈絡不再透過 WebSocket URL 傳播。如果伺服器端仍需要把連線關聯到 trace，請在應用層使用其他已經審查過的關聯機制。
 
 ## 接下來
 

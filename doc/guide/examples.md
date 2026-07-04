@@ -5,9 +5,13 @@ description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket
 
 # Examples
 
-This page provides copy-paste-ready examples for the most common use cases.
+This page provides examples for the most common use cases.
+
+> These examples target the current repository source/workspace API. If you installed the current npm latest or a CDN build from the published release line, check that release's README or release notes before copying `withEndpoint(...)`, `struct.request(...)`, or related helpers into an external app.
 
 ## REST CRUD
+
+The examples in this guide use the array form because it keeps status/body pairs explicit and supports grouping multiple statuses. Object-form `output` is still supported and remains useful for compact reference examples.
 
 ### Define Structs and Endpoints
 
@@ -26,80 +30,75 @@ const UserListStruct = struct.object({
   total: struct.number(),
 })
 
-const CreateUserInput = struct.object({
-  name: struct.string(),
-  email: struct.string(),
-  role: struct.string().alias('role'),
-})
-
 // Request definitions
 const createUser = defineRequest({
   method: 'POST',
   path: '/v1/users',
-  input: CreateUserInput,
-  build: (input) => ({
-    body: input,
+  input: struct.request({
+    body: struct.object({
+      name: struct.string(),
+      email: struct.string(),
+      role: struct.string(),
+    }),
   }),
-  output: {
-    201: UserStruct,
-    400: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 201, body: UserStruct },
+    { status: 400, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
 const listUsers = defineRequest({
   method: 'GET',
   path: '/v1/users',
-  output: {
-    200: UserListStruct,
-  },
+  output: [
+    { status: 200, body: UserListStruct },
+  ] as const,
 })
 
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
+  input: struct.request({
+    path: struct.object({
+      id: struct.number(),
+    }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-  }),
-  output: {
-    200: UserStruct,
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 200, body: UserStruct },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
 const updateUser = defineRequest({
   method: 'PUT',
   path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
-    name: struct.string(),
-    email: struct.string(),
+  input: struct.request({
+    path: struct.object({
+      id: struct.number(),
+    }),
+    body: struct.object({
+      name: struct.string(),
+      email: struct.string(),
+    }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-    body: { name: input.name, email: input.email },
-  }),
-  output: {
-    200: UserStruct,
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 200, body: UserStruct },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
 const deleteUser = defineRequest({
   method: 'DELETE',
   path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
+  input: struct.request({
+    path: struct.object({
+      id: struct.number(),
+    }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-  }),
-  output: {
-    204: struct.unknown(),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 204, body: struct.unknown() },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 ```
 
@@ -109,7 +108,11 @@ const deleteUser = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'))
 
 async function handleCreate() {
-  const [error, user] = await client.execute(createUser({ name: 'Alice', email: 'alice@example.com', role: 'admin' }))
+  const [error, user] = await client.execute(
+    createUser({
+      body: { name: 'Alice', email: 'alice@example.com', role: 'admin' },
+    }),
+  )
   if (error) {
     handleError(error)
     return
@@ -127,7 +130,7 @@ async function handleList() {
 }
 
 async function handleGet(id: number) {
-  const [error, user] = await client.execute(getUser({ id }))
+  const [error, user] = await client.execute(getUser({ path: { id } }))
   if (error) {
     handleError(error)
     return
@@ -136,7 +139,12 @@ async function handleGet(id: number) {
 }
 
 async function handleUpdate(id: number) {
-  const [error, user] = await client.execute(updateUser({ id, name: 'Bob', email: 'bob@example.com' }))
+  const [error, user] = await client.execute(
+    updateUser({
+      path: { id },
+      body: { name: 'Bob', email: 'bob@example.com' },
+    }),
+  )
   if (error) {
     handleError(error)
     return
@@ -145,7 +153,7 @@ async function handleUpdate(id: number) {
 }
 
 async function handleDelete(id: number) {
-  const [error] = await client.execute(deleteUser({ id }))
+  const [error] = await client.execute(deleteUser({ path: { id } }))
   if (error) {
     handleError(error)
     return
@@ -191,15 +199,19 @@ const client = createClient(
 const notificationStream = defineEventStream({
   path: '/v1/notifications',
   events: {
-    message: struct.object({
-      id: struct.string(),
-      content: struct.string(),
-      timestamp: struct.number(),
-    }),
-    alert: struct.object({
-      level: struct.enum(['info', 'warning', 'critical'] as const),
-      title: struct.string(),
-    }),
+    message: struct.json(
+      struct.object({
+        id: struct.string(),
+        content: struct.string(),
+        timestamp: struct.number(),
+      }),
+    ),
+    alert: struct.json(
+      struct.object({
+        level: struct.enum(['info', 'warning', 'critical'] as const),
+        title: struct.string(),
+      }),
+    ),
     default: struct.string(),
   },
 })
@@ -253,11 +265,10 @@ const client = createClient(
 
 const chatRoom = defineWebSocket({
   path: '/room/:roomId',
-  input: struct.object({
-    roomId: struct.string().alias('roomId'),
-  }),
-  build: (input) => ({
-    params: { roomId: input.roomId },
+  input: struct.request({
+    path: struct.object({
+      roomId: struct.string(),
+    }),
   }),
   incoming: {
     message: struct.object({
@@ -272,16 +283,18 @@ const chatRoom = defineWebSocket({
     userLeft: struct.object({
       userId: struct.string(),
     }),
+    pong: struct.object({}),
   },
   outgoing: {
     sendMessage: struct.object({
       text: struct.string(),
     }),
+    ping: struct.object({}),
   },
 })
 
 async function joinChat(roomId: string) {
-  const [error, session, connection] = await client.execute(chatRoom({ roomId }))
+  const [error, session, connection] = await client.execute(chatRoom({ path: { roomId } }))
 
   if (error) {
     console.error('Connection failed:', error.message)
@@ -298,18 +311,18 @@ async function joinChat(roomId: string) {
     console.error('Runtime error:', err)
   })
 
-  session.send({ type: 'sendMessage', data: { text: 'Hello everyone!' } })
+  session.send({ type: 'sendMessage', text: 'Hello everyone!' })
 
   for await (const msg of session.receive) {
     switch (msg.type) {
       case 'message':
-        console.log(`${msg.data.userId}: ${msg.data.text}`)
+        console.log(`${msg.userId}: ${msg.text}`)
         break
       case 'userJoined':
-        console.log(`${msg.data.userName} joined`)
+        console.log(`${msg.userName} joined`)
         break
       case 'userLeft':
-        console.log(`${msg.data.userId} left`)
+        console.log(`${msg.userId} left`)
         break
     }
   }
@@ -329,11 +342,12 @@ import {
   createHttpInterceptor,
   createSSEInterceptor,
   createWebSocketInterceptor,
+  type HttpRequest,
   withInterceptors,
   withEndpoint,
 } from '@defjs/core'
 
-function authInterceptor(getToken: () => string | null) {
+function authInterceptors(getToken: () => string | null) {
   const apply = (req: HttpRequest) => {
     const token = getToken()
     if (!token) return req
@@ -342,35 +356,43 @@ function authInterceptor(getToken: () => string | null) {
     return { ...req, headers }
   }
 
-  return [
-    createHttpInterceptor((req, next) => next(apply(req))),
-    createSSEInterceptor((req, next) => next(apply(req))),
-    createWebSocketInterceptor((req, next) => next(apply(req))),
-  ]
+  return {
+    http: createHttpInterceptor((req, next) => next(apply(req))),
+    sse: createSSEInterceptor((req, next) => next(apply(req))),
+    webSocket: createWebSocketInterceptor((req, next) => next(apply(req))),
+  }
 }
+
+const auth = authInterceptors(() => localStorage.getItem('token'))
 
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withInterceptors(...authInterceptor(() => localStorage.getItem('token'))),
+  withInterceptors(auth.http, auth.sse, auth.webSocket),
 )
 ```
 
 ### Logging
 
 ```typescript
+function requestTarget(req: HttpRequest) {
+  const query = typeof req.queryString === 'string' && req.queryString.length > 0 ? `?${req.queryString}` : ''
+  return `${req.baseEndpoint ?? ''}${req.endpoint}${query}`
+}
+
 function loggingInterceptor() {
   return createHttpInterceptor(async (req, next) => {
     const start = performance.now()
-    console.log(`[HTTP] ${req.method} ${req.url}`)
+    const target = requestTarget(req)
+    console.log(`[HTTP] ${req.method} ${target}`)
 
     try {
       const response = await next(req)
       const duration = (performance.now() - start).toFixed(2)
-      console.log(`[HTTP] ${req.method} ${req.url} — ${response.status} (${duration}ms)`)
+      console.log(`[HTTP] ${req.method} ${target} — ${response.status} (${duration}ms)`)
       return response
     } catch (error) {
       const duration = (performance.now() - start).toFixed(2)
-      console.error(`[HTTP] ${req.method} ${req.url} — ERROR (${duration}ms)`, error)
+      console.error(`[HTTP] ${req.method} ${target} — ERROR (${duration}ms)`, error)
       throw error
     }
   })
@@ -404,9 +426,9 @@ import { defineRequest, struct } from '@defjs/core'
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/user',
-  output: {
-    200: struct.object({ name: struct.string() }),
-  },
+  output: [
+    { status: 200, body: struct.object({ name: struct.string() }) },
+  ] as const,
 })
 
 @Component({
@@ -438,7 +460,7 @@ import { authInterceptor } from './interceptors'
 
 const app = createApp(App)
 
-app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor)))
+app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(() => authInterceptor())))
 
 app.mount('#app')
 ```
@@ -454,9 +476,9 @@ const client = injectClient()
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/user',
-  output: {
-    200: struct.object({ name: struct.string() }),
-  },
+  output: [
+    { status: 200, body: struct.object({ name: struct.string() }) },
+  ] as const,
 })
 
 async function loadUser() {
@@ -481,14 +503,15 @@ async function loadUser() {
 | `createClient(...options)`                                                                  | Create a client instance    |
 | `withEndpoint(url)`                                                                         | Set base URL                |
 | `withInterceptors(...interceptors)`                                                         | Register interceptors       |
-| `defineRequest({ method, path, input?, build?, output? })`                                  | Define an HTTP endpoint     |
-| `defineEventStream({ path, events, input?, build? })`                                       | Define an SSE endpoint      |
-| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                            | Define a WebSocket endpoint |
+| `defineRequest({ method, path, input?, build?, output? })`                                 | Define an HTTP endpoint     |
+| `defineEventStream({ path, events, input?, build? })`                                      | Define an SSE endpoint      |
+| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                           | Define a WebSocket endpoint |
 | `struct.object(shape)`                                                                      | Object struct               |
+| `struct.request({ path, query, headers, body })`                                            | Request-shaped input        |
 | `struct.string()` / `struct.number()` / `struct.boolean()`                                  | Primitive structs           |
 | `struct.array(item)`                                                                        | Array struct                |
 | `struct.enum(values)`                                                                       | Enum struct                 |
-| `struct.alias(name)                                                                         | Field aliases               |
+| `.alias(name)`                                                                              | Field-level wire-name alias |
 | `createHttpInterceptor(fn)` / `createSSEInterceptor(fn)` / `createWebSocketInterceptor(fn)` | Create interceptors         |
 | `basicAuthHttpInterceptor(fn)` / `basicAuthSSEInterceptor(fn)`                              | Built-in Basic Auth         |
 

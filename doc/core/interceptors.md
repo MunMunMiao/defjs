@@ -45,16 +45,24 @@ const sseAuthInterceptor = createSSEInterceptor(async (req: HttpRequest, next: S
 
 ### WebSocket Interceptors
 
-WebSocket interceptors operate on `HttpRequest` (the HTTP request before handshake) and return `Promise<WebSocketSessionLike>`. Typical use: modify URL or inject subprotocol headers before WebSocket handshake.
+WebSocket interceptors operate on `HttpRequest` (the request before the socket is opened) and return `Promise<WebSocketSessionLike>`. Typical use: inspect or rewrite the resolved URL, add logging, or wrap the returned session.
+
+WebSocket subprotocol negotiation is configured through the public WebSocket options API, not by mutating handshake headers in an interceptor. Use one of these public entry points instead:
+
+- endpoint-level `protocols: ['v1']`
+- `withWebSocketProtocols(['v1'])`
+- `withWebSocketOptions({ protocols: ['v1'] })`
+- `client.execute(command, { protocols: ['v1'] })`
 
 ```typescript
 import { createWebSocketInterceptor } from '@defjs/core'
 import type { HttpRequest, WebSocketHandler } from '@defjs/core'
 
-const wsProtocolInterceptor = createWebSocketInterceptor(async (req: HttpRequest, next: WebSocketHandler) => {
-  const headers = new Headers(req.headers)
-  headers.set('Sec-WebSocket-Protocol', 'v1')
-  const session = await next({ ...req, headers })
+const wsLoggingInterceptor = createWebSocketInterceptor(async (req: HttpRequest, next: WebSocketHandler) => {
+  const target = req.queryString ? `${req.endpoint}?${req.queryString}` : req.endpoint
+  console.log(`[WS] ${target}`)
+  const session = await next(req)
+  console.log('[WS] protocol:', session.connection.protocol)
   return session
 })
 ```
@@ -64,8 +72,7 @@ const wsProtocolInterceptor = createWebSocketInterceptor(async (req: HttpRequest
 All three interceptor chains use the **onion model**: request phase enters in registration order, response phase returns in reverse order.
 
 ```typescript
-import { createHttpInterceptor, makeInterceptorChain } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext, HttpResponse } from '@defjs/core'
+import { createHttpInterceptor } from '@defjs/core'
 
 const order: number[] = []
 
@@ -90,7 +97,7 @@ const c = createHttpInterceptor(async (req, next) => {
   return res
 })
 
-// Registration order: a -> b -> c
+// Register with withInterceptors(a, b, c)
 // Execution order: 1 -> 2 -> 3 -> 3.1 -> 2.1 -> 1.1
 ```
 
@@ -272,19 +279,22 @@ const client = createClient(
 
 The client filters interceptors by command type:
 
-| Command Type                  | Filter Condition        | Internal Function              |
-| ----------------------------- | ----------------------- | ------------------------------ |
-| HTTP (`defineRequest`)        | `kind === 'http'`       | `resolveHttpInterceptors`      |
-| SSE (`defineEventStream`)     | `kind === 'sse'`        | `resolveSSEInterceptors`       |
-| WebSocket (`defineWebSocket`) | `kind === 'web-socket'` | `resolveWebSocketInterceptors` |
+| Command Type                  | Filter Condition |
+| ----------------------------- | ---------------- |
+| HTTP (`defineRequest`)        | `kind === 'http'` |
+| SSE (`defineEventStream`)     | `kind === 'sse'` |
+| WebSocket (`defineWebSocket`) | `kind === 'web-socket'` |
 
 Filtered interceptors maintain their original registration order, then form an onion chain.
 
 ```typescript
-// Simplified internal execution logic
-const httpInterceptors = resolveHttpInterceptors(clientConfig.interceptors)
-const chain = makeInterceptorChain(httpInterceptors)
-const response = await chain(request, (req) => fetchHandler(req, clientConfig.http.fetch))
+// Conceptual execution sketch — public API does the filtering and chaining internally.
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withInterceptors(loggingInterceptor, authInterceptor, retryInterceptor),
+)
+
+const [error, result] = await client.execute(command)
 ```
 
 ### Interceptor Order and Composition

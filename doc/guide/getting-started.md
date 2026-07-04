@@ -1,43 +1,34 @@
 ---
 title: Getting Started
-description: Install @defjs/core, use it via CDN, and create your first typed request in three steps.
+description: Use the current repository source/workspace API to create your first typed request, with separate notes for published npm/CDN users.
 ---
 
 # Getting Started
 
-Defjs is a TypeScript library for defining typed request APIs and executing them across multiple transports and JavaScript runtimes.
+Defjs is a TypeScript library for defining typed HTTP, SSE, and WebSocket APIs and executing them across JavaScript runtimes.
 
-## Installation
+## Repository source/workspace track
 
-Use your preferred package manager:
+This tutorial targets the current repository source/workspace API.
 
-::: code-group
+To follow the examples on this page exactly, install workspace dependencies and run them from a workspace package that resolves `@defjs/core` from this repository source:
 
-```sh [npm]
-npm install @defjs/core
+```sh
+pnpm install
+pnpm --dir doc run typecheck
 ```
 
-```sh [yarn]
-yarn add @defjs/core
-```
-
-```sh [pnpm]
-pnpm add @defjs/core
-```
-
-```sh [bun]
-bun add @defjs/core
-```
-
+::: info Development baseline
+This repository is developed with Node `>=26`, `pnpm@11.6.0`, and `engine-strict=true`. That baseline is for contributors working in this monorepo. Installing a published defjs package into an application follows the package's published runtime and bundler constraints.
 :::
 
-## CDN Usage
+## Published npm/CDN caveat
 
-Import directly as an ES module without a build tool:
+If you install `@defjs/core` from npm or import it from a CDN today, the current latest public release may still lag behind this tutorial. For example, `@defjs/core@0.3.3` uses the older `createClient(options)` / `defineRequest(method, endpoint)` style.
 
-```typescript
-import { createClient, defineRequest, struct } from 'https://unpkg.com/@defjs/core/index.min.js'
-```
+This page does not provide a full legacy `0.3.3` tutorial. Before copying `withEndpoint(...)` or `struct.request(...)` into an external app, use a published release whose package README, package table, or release notes explicitly includes this API.
+
+If you need a CDN import for the currently published line, import that published release separately and follow its published README/API reference rather than the source/workspace examples below.
 
 ## Three Steps to Your First Request
 
@@ -53,36 +44,44 @@ const client = createClient(withEndpoint('https://api.example.com'))
 
 ### Step 2: Define a Request
 
-Use `defineRequest` to define a typed HTTP endpoint. Use `struct` to describe the shape of inputs and responses:
+Use `defineRequest` to define a typed HTTP endpoint. Use `struct.request(...)` when your input maps directly to HTTP path, query, headers, or body sections:
 
 ```typescript twoslash
 import { defineRequest, struct } from '@defjs/core'
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user/:id',
-  input: struct.object({
-    id: struct.number(),
-  }),
-  output: {
-    '200': struct.object({
+  path: '/v1/users/:id',
+  input: struct.request({
+    path: struct.object({
       id: struct.number(),
-      name: struct.string(),
     }),
-    '404': struct.object({
-      message: struct.string(),
-    }),
-  },
+  }),
+  output: [
+    {
+      status: 200,
+      body: struct.object({
+        id: struct.number(),
+        name: struct.string(),
+      }),
+    },
+    {
+      status: 404,
+      body: struct.object({
+        message: struct.string(),
+      }),
+    },
+  ] as const,
 })
 ```
 
 ::: tip
-The keys in `output` are HTTP status codes. Defjs automatically selects the matching struct at runtime and derives TypeScript types accordingly: 2xx responses are typed as success data, non-2xx as error data.
+The examples in this guide use the array form because it keeps status/body pairs explicit and supports grouping multiple statuses. Object-form `output` is still supported and remains useful for compact reference examples.
 :::
 
 ### Step 3: Execute
 
-Call `client.execute` with your request command and optional configuration:
+Call `client.execute` with your request command. HTTP execution returns an error-first tuple: success is `[null, result, response]`, failure is `[error, undefined, response?]`.
 
 ```typescript twoslash
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
@@ -91,105 +90,107 @@ const client = createClient(withEndpoint('https://api.example.com'))
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user/:id',
-  input: struct.object({
-    id: struct.number(),
-  }),
-  output: {
-    '200': struct.object({
+  path: '/v1/users/:id',
+  input: struct.request({
+    path: struct.object({
       id: struct.number(),
-      name: struct.string(),
     }),
-    '404': struct.object({
-      message: struct.string(),
-    }),
-  },
+  }),
+  output: [
+    {
+      status: 200,
+      body: struct.object({
+        id: struct.number(),
+        name: struct.string(),
+      }),
+    },
+    {
+      status: 404,
+      body: struct.object({
+        message: struct.string(),
+      }),
+    },
+  ] as const,
 })
 
 async function loadUser() {
-  const [error, user] = await client.execute(getUser({ id: 1 }))
+  const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
 
   if (error) {
-    // error is typed based on the non-2xx structs in output
     console.error(error.code, error.message)
     return
   }
 
-  // user is typed as { id: number; name: string }
   console.log(user.name)
 }
 ```
 
 ## Complete Example
 
-Here is an end-to-end example with input validation, output validation, error handling, and an interceptor:
+Here is an end-to-end example with automatic request mapping, output validation, error handling, and an interceptor:
 
 ```typescript
-import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
+import {
+  createClient,
+  createHttpInterceptor,
+  defineRequest,
+  struct,
+  withEndpoint,
+  withInterceptors,
+} from '@defjs/core'
 
-// 1. Create Client
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors([
-    async (request, next) => {
-      request.headers.set('Authorization', 'Bearer token')
-      return next(request)
-    },
-  ]),
-)
-
-// 2. Define Request
-const createPost = defineRequest({
-  method: 'POST',
-  path: '/v1/posts',
-  input: struct.object({
-    title: struct.string(),
-    body: struct.string(),
-    'X-Request-ID': struct.string(),
-  }),
-  build: (input) => ({
-    body: { title: input.title, body: input.body },
-    headers: { 'X-Request-ID': input['X-Request-ID'] },
-  }),
-  output: {
-    201: struct.object({
-      id: struct.number(),
-      title: struct.string(),
-    }),
-    400: struct.object({
-      field: struct.string(),
-      reason: struct.string(),
-    }),
-  },
+const authInterceptor = createHttpInterceptor(async (request, next) => {
+  const headers = request.headers ?? new Headers()
+  request.headers = headers
+  headers.set('Authorization', 'Bearer token')
+  return next(request)
 })
 
-// 3. Execute
-async function createPost() {
-  const [error, post, response] = await client.execute(
-    createPost({
-      title: 'Hello',
-      body: 'World',
-      'X-Request-ID': 'uuid-123',
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withInterceptors(authInterceptor),
+)
+
+const createPostRequest = defineRequest({
+  method: 'POST',
+  path: '/v1/posts',
+  input: struct.request({
+    headers: struct.object({
+      'X-Request-ID': struct.string(),
+    }),
+    body: struct.object({
+      title: struct.string(),
+      body: struct.string(),
+    }),
+  }),
+  output: [
+    {
+      status: 201,
+      body: struct.object({
+        id: struct.number(),
+        title: struct.string(),
+      }),
+    },
+    {
+      status: 400,
+      body: struct.object({
+        field: struct.string(),
+        reason: struct.string(),
+      }),
+    },
+  ] as const,
+})
+
+async function submitPost() {
+  const [error, post] = await client.execute(
+    createPostRequest({
+      headers: { 'X-Request-ID': 'uuid-123' },
+      body: { title: 'Hello', body: 'World' },
     }),
   )
 
   if (error) {
-    switch (error.code) {
-      case 'HTTP_STATUS':
-        console.error('Validation failed:', error.data)
-        break
-      case 'REQUEST_VALIDATION_FAILED':
-        console.error('Request validation failed:', error.message)
-        break
-      case 'RESPONSE_VALIDATION_FAILED':
-        console.error('Response validation failed:', error.message)
-        break
-      case 'TRANSPORT_ERROR':
-        console.error('Network error:', error.message)
-        break
-      default:
-        console.error('Unknown error:', error)
-    }
+    console.error(error)
     return
   }
 
@@ -202,15 +203,15 @@ async function createPost() {
 | API                    | Description                     | Typical Usage                                                                  |
 | ---------------------- | ------------------------------- | ------------------------------------------------------------------------------ |
 | `createClient`         | Create a request client         | `createClient(withEndpoint('https://api.example.com'))`                        |
-| `defineRequest`        | Define an HTTP endpoint         | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
+| `defineRequest`        | Define an HTTP endpoint         | `defineRequest({ method: 'GET', path: '/user/:id', input: struct.request({ path: struct.object({ id: struct.number() }) }), output: [{ status: 200, body: UserStruct }] as const })` |
 | `defineEventStream`    | Define an SSE endpoint          | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
 | `defineWebSocket`      | Define a WebSocket endpoint     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
 | `struct`               | Struct builder                  | `struct.object({ id: struct.number() })`                                       |
 | `.alias(name)`         | Field wire-name alias           | `struct.string().alias('user_name')`                                           |
 | `withEndpoint`         | Set base URL                    | `withEndpoint('https://api.example.com')`                                      |
-| `withInterceptors`     | Register interceptors           | `withInterceptors([...interceptors])`                                          |
+| `withInterceptors`     | Register interceptors           | `withInterceptors(loggingInterceptor, authInterceptor)`                        |
 | `withCredentials`      | Enable cross-origin credentials | `withCredentials(true)`                                                        |
-| `withSSEOptions`       | Configure SSE options           | `withSSEOptions({ method: 'POST' })`                                           |
+| `withSSEReconnect`     | Configure SSE reconnect policy  | `withSSEReconnect({ attempts: 3, delayMs: 1000 })`                             |
 | `withWebSocketOptions` | Configure WebSocket options     | `withWebSocketOptions({ protocols: ['v1'] })`                                  |
 
 ## What's Next

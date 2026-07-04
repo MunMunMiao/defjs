@@ -57,7 +57,7 @@ const Profile = struct.object({
 
 ```typescript
 const Status = struct.enum(['pending', 'done', 'cancelled'])
-const Priority = struct.objectEnum({ Low: 1, Medium: 2, High: 3 })
+const Priority = struct.enum({ Low: 1, Medium: 2, High: 3 })
 
 const Flag = struct.literal(true)
 ```
@@ -73,7 +73,7 @@ const Dict = struct.record(struct.number())
 ### Unions and Intersections
 
 ```typescript
-const Id = struct.union([struct.string(), struct.number()])
+const Id = struct.or(struct.string(), struct.number())
 const Named = struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
 ```
 
@@ -130,26 +130,33 @@ type Person = Infer<typeof Person>
 // { name: string; age?: number }
 ```
 
-`Infer` also works for `struct.array(...)`, `struct.union(...)`, `struct.request(...)`:
+`Infer` also works for `struct.array(...)`, `struct.or(...)`, `struct.request(...)`:
 
 ```typescript
 type Tags = Infer<typeof Tags> // string[]
 type Id = Infer<typeof Id> // string | number
-type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
+type Req = Infer<typeof CreateUser>
+// { path: { orgId: number }; query: { dryRun?: boolean }; headers: { 'X-Api-Key': string }; body: { name: string } }
 ```
 
 ## StructError and Error Mapping
 
-When validation fails, the runtime returns `StructError` containing a complete `StructIssue[]`.
+`StructError` is the runtime container for `StructIssue[]`. Defjs may use it as the underlying `cause` of request/response validation failures, and you can also construct it directly when you want to format or propagate collected issues. Missing object fields are filled with zero values, so the common failure cases are invalid types, invalid enum/literal values, or union mismatches rather than `missing_key`. The public package intentionally does not export generic helpers like `struct.parseTuple(...)` or `struct.parseValue(...)`; parsing happens when Defjs consumes command input or transport data.
 
 ```typescript
-import { struct, StructError } from '@defjs/core'
+import { StructError } from '@defjs/core'
 
-const [error, value] = struct.parseTuple(User, { id: 42 })
-if (error) {
-  console.log(error.issues)
-  // [{ code: 'missing_key', path: ['name'], expected: 'string', received: undefined, message: '...' }]
-}
+const error = new StructError([
+  {
+    code: 'invalid_type',
+    path: ['name'],
+    expected: 'string',
+    received: 42,
+    message: 'Expected string at [name], received 42',
+  },
+])
+
+console.log(error.issues)
 ```
 
 ### Error Formatting
@@ -157,7 +164,7 @@ if (error) {
 ```typescript
 error.format() // Tree object { _errors: [], name: { _errors: ['...'] } }
 error.flatten() // Flat object { formErrors: [], fieldErrors: { name: ['...'] } }
-error.prettify() // String: "× name: Expected string, received undefined"
+error.prettify() // String: "× name: Expected string at [name], received 42"
 ```
 
 ### Global Error Mapping
@@ -168,8 +175,8 @@ Replace default messages via `setErrorMap`:
 import { setErrorMap } from '@defjs/core'
 
 setErrorMap((issue) => {
-  if (issue.code === 'missing_key') {
-    return `Field ${issue.path.join('.')} is required`
+  if (issue.code === 'invalid_type') {
+    return `Field ${issue.path.join('.')} has the wrong type`
   }
   return undefined // Uncovered issues use default messages
 })
@@ -192,29 +199,7 @@ The same alias is used by JSON, query, path params, headers, urlencoded bodies, 
 
 ## Field Introspection
 
-`getStructFields` expands an object struct into a readable field list containing field key, alias, and sub-struct.
-
-```typescript
-import { getStructFields } from '@defjs/core'
-
-const fields = getStructFields(UserBody)
-// [
-//   { key: 'id', alias: 'user_id', struct: NumberStruct },
-//   { key: 'name', alias: 'user_name', struct: StringStruct },
-// ]
-```
-
-Combined with `isObjectStruct` for safe type checking before introspection:
-
-```typescript
-import { isObjectStruct, getStructFields } from '@defjs/core'
-
-if (isObjectStruct(struct)) {
-  for (const field of getStructFields(struct)) {
-    console.log(field.key, field.alias)
-  }
-}
-```
+Field introspection helpers such as `getStructFields(...)` and `isObjectStruct(...)` exist in internal modules and core tests, but they are not part of the public `@defjs/core` export surface. Public docs should treat aliases as a write-time/read-time encoding feature rather than promise runtime reflection APIs.
 
 ## Zero-Value Defaults and Partial Input
 
@@ -227,8 +212,9 @@ The struct parser follows Go `encoding/json` semantics:
 ```typescript
 const Point = struct.object({ x: struct.number(), y: struct.number() })
 
-struct.parseValue(Point, {}) // { x: 0, y: 0 }
-struct.parseValue(Point, { x: 1 }) // { x: 1, y: 0 }
+// Parsed command input / response data follows the same zero-value behavior:
+// {} -> { x: 0, y: 0 }
+// { x: 1 } -> { x: 1, y: 0 }
 ```
 
 This is by design, not a bug. Benefits:
@@ -237,7 +223,7 @@ This is by design, not a bug. Benefits:
 - Avoids `undefined` spreading through objects; output is always safely traversable.
 - Consistent mental model with Go's json unmarshaling, unifying cross-language collaboration.
 
-If you need strict validation (missing fields should error), explicitly check in the endpoint's `build` function, or use `struct.parseTuple` to handle the `[error, value]` result yourself.
+If you need strict validation (missing fields should error), explicitly check for required business fields in the endpoint's `build` function or before creating the command input.
 
 ## What's Next
 

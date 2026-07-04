@@ -74,8 +74,8 @@ const merged = mergeHttpContexts(baseCtx, extraCtx)
 执行命令时，客户端按以下顺序处理输入：
 
 1. **验证**：使用 `input` Struct 验证并解析调用方的原始数据。
-2. **构建**：调用 `build(request, parsedInput)` 将解析后的数据映射到请求各部分。
-3. **传输**：根据 `kind` 分发到 HTTP fetch、SSE 流或 WebSocket 连接。
+2. **构建**：当存在自定义 `build` 时，调用 `build(request, parsedInput)` 将解析后的数据映射到请求各部分。
+3. **传输**：根据命令对应的传输类型分发到 HTTP fetch、SSE 流或 WebSocket 连接。
 
 ```typescript
 import { defineRequest, struct } from '@defjs/core'
@@ -112,13 +112,14 @@ const [error, user] = await client.execute(CreateUser({ body: { name: 'Alice', e
 | `setFormData` / `addFormData`             | ✓    | ✗   | ✗         |
 | `setFormUrlEncoded` / `addFormUrlEncoded` | ✓    | ✗   | ✗         |
 | `setBlob` / `setArrayBuffer`              | ✓    | ✗   | ✗         |
-| `withCredentials`                         | ✓    | ✗   | ✗         |
 
 在 `build` 中使用传输协议不支持的方法会在执行时抛出 `REQUEST_VALIDATION_FAILED`。
 
+`withCredentials(...)` 属于客户端级配置，不是公开的 `build` 上下文方法。当前运行时测试也确认 SSE 可以通过客户端级 `withCredentials(true)` 工作。
+
 ### 自动构建
 
-如果省略 `build`，则必须同时省略 `input`。但是，你可以使用 Struct 的 `request` 形状让框架自动推断构建逻辑：
+即使省略 `build`，只要 `input` 使用的是 `struct.request(...)`，仍然可以提供 `input`，由 Defjs 自动把解析后的 `path` / `query` / `headers` / `body` section 映射到出站请求：
 
 ```typescript
 import { defineRequest, struct } from '@defjs/core'
@@ -128,13 +129,13 @@ const GetUser = defineRequest({
   path: '/users/:id',
   input: struct.request({
     path: struct.object({ id: struct.string() }),
-    query: struct.object({ include: struct.optional(struct.string()) }),
+    query: struct.object({ include: struct.string().optional() }),
   }),
   // 无需 build；框架自动映射 path/query
 })
 ```
 
-当提供 `build` 时，必须同时提供 `input`。这是严格的设计规则。
+当提供 `build` 时，必须同时提供 `input`。但如果不提供 `build`，只要 `input` 是 `struct.request(...)` 形状，仍然允许直接依赖框架自动构建请求。
 
 ---
 
@@ -330,10 +331,18 @@ withWebSocketHeartbeat({
 配置函数按顺序应用；后续覆盖前面。执行时选项（`client.execute(cmd, { timeout: 5000 })`）优先级最高，其次是客户端级配置。
 
 ```typescript
-const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEOptions({ reconnect: { attempts: 3 } }))
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withCredentials(true),
+  withSSEReconnect({ attempts: 3 }),
+)
 
-// 在执行时覆盖 SSE 重连配置
-const [error, stream] = await client.execute(watchLogs(), { reconnect: { attempts: 10 } })
+// 用更靠后的客户端配置覆盖更早的默认值
+const clientWithMoreRetries = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEReconnect({ attempts: 3 }),
+  withSSEOptions({ reconnect: { attempts: 10, delayMs: 1000 } }),
+)
 ```
 
 ## 下一步

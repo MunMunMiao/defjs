@@ -103,7 +103,7 @@ import { defineEventStream, struct } from '@defjs/core'
 const watchLogs = defineEventStream({
   path: '/v1/logs/stream',
   events: {
-    log: struct.object({ level: struct.string(), message: struct.string() }),
+    log: struct.json(struct.object({ level: struct.string(), message: struct.string() })),
   },
 })
 

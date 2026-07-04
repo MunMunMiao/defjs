@@ -5,11 +5,15 @@ description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket
 
 # 示例
 
-本页提供可直接复制粘贴的代码片段，覆盖最常见的使用场景。
+本页提供最常见使用场景的完整示例。
+
+> 这些示例面向当前仓库的 source/workspace API。如果你安装的是 npm latest 或 CDN 上当前发布线的构建，请先查阅对应版本的 README 或 release notes，再把 `withEndpoint(...)`、`struct.request(...)` 或相关 helpers 复制到外部应用里。
 
 ## REST CRUD
 
-### 定义结构模型和端点
+本指南中的示例主要使用数组形式的 `output`，因为它能更明确地表达状态码 / 响应体配对，也便于把多个状态码归到同一组。对象形式依然受支持，适合较紧凑的参考示例。
+
+### 定义结构和端点
 
 ```typescript
 import { createClient, defineRequest, struct, withEndpoint, RequestError } from '@defjs/core'
@@ -26,82 +30,75 @@ const UserListStruct = struct.object({
   total: struct.number(),
 })
 
-const CreateUserInput = struct.object({
-  name: struct.string(),
-  email: struct.string(),
-  role: struct.string().alias('role'),
-})
-
 // 请求定义
 const createUser = defineRequest({
   method: 'POST',
   path: '/v1/users',
-  input: CreateUserInput,
-  build(ctx, input) {
-    ctx.setJson(input.body)
-  },
-  output: {
-    201: UserStruct,
-    400: struct.object({ message: struct.string() }),
-  },
+  input: struct.request({
+    body: struct.object({
+      name: struct.string(),
+      email: struct.string(),
+      role: struct.string(),
+    }),
+  }),
+  output: [
+    { status: 201, body: UserStruct },
+    { status: 400, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
 const listUsers = defineRequest({
   method: 'GET',
   path: '/v1/users',
-  output: {
-    200: UserListStruct,
-  },
+  output: [
+    { status: 200, body: UserListStruct },
+  ] as const,
 })
 
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/users/:id',
   input: struct.request({
-    path: struct.object({ id: struct.number() }),
+    path: struct.object({
+      id: struct.number(),
+    }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-  },
-  output: {
-    200: UserStruct,
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 200, body: UserStruct },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
 const updateUser = defineRequest({
   method: 'PUT',
   path: '/v1/users/:id',
   input: struct.request({
-    path: struct.object({ id: struct.number() }),
+    path: struct.object({
+      id: struct.number(),
+    }),
     body: struct.object({
       name: struct.string(),
       email: struct.string(),
     }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-    ctx.setJson(input.body)
-  },
-  output: {
-    200: UserStruct,
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 200, body: UserStruct },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
 const deleteUser = defineRequest({
   method: 'DELETE',
   path: '/v1/users/:id',
   input: struct.request({
-    path: struct.object({ id: struct.number() }),
+    path: struct.object({
+      id: struct.number(),
+    }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-  },
-  output: {
-    204: struct.unknown(),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 204, body: struct.unknown() },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 ```
 
@@ -111,7 +108,11 @@ const deleteUser = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'))
 
 async function handleCreate() {
-  const [error, user] = await client.execute(createUser({ name: 'Alice', email: 'alice@example.com', role: 'admin' }))
+  const [error, user] = await client.execute(
+    createUser({
+      body: { name: 'Alice', email: 'alice@example.com', role: 'admin' },
+    }),
+  )
   if (error) {
     handleError(error)
     return
@@ -129,9 +130,7 @@ async function handleList() {
 }
 
 async function handleGet(id: number) {
-  const [error, user] = await client.execute(
-    getUser({ path: { id } }),
-  )
+  const [error, user] = await client.execute(getUser({ path: { id } }))
   if (error) {
     handleError(error)
     return
@@ -141,7 +140,10 @@ async function handleGet(id: number) {
 
 async function handleUpdate(id: number) {
   const [error, user] = await client.execute(
-    updateUser({ path: { id }, body: { name: 'Bob', email: 'bob@example.com' } }),
+    updateUser({
+      path: { id },
+      body: { name: 'Bob', email: 'bob@example.com' },
+    }),
   )
   if (error) {
     handleError(error)
@@ -197,15 +199,19 @@ const client = createClient(
 const notificationStream = defineEventStream({
   path: '/v1/notifications',
   events: {
-    message: struct.object({
-      id: struct.string(),
-      content: struct.string(),
-      timestamp: struct.number(),
-    }),
-    alert: struct.object({
-      level: struct.enum(['info', 'warning', 'critical'] as const),
-      title: struct.string(),
-    }),
+    message: struct.json(
+      struct.object({
+        id: struct.string(),
+        content: struct.string(),
+        timestamp: struct.number(),
+      }),
+    ),
+    alert: struct.json(
+      struct.object({
+        level: struct.enum(['info', 'warning', 'critical'] as const),
+        title: struct.string(),
+      }),
+    ),
     default: struct.string(),
   },
 })
@@ -260,11 +266,10 @@ const client = createClient(
 const chatRoom = defineWebSocket({
   path: '/room/:roomId',
   input: struct.request({
-    path: struct.object({ roomId: struct.string() }),
+    path: struct.object({
+      roomId: struct.string(),
+    }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-  },
   incoming: {
     message: struct.object({
       userId: struct.string(),
@@ -278,11 +283,13 @@ const chatRoom = defineWebSocket({
     userLeft: struct.object({
       userId: struct.string(),
     }),
+    pong: struct.object({}),
   },
   outgoing: {
     sendMessage: struct.object({
       text: struct.string(),
     }),
+    ping: struct.object({}),
   },
 })
 
@@ -335,11 +342,12 @@ import {
   createHttpInterceptor,
   createSSEInterceptor,
   createWebSocketInterceptor,
+  type HttpRequest,
   withInterceptors,
   withEndpoint,
 } from '@defjs/core'
 
-function authInterceptor(getToken: () => string | null) {
+function authInterceptors(getToken: () => string | null) {
   const apply = (req: HttpRequest) => {
     const token = getToken()
     if (!token) return req
@@ -348,35 +356,43 @@ function authInterceptor(getToken: () => string | null) {
     return { ...req, headers }
   }
 
-  return [
-    createHttpInterceptor((req, next) => next(apply(req))),
-    createSSEInterceptor((req, next) => next(apply(req))),
-    createWebSocketInterceptor((req, next) => next(apply(req))),
-  ]
+  return {
+    http: createHttpInterceptor((req, next) => next(apply(req))),
+    sse: createSSEInterceptor((req, next) => next(apply(req))),
+    webSocket: createWebSocketInterceptor((req, next) => next(apply(req))),
+  }
 }
+
+const auth = authInterceptors(() => localStorage.getItem('token'))
 
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withInterceptors(...authInterceptor(() => localStorage.getItem('token'))),
+  withInterceptors(auth.http, auth.sse, auth.webSocket),
 )
 ```
 
 ### 日志
 
 ```typescript
+function requestTarget(req: HttpRequest) {
+  const query = typeof req.queryString === 'string' && req.queryString.length > 0 ? `?${req.queryString}` : ''
+  return `${req.baseEndpoint ?? ''}${req.endpoint}${query}`
+}
+
 function loggingInterceptor() {
   return createHttpInterceptor(async (req, next) => {
     const start = performance.now()
-    console.log(`[HTTP] ${req.method} ${req.url}`)
+    const target = requestTarget(req)
+    console.log(`[HTTP] ${req.method} ${target}`)
 
     try {
       const response = await next(req)
       const duration = (performance.now() - start).toFixed(2)
-      console.log(`[HTTP] ${req.method} ${req.url} — ${response.status} (${duration}ms)`)
+      console.log(`[HTTP] ${req.method} ${target} — ${response.status} (${duration}ms)`)
       return response
     } catch (error) {
       const duration = (performance.now() - start).toFixed(2)
-      console.error(`[HTTP] ${req.method} ${req.url} — ERROR (${duration}ms)`, error)
+      console.error(`[HTTP] ${req.method} ${target} — ERROR (${duration}ms)`, error)
       throw error
     }
   })
@@ -389,13 +405,18 @@ function loggingInterceptor() {
 // app.config.ts
 import { ApplicationConfig } from '@angular/core'
 import { provideClient, withEndpoint, withInterceptors } from '@defjs/angular'
-import { authInterceptor } from './interceptors'
+
+const auth = authInterceptors(() => localStorage.getItem('token'))
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideClient(
       withEndpoint('https://api.example.com'),
-      withInterceptors(() => authInterceptor()),
+      withInterceptors(
+        () => auth.http,
+        () => auth.sse,
+        () => auth.webSocket,
+      ),
     ),
   ],
 }
@@ -410,9 +431,9 @@ import { defineRequest, struct } from '@defjs/core'
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/user',
-  output: {
-    200: struct.object({ name: struct.string() }),
-  },
+  output: [
+    { status: 200, body: struct.object({ name: struct.string() }) },
+  ] as const,
 })
 
 @Component({
@@ -439,12 +460,24 @@ export class UserComponent {
 // main.ts
 import { createApp } from 'vue'
 import App from './App.vue'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
-import { authInterceptor } from './interceptors'
+import { provideClient, withInterceptors } from '@defjs/vue'
+import { withEndpoint } from '@defjs/core'
+import { authInterceptors } from './interceptors'
+
+const auth = authInterceptors(() => localStorage.getItem('token'))
 
 const app = createApp(App)
 
-app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor)))
+app.use(
+  provideClient(
+    withEndpoint('https://api.example.com'),
+    withInterceptors(
+      () => auth.http,
+      () => auth.sse,
+      () => auth.webSocket,
+    ),
+  ),
+)
 
 app.mount('#app')
 ```
@@ -460,9 +493,9 @@ const client = injectClient()
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/user',
-  output: {
-    200: struct.object({ name: struct.string() }),
-  },
+  output: [
+    { status: 200, body: struct.object({ name: struct.string() }) },
+  ] as const,
 })
 
 async function loadUser() {
@@ -487,14 +520,15 @@ async function loadUser() {
 | `createClient(...options)`                                                                  | 创建客户端实例      |
 | `withEndpoint(url)`                                                                         | 设置基础 URL        |
 | `withInterceptors(...interceptors)`                                                         | 注册拦截器          |
-| `defineRequest({ method, path, input?, build?, output? })`                                  | 定义 HTTP 端点      |
-| `defineEventStream({ path, events, input?, build? })`                                       | 定义 SSE 端点       |
-| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                            | 定义 WebSocket 端点 |
+| `defineRequest({ method, path, input?, build?, output? })`                                 | 定义 HTTP 端点      |
+| `defineEventStream({ path, events, input?, build? })`                                      | 定义 SSE 端点       |
+| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                           | 定义 WebSocket 端点 |
 | `struct.object(shape)`                                                                      | 对象结构            |
+| `struct.request({ path, query, headers, body })`                                            | 请求形状输入        |
 | `struct.string()` / `struct.number()` / `struct.boolean()`                                  | 基础类型结构        |
 | `struct.array(item)`                                                                        | 数组结构            |
 | `struct.enum(values)`                                                                       | 枚举结构            |
-| `.alias(name)`                                                                              | 字段别名            |
+| `.alias(name)`                                                                              | 字段级线缆名称别名  |
 | `createHttpInterceptor(fn)` / `createSSEInterceptor(fn)` / `createWebSocketInterceptor(fn)` | 创建拦截器          |
 | `basicAuthHttpInterceptor(fn)` / `basicAuthSSEInterceptor(fn)`                              | 内置 Basic Auth     |
 
