@@ -50,29 +50,7 @@ export interface ClientSSEOptions {
   maxBufferSize?: number
 }
 
-export interface ClientSSEConfig {
-  handle: typeof fetch
-  onInvalidEvent?: (context: {
-    reason: 'missing-struct' | 'validation-failed'
-    message: { id: string; event: string; data: string; retry?: number }
-    cause?: unknown
-  }) => void | Promise<void>
-  reconnect?: {
-    attempts?: number
-    delayMs?: number
-    factor?: number
-    jitter?: number
-    maxDelayMs?: number
-    shouldReconnect?: (context: {
-      attempt: number
-      cause?: unknown
-      lastEventId: string
-      open?: { response: { status: number; statusText: string; url: string }; url: string }
-    }) => boolean | Promise<boolean>
-  }
-  queue?: { maxSize?: number; overflow?: 'drop-newest' | 'drop-oldest' | 'error' }
-  maxBufferSize?: number
-}
+export type ClientSSEConfig = ClientSSEOptions & { handle: typeof fetch }
 
 export interface ClientOptions {
   endpoint: string
