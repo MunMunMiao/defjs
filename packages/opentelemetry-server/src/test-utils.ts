@@ -1,4 +1,3 @@
-import type { FnReturn, OmitKeys, SelectKeys } from './utility_types'
 import type { EventStreamHandle, HttpRequest, HttpResponse, WebSocketSessionLike } from '@defjs/core'
 import { makeResponse } from '@defjs/core'
 import type {
@@ -18,7 +17,7 @@ import type {
 } from '@opentelemetry/api'
 import { vi } from 'vitest'
 
-type MockFn = FnReturn<typeof vi.fn>
+type MockFn = ReturnType<typeof vi.fn>
 type SSECloseCode = 'eof' | 'error' | 'aborted'
 interface WebSocketCloseInfo {
   cause?: unknown
@@ -57,7 +56,7 @@ interface SSECloseInfo {
   cause?: unknown
 }
 
-export type MockSpan = OmitKeys<
+export type MockSpan = Omit<
   Span,
   | 'setAttribute'
   | 'setAttributes'
@@ -198,7 +197,7 @@ export function makeSSERequest(headers?: Headers): HttpRequest {
   }
 }
 
-function makeSSEHandleBase(): SelectKeys<EventStreamHandle<unknown>, 'open' | 'close'> {
+function makeSSEHandleBase(): Pick<EventStreamHandle<unknown>, 'open' | 'close'> {
   return {
     open: {
       response: makeHttpResponse<null>(),

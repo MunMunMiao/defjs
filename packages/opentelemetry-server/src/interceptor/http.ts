@@ -1,4 +1,3 @@
-import type { FnReturn } from '../utility_types'
 import type { HttpRequest, HttpResponse } from '@defjs/core'
 import { createHttpInterceptor } from '@defjs/core'
 import type { Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
@@ -18,7 +17,7 @@ export interface HttpInterceptorOptions {
   responseHook?: (span: Span, res: HttpResponse<unknown>) => void
 }
 
-export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptions): FnReturn<typeof createHttpInterceptor> {
+export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptions): ReturnType<typeof createHttpInterceptor> {
   return createHttpInterceptor(async (req, next) => {
     const { tracer, propagator, metrics, requireParentSpan, requestHook, responseHook } = options
 

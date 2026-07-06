@@ -1,4 +1,3 @@
-import type { NonNullableValue, FnParams } from './utility_types'
 import type { ClientConfig, EventStreamHandle, HttpRequest, HttpResponse, WebSocketSessionLike } from '@defjs/core'
 import { createClient, withEndpoint } from '@defjs/core'
 import type { Meter, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
@@ -122,16 +121,16 @@ withOpenTelemetryServer({ tracer: makeTracer(), http: {}, sse: {}, webSocket: {}
 // Used with createClient
 createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer: makeTracer() }))
 
-type HttpResponseHook = NonNullableValue<OpenTelemetryServerHttpOptions['responseHook']>
-type SSEResponseHook = NonNullableValue<OpenTelemetryServerSSEOptions['responseHook']>
-type WebSocketResponseHook = NonNullableValue<OpenTelemetryServerWebSocketOptions['responseHook']>
+type HttpResponseHook = NonNullable<OpenTelemetryServerHttpOptions['responseHook']>
+type SSEResponseHook = NonNullable<OpenTelemetryServerSSEOptions['responseHook']>
+type WebSocketResponseHook = NonNullable<OpenTelemetryServerWebSocketOptions['responseHook']>
 
-type HttpResponseArg = Expect<Equal<FnParams<HttpResponseHook>[1], HttpResponse<unknown>>>
-type SSEResponseArg = Expect<Equal<FnParams<SSEResponseHook>[1], EventStreamHandle<unknown>>>
-type WebSocketResponseArg = Expect<Equal<FnParams<WebSocketResponseHook>[1], WebSocketSessionLike>>
+type HttpResponseArg = Expect<Equal<Parameters<HttpResponseHook>[1], HttpResponse<unknown>>>
+type SSEResponseArg = Expect<Equal<Parameters<SSEResponseHook>[1], EventStreamHandle<unknown>>>
+type WebSocketResponseArg = Expect<Equal<Parameters<WebSocketResponseHook>[1], WebSocketSessionLike>>
 
 // Hook parameter types stay transport-specific.
-type HttpRequestArg = Expect<Equal<FnParams<NonNullableValue<OpenTelemetryServerHttpOptions['requestHook']>>[1], HttpRequest>>
+type HttpRequestArg = Expect<Equal<Parameters<NonNullable<OpenTelemetryServerHttpOptions['requestHook']>>[1], HttpRequest>>
 
 // @ts-expect-error tracer is required
 withOpenTelemetryServer({})

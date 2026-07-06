@@ -1,10 +1,9 @@
-import type { FnReturn } from '../utility_types'
 import type { HttpRequest } from '@defjs/core'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { activeSpans, createMockMetrics, createMockPropagator, createMockTracer, makeHttpRequest, makeHttpResponse } from '../test-utils'
 import { createOpenTelemetryHttpInterceptor } from './http'
 
-let mockPropagator: FnReturn<typeof createMockPropagator>
+let mockPropagator: ReturnType<typeof createMockPropagator>
 
 describe('createOpenTelemetryHttpInterceptor', () => {
   beforeEach(() => {

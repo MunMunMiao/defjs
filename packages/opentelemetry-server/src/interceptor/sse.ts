@@ -1,4 +1,3 @@
-import type { FnReturn } from '../utility_types'
 import type { EventStreamHandle, HttpRequest } from '@defjs/core'
 import { createSSEInterceptor } from '@defjs/core'
 import type { Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
@@ -31,7 +30,7 @@ export interface SSEInterceptorOptions {
   responseHook?: (span: Span, stream: EventStreamHandle<unknown>) => void
 }
 
-export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions): FnReturn<typeof createSSEInterceptor> {
+export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions): ReturnType<typeof createSSEInterceptor> {
   return createSSEInterceptor(async (req, next) => {
     const { tracer, propagator, metrics, requireParentSpan, requestHook, responseHook } = options
 
