@@ -8,11 +8,11 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "docs:dev": "node scripts/without-node-webstorage.mjs vitepress dev",
-    "docs:build": "node scripts/without-node-webstorage.mjs vitepress build",
-    "docs:preview": "node scripts/without-node-webstorage.mjs vitepress preview",
-    "test": "node scripts/without-node-webstorage.mjs vitest run",
-    "typecheck": "node scripts/without-node-webstorage.mjs pnpm run typecheck:docs",
+    "docs:dev": "vitepress dev",
+    "docs:build": "vitepress build",
+    "docs:preview": "vitepress preview",
+    "test": "vitest run",
+    "typecheck": "pnpm run typecheck:docs",
     "typecheck:docs": "tsc --project tsconfig.json --noEmit && tsx scripts/typecheck-docs.ts"
   },
   "devDependencies": {
