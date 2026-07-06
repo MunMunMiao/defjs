@@ -1,10 +1,8 @@
-import type { Socket } from 'node:net'
-import type { ServerType } from '@hono/node-server'
-import { createAdaptorServer } from '@hono/node-server'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import type { TestProject } from 'vitest/node'
+import { startHonoTestServer, type HonoTestServer } from '../../../test/hono-test-server'
 
 declare module 'vitest' {
   export interface ProvidedContext {
@@ -12,8 +10,7 @@ declare module 'vitest' {
   }
 }
 
-let testServer: ServerType | undefined
-const testServerSockets = new Set<Socket>()
+let testServer: HonoTestServer | undefined
 
 export async function setup({ provide }: TestProject) {
   const app = new Hono()
@@ -61,44 +58,11 @@ export async function setup({ provide }: TestProject) {
     }),
   )
 
-  const server = createAdaptorServer({ fetch: app.fetch, hostname: '127.0.0.1' })
-  testServer = server
-
-  server.on('connection', (socket) => {
-    testServerSockets.add(socket)
-    socket.on('close', () => {
-      testServerSockets.delete(socket)
-    })
-  })
-
-  injectWebSocket(server)
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => resolve())
-  })
-
-  const address = server.address()
-  if (!address || typeof address === 'string') {
-    throw new TypeError('Failed to resolve test server address')
-  }
-
-  const host = `http://127.0.0.1:${address.port}`
-  server.unref()
-  provide('testServerHost', host)
+  testServer = await startHonoTestServer(app, { injectWebSocket })
+  provide('testServerHost', testServer.host)
 }
 
 export async function teardown() {
-  if (!testServer) {
-    return
-  }
-
-  testServerSockets.forEach((socket) => socket.destroy())
-  testServerSockets.clear()
-
-  await new Promise<void>((resolve) => {
-    testServer?.close(() => resolve())
-  })
-
+  await testServer?.close()
   testServer = undefined
 }
