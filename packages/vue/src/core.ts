@@ -28,7 +28,7 @@ export function withEndpoint(endpoint: string): ClientOption {
  */
 export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
   return (config) => {
-    config.interceptors = fns.map((fn) => fn())
+    config.interceptors = [...(config.interceptors ?? []), ...fns.map((fn) => fn())]
   }
 }
 

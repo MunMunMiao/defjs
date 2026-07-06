@@ -40,7 +40,7 @@ This homepage quick start targets the current repository source/workspace API.
 
 Repository workspace baseline: use Node `>=26`, `pnpm@11.6.0`, and `engine-strict=true`. That is the current floor for this source checkout and for packages built from the repository's current manifests; if you later install a published package, follow the `engines` field and release notes shipped with that published version.
 
-Use these commands to install the workspace and verify the docs examples:
+Use these commands to install the workspace and typecheck the docs twoslash blocks. Ordinary fenced snippets on this page still need manual review:
 
 ```bash
 pnpm install
@@ -49,7 +49,7 @@ pnpm --dir doc run typecheck
 
 To experiment with the snippet, paste it into a workspace package or docs twoslash block that resolves `@defjs/core` from source. The repository root itself is not an app package that imports `@defjs/core`.
 
-> Published npm/CDN users: the current public release line may lag behind this page. This homepage does not teach the legacy `@defjs/core@0.3.3` API. Before copying `withEndpoint(...)` or `struct.request(...)` into an external app, use a published release whose package table or release notes explicitly includes this API.
+> Published package users: the API shown on this homepage may move ahead of the release you installed. Before copying `withEndpoint(...)` or `struct.request(...)` into an external app, check the installed package metadata or release notes to confirm that this API is published there.
 
 Define a typed request and execute it:
 

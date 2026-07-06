@@ -24,11 +24,11 @@ This repository is developed with Node `>=26`, `pnpm@11.6.0`, and `engine-strict
 
 ## Published npm/CDN caveat
 
-If you install `@defjs/core` from npm or import it from a CDN today, the current latest public release may still lag behind this tutorial. For example, `@defjs/core@0.3.3` uses the older `createClient(options)` / `defineRequest(method, endpoint)` style.
+If you install `@defjs/core` from npm or import it from a CDN, the published release you use may lag behind this tutorial.
 
-This page does not provide a full legacy `0.3.3` tutorial. Before copying `withEndpoint(...)` or `struct.request(...)` into an external app, use a published release whose package README, package table, or release notes explicitly includes this API.
+This page does not provide a separate guide for older published APIs. Before copying `withEndpoint(...)` or `struct.request(...)` into an external app, use a published release whose installed package metadata, README, or release notes explicitly include this API.
 
-If you need a CDN import for the currently published line, import that published release separately and follow its published README/API reference rather than the source/workspace examples below.
+If you need a CDN import for a published release, follow that release's published README/API reference rather than the source/workspace examples below.
 
 ## Three Steps to Your First Request
 

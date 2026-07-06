@@ -8,7 +8,7 @@ Supports Angular 18–22.
 
 The examples below assume `@defjs/angular` and `@defjs/core` expose matching APIs. In this repository checkout, the package imports resolve to workspace source packages. In an external app, they resolve to the published versions you installed.
 
-Public npm currently ships `@defjs/angular@18.0.7` and `@defjs/core@0.3.3`. The source examples shown here can move ahead of those published releases, especially when an example uses newer `@defjs/core` APIs such as `createClient(withEndpoint(...))` and `struct.request(...)`. Before copying a snippet into another app, check the package metadata, README, and release notes for the exact `@defjs/angular` and `@defjs/core` versions you installed and confirm that those APIs are present.
+Published `@defjs/angular` and `@defjs/core` releases can lag behind the source examples shown here, especially when an example uses newer APIs such as `createClient(withEndpoint(...))` and `struct.request(...)`. Before copying a snippet into another app, check the package metadata, README, and release notes for the exact published versions you installed and confirm that those APIs are present.
 
 This repository currently uses `Node >=26`, `pnpm@11.6.0`, and `engine-strict=true` for source development, and the package manifest declares `engines.node >=26`. Treat that as source-checkout guidance unless the published package metadata for your installed release says otherwise.
 

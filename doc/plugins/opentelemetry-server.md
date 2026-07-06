@@ -151,7 +151,7 @@ When `meter` is provided, HTTP records the stable metric:
 
 | Metric                         | Unit | Attributes                                                                                                                            |
 | ------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `http.client.request.duration` | `s`  | `http.request.method`, optional `http.response.status_code`, optional `server.address`, optional `server.port`, optional `error.type` |
+| `http.client.request.duration` | `s`  | `http.request.method`, `server.address`, `server.port`, optional `http.response.status_code`, optional `error.type` |
 
 This package does not add request or response bodies, full headers, baggage values, payload sizes, or message payloads as default custom telemetry fields. It also does not create separate span attributes or metrics for raw query strings.
 

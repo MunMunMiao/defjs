@@ -278,27 +278,30 @@ const notifications = defineEventStream({
 
 export function useNotifications() {
   const client = injectClient()
-  let disposed = false
-  let closeStream = () => {}
+  const abort = new AbortController()
+  let closeStream = () => {
+    abort.abort()
+  }
 
   onBeforeUnmount(() => {
-    disposed = true
     closeStream()
   })
 
   onMounted(async () => {
-    const [streamError, stream] = await client.execute(notifications())
+    const [streamError, stream] = await client.execute(notifications(), {
+      signal: abort.signal,
+    })
+
+    if (abort.signal.aborted) {
+      return
+    }
 
     if (streamError || !stream) {
       return
     }
 
-    if (disposed) {
-      stream.close('component-unmounted')
-      return
-    }
-
     closeStream = () => {
+      abort.abort()
       stream.close('component-unmounted')
     }
 
@@ -311,7 +314,7 @@ export function useNotifications() {
     } catch (error) {
       const closeInfo = await stream.closed
 
-      if (disposed || closeInfo.code === 'aborted') {
+      if (abort.signal.aborted || closeInfo.code === 'aborted') {
         return
       }
 

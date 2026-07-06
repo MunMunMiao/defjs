@@ -75,23 +75,32 @@ export function UserProfile({ id }: { id: number }) {
   const [name, setName] = useState<string>('loading...')
 
   useEffect(() => {
-    let cancelled = false
+    const abort = new AbortController()
 
-    client.execute(getUser({ path: { id } })).then(([error, user]) => {
-      if (cancelled) {
-        return
-      }
+    void client
+      .execute(getUser({ path: { id } }), { signal: abort.signal })
+      .then(([error, user]) => {
+        if (abort.signal.aborted) {
+          return
+        }
 
-      if (error) {
-        setName(error.message)
-        return
-      }
+        if (error) {
+          setName(error.message)
+          return
+        }
 
-      setName(user.name)
-    })
+        setName(user.name)
+      })
+      .catch((error) => {
+        if (abort.signal.aborted) {
+          return
+        }
+
+        setName(error instanceof Error ? error.message : String(error))
+      })
 
     return () => {
-      cancelled = true
+      abort.abort()
     }
   }, [client, id])
 
@@ -119,7 +128,7 @@ Sets the base endpoint URL for the client created by `ClientProvider`.
 
 ### `withInterceptors(...fns: (() => Interceptor)[]): ClientOption`
 
-Registers interceptor factories evaluated when `ClientProvider` creates the client. In this adapter, `withInterceptors(...)` replaces `config.interceptors` with the interceptors produced by the factories you pass, so group all interceptors for that provider in one `withInterceptors(...)` call.
+Registers interceptor factories evaluated when `ClientProvider` creates the client. withInterceptors(...) in this adapter accepts factory functions because the provider/plugin creates the real @defjs/core client later. Each call appends the interceptors produced by those factories in option application order, matching the core client's withInterceptors(...) composition model.
 
 ## Notes
 

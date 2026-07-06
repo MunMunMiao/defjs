@@ -347,7 +347,7 @@ import {
   withEndpoint,
 } from '@defjs/core'
 
-function authInterceptors(getToken: () => string | null) {
+export function authInterceptors(getToken: () => string | null) {
   const apply = (req: HttpRequest) => {
     const token = getToken()
     if (!token) return req
@@ -363,11 +363,11 @@ function authInterceptors(getToken: () => string | null) {
   }
 }
 
-const auth = authInterceptors(() => localStorage.getItem('token'))
+const interceptors = authInterceptors(() => localStorage.getItem('token'))
 
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withInterceptors(auth.http, auth.sse, auth.webSocket),
+  withInterceptors(interceptors.http, interceptors.sse, interceptors.webSocket),
 )
 ```
 
@@ -405,17 +405,18 @@ function loggingInterceptor() {
 // app.config.ts
 import { ApplicationConfig } from '@angular/core'
 import { provideClient, withEndpoint, withInterceptors } from '@defjs/angular'
+import { authInterceptors } from './interceptors'
 
-const auth = authInterceptors(() => localStorage.getItem('token'))
+const interceptors = authInterceptors(() => localStorage.getItem('token'))
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideClient(
       withEndpoint('https://api.example.com'),
       withInterceptors(
-        () => auth.http,
-        () => auth.sse,
-        () => auth.webSocket,
+        () => interceptors.http,
+        () => interceptors.sse,
+        () => interceptors.webSocket,
       ),
     ),
   ],
@@ -464,7 +465,7 @@ import { provideClient, withInterceptors } from '@defjs/vue'
 import { withEndpoint } from '@defjs/core'
 import { authInterceptors } from './interceptors'
 
-const auth = authInterceptors(() => localStorage.getItem('token'))
+const interceptors = authInterceptors(() => localStorage.getItem('token'))
 
 const app = createApp(App)
 
@@ -472,9 +473,9 @@ app.use(
   provideClient(
     withEndpoint('https://api.example.com'),
     withInterceptors(
-      () => auth.http,
-      () => auth.sse,
-      () => auth.webSocket,
+      () => interceptors.http,
+      () => interceptors.sse,
+      () => interceptors.webSocket,
     ),
   ),
 )

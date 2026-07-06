@@ -26,11 +26,31 @@ describe('withInterceptors', () => {
   })
 
   it('should set interceptors in config', () => {
-    const config = {} as ClientConfig
+    const config = { interceptors: [] } as ClientConfig
     const interceptor = (() => ({})) as unknown as () => Interceptor
     const option = withInterceptors(interceptor)
     option(config)
     expect(config.interceptors).toEqual([interceptor()])
+  })
+
+  it('should append interceptors across sequential calls in order', () => {
+    const config = { interceptors: [] } as ClientConfig
+    const interceptor1 = {} as Interceptor
+    const interceptor2 = {} as Interceptor
+
+    withInterceptors(() => interceptor1)(config)
+    withInterceptors(() => interceptor2)(config)
+
+    expect(config.interceptors).toEqual([interceptor1, interceptor2])
+  })
+
+  it('should initialize interceptors when config starts empty', () => {
+    const config = {} as ClientConfig
+    const interceptor = {} as Interceptor
+
+    withInterceptors(() => interceptor)(config)
+
+    expect(config.interceptors).toEqual([interceptor])
   })
 })
 

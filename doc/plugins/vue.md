@@ -111,7 +111,7 @@ If `injectClient()` runs before `app.use(provideClient(...))`, it throws immedia
 
 ## Option helpers
 
-`withEndpoint` and `withInterceptors` in `@defjs/vue` are plugin-oriented helpers. `withInterceptors` accepts factory functions because the Vue plugin creates the real `@defjs/core` client later, during installation. In this adapter, `withInterceptors(...)` replaces `config.interceptors` with the interceptors produced by the factories you pass, so group all interceptors for that client in one `withInterceptors(...)` call.
+`withEndpoint` and `withInterceptors` in `@defjs/vue` are plugin-oriented helpers. withInterceptors(...) in this adapter accepts factory functions because the provider/plugin creates the real @defjs/core client later. Each call appends the interceptors produced by those factories in option application order, matching the core client's withInterceptors(...) composition model.
 
 ```ts
 import { createApp } from 'vue'
@@ -278,27 +278,30 @@ const notifications = defineEventStream({
 
 export function useNotifications() {
   const client = injectClient()
-  let disposed = false
-  let closeStream = () => {}
+  const abort = new AbortController()
+  let closeStream = () => {
+    abort.abort()
+  }
 
   onBeforeUnmount(() => {
-    disposed = true
     closeStream()
   })
 
   onMounted(async () => {
-    const [streamError, stream] = await client.execute(notifications())
+    const [streamError, stream] = await client.execute(notifications(), {
+      signal: abort.signal,
+    })
+
+    if (abort.signal.aborted) {
+      return
+    }
 
     if (streamError || !stream) {
       return
     }
 
-    if (disposed) {
-      stream.close('component-unmounted')
-      return
-    }
-
     closeStream = () => {
+      abort.abort()
       stream.close('component-unmounted')
     }
 
@@ -311,7 +314,7 @@ export function useNotifications() {
     } catch (error) {
       const closeInfo = await stream.closed
 
-      if (disposed || closeInfo.code === 'aborted') {
+      if (abort.signal.aborted || closeInfo.code === 'aborted') {
         return
       }
 
@@ -471,7 +474,7 @@ Sets the base endpoint URL for the client created by `provideClient(...)`.
 
 ### `withInterceptors(...fns: (() => Interceptor)[]): ClientOption`
 
-Registers interceptor factories for the client created by `provideClient(...)`. In this adapter, `withInterceptors(...)` replaces `config.interceptors` with the interceptors produced by the factories you pass, so group all interceptors for that client in one `withInterceptors(...)` call.
+Registers interceptor factories for the client created by `provideClient(...)`. withInterceptors(...) in this adapter accepts factory functions because the provider/plugin creates the real @defjs/core client later. Each call appends the interceptors produced by those factories in option application order, matching the core client's withInterceptors(...) composition model.
 
 ### `HTTP_CLIENT`
 

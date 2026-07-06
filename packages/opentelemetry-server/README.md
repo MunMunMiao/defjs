@@ -1,8 +1,3 @@
----
-title: OpenTelemetry Server
-description: Outbound-only client tracing without SDK initialization. Supports HTTP, SSE, and WebSocket with OpenTelemetry metrics and trace collection.
----
-
 # @defjs/opentelemetry-server
 
 Server-side outbound OpenTelemetry integration for `@defjs/core` HTTP, SSE, and WebSocket clients.
@@ -144,7 +139,7 @@ When `meter` is provided, the following stable metrics are collected:
 
 | Metric                         | Unit | Attributes                                                                                                                            |
 | ------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `http.client.request.duration` | `s`  | `http.request.method`, optional `http.response.status_code`, optional `server.address`, optional `server.port`, optional `error.type` |
+| `http.client.request.duration` | `s`  | `http.request.method`, `server.address`, `server.port`, optional `http.response.status_code`, optional `error.type` |
 
 This package does not add request or response bodies, full headers, baggage values, payload sizes, or message payloads as default custom telemetry fields. It also does not create separate span attributes or metrics for raw query strings.
 
@@ -201,6 +196,6 @@ By default, **per-message spans are not created**, and **message payloads, messa
 
 ## What's Next
 
-- [Client](/core/client) — `createClient` and full transport configuration
-- [SSE](/core/sse) — `defineEventStream` and streaming event consumption
-- [WebSocket](/core/web-socket) — `defineWebSocket` and real-time communication
+- [Client](../../doc/core/client.md) — `createClient` and full transport configuration
+- [SSE](../../doc/core/sse.md) — `defineEventStream` and streaming event consumption
+- [WebSocket](../../doc/core/web-socket.md) — `defineWebSocket` and real-time communication

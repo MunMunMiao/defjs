@@ -96,7 +96,8 @@ onMounted(async () => {
 </template>
 ```
 
-If you need interceptors, pass factory functions to `withInterceptors(...)` because `provideClient(...)` creates the real `@defjs/core` client later during plugin installation. In this adapter, `withInterceptors(...)` replaces `config.interceptors` with the interceptors produced by the factories you pass, so group all interceptors for that client in one `withInterceptors(...)` call:
+If you need interceptors, withInterceptors(...) in this adapter accepts factory functions because the provider/plugin creates the real @defjs/core client later. Each call appends the interceptors produced by those factories in option application order, matching the core client's withInterceptors(...) composition model.
+
 
 ```ts
 import { createApp } from 'vue'
@@ -112,7 +113,14 @@ const authInterceptor = createHttpInterceptor(async (request, next) => {
 })
 
 const loggingInterceptor = createHttpInterceptor(async (request, next) => {
-  console.log(request.method, request.url)
+  const target = request.baseEndpoint
+    ? new URL(
+        `${request.endpoint}${request.queryString ? `?${request.queryString}` : ''}`,
+        request.baseEndpoint,
+      ).toString()
+    : `${request.endpoint}${request.queryString ? `?${request.queryString}` : ''}`
+
+  console.log(request.method, target)
   return next(request)
 })
 
@@ -148,7 +156,7 @@ Sets the base endpoint URL for the client created by `provideClient(...)`.
 
 ### `withInterceptors(...fns: (() => Interceptor)[]): ClientOption`
 
-Registers interceptor factories evaluated when the plugin creates the client. In this adapter, `withInterceptors(...)` replaces `config.interceptors` with the interceptors produced by the factories you pass, so group all interceptors for that client in one `withInterceptors(...)` call.
+Registers interceptor factories evaluated when the plugin creates the client. withInterceptors(...) in this adapter accepts factory functions because the provider/plugin creates the real @defjs/core client later. Each call appends the interceptors produced by those factories in option application order, matching the core client's withInterceptors(...) composition model.
 
 ### `HTTP_CLIENT`
 

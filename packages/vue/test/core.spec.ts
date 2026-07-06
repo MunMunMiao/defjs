@@ -1,10 +1,7 @@
 import type { Client, ClientConfig, Interceptor } from '@defjs/core'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createApp, h } from 'vue'
 import { injectClient, provideClient, withEndpoint, withInterceptors } from '../src'
-import { startHonoServer } from './server'
-
-type TestServer = { port: number; close: () => Promise<void> }
 
 describe('withEndpoint', () => {
   it('should return a ClientOption function', () => {
@@ -27,11 +24,31 @@ describe('withInterceptors', () => {
   })
 
   it('should set interceptors in config', () => {
-    const config = {} as ClientConfig
+    const config = { interceptors: [] } as ClientConfig
     const interceptor = (() => ({})) as unknown as () => Interceptor
     const option = withInterceptors(interceptor)
     option(config)
     expect(config.interceptors).toEqual([interceptor()])
+  })
+
+  it('should append interceptors across sequential calls in order', () => {
+    const config = { interceptors: [] } as ClientConfig
+    const interceptor1 = {} as Interceptor
+    const interceptor2 = {} as Interceptor
+
+    withInterceptors(() => interceptor1)(config)
+    withInterceptors(() => interceptor2)(config)
+
+    expect(config.interceptors).toEqual([interceptor1, interceptor2])
+  })
+
+  it('should initialize interceptors when config starts empty', () => {
+    const config = {} as ClientConfig
+    const interceptor = {} as Interceptor
+
+    withInterceptors(() => interceptor)(config)
+
+    expect(config.interceptors).toEqual([interceptor])
   })
 })
 
@@ -50,21 +67,10 @@ describe('injectClient', () => {
 })
 
 describe('provideClient', () => {
-  let server: TestServer
-
-  beforeAll(async () => {
-    server = await startHonoServer()
-  })
-
-  afterAll(async () => {
-    await server.close()
-  })
+  const endpoint = 'https://api.example.com'
 
   it('should create a Plugin', () => {
-    const plugin = provideClient(
-      withEndpoint(`http://localhost:${server.port}`),
-      withInterceptors((() => ({})) as unknown as () => Interceptor),
-    )
+    const plugin = provideClient(withEndpoint(endpoint), withInterceptors((() => ({})) as unknown as () => Interceptor))
     expect(plugin).toHaveProperty('install')
   })
 
@@ -78,7 +84,7 @@ describe('provideClient', () => {
       template: '<div></div>',
     })
 
-    app.use(provideClient(withEndpoint(`http://localhost:${server.port}`), withInterceptors((() => ({})) as unknown as () => Interceptor)))
+    app.use(provideClient(withEndpoint(endpoint), withInterceptors((() => ({})) as unknown as () => Interceptor)))
 
     app.mount(document.createElement('div'))
     expect(injectedClient).toBeDefined()
@@ -94,7 +100,7 @@ describe('provideClient', () => {
       template: '<div></div>',
     })
 
-    app.use(provideClient(withEndpoint(`http://localhost:${server.port}`)))
+    app.use(provideClient(withEndpoint(endpoint)))
 
     app.mount(document.createElement('div'))
     expect(injectedClient).toBeDefined()

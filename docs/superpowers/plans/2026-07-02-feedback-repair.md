@@ -16,7 +16,7 @@
 - 不实现 opt-in strict / regulated profile。
 - 不实现 SSE/WebSocket message-level telemetry。
 - 不实现 `captureHeaders`、`captureAttributes`、redaction preset。
-- 不修改 locale 镜像文档，例如 `doc/zh-Hans`、`doc/fr-FR`、`doc/de-DE`。
+- locale 文档只修改与本轮反馈修复直接相关的页面，不扩展到无关镜像页。
 - 不新建第二套 docs 校验系统。
 - 文档内容保持现有英文文档风格；计划、执行说明、审查说明和最终汇报使用简体中文。
 - 主入口示例统一采用 `createClient(withEndpoint('https://api.example.com'))`。
@@ -1135,5 +1135,5 @@ Report in Chinese with this structure:
 - Spec coverage: 本计划覆盖 root README delivered/planned/non-goals、adoption note、公开入口 onboarding 统一、`struct.request(...)` 与 `build(ctx, input)` 分层、OTel WebSocket query propagation 安全提示、React/Vue/Angular cookbook、thin-adapter 边界、验证策略和验收标准。
 - Placeholder scan: 本计划没有占位符、未完成标记或未指定文件路径的泛化步骤。
 - Type/API consistency: 计划中的主路径示例统一使用 `createClient(withEndpoint(...))`、`defineRequest(...)`、`struct.request(...)`、array-form `output`、`client.execute(...)` error-first tuple；manual mapping 示例统一使用 `build(ctx, input)` 与 `ctx.setPathParams(...)` / `ctx.setQueryParams(...)` / `ctx.setJson(...)`。
-- Scope check: 本计划只修改 Markdown 文档和 README，不新增包、不修改 runtime source、不新增 public API、不修改 locale mirror docs、不新增 docs validation system。
+- Scope check: 本计划只修改 Markdown 文档和 README，不新增包、不修改 runtime source、不新增 public API；locale 仅限本轮已直接涉及且确认有误的页面，不新增 docs validation system。
 - Verification check: 自动验证限定为现有 `doc` package 的 `typecheck`、`docs:build` 和可选 `test`；README 验收明确采用人工一致性复核，不把 README 写成已被 docs typecheck 覆盖。

@@ -28,9 +28,9 @@ Defjs is a TypeScript library for defining typed HTTP, SSE, and WebSocket APIs a
 
 ## Quick Start
 
-The example below is for the current repository source/workspace API, not for the current latest npm release of `@defjs/core`.
+The example below targets the current repository source/workspace API.
 
-Use these commands to install the workspace and verify the docs examples:
+Use these commands to install the workspace and typecheck the docs twoslash blocks. Ordinary fenced snippets in this README still need manual review:
 
 ```sh
 pnpm install
@@ -39,7 +39,7 @@ pnpm --dir doc run typecheck
 
 To experiment with the snippet, paste it into a workspace package or docs twoslash block that resolves `@defjs/core` from repository source. The repository root itself is not an app package that imports `@defjs/core`.
 
-If an external application installs `@defjs/core` from npm today, this sample may not apply until a published release explicitly includes this API. Use this sample for repository source/workspace onboarding only, and wait for a release whose package table below or release notes confirm that this API has shipped before using it in an external app.
+If an external application installs `@defjs/core` from a published package, confirm that the installed release explicitly includes this API before copying the sample into that app. Use this snippet for repository source/workspace onboarding unless your published package metadata or release notes confirm the same API surface.
 
 ```ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
@@ -82,13 +82,13 @@ Documentation source lives in `doc/`. This README and the repository docs source
 
 ## Repository packages
 
-| Package | Purpose | Repository status | npm status |
-| --- | --- | --- | --- |
-| [`@defjs/core`](packages/core) | Typed HTTP, SSE, and WebSocket client definitions and execution. | Manifest version `0.4.0` in this repository. | Latest npm release: `0.3.3`. |
-| [`@defjs/react`](packages/react) | React thin adapter for sharing a typed core client through `ClientProvider` and `useClient`. | Manifest version `0.0.1` in this repository. | No public npm package found. |
-| [`@defjs/vue`](packages/vue) | Vue thin adapter for providing and injecting a typed core client. | Manifest version `0.0.1` in this repository. | No public npm package found. |
-| [`@defjs/angular`](packages/angular) | Angular DI thin adapter for providing and injecting a typed core client. | Manifest version `19.0.0` in this repository. | Latest npm release: `18.0.7`, so the repository is ahead of npm. |
-| [`@defjs/opentelemetry-server`](packages/opentelemetry-server) | Server-side outbound OpenTelemetry instrumentation for core clients. | Manifest version `0.2.0` in this repository. | No public npm package found. |
+| Package | Purpose |
+| --- | --- |
+| [`@defjs/core`](packages/core) | Typed HTTP, SSE, and WebSocket client definitions and execution. |
+| [`@defjs/react`](packages/react) | React thin adapter for sharing a typed core client through `ClientProvider` and `useClient`. |
+| [`@defjs/vue`](packages/vue) | Vue thin adapter for providing and injecting a typed core client. |
+| [`@defjs/angular`](packages/angular) | Angular DI thin adapter for providing and injecting a typed core client. |
+| [`@defjs/opentelemetry-server`](packages/opentelemetry-server) | Server-side outbound OpenTelemetry instrumentation for core clients. |
 
 ## Status and Roadmap
 
@@ -99,7 +99,7 @@ Documentation source lives in `doc/`. This README and the repository docs source
 - Server-side outbound OpenTelemetry instrumentation for defjs clients.
 - Documentation source and local VitePress tooling in `doc/`.
 
-See the repository packages table above for current npm availability.
+See the package READMEs and the metadata for the published releases you install to confirm exact npm availability and API surface.
 
 ### Planned
 

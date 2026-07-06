@@ -13,7 +13,7 @@ It does not implement RxJS operators, signal state, TestBed utilities, generated
 
 This page currently documents source/workspace usage from this repository. `@defjs/angular` lives at `packages/angular`, and its peer dependency expects the matching `@defjs/core` workspace version from `packages/core`.
 
-The import specifiers shown below use package names, but in this repository they resolve to workspace source packages rather than a registry-published package pair. Public npm currently ships `@defjs/angular@18.0.7` and `@defjs/core@0.3.3`. The current repository examples below use newer source/workspace `@defjs/core` APIs such as `createClient(withEndpoint(...))` and `struct.request(...)`, so do not copy these examples into an external app unless the published versions you choose explicitly support that API surface.
+The import specifiers shown below use package names, but in this repository they resolve to workspace source packages rather than a registry-published package pair. The current repository examples below can use newer source/workspace `@defjs/core` APIs such as `createClient(withEndpoint(...))` and `struct.request(...)`, so do not copy these examples into an external app unless the published versions you choose explicitly support that API surface.
 
 Current workspace/package baseline: this repository uses `Node >=26`, `pnpm@11.6.0`, and `engine-strict=true`, and `packages/angular/package.json` currently declares `engines.node >=26`. That means this source checkout and any package built from the current manifests have a Node >=26 floor. If you install a published package, follow the engine field and release notes that ship with that published version.
 
@@ -442,12 +442,9 @@ Returns the client visible from the current Angular injection context. Nested en
 
 ## Dependencies
 
-| @defjs/angular | Angular Version | @defjs/core |
-| -------------- | --------------- | ----------- |
-| 19.x           | 18 – 22         | workspace source / evolving |
-| npm 18.0.7     | ^18             | latest npm currently 0.3.3 |
+The current package declares Angular peer dependency range `>=18.0.0 <=22.0.0`.
 
-The current repository source package declares Angular peer dependency range `>=18.0.0 <=22.0.0` and `engines.node >=26`.
+For exact published version pairings, check the installed package metadata for the `@defjs/angular` and `@defjs/core` releases you are using.
 
 ## What's Next
 

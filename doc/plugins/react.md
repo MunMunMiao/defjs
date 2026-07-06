@@ -88,23 +88,32 @@ export function UserProfile({ id }: { id: number }) {
   const [name, setName] = useState('loading...')
 
   useEffect(() => {
-    let cancelled = false
+    const abort = new AbortController()
 
-    client.execute(getUser({ path: { id } })).then(([error, user]) => {
-      if (cancelled) {
-        return
-      }
+    void client
+      .execute(getUser({ path: { id } }), { signal: abort.signal })
+      .then(([error, user]) => {
+        if (abort.signal.aborted) {
+          return
+        }
 
-      if (error) {
-        setName(error.message)
-        return
-      }
+        if (error) {
+          setName(error.message)
+          return
+        }
 
-      setName(user.name)
-    })
+        setName(user.name)
+      })
+      .catch((error) => {
+        if (abort.signal.aborted) {
+          return
+        }
+
+        setName(error instanceof Error ? error.message : String(error))
+      })
 
     return () => {
-      cancelled = true
+      abort.abort()
     }
   }, [client, id])
 
@@ -116,7 +125,7 @@ If `useClient()` is called outside `ClientProvider`, it throws immediately so th
 
 ## Option helpers
 
-`withEndpoint` and `withInterceptors` in `@defjs/react` are provider-oriented helpers. `withInterceptors` accepts factory functions because `ClientProvider` creates the real `@defjs/core` client later. In this adapter, `withInterceptors(...)` replaces `config.interceptors` with the interceptors produced by the factories you pass, so group all interceptors for that provider in one `withInterceptors(...)` call.
+`withEndpoint` and `withInterceptors` in `@defjs/react` are provider-oriented helpers. withInterceptors(...) in this adapter accepts factory functions because the provider/plugin creates the real @defjs/core client later. Each call appends the interceptors produced by those factories in option application order, matching the core client's withInterceptors(...) composition model.
 
 ```tsx
 import type { ReactNode } from 'react'
@@ -356,7 +365,7 @@ Sets the base endpoint URL for the client created by `ClientProvider`.
 
 ### `withInterceptors(...fns: (() => Interceptor)[]): ClientOption`
 
-Registers interceptor factories for the client created by `ClientProvider`. In this adapter, `withInterceptors(...)` replaces `config.interceptors` with the interceptors produced by the factories you pass, so group all interceptors for that provider in one `withInterceptors(...)` call.
+Registers interceptor factories for the client created by `ClientProvider`. withInterceptors(...) in this adapter accepts factory functions because the provider/plugin creates the real @defjs/core client later. Each call appends the interceptors produced by those factories in option application order, matching the core client's withInterceptors(...) composition model.
 
 ## Notes
 

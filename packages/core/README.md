@@ -6,7 +6,7 @@ Type-safe HTTP, SSE, and WebSocket commands for TypeScript.
 
 This README follows the current repository source/workspace API for `@defjs/core`.
 
-Use these commands to install the workspace and verify the docs examples:
+Use these commands to install the workspace and typecheck the docs twoslash blocks. Ordinary fenced snippets in this README still need manual review:
 
 ```bash
 pnpm install
@@ -15,7 +15,7 @@ pnpm --dir doc run typecheck
 
 To experiment with the snippet inside this repository, paste it into a workspace package or docs twoslash block that resolves `@defjs/core` from source.
 
-> Published npm users: the current latest public release is still `@defjs/core@0.3.3`, which uses the older `createClient(options)` / `defineRequest(method, endpoint)` signatures. Before copying `withEndpoint(...)` or `struct.request(...)` into an external app, check the release notes for a published version that explicitly includes this API.
+> Published package users: before copying `withEndpoint(...)` or `struct.request(...)` into an external app, check the installed package metadata and release notes to confirm that your published release includes this API.
 
 ## Quick start
 
