@@ -13,23 +13,19 @@ export interface TypecheckResult {
 
 const DOC_DIR = path.resolve(fileURLToPath(new URL('..', import.meta.url)), '..')
 
-function plural(count: number, singular: string, pluralForm: string): string {
-  return count === 1 ? singular : pluralForm
-}
-
 export function formatDiagnostic(diagnostic: TwoslashDiagnostic): string {
   return `${diagnostic.filePath} block #${diagnostic.blockIndex} line ${diagnostic.line}:${diagnostic.character}\n  ${diagnostic.code}: ${diagnostic.text}`
 }
 
 export function formatSummary(result: TypecheckResult): string {
-  const blockWord = plural(result.blocksChecked, 'code block', 'code blocks')
-  const fileWord = plural(result.filesChecked, 'markdown file', 'markdown files')
+  const blockWord = result.blocksChecked === 1 ? 'code block' : 'code blocks'
+  const fileWord = result.filesChecked === 1 ? 'markdown file' : 'markdown files'
   const lines = [`Checked ${result.blocksChecked} twoslash ${blockWord} in ${result.filesChecked} ${fileWord}.`]
 
   if (result.diagnostics.length === 0) {
     lines.push('No Twoslash type errors found.')
   } else {
-    const errorWord = plural(result.diagnostics.length, 'error', 'errors')
+    const errorWord = result.diagnostics.length === 1 ? 'error' : 'errors'
     lines.push(`Found ${result.diagnostics.length} Twoslash type ${errorWord}.`)
   }
 

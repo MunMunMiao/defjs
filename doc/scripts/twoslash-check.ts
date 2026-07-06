@@ -57,10 +57,6 @@ const HANDBOOK_OPTIONS = {
   noErrorValidation: true,
 }
 
-function extensionFor(block: TwoslashBlock): 'ts' | 'tsx' | 'vue' {
-  return block.lang
-}
-
 function errorCode(error: RawTwoslashError): string {
   const raw = error.code ?? error.id ?? 'unknown'
   return typeof raw === 'number' ? `TS${raw}` : String(raw)
@@ -106,7 +102,7 @@ export function createTwoslashChecker(): TwoslashChecker {
   return {
     checkBlock(block) {
       const runner = block.lang === 'vue' ? vueRunner : tsRunner
-      const result = runner(block.code, extensionFor(block), {
+      const result = runner(block.code, block.lang, {
         compilerOptions: DOC_COMPILER_OPTIONS,
         handbookOptions: HANDBOOK_OPTIONS,
       })
