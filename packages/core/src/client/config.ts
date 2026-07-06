@@ -50,7 +50,9 @@ export interface ClientSSEOptions {
   maxBufferSize?: number
 }
 
-export type ClientSSEConfig = ClientSSEOptions & { handle: typeof fetch }
+export interface ClientSSEConfig extends ClientSSEOptions {
+  handle: typeof fetch
+}
 
 export interface ClientOptions {
   endpoint: string
