@@ -3,6 +3,18 @@ import { describe, expect, it } from 'vitest'
 import { createApp, h } from 'vue'
 import { injectClient, provideClient, withEndpoint, withInterceptors } from '../src'
 
+function makeClientConfig(overrides: Partial<ClientConfig> = {}): ClientConfig {
+  return {
+    endpoint: '',
+    http: { handle: fetch },
+    interceptors: [],
+    queryParamsSerializer: (params) => params.toString(),
+    sse: { handle: fetch },
+    webSocket: {},
+    ...overrides,
+  }
+}
+
 describe('withEndpoint', () => {
   it('should return a ClientOption function', () => {
     const option = withEndpoint('https://api.example.com')
@@ -24,7 +36,7 @@ describe('withInterceptors', () => {
   })
 
   it('should set interceptors in config', () => {
-    const config = { interceptors: [] } as ClientConfig
+    const config = makeClientConfig()
     const interceptor = (() => ({})) as unknown as () => Interceptor
     const option = withInterceptors(interceptor)
     option(config)
@@ -32,7 +44,7 @@ describe('withInterceptors', () => {
   })
 
   it('should append interceptors across sequential calls in order', () => {
-    const config = { interceptors: [] } as ClientConfig
+    const config = makeClientConfig()
     const interceptor1 = {} as Interceptor
     const interceptor2 = {} as Interceptor
 
