@@ -31,7 +31,7 @@ features:
     details: 브라우저, Node.js, Bun, Deno에서 모두 동작해요. 폴리필이 필요 없고, 코어 패키지는 순수 ESM에 런타임 의존성이 제로예요.
   - icon: 🧩
     title: 프레임워크 지원
-    details: Angular, Vue, React를 위한 퍼스트클래스 통합으로 provideClient / injectClient / useClient 패턴을 제공해요. 서버 사이드 관측 가능성을 위한 OpenTelemetry 플러그인도 있어요.
+    details: Vue, React를 위한 퍼스트클래스 통합으로 provideClient / injectClient / useClient 패턴을 제공해요. 서버 사이드 관측 가능성을 위한 OpenTelemetry 플러그인도 있어요.
 ---
 
 ## 퀵스타트
@@ -83,15 +83,9 @@ if (!error) {
 
 <div class="framework-grid">
 
-### Angular
-
-`@defjs/angular`는 Angular의 의존성 주입 시스템을 위해 `provideClient`와 `injectClient`를 제공해요. 인터셉터는 팩토리 함수를 통해 Angular 서비스를 주입할 수 있어요.
-
-[자세히 알아보기 →](/plugins/angular)
-
 ### Vue
 
-`@defjs/vue`는 Vue 플러그인으로 `provideClient`를 제공하고, Composition API를 위한 `injectClient`를 제공해요. Angular 패키지와 동일한 API 설계로 프레임워크 간 지식 이동이 원활해요.
+`@defjs/vue`는 Vue 플러그인으로 `provideClient`를 제공하고, Composition API를 위한 `injectClient`를 제공해요. 애플리케이션 전체에서 하나의 타입화된 `@defjs/core` 클라이언트를 공유해요.
 
 [자세히 알아보기 →](/plugins/vue)
 

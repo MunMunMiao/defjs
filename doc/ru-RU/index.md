@@ -31,7 +31,7 @@ features:
     details: Работает в браузерах, Node.js, Bun и Deno. Полифиллы не нужны. Чистый ESM с нулевым количеством зависимостей рантайма для основного пакета.
   - icon: 🧩
     title: Готовность к фреймворкам
-    details: Первоклассные интеграции для Angular, Vue и React через паттерны provideClient / injectClient / useClient. Плагин OpenTelemetry для серверной наблюдаемости.
+    details: Первоклассные интеграции для Vue и React через паттерны provideClient / injectClient / useClient. Плагин OpenTelemetry для серверной наблюдаемости.
 ---
 
 ## Быстрый старт
@@ -83,15 +83,9 @@ if (!error) {
 
 <div class="framework-grid">
 
-### Angular
-
-`@defjs/angular` предоставляет `provideClient` и `injectClient` для системы внедрения зависимостей Angular. Перехватчики могут внедрять Angular-сервисы через фабричные функции.
-
-[Подробнее →](/plugins/angular)
-
 ### Vue
 
-`@defjs/vue` предоставляет `provideClient` как Vue-плагин и `injectClient` для Composition API. Идентичный дизайн API с Angular-пакетом для безшовного переноса знаний между фреймворками.
+`@defjs/vue` предоставляет `provideClient` как Vue-плагин и `injectClient` для Composition API. Совместное использование одного типизированного клиента `@defjs/core` между приложениями.
 
 [Подробнее →](/plugins/vue)
 

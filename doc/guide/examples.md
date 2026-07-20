@@ -1,6 +1,6 @@
 ---
 title: Examples
-description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket, interceptor patterns, and Angular / Vue integration.
+description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket, interceptor patterns, and Vue integration.
 ---
 
 # Examples
@@ -50,9 +50,7 @@ const createUser = defineRequest({
 const listUsers = defineRequest({
   method: 'GET',
   path: '/v1/users',
-  output: [
-    { status: 200, body: UserListStruct },
-  ] as const,
+  output: [{ status: 200, body: UserListStruct }] as const,
 })
 
 const getUser = defineRequest({
@@ -365,10 +363,7 @@ function authInterceptors(getToken: () => string | null) {
 
 const auth = authInterceptors(() => localStorage.getItem('token'))
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(auth.http, auth.sse, auth.webSocket),
-)
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth.http, auth.sse, auth.webSocket))
 ```
 
 ### Logging
@@ -399,56 +394,6 @@ function loggingInterceptor() {
 }
 ```
 
-## Angular Integration
-
-```typescript
-// app.config.ts
-import { ApplicationConfig } from '@angular/core'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/angular'
-import { authInterceptor } from './interceptors'
-
-export const appConfig: ApplicationConfig = {
-  providers: [
-    provideClient(
-      withEndpoint('https://api.example.com'),
-      withInterceptors(() => authInterceptor()),
-    ),
-  ],
-}
-```
-
-```typescript
-// user.component.ts
-import { Component } from '@angular/core'
-import { injectClient } from '@defjs/angular'
-import { defineRequest, struct } from '@defjs/core'
-
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: [
-    { status: 200, body: struct.object({ name: struct.string() }) },
-  ] as const,
-})
-
-@Component({
-  selector: 'app-user',
-  template: `<button (click)="loadUser()">Load User</button>`,
-})
-export class UserComponent {
-  private client = injectClient()
-
-  async loadUser() {
-    const [error, user] = await this.client.execute(getUser())
-    if (error) {
-      console.error('Failed:', error.message)
-      return
-    }
-    console.log('User:', user.name)
-  }
-}
-```
-
 ## Vue Integration
 
 ```typescript
@@ -460,7 +405,12 @@ import { authInterceptor } from './interceptors'
 
 const app = createApp(App)
 
-app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(() => authInterceptor())))
+app.use(
+  provideClient(
+    withEndpoint('https://api.example.com'),
+    withInterceptors(() => authInterceptor()),
+  ),
+)
 
 app.mount('#app')
 ```
@@ -476,9 +426,7 @@ const client = injectClient()
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/user',
-  output: [
-    { status: 200, body: struct.object({ name: struct.string() }) },
-  ] as const,
+  output: [{ status: 200, body: struct.object({ name: struct.string() }) }] as const,
 })
 
 async function loadUser() {
@@ -503,9 +451,9 @@ async function loadUser() {
 | `createClient(...options)`                                                                  | Create a client instance    |
 | `withEndpoint(url)`                                                                         | Set base URL                |
 | `withInterceptors(...interceptors)`                                                         | Register interceptors       |
-| `defineRequest({ method, path, input?, build?, output? })`                                 | Define an HTTP endpoint     |
-| `defineEventStream({ path, events, input?, build? })`                                      | Define an SSE endpoint      |
-| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                           | Define a WebSocket endpoint |
+| `defineRequest({ method, path, input?, build?, output? })`                                  | Define an HTTP endpoint     |
+| `defineEventStream({ path, events, input?, build? })`                                       | Define an SSE endpoint      |
+| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                            | Define a WebSocket endpoint |
 | `struct.object(shape)`                                                                      | Object struct               |
 | `struct.request({ path, query, headers, body })`                                            | Request-shaped input        |
 | `struct.string()` / `struct.number()` / `struct.boolean()`                                  | Primitive structs           |

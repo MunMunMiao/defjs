@@ -36,25 +36,7 @@ export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDP
 
 ## 框架集成
 
-`@defjs/angular`、`@defjs/vue` 和 `@defjs/react` 将显式客户端接入各框架的依赖模型。Angular 和 Vue 使用 `provideClient` / `injectClient`；React 使用 `ClientProvider` / `useClient`。这允许客户端在组件或服务树中注册和检索。
-
-### Angular
-
-```typescript
-import { provideClient, withEndpoint, injectClient } from '@defjs/angular'
-
-export const appConfig = {
-  providers: [provideClient(withEndpoint('https://api.example.com'))],
-}
-
-export class UserComponent {
-  private client = injectClient()
-
-  async loadUser() {
-    const [error, user] = await this.client.execute(this.getUser())
-  }
-}
-```
+`@defjs/vue` 和 `@defjs/react` 将显式客户端接入各框架的依赖模型。Vue 使用 `provideClient` / `injectClient`；React 使用 `ClientProvider` / `useClient`。这允许客户端在组件或服务树中注册和检索。
 
 ### Vue
 
@@ -208,18 +190,14 @@ const getUser = defineRequest({
   build(ctx, input) {
     ctx.setPathParams(input.path)
   },
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-  ] as const,
+  output: [{ status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) }] as const,
 })
 
 // 正确：不提供 input 和 build
 const listUsers = defineRequest({
   method: 'GET',
   path: '/users',
-  output: [
-    { status: 200, body: struct.object({ items: struct.array(struct.object({ id: struct.number() })) }) },
-  ] as const,
+  output: [{ status: 200, body: struct.object({ items: struct.array(struct.object({ id: struct.number() })) }) }] as const,
 })
 
 // 错误：提供 build 但没有 input
@@ -229,9 +207,7 @@ const badRequest = defineRequest({
   build(ctx, input) {
     ctx.setPathParams({ id: input.id }) // TypeScript 错误：缺少 input 结构
   },
-  output: [
-    { status: 200, body: struct.object({ id: struct.number() }) },
-  ] as const,
+  output: [{ status: 200, body: struct.object({ id: struct.number() }) }] as const,
 })
 ```
 
@@ -239,14 +215,13 @@ const badRequest = defineRequest({
 
 ## 依赖要求
 
-| 包               | 所需版本 |
-| ---------------- | -------- |
-| `@defjs/core`    | `^0.4.0` |
-| `@defjs/angular` | `19.x`   |
-| `@defjs/vue`     | `^0.4.0` |
-| `@defjs/react`   | `^0.4.0` |
+| 包             | 所需版本 |
+| -------------- | -------- |
+| `@defjs/core`  | `^0.4.0` |
+| `@defjs/vue`   | `^0.4.0` |
+| `@defjs/react` | `^0.4.0` |
 
-Angular 的 peer dependency 范围：`>=18.0.0 <=22.0.0`。React 的 peer dependency 范围：`>=18.0.0`。Node 运行时：`>=26`。
+React 的 peer dependency 范围：`>=18.0.0`。Node 运行时：`>=26`。
 
 ## 下一步
 

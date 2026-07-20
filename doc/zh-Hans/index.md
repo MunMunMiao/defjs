@@ -31,7 +31,7 @@ features:
     details: 支持浏览器、Node.js、Bun 和 Deno。无需 polyfill。核心包为纯 ESM，零运行时依赖。
   - icon: 🧩
     title: 框架就绪
-    details: 为 Angular、Vue 和 React 提供一等公民集成，采用 provideClient / injectClient / useClient 模式。服务端可观测性支持 OpenTelemetry 插件。
+    details: 为 Vue 和 React 提供一等公民集成，采用 provideClient / injectClient / useClient 模式。服务端可观测性支持 OpenTelemetry 插件。
 ---
 
 ## 快速开始
@@ -80,15 +80,9 @@ if (!error) {
 
 <div class="framework-grid">
 
-### Angular
-
-`@defjs/angular` 为 Angular 依赖注入系统提供 `provideClient` 和 `injectClient`。拦截器可以通过工厂函数注入 Angular 服务。
-
-[了解更多 →](/zh-Hans/plugins/angular)
-
 ### Vue
 
-`@defjs/vue` 将 `provideClient` 作为 Vue 插件提供，并在组合式 API 中使用 `injectClient`。与 Angular 包的 API 设计保持一致，实现跨框架知识的无缝复用。
+`@defjs/vue` 将 `provideClient` 作为 Vue 插件提供，并在组合式 API 中使用 `injectClient`，在应用间共享一个类型化的 `@defjs/core` 客户端。
 
 [了解更多 →](/zh-Hans/plugins/vue)
 

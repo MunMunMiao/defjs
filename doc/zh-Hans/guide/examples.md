@@ -1,6 +1,6 @@
 ---
 title: Examples
-description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket, interceptor patterns, and Angular / Vue integration.
+description: 完整可运行的代码片段，涵盖 REST CRUD、SSE、WebSocket、拦截器模式与 Vue 集成。
 ---
 
 # 示例
@@ -50,9 +50,7 @@ const createUser = defineRequest({
 const listUsers = defineRequest({
   method: 'GET',
   path: '/v1/users',
-  output: [
-    { status: 200, body: UserListStruct },
-  ] as const,
+  output: [{ status: 200, body: UserListStruct }] as const,
 })
 
 const getUser = defineRequest({
@@ -399,62 +397,6 @@ function loggingInterceptor() {
 }
 ```
 
-## Angular 集成
-
-```typescript
-// app.config.ts
-import { ApplicationConfig } from '@angular/core'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/angular'
-import { authInterceptors } from './interceptors'
-
-const interceptors = authInterceptors(() => localStorage.getItem('token'))
-
-export const appConfig: ApplicationConfig = {
-  providers: [
-    provideClient(
-      withEndpoint('https://api.example.com'),
-      withInterceptors(
-        () => interceptors.http,
-        () => interceptors.sse,
-        () => interceptors.webSocket,
-      ),
-    ),
-  ],
-}
-```
-
-```typescript
-// user.component.ts
-import { Component } from '@angular/core'
-import { injectClient } from '@defjs/angular'
-import { defineRequest, struct } from '@defjs/core'
-
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: [
-    { status: 200, body: struct.object({ name: struct.string() }) },
-  ] as const,
-})
-
-@Component({
-  selector: 'app-user',
-  template: `<button (click)="loadUser()">Load User</button>`,
-})
-export class UserComponent {
-  private client = injectClient()
-
-  async loadUser() {
-    const [error, user] = await this.client.execute(getUser())
-    if (error) {
-      console.error('Failed:', error.message)
-      return
-    }
-    console.log('User:', user.name)
-  }
-}
-```
-
 ## Vue 集成
 
 ```typescript
@@ -494,9 +436,7 @@ const client = injectClient()
 const getUser = defineRequest({
   method: 'GET',
   path: '/v1/user',
-  output: [
-    { status: 200, body: struct.object({ name: struct.string() }) },
-  ] as const,
+  output: [{ status: 200, body: struct.object({ name: struct.string() }) }] as const,
 })
 
 async function loadUser() {
@@ -521,9 +461,9 @@ async function loadUser() {
 | `createClient(...options)`                                                                  | 创建客户端实例      |
 | `withEndpoint(url)`                                                                         | 设置基础 URL        |
 | `withInterceptors(...interceptors)`                                                         | 注册拦截器          |
-| `defineRequest({ method, path, input?, build?, output? })`                                 | 定义 HTTP 端点      |
-| `defineEventStream({ path, events, input?, build? })`                                      | 定义 SSE 端点       |
-| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                           | 定义 WebSocket 端点 |
+| `defineRequest({ method, path, input?, build?, output? })`                                  | 定义 HTTP 端点      |
+| `defineEventStream({ path, events, input?, build? })`                                       | 定义 SSE 端点       |
+| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                            | 定义 WebSocket 端点 |
 | `struct.object(shape)`                                                                      | 对象结构            |
 | `struct.request({ path, query, headers, body })`                                            | 请求形状输入        |
 | `struct.string()` / `struct.number()` / `struct.boolean()`                                  | 基础类型结构        |

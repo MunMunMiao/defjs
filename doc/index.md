@@ -31,7 +31,7 @@ features:
     details: Works in browsers, Node.js, Bun, and Deno. No polyfills needed. Pure ESM with zero runtime dependencies for the core package.
   - icon: 🧩
     title: Framework Ready
-    details: First-class integrations for Angular, Vue, and React with provideClient / injectClient / useClient patterns. OpenTelemetry plugin for server-side observability.
+    details: First-class integrations for Vue and React with provideClient / injectClient / useClient patterns. OpenTelemetry plugin for server-side observability.
 ---
 
 ## Quick Start
@@ -80,15 +80,9 @@ if (!error) {
 
 <div class="framework-grid">
 
-### Angular
-
-`@defjs/angular` provides `provideClient` and `injectClient` for Angular's dependency injection system. Interceptors can inject Angular services via factory functions.
-
-[Learn more →](/plugins/angular)
-
 ### Vue
 
-`@defjs/vue` provides `provideClient` as a Vue plugin and `injectClient` for the Composition API. Identical API design to the Angular package for seamless cross-framework knowledge transfer.
+`@defjs/vue` provides `provideClient` as a Vue plugin and `injectClient` for the Composition API, sharing one typed `@defjs/core` client across the app.
 
 [Learn more →](/plugins/vue)
 

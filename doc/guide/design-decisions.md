@@ -36,25 +36,7 @@ export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDP
 
 ## Framework Integration
 
-`@defjs/angular`, `@defjs/vue`, and `@defjs/react` integrate explicit clients with each framework's dependency model. Angular and Vue use `provideClient` / `injectClient`; React uses `ClientProvider` / `useClient`. This allows clients to be registered and retrieved within the component or service tree.
-
-### Angular
-
-```typescript
-import { provideClient, withEndpoint, injectClient } from '@defjs/angular'
-
-export const appConfig = {
-  providers: [provideClient(withEndpoint('https://api.example.com'))],
-}
-
-export class UserComponent {
-  private client = injectClient()
-
-  async loadUser() {
-    const [error, user] = await this.client.execute(this.getUser())
-  }
-}
-```
+`@defjs/vue` and `@defjs/react` integrate explicit clients with each framework's dependency model. Vue uses `provideClient` / `injectClient`; React uses `ClientProvider` / `useClient`. This allows clients to be registered and retrieved within the component or service tree.
 
 ### Vue
 
@@ -210,18 +192,14 @@ const getUser = defineRequest({
   build(ctx, input) {
     ctx.setPathParams(input.path)
   },
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-  ] as const,
+  output: [{ status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) }] as const,
 })
 
 // Correct: no input and no build
 const listUsers = defineRequest({
   method: 'GET',
   path: '/users',
-  output: [
-    { status: 200, body: struct.object({ items: struct.array(struct.object({ id: struct.number() })) }) },
-  ] as const,
+  output: [{ status: 200, body: struct.object({ items: struct.array(struct.object({ id: struct.number() })) }) }] as const,
 })
 
 // Error: has build but no input
@@ -231,9 +209,7 @@ const badRequest = defineRequest({
   build(ctx, input) {
     ctx.setPathParams({ id: input.id }) // TypeScript error: missing input struct
   },
-  output: [
-    { status: 200, body: struct.object({ id: struct.number() }) },
-  ] as const,
+  output: [{ status: 200, body: struct.object({ id: struct.number() }) }] as const,
 })
 ```
 
@@ -241,14 +217,13 @@ This rule also applies to `defineEventStream` and `defineWebSocket`.
 
 ## Dependencies
 
-| Package          | Required Version |
-| ---------------- | ---------------- |
-| `@defjs/core`    | `^0.4.0`         |
-| `@defjs/angular` | `19.x`           |
-| `@defjs/vue`     | `^0.4.0`         |
-| `@defjs/react`   | `^0.4.0`         |
+| Package        | Required Version |
+| -------------- | ---------------- |
+| `@defjs/core`  | `^0.4.0`         |
+| `@defjs/vue`   | `^0.4.0`         |
+| `@defjs/react` | `^0.4.0`         |
 
-Angular's peer dependency range: `>=18.0.0 <=22.0.0`. React peer dependency range: `>=18.0.0`. Node runtime: `>=26`.
+React peer dependency range: `>=18.0.0`. Node runtime: `>=26`.
 
 ## What's Next
 

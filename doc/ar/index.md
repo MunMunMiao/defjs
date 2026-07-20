@@ -31,7 +31,7 @@ features:
     details: يعمل في المتصفحات و Node.js و Bun و Deno. لا تحتاج إلى polyfills. ESM خالص مع صفر تبعيات وقت التشغيل للحزمة الأساسية.
   - icon: 🧩
     title: جاهز لإطار العمل
-    details: تكاملات من الدرجة الأولى لـ Angular و Vue و React مع أنماط provideClient / injectClient / useClient. إضافة OpenTelemetry لقابلية المراقبة من جانب الخادم.
+    details: تكاملات من الدرجة الأولى لـ Vue و React مع أنماط provideClient / injectClient / useClient. إضافة OpenTelemetry لقابلية المراقبة من جانب الخادم.
 ---
 
 ## البدء السريع
@@ -83,15 +83,9 @@ if (!error) {
 
 <div class="framework-grid">
 
-### Angular
-
-`@defjs/angular` يوفر `provideClient` و `injectClient` لنظام حقن التبعيات في Angular. يمكن للاعتراضات حقن خدمات Angular عبر دوال المصنع.
-
-[تعرّف على المزيد →](/plugins/angular)
-
 ### Vue
 
-`@defjs/vue` يوفر `provideClient` كإضافة Vue و `injectClient` لـ Composition API. تصميم واجهة برمجة التطبيقات مطابق لحزمة Angular لنقل المعرفة بسلاسة بين الأطر.
+`@defjs/vue` يوفر `provideClient` كإضافة Vue و `injectClient` لـ Composition API لمشاركة عميل `@defjs/core` مكتوب الأنواع عبر تطبيقك.
 
 [تعرّف على المزيد →](/plugins/vue)
 

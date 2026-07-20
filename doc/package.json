@@ -16,7 +16,6 @@
     "typecheck:docs": "tsc --project tsconfig.json --noEmit && tsx scripts/typecheck-docs.ts"
   },
   "devDependencies": {
-    "@defjs/angular": "workspace:*",
     "@defjs/core": "workspace:*",
     "@defjs/opentelemetry-server": "workspace:*",
     "@defjs/react": "workspace:*",

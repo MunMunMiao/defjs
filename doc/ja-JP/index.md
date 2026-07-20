@@ -31,7 +31,7 @@ features:
     details: ブラウザ、Node.js、Bun、Deno で動作します。ポリフィルは不要です。コアパッケージは純粋な ESM で、実行時依存ゼロです。
   - icon: 🧩
     title: フレームワーク対応
-    details: Angular、Vue、React 向けのファーストクラス統合。provideClient / injectClient / useClient パターンを提供します。サーバーサイドの可観測性には OpenTelemetry プラグインを利用できます。
+    details: Vue、React 向けのファーストクラス統合。provideClient / injectClient / useClient パターンを提供します。サーバーサイドの可観測性には OpenTelemetry プラグインを利用できます。
 ---
 
 ## クイックスタート
@@ -83,15 +83,9 @@ if (!error) {
 
 <div class="framework-grid">
 
-### Angular
-
-`@defjs/angular` は `provideClient` と `injectClient` を Angular の依存性注入システムに提供します。インターセプターはファクトリ関数を介して Angular サービスを注入できます。
-
-[詳細を見る →](/plugins/angular)
-
 ### Vue
 
-`@defjs/vue` は Vue プラグインとして `provideClient` を、Composition API 向けに `injectClient` を提供します。Angular パッケージと同じ API 設計により、フレームワーク間の知識移行がスムーズです。
+`@defjs/vue` は Vue プラグインとして `provideClient` を、Composition API 向けに `injectClient` を提供します。型付き `@defjs/core` クライアントをアプリケーション全体で共有できます。
 
 [詳細を見る →](/plugins/vue)
 

@@ -1,6 +1,6 @@
 ---
 title: Examples
-description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket, interceptor patterns, and Angular / Vue integration.
+description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket, interceptor patterns, and Vue integration.
 ---
 
 # أمثلة
@@ -374,56 +374,6 @@ function loggingInterceptor() {
       throw error
     }
   })
-}
-```
-
-## تكامل Angular
-
-```typescript
-// app.config.ts
-import { ApplicationConfig } from '@angular/core'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/angular'
-import { authInterceptor } from './interceptors'
-
-export const appConfig: ApplicationConfig = {
-  providers: [
-    provideClient(
-      withEndpoint('https://api.example.com'),
-      withInterceptors(() => authInterceptor()),
-    ),
-  ],
-}
-```
-
-```typescript
-// user.component.ts
-import { Component } from '@angular/core'
-import { injectClient } from '@defjs/angular'
-import { defineRequest, struct } from '@defjs/core'
-
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ name: struct.string() }),
-  },
-})
-
-@Component({
-  selector: 'app-user',
-  template: `<button (click)="loadUser()">Load User</button>`,
-})
-export class UserComponent {
-  private client = injectClient()
-
-  async loadUser() {
-    const [error, user] = await this.client.execute(getUser())
-    if (error) {
-      console.error('Failed:', error.message)
-      return
-    }
-    console.log('User:', user.name)
-  }
 }
 ```
 

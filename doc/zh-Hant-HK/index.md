@@ -31,7 +31,7 @@ features:
     details: 支援瀏覽器、Node.js、Bun 與 Deno。無需 polyfill。核心套件為純 ESM，零執行階段相依。
   - icon: 🧩
     title: 框架就緒
-    details: 為 Angular、Vue 與 React 提供 first-class 整合，採用 provideClient / injectClient / useClient 模式。伺服器端可觀測性則有 OpenTelemetry 外掛。
+    details: 為 Vue 與 React 提供 first-class 整合，採用 provideClient / injectClient / useClient 模式。伺服器端可觀測性則有 OpenTelemetry 外掛。
 ---
 
 ## 快速開始
@@ -83,15 +83,9 @@ if (!error) {
 
 <div class="framework-grid">
 
-### Angular
-
-`@defjs/angular` 提供 `provideClient` 與 `injectClient`，以融入 Angular 的相依注入系統。攔截器可透過工廠函式注入 Angular 服務。
-
-[深入了解 →](/plugins/angular)
-
 ### Vue
 
-`@defjs/vue` 提供 `provideClient` 作為 Vue 外掛，並以 `injectClient` 搭配 Composition API 使用。API 設計與 Angular 套件完全一致，讓跨框架知識無縫轉移。
+`@defjs/vue` 提供 `provideClient` 作為 Vue 外掛，並以 `injectClient` 搭配 Composition API 使用，讓應用間共享一個類型化的 `@defjs/core` 用戶端。
 
 [深入了解 →](/plugins/vue)
 

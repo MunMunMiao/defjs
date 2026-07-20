@@ -31,7 +31,7 @@ features:
     details: Funciona en navegadores, Node.js, Bun y Deno. Sin polyfills necesarios. ESM puro con cero dependencias de runtime para el paquete core.
   - icon: 🧩
     title: Listo para Frameworks
-    details: Integraciones de primera clase para Angular, Vue y React con patrones provideClient / injectClient / useClient. Plugin OpenTelemetry para observabilidad en el servidor.
+    details: Integraciones de primera clase para Vue y React con patrones provideClient / injectClient / useClient. Plugin OpenTelemetry para observabilidad en el servidor.
 ---
 
 ## Inicio rápido
@@ -83,15 +83,9 @@ if (!error) {
 
 <div class="framework-grid">
 
-### Angular
-
-`@defjs/angular` proporciona `provideClient` e `injectClient` para el sistema de inyección de dependencias de Angular. Los interceptores pueden inyectar servicios Angular mediante funciones factory.
-
-[Aprender más →](/plugins/angular)
-
 ### Vue
 
-`@defjs/vue` proporciona `provideClient` como un plugin de Vue e `injectClient` para la Composition API. Diseño de API idéntico al paquete Angular para una transferencia de conocimiento fluida entre frameworks.
+`@defjs/vue` proporciona `provideClient` como un plugin de Vue e `injectClient` para la Composition API. Comparte un client `@defjs/core` tipado en toda la aplicación.
 
 [Aprender más →](/plugins/vue)
 

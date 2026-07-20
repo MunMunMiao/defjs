@@ -8,7 +8,6 @@ const navEn = [
   {
     text: 'Plugins',
     items: [
-      { text: 'Angular', link: '/plugins/angular' },
       { text: 'Vue', link: '/plugins/vue' },
       { text: 'React', link: '/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/plugins/opentelemetry-server' },
@@ -47,7 +46,6 @@ const sidebarEn = {
     {
       text: 'Plugins',
       items: [
-        { text: 'Angular', link: '/plugins/angular' },
         { text: 'Vue', link: '/plugins/vue' },
         { text: 'React', link: '/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/plugins/opentelemetry-server' },
@@ -62,7 +60,6 @@ const navZh = [
   {
     text: '插件',
     items: [
-      { text: 'Angular', link: '/zh-Hans/plugins/angular' },
       { text: 'Vue', link: '/zh-Hans/plugins/vue' },
       { text: 'React', link: '/zh-Hans/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/zh-Hans/plugins/opentelemetry-server' },
@@ -101,7 +98,6 @@ const sidebarZh = {
     {
       text: '插件',
       items: [
-        { text: 'Angular', link: '/zh-Hans/plugins/angular' },
         { text: 'Vue', link: '/zh-Hans/plugins/vue' },
         { text: 'React', link: '/zh-Hans/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/zh-Hans/plugins/opentelemetry-server' },
@@ -116,7 +112,6 @@ const navZhTw = [
   {
     text: '外掛程式',
     items: [
-      { text: 'Angular', link: '/zh-Hant-TW/plugins/angular' },
       { text: 'Vue', link: '/zh-Hant-TW/plugins/vue' },
       { text: 'React', link: '/zh-Hant-TW/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/zh-Hant-TW/plugins/opentelemetry-server' },
@@ -155,7 +150,6 @@ const sidebarZhTw = {
     {
       text: '外掛程式',
       items: [
-        { text: 'Angular', link: '/zh-Hant-TW/plugins/angular' },
         { text: 'Vue', link: '/zh-Hant-TW/plugins/vue' },
         { text: 'React', link: '/zh-Hant-TW/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/zh-Hant-TW/plugins/opentelemetry-server' },
@@ -170,7 +164,6 @@ const navZhHk = [
   {
     text: '外掛',
     items: [
-      { text: 'Angular', link: '/zh-Hant-HK/plugins/angular' },
       { text: 'Vue', link: '/zh-Hant-HK/plugins/vue' },
       { text: 'React', link: '/zh-Hant-HK/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/zh-Hant-HK/plugins/opentelemetry-server' },
@@ -209,7 +202,6 @@ const sidebarZhHk = {
     {
       text: '外掛',
       items: [
-        { text: 'Angular', link: '/zh-Hant-HK/plugins/angular' },
         { text: 'Vue', link: '/zh-Hant-HK/plugins/vue' },
         { text: 'React', link: '/zh-Hant-HK/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/zh-Hant-HK/plugins/opentelemetry-server' },
@@ -224,7 +216,6 @@ const navDe = [
   {
     text: 'Plugins',
     items: [
-      { text: 'Angular', link: '/de-DE/plugins/angular' },
       { text: 'Vue', link: '/de-DE/plugins/vue' },
       { text: 'React', link: '/de-DE/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/de-DE/plugins/opentelemetry-server' },
@@ -263,7 +254,6 @@ const sidebarDe = {
     {
       text: 'Plugins',
       items: [
-        { text: 'Angular', link: '/de-DE/plugins/angular' },
         { text: 'Vue', link: '/de-DE/plugins/vue' },
         { text: 'React', link: '/de-DE/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/de-DE/plugins/opentelemetry-server' },
@@ -278,7 +268,6 @@ const navJa = [
   {
     text: 'プラグイン',
     items: [
-      { text: 'Angular', link: '/ja-JP/plugins/angular' },
       { text: 'Vue', link: '/ja-JP/plugins/vue' },
       { text: 'React', link: '/ja-JP/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/ja-JP/plugins/opentelemetry-server' },
@@ -317,7 +306,6 @@ const sidebarJa = {
     {
       text: 'プラグイン',
       items: [
-        { text: 'Angular', link: '/ja-JP/plugins/angular' },
         { text: 'Vue', link: '/ja-JP/plugins/vue' },
         { text: 'React', link: '/ja-JP/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/ja-JP/plugins/opentelemetry-server' },
@@ -332,7 +320,6 @@ const navKo = [
   {
     text: '플러그인',
     items: [
-      { text: 'Angular', link: '/ko-KR/plugins/angular' },
       { text: 'Vue', link: '/ko-KR/plugins/vue' },
       { text: 'React', link: '/ko-KR/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/ko-KR/plugins/opentelemetry-server' },
@@ -371,7 +358,6 @@ const sidebarKo = {
     {
       text: '플러그인',
       items: [
-        { text: 'Angular', link: '/ko-KR/plugins/angular' },
         { text: 'Vue', link: '/ko-KR/plugins/vue' },
         { text: 'React', link: '/ko-KR/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/ko-KR/plugins/opentelemetry-server' },
@@ -386,7 +372,6 @@ const navAr = [
   {
     text: 'الإضافات',
     items: [
-      { text: 'Angular', link: '/ar/plugins/angular' },
       { text: 'Vue', link: '/ar/plugins/vue' },
       { text: 'React', link: '/ar/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/ar/plugins/opentelemetry-server' },
@@ -425,7 +410,6 @@ const sidebarAr = {
     {
       text: 'الإضافات',
       items: [
-        { text: 'Angular', link: '/ar/plugins/angular' },
         { text: 'Vue', link: '/ar/plugins/vue' },
         { text: 'React', link: '/ar/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/ar/plugins/opentelemetry-server' },
@@ -440,7 +424,6 @@ const navEs = [
   {
     text: 'Plugins',
     items: [
-      { text: 'Angular', link: '/es-ES/plugins/angular' },
       { text: 'Vue', link: '/es-ES/plugins/vue' },
       { text: 'React', link: '/es-ES/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/es-ES/plugins/opentelemetry-server' },
@@ -479,7 +462,6 @@ const sidebarEs = {
     {
       text: 'Plugins',
       items: [
-        { text: 'Angular', link: '/es-ES/plugins/angular' },
         { text: 'Vue', link: '/es-ES/plugins/vue' },
         { text: 'React', link: '/es-ES/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/es-ES/plugins/opentelemetry-server' },
@@ -494,7 +476,6 @@ const navRu = [
   {
     text: 'Плагины',
     items: [
-      { text: 'Angular', link: '/ru-RU/plugins/angular' },
       { text: 'Vue', link: '/ru-RU/plugins/vue' },
       { text: 'React', link: '/ru-RU/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/ru-RU/plugins/opentelemetry-server' },
@@ -533,7 +514,6 @@ const sidebarRu = {
     {
       text: 'Плагины',
       items: [
-        { text: 'Angular', link: '/ru-RU/plugins/angular' },
         { text: 'Vue', link: '/ru-RU/plugins/vue' },
         { text: 'React', link: '/ru-RU/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/ru-RU/plugins/opentelemetry-server' },
@@ -548,7 +528,6 @@ const navFr = [
   {
     text: 'Plugins',
     items: [
-      { text: 'Angular', link: '/fr-FR/plugins/angular' },
       { text: 'Vue', link: '/fr-FR/plugins/vue' },
       { text: 'React', link: '/fr-FR/plugins/react' },
       { text: 'OpenTelemetry Server', link: '/fr-FR/plugins/opentelemetry-server' },
@@ -587,7 +566,6 @@ const sidebarFr = {
     {
       text: 'Plugins',
       items: [
-        { text: 'Angular', link: '/fr-FR/plugins/angular' },
         { text: 'Vue', link: '/fr-FR/plugins/vue' },
         { text: 'React', link: '/fr-FR/plugins/react' },
         { text: 'OpenTelemetry Server', link: '/fr-FR/plugins/opentelemetry-server' },

@@ -41,7 +41,6 @@ export const DOC_COMPILER_OPTIONS: ts.CompilerOptions = {
   moduleResolution: ts.ModuleResolutionKind.Bundler,
   noEmit: true,
   paths: {
-    '@defjs/angular': ['packages/angular/src/index.ts'],
     '@defjs/core': ['packages/core/src/index.ts'],
     '@defjs/opentelemetry-server': ['packages/opentelemetry-server/src/index.ts'],
     '@defjs/react': ['packages/react/src/index.ts'],

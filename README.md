@@ -82,20 +82,19 @@ Documentation source lives in `doc/`. This README and the repository docs source
 
 ## Repository packages
 
-| Package | Purpose |
-| --- | --- |
-| [`@defjs/core`](packages/core) | Typed HTTP, SSE, and WebSocket client definitions and execution. |
-| [`@defjs/react`](packages/react) | React thin adapter for sharing a typed core client through `ClientProvider` and `useClient`. |
-| [`@defjs/vue`](packages/vue) | Vue thin adapter for providing and injecting a typed core client. |
-| [`@defjs/angular`](packages/angular) | Angular DI thin adapter for providing and injecting a typed core client. |
-| [`@defjs/opentelemetry-server`](packages/opentelemetry-server) | Server-side outbound OpenTelemetry instrumentation for core clients. |
+| Package                                                        | Purpose                                                                                      |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [`@defjs/core`](packages/core)                                 | Typed HTTP, SSE, and WebSocket client definitions and execution.                             |
+| [`@defjs/react`](packages/react)                               | React thin adapter for sharing a typed core client through `ClientProvider` and `useClient`. |
+| [`@defjs/vue`](packages/vue)                                   | Vue thin adapter for providing and injecting a typed core client.                            |
+| [`@defjs/opentelemetry-server`](packages/opentelemetry-server) | Server-side outbound OpenTelemetry instrumentation for core clients.                         |
 
 ## Status and Roadmap
 
 ### Implemented in this repository source today
 
 - Typed HTTP, SSE, and WebSocket command definitions in `@defjs/core`.
-- Thin framework adapters for React, Vue, and Angular.
+- Thin framework adapters for React and Vue.
 - Server-side outbound OpenTelemetry instrumentation for defjs clients.
 - Documentation source and local VitePress tooling in `doc/`.
 
@@ -120,7 +119,7 @@ Repository development baseline: Node `>=26`, `pnpm@11.6.0`, `engine-strict=true
 
 These values describe this repository's contributor baseline, not a blanket requirement for every consumer application that installs a published package.
 
-Most defjs packages are still evolving before stable 1.0; `@defjs/angular` follows Angular ecosystem versioning; overall API may evolve.
+Most defjs packages are still evolving before stable 1.0; overall API may evolve.
 
 ## License
 
@@ -128,7 +127,6 @@ Most defjs packages are still evolving before stable 1.0; `@defjs/angular` follo
 
 ## Reference
 
-- [Angular HttpClient](https://angular.dev/guide/http)
 - [Axios](https://axios-http.com)
 - [Zod](https://zod.dev)
 - [Deepkit Framework](https://github.com/deepkit/deepkit-framework)
