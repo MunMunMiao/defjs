@@ -141,14 +141,7 @@ const authInterceptor = createHttpInterceptor(async (request, next) => {
 
 export function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <ClientProvider
-      options={[
-        withEndpoint('https://api.example.com'),
-        withInterceptors(() => authInterceptor),
-      ]}
-    >
-      {children}
-    </ClientProvider>
+    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(() => authInterceptor)]}>{children}</ClientProvider>
   )
 }
 ```
@@ -180,21 +173,13 @@ const client = createClient(
 ```ts
 // app/lib/createServerClient.ts
 import { cookies, headers } from 'next/headers'
-import {
-  createClient,
-  createHttpInterceptor,
-  withEndpoint,
-  withInterceptors,
-} from '@defjs/core'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
 
 export async function createServerClient() {
   const requestHeaders = await headers()
   const requestCookies = await cookies()
   const reviewedCookieNames = ['session', 'csrf-token'] as const
-  const serializeForwardedCookie = (
-    name: (typeof reviewedCookieNames)[number],
-    value: string,
-  ) => `${name}=${encodeURIComponent(value)}`
+  const serializeForwardedCookie = (name: (typeof reviewedCookieNames)[number], value: string) => `${name}=${encodeURIComponent(value)}`
 
   return createClient(
     withEndpoint(process.env.API_ENDPOINT!),
@@ -236,11 +221,7 @@ import type { ReactNode } from 'react'
 import { ClientProvider, withEndpoint } from '@defjs/react'
 
 export function ApiProvider({ children }: { children: ReactNode }) {
-  return (
-    <ClientProvider options={[withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!)]}>
-      {children}
-    </ClientProvider>
-  )
+  return <ClientProvider options={[withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!)]}>{children}</ClientProvider>
 }
 ```
 
@@ -289,21 +270,14 @@ type GetUserData = {
 
 type FetchUser = (id: number) => Promise<GetUserData>
 
-export async function prefetchUser(
-  queryClient: QueryClient,
-  fetchUser: FetchUser,
-  id: number,
-) {
+export async function prefetchUser(queryClient: QueryClient, fetchUser: FetchUser, id: number) {
   await queryClient.prefetchQuery({
     queryKey: ['user', id],
     queryFn: () => fetchUser(id),
   })
 }
 
-export async function fetchUserWithClient(
-  client: Client,
-  id: number,
-): Promise<GetUserData> {
+export async function fetchUserWithClient(client: Client, id: number): Promise<GetUserData> {
   const [error, user] = await client.execute(getUser({ path: { id } }))
   if (error) {
     throw error

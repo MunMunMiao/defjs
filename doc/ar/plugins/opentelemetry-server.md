@@ -97,12 +97,12 @@ const client = createClient(
 
 ### خيارات WebSocket
 
-| الخيار             | النوع                     | الافتراضي   | الوصف                                                                      |
-| ------------------ | ------------------------- | ----------- | -------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`      | تمكين تتبع WebSocket                                                       |
+| الخيار             | النوع                     | الافتراضي   | الوصف                                                                                                                                            |
+| ------------------ | ------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enabled`          | `boolean`                 | `true`      | تمكين تتبع WebSocket                                                                                                                             |
 | `queryPropagation` | `boolean`                 | `true`      | حقن سياق التتبع في سلسلة استعلام URL لـ WebSocket لتوافق المتصفح. ولحركة إنتاج حساسة أمنيًا، فالخط الأساسي الموصى به هو ضبطه صراحةً على `false`. |
-| `requestHook`      | `(span, req) => void`     | `undefined` | تخصيص span WebSocket قبل طلب الاتصال                                       |
-| `responseHook`     | `(span, session) => void` | `undefined` | تخصيص span WebSocket بعد إرجاع الجلسة، `session` هو `WebSocketSessionLike` |
+| `requestHook`      | `(span, req) => void`     | `undefined` | تخصيص span WebSocket قبل طلب الاتصال                                                                                                             |
+| `responseHook`     | `(span, session) => void` | `undefined` | تخصيص span WebSocket بعد إرجاع الجلسة، `session` هو `WebSocketSessionLike`                                                                       |
 
 > **معالجة استثناء Hook**: إذا رمى `requestHook` أو `responseHook`، يُسجّل الخطأ على حدث `defjs.otel.hook.error` في الـ span، لكن الطلب/الدفق/الجلسة **يستمر بشكل طبيعي**.
 >
@@ -110,14 +110,14 @@ const client = createClient(
 
 ## الترحيل من الـ API القديم
 
-| الإعداد القديم             | الإعداد الجديد                                                   |
-| ------------------------- | ---------------------------------------------------------------- |
-| `http: false`             | `http: { enabled: false }`                                       |
-| `sse: false`              | `sse: { enabled: false }`                                        |
-| `webSocket: false`        | `webSocket: { enabled: false }`                                  |
-| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
-| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
-| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                   |
+| الإعداد القديم              | الإعداد الجديد                                                      |
+| --------------------------- | ------------------------------------------------------------------- |
+| `http: false`               | `http: { enabled: false }`                                          |
+| `sse: false`                | `sse: { enabled: false }`                                           |
+| `webSocket: false`          | `webSocket: { enabled: false }`                                     |
+| `requestHook`               | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook`    |
+| `responseHook`              | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                        |
 
 أزيلت الـ hooks ذات المستوى الأعلى ومفاتيح التبديل المنطقية للنقل عمدًا حتى يعرّض كل وسيلة نقل أنواع الطلب/الاستجابة الصحيحة. وتمرير هذه الخيارات القديمة المحذوفة من JavaScript يؤدي الآن إلى خطأ ترحيل بدلًا من تفسيرها بصمت على أنها instrumentation مفعلة.
 

@@ -279,10 +279,10 @@ const client = createClient(
 
 The client filters interceptors by command type:
 
-| Command Type                  | Filter Condition |
-| ----------------------------- | ---------------- |
-| HTTP (`defineRequest`)        | `kind === 'http'` |
-| SSE (`defineEventStream`)     | `kind === 'sse'` |
+| Command Type                  | Filter Condition        |
+| ----------------------------- | ----------------------- |
+| HTTP (`defineRequest`)        | `kind === 'http'`       |
+| SSE (`defineEventStream`)     | `kind === 'sse'`        |
 | WebSocket (`defineWebSocket`) | `kind === 'web-socket'` |
 
 Filtered interceptors maintain their original registration order, then form an onion chain.

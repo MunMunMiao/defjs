@@ -176,19 +176,19 @@ async function createPost() {
 
 ## Краткая справка по Core API
 
-| API                    | Описание                          | Типичное использование                                                         |
-| ---------------------- | --------------------------------- | ------------------------------------------------------------------------------ |
-| `createClient`         | Создать клиент запросов           | `createClient(withEndpoint('https://api.example.com'))`                        |
+| API                    | Описание                          | Типичное использование                                                                                  |
+| ---------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `createClient`         | Создать клиент запросов           | `createClient(withEndpoint('https://api.example.com'))`                                                 |
 | `defineRequest`        | Определить HTTP-ендпоинт          | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | Определить SSE-ендпоинт           | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
-| `defineWebSocket`      | Определить WebSocket-ендпоинт     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
-| `struct`               | Конструктор схем                  | `struct.object({ id: struct.number() })`                                       |
-| `.alias(name)`         | Alias wire-имени для полей        | `struct.string().alias('user_name')`                                           |
-| `withEndpoint`         | Задать базовый URL                | `withEndpoint('https://api.example.com')`                                      |
-| `withInterceptors`     | Зарегистрировать перехватчики     | `withInterceptors([...interceptors])`                                          |
-| `withCredentials`      | Включить cross-origin credentials | `withCredentials(true)`                                                        |
-| `withSSEOptions`       | Настроить SSE                     | `withSSEOptions({ method: 'POST' })`                                           |
-| `withWebSocketOptions` | Настроить WebSocket               | `withWebSocketOptions({ protocols: ['v1'] })`                                  |
+| `defineEventStream`    | Определить SSE-ендпоинт           | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
+| `defineWebSocket`      | Определить WebSocket-ендпоинт     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
+| `struct`               | Конструктор схем                  | `struct.object({ id: struct.number() })`                                                                |
+| `.alias(name)`         | Alias wire-имени для полей        | `struct.string().alias('user_name')`                                                                    |
+| `withEndpoint`         | Задать базовый URL                | `withEndpoint('https://api.example.com')`                                                               |
+| `withInterceptors`     | Зарегистрировать перехватчики     | `withInterceptors([...interceptors])`                                                                   |
+| `withCredentials`      | Включить cross-origin credentials | `withCredentials(true)`                                                                                 |
+| `withSSEOptions`       | Настроить SSE                     | `withSSEOptions({ method: 'POST' })`                                                                    |
+| `withWebSocketOptions` | Настроить WebSocket               | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
 
 ## Что дальше
 

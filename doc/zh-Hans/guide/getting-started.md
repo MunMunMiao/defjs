@@ -130,14 +130,7 @@ async function loadUser() {
 下面是一个端到端示例，包含自动请求映射、输出验证、错误处理和拦截器：
 
 ```typescript
-import {
-  createClient,
-  createHttpInterceptor,
-  defineRequest,
-  struct,
-  withEndpoint,
-  withInterceptors,
-} from '@defjs/core'
+import { createClient, createHttpInterceptor, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
 
 const authInterceptor = createHttpInterceptor(async (request, next) => {
   const headers = request.headers ?? new Headers()
@@ -146,10 +139,7 @@ const authInterceptor = createHttpInterceptor(async (request, next) => {
   return next(request)
 })
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(authInterceptor),
-)
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor))
 
 const createPostRequest = defineRequest({
   method: 'POST',
@@ -200,19 +190,19 @@ async function submitPost() {
 
 ## 核心 API 速查表
 
-| API                    | 说明                | 典型用法                                                                                                                                     |
-| ---------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createClient`         | 创建请求客户端      | `createClient(withEndpoint('https://api.example.com'))`                                                                                      |
+| API                    | 说明                | 典型用法                                                                                                                                                                             |
+| ---------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `createClient`         | 创建请求客户端      | `createClient(withEndpoint('https://api.example.com'))`                                                                                                                              |
 | `defineRequest`        | 定义 HTTP 端点      | `defineRequest({ method: 'GET', path: '/user/:id', input: struct.request({ path: struct.object({ id: struct.number() }) }), output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | 定义 SSE 端点       | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                                                               |
-| `defineWebSocket`      | 定义 WebSocket 端点 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                                                       |
-| `struct`               | 结构构建器          | `struct.object({ id: struct.number() })`                                                                                                     |
-| `.alias(name)`         | 字段 wire 名别名    | `struct.string().alias('user_name')`                                                                                                         |
-| `withEndpoint`         | 设置基础 URL        | `withEndpoint('https://api.example.com')`                                                                                                    |
-| `withInterceptors`     | 注册拦截器          | `withInterceptors(loggingInterceptor, authInterceptor)`                                                                                      |
-| `withCredentials`      | 启用跨域凭证        | `withCredentials(true)`                                                                                                                      |
-| `withSSEReconnect`     | 配置 SSE 重连策略   | `withSSEReconnect({ attempts: 3, delayMs: 1000 })`                                                                                           |
-| `withWebSocketOptions` | 配置 WebSocket 选项 | `withWebSocketOptions({ protocols: ['v1'] })`                                                                                                |
+| `defineEventStream`    | 定义 SSE 端点       | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                                                                                                       |
+| `defineWebSocket`      | 定义 WebSocket 端点 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                                                                                               |
+| `struct`               | 结构构建器          | `struct.object({ id: struct.number() })`                                                                                                                                             |
+| `.alias(name)`         | 字段 wire 名别名    | `struct.string().alias('user_name')`                                                                                                                                                 |
+| `withEndpoint`         | 设置基础 URL        | `withEndpoint('https://api.example.com')`                                                                                                                                            |
+| `withInterceptors`     | 注册拦截器          | `withInterceptors(loggingInterceptor, authInterceptor)`                                                                                                                              |
+| `withCredentials`      | 启用跨域凭证        | `withCredentials(true)`                                                                                                                                                              |
+| `withSSEReconnect`     | 配置 SSE 重连策略   | `withSSEReconnect({ attempts: 3, delayMs: 1000 })`                                                                                                                                   |
+| `withWebSocketOptions` | 配置 WebSocket 选项 | `withWebSocketOptions({ protocols: ['v1'] })`                                                                                                                                        |
 
 ## 下一步
 

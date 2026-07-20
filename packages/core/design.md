@@ -451,16 +451,7 @@ build(ctx, input) {
 
 ### Binding 边界
 
-In `build(ctx, input)`, explicit object literal keys are the final wire keys and are never rewritten by source-field aliases. Whole-source bound values (e.g. `ctx.setJson(input.body)`) still recursively apply the source struct's aliases.
-2. binding metadata 使用 endpoint-local registry / private symbol / WeakMap，不能占用用户字段名 `path`、`struct`、`fieldKey`。
-3. ctx 必须校验 bound source 属于当前 endpoint input owner，不能接受伪造对象、闭包里的字段 struct 或其他 endpoint 的 bound view。
-4. root input object / nested object bound view 可以作为 direct source，但必须按 helper 支持结构校验。
-5. path/query/header 是 flat output；source 可以来自 deep bound source，也可以来自平铺 object source。
-6. JSON 支持递归 object projection，也支持 whole-object / whole-array bound source，以及 `input.array.map(item => projection)` 生成的 one-to-one `ArrayProjection`。
-7. `ArrayProjection` v1 只支持 `map`；array item bound source 只能在所属 `map(...)` projection 内使用，不支持 `filter` / `reduce` / `flatMap` / index access。
-8. v1 不提供泛 `ctx.setBody(ref)`，避免 `BodyInit` 重新变成 raw body 入口。
-9. `ctx` 不暴露 `setXXX`、`context`、`withCredentials`、`setXml`。
-10. primitive / array / union input 在 v1 只做边界解析，不支持 struct-aware `build`；配置 `build` 应返回 definition error。
+In `build(ctx, input)`, explicit object literal keys are the final wire keys and are never rewritten by source-field aliases. Whole-source bound values (e.g. `ctx.setJson(input.body)`) still recursively apply the source struct's aliases. 2. binding metadata 使用 endpoint-local registry / private symbol / WeakMap，不能占用用户字段名 `path`、`struct`、`fieldKey`。3. ctx 必须校验 bound source 属于当前 endpoint input owner，不能接受伪造对象、闭包里的字段 struct 或其他 endpoint 的 bound view。4. root input object / nested object bound view 可以作为 direct source，但必须按 helper 支持结构校验。5. path/query/header 是 flat output；source 可以来自 deep bound source，也可以来自平铺 object source。6. JSON 支持递归 object projection，也支持 whole-object / whole-array bound source，以及 `input.array.map(item => projection)` 生成的 one-to-one `ArrayProjection`。7. `ArrayProjection` v1 只支持 `map`；array item bound source 只能在所属 `map(...)` projection 内使用，不支持 `filter` / `reduce` / `flatMap` / index access。8. v1 不提供泛 `ctx.setBody(ref)`，避免 `BodyInit` 重新变成 raw body 入口。9. `ctx` 不暴露 `setXXX`、`context`、`withCredentials`、`setXml`。10. primitive / array / union input 在 v1 只做边界解析，不支持 struct-aware `build`；配置 `build` 应返回 definition error。
 
 ### Transport 差异
 

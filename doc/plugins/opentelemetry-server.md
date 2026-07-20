@@ -107,12 +107,12 @@ After disabling query propagation, trace context no longer rides on the WebSocke
 
 ### WebSocket options
 
-| Option             | Type                      | Default     | Description                                                                                                                                  |
-| ------------------ | ------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`      | Enable WebSocket instrumentation.                                                                                                            |
+| Option             | Type                      | Default     | Description                                                                                                                                                            |
+| ------------------ | ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                 | `true`      | Enable WebSocket instrumentation.                                                                                                                                      |
 | `queryPropagation` | `boolean`                 | `true`      | Inject trace context into the WebSocket URL query string for browser compatibility. Use `false` as the recommended production baseline for security-sensitive traffic. |
-| `requestHook`      | `(span, req) => void`     | `undefined` | Customize the WebSocket span before the connection request is sent.                                                                          |
-| `responseHook`     | `(span, session) => void` | `undefined` | Customize the WebSocket span after the session is returned. `session` is `WebSocketSessionLike`.                                            |
+| `requestHook`      | `(span, req) => void`     | `undefined` | Customize the WebSocket span before the connection request is sent.                                                                                                    |
+| `responseHook`     | `(span, session) => void` | `undefined` | Customize the WebSocket span after the session is returned. `session` is `WebSocketSessionLike`.                                                                       |
 
 Instrumentation hooks are telemetry customization hooks. If a hook throws, the error is recorded on the span as `defjs.otel.hook.error`, but the client request/stream/session continues.
 
@@ -149,8 +149,8 @@ Default HTTP tracing records a `SpanKind.CLIENT` span with these core attributes
 
 When `meter` is provided, HTTP records the stable metric:
 
-| Metric                         | Unit | Attributes                                                                                                                            |
-| ------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Metric                         | Unit | Attributes                                                                                                          |
+| ------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------- |
 | `http.client.request.duration` | `s`  | `http.request.method`, `server.address`, `server.port`, optional `http.response.status_code`, optional `error.type` |
 
 This package does not add request or response bodies, full headers, baggage values, payload sizes, or message payloads as default custom telemetry fields. It also does not create separate span attributes or metrics for raw query strings.

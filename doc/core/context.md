@@ -331,11 +331,7 @@ withWebSocketHeartbeat({
 Configuration functions apply in order; later ones override earlier ones. Execution-time options (`client.execute(cmd, { timeout: 5000 })`) only override the settings that `client.execute(...)` actually accepts for that transport, followed by client-level configuration. SSE reconnect remains client-level configuration.
 
 ```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withCredentials(true),
-  withSSEReconnect({ attempts: 3 }),
-)
+const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEReconnect({ attempts: 3 }))
 
 // Override the earlier client default with a later client option
 const clientWithMoreRetries = createClient(

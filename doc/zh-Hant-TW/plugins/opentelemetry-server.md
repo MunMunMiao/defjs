@@ -97,12 +97,12 @@ const client = createClient(
 
 ### WebSocket 選項
 
-| 選項               | 型別                      | 預設值      | 說明                                                                     |
-| ------------------ | ------------------------- | ----------- | ------------------------------------------------------------------------ |
-| `enabled`          | `boolean`                 | `true`      | 啟用 WebSocket 追蹤                                                      |
+| 選項               | 型別                      | 預設值      | 說明                                                                                                             |
+| ------------------ | ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                 | `true`      | 啟用 WebSocket 追蹤                                                                                              |
 | `queryPropagation` | `boolean`                 | `true`      | 為確保瀏覽器相容性，將追蹤脈絡注入 WebSocket URL 查詢字串；對安全敏感的生產流量，建議明確設為 `false` 作為基準。 |
-| `requestHook`      | `(span, req) => void`     | `undefined` | 在連線請求前自訂 WebSocket span                                          |
-| `responseHook`     | `(span, session) => void` | `undefined` | 在工作階段回傳後自訂 WebSocket span，`session` 為 `WebSocketSessionLike` |
+| `requestHook`      | `(span, req) => void`     | `undefined` | 在連線請求前自訂 WebSocket span                                                                                  |
+| `responseHook`     | `(span, session) => void` | `undefined` | 在工作階段回傳後自訂 WebSocket span，`session` 為 `WebSocketSessionLike`                                         |
 
 > **鉤子例外處理**：若 `requestHook` 或 `responseHook` 拋出錯誤，該錯誤會記錄在 span 的 `defjs.otel.hook.error` 事件中，但用戶端請求／串流／工作階段**會繼續正常執行**。
 >
@@ -110,14 +110,14 @@ const client = createClient(
 
 ## 從舊 API 遷移
 
-| 舊設定                    | 新設定                                                           |
-| ------------------------- | ---------------------------------------------------------------- |
-| `http: false`             | `http: { enabled: false }`                                       |
-| `sse: false`              | `sse: { enabled: false }`                                        |
-| `webSocket: false`        | `webSocket: { enabled: false }`                                  |
-| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
-| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
-| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                   |
+| 舊設定                      | 新設定                                                              |
+| --------------------------- | ------------------------------------------------------------------- |
+| `http: false`               | `http: { enabled: false }`                                          |
+| `sse: false`                | `sse: { enabled: false }`                                           |
+| `webSocket: false`          | `webSocket: { enabled: false }`                                     |
+| `requestHook`               | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook`    |
+| `responseHook`              | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                        |
 
 舊的頂層 Hook 與布林傳輸開關是刻意移除的，這樣每個傳輸協定都能暴露正確的請求／回應型別。現在如果繼續從 JavaScript 傳入這些已移除的舊選項，會直接拋出遷移錯誤，而不是被靜默解讀成已啟用遙測。
 

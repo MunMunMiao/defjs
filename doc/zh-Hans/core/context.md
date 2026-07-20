@@ -331,11 +331,7 @@ withWebSocketHeartbeat({
 配置函数按顺序应用；后续覆盖前面。执行时选项（`client.execute(cmd, { timeout: 5000 })`）优先级最高，其次是客户端级配置。
 
 ```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withCredentials(true),
-  withSSEReconnect({ attempts: 3 }),
-)
+const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEReconnect({ attempts: 3 }))
 
 // 用更靠后的客户端配置覆盖更早的默认值
 const clientWithMoreRetries = createClient(

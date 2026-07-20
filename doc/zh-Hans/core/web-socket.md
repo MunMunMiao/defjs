@@ -142,15 +142,15 @@ idle → connecting → open → closing → closed
          (retry)      aborted
 ```
 
-| 状态           | 含义                                                         |
-| -------------- | ------------------------------------------------------------ |
-| `idle`         | 在 `execute()` 被调用之前。                                                                 |
-| `connecting`   | 首次打开连接尝试中。                                                                        |
-| `open`         | 连接已建立，消息可以流动。                                                                  |
-| `closing`      | 当前处于 `CONNECTING`/`OPEN` 的套接字正在关闭，通常由外部 abort 驱动，并等待关闭事件。手动 `close()` 不保证会对外暴露这个状态。       |
-| `closed`       | 干净关闭（无错误，包括手动 `close()`）。                                                    |
-| `reconnecting` | 连接断开，等待重试。                                                                        |
-| `error`        | 终端失败（验证错误、传输错误、带原因的非中止关闭，或 abort reason 未被归一化为 `ABORTED` 的外部 abort）。 |
+| 状态           | 含义                                                                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `idle`         | 在 `execute()` 被调用之前。                                                                                                                       |
+| `connecting`   | 首次打开连接尝试中。                                                                                                                              |
+| `open`         | 连接已建立，消息可以流动。                                                                                                                        |
+| `closing`      | 当前处于 `CONNECTING`/`OPEN` 的套接字正在关闭，通常由外部 abort 驱动，并等待关闭事件。手动 `close()` 不保证会对外暴露这个状态。                   |
+| `closed`       | 干净关闭（无错误，包括手动 `close()`）。                                                                                                          |
+| `reconnecting` | 连接断开，等待重试。                                                                                                                              |
+| `error`        | 终端失败（验证错误、传输错误、带原因的非中止关闭，或 abort reason 未被归一化为 `ABORTED` 的外部 abort）。                                         |
 | `aborted`      | 套接字生命周期开始后，外部取消被归一化为传输层 `ABORTED`（例如默认 `controller.abort()`、`ERR_ABORTED`，或名称为 `AbortError` 的 DOMException）。 |
 
 状态转换通过 `onStateChange` 发出。启动后，外部 abort 只有在当前存在处于 `CONNECTING` 或 `OPEN` 的套接字时才会先进入 `closing`。如果运行时正处于重连等待阶段，则可能没有当前套接字可关闭，session 会直接进入 `aborted` 或 `error` 这样的终态，而不会重新经过 `closing`。只有当合并后的 abort reason 被归一化为传输层 `ABORTED` 时，最终状态才会进入 `aborted`（例如默认 abort reason、`ERR_ABORTED`，或名称为 `AbortError` 的 DOMException）；其他自定义 reason 会进入 `error`。手动 `close()` 最终仍会进入 `closed`，但调用方不能依赖这一条路径一定会先观察到公开的 `closing` 状态。`receive` 异步迭代器会在套接字到达终端状态（`closed`、`error` 或 `aborted`）时结束。
@@ -180,12 +180,7 @@ const [error, socket] = await client.execute(useSocket(), {
 心跳可以在客户端级别通过 `withWebSocketHeartbeat(...)` 或 `withWebSocketOptions({ heartbeat: ... })` 配置，也可以在请求级别通过 `execute()` 选项配置。请求级别配置优先。
 
 ```typescript
-import {
-  createClient,
-  withEndpoint,
-  withWebSocketHeartbeat,
-  withWebSocketReconnect,
-} from '@defjs/core'
+import { createClient, withEndpoint, withWebSocketHeartbeat, withWebSocketReconnect } from '@defjs/core'
 
 const client = createClient(
   withEndpoint('https://api.example.com'),

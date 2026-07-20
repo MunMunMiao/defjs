@@ -176,19 +176,19 @@ async function createPost() {
 
 ## Core-API-Kurzreferenz
 
-| API                    | Beschreibung                        | Typische Nutzung                                                               |
-| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
-| `createClient`         | Client erstellen                    | `createClient(withEndpoint('https://api.example.com'))`                        |
+| API                    | Beschreibung                        | Typische Nutzung                                                                                        |
+| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `createClient`         | Client erstellen                    | `createClient(withEndpoint('https://api.example.com'))`                                                 |
 | `defineRequest`        | HTTP-Endpunkt definieren            | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | SSE-Endpunkt definieren             | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
-| `defineWebSocket`      | WebSocket-Endpunkt definieren       | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
-| `struct`               | Struct-Builder                      | `struct.object({ id: struct.number() })`                                       |
-| `.alias(name)`         | Wire-Name-Alias für Felder          | `struct.string().alias('user_name')`                                           |
-| `withEndpoint`         | Basis-URL setzen                    | `withEndpoint('https://api.example.com')`                                      |
-| `withInterceptors`     | Interceptors registrieren           | `withInterceptors([...interceptors])`                                          |
-| `withCredentials`      | Cross-Origin-Credentials aktivieren | `withCredentials(true)`                                                        |
-| `withSSEOptions`       | SSE-Optionen konfigurieren          | `withSSEOptions({ method: 'POST' })`                                           |
-| `withWebSocketOptions` | WebSocket-Optionen konfigurieren    | `withWebSocketOptions({ protocols: ['v1'] })`                                  |
+| `defineEventStream`    | SSE-Endpunkt definieren             | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
+| `defineWebSocket`      | WebSocket-Endpunkt definieren       | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
+| `struct`               | Struct-Builder                      | `struct.object({ id: struct.number() })`                                                                |
+| `.alias(name)`         | Wire-Name-Alias für Felder          | `struct.string().alias('user_name')`                                                                    |
+| `withEndpoint`         | Basis-URL setzen                    | `withEndpoint('https://api.example.com')`                                                               |
+| `withInterceptors`     | Interceptors registrieren           | `withInterceptors([...interceptors])`                                                                   |
+| `withCredentials`      | Cross-Origin-Credentials aktivieren | `withCredentials(true)`                                                                                 |
+| `withSSEOptions`       | SSE-Optionen konfigurieren          | `withSSEOptions({ method: 'POST' })`                                                                    |
+| `withWebSocketOptions` | WebSocket-Optionen konfigurieren    | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
 
 ## Wie geht es weiter
 

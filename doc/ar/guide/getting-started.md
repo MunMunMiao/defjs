@@ -176,19 +176,19 @@ async function createPost() {
 
 ## مرجع سريع لواجهة برمجة التطبيقات الأساسية
 
-| API                    | الوصف                              | الاستخدام النموذجي                                                             |
-| ---------------------- | ---------------------------------- | ------------------------------------------------------------------------------ |
-| `createClient`         | إنشاء عميل طلب                     | `createClient(withEndpoint('https://api.example.com'))`                        |
+| API                    | الوصف                              | الاستخدام النموذجي                                                                                      |
+| ---------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `createClient`         | إنشاء عميل طلب                     | `createClient(withEndpoint('https://api.example.com'))`                                                 |
 | `defineRequest`        | تعريف نقطة نهاية HTTP              | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | تعريف نقطة نهاية SSE               | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
-| `defineWebSocket`      | تعريف نقطة نهاية WebSocket         | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
-| `struct`               | منشئ المخطط                        | `struct.object({ id: struct.number() })`                                       |
-| `.alias(name)`         | اسم wire بديل للحقول               | `struct.string().alias('user_name')`                                           |
-| `withEndpoint`         | تعيين عنوان URL الأساسي            | `withEndpoint('https://api.example.com')`                                      |
-| `withInterceptors`     | تسجيل الاعتراضات                   | `withInterceptors([...interceptors])`                                          |
-| `withCredentials`      | تمكين بيانات الاعتماد عبر النطاقات | `withCredentials(true)`                                                        |
-| `withSSEOptions`       | ضبط خيارات SSE                     | `withSSEOptions({ method: 'POST' })`                                           |
-| `withWebSocketOptions` | ضبط خيارات WebSocket               | `withWebSocketOptions({ protocols: ['v1'] })`                                  |
+| `defineEventStream`    | تعريف نقطة نهاية SSE               | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
+| `defineWebSocket`      | تعريف نقطة نهاية WebSocket         | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
+| `struct`               | منشئ المخطط                        | `struct.object({ id: struct.number() })`                                                                |
+| `.alias(name)`         | اسم wire بديل للحقول               | `struct.string().alias('user_name')`                                                                    |
+| `withEndpoint`         | تعيين عنوان URL الأساسي            | `withEndpoint('https://api.example.com')`                                                               |
+| `withInterceptors`     | تسجيل الاعتراضات                   | `withInterceptors([...interceptors])`                                                                   |
+| `withCredentials`      | تمكين بيانات الاعتماد عبر النطاقات | `withCredentials(true)`                                                                                 |
+| `withSSEOptions`       | ضبط خيارات SSE                     | `withSSEOptions({ method: 'POST' })`                                                                    |
+| `withWebSocketOptions` | ضبط خيارات WebSocket               | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
 
 ## ما التالي
 

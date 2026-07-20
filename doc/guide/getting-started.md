@@ -130,14 +130,7 @@ async function loadUser() {
 Here is an end-to-end example with automatic request mapping, output validation, error handling, and an interceptor:
 
 ```typescript
-import {
-  createClient,
-  createHttpInterceptor,
-  defineRequest,
-  struct,
-  withEndpoint,
-  withInterceptors,
-} from '@defjs/core'
+import { createClient, createHttpInterceptor, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
 
 const authInterceptor = createHttpInterceptor(async (request, next) => {
   const headers = request.headers ?? new Headers()
@@ -146,10 +139,7 @@ const authInterceptor = createHttpInterceptor(async (request, next) => {
   return next(request)
 })
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(authInterceptor),
-)
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor))
 
 const createPostRequest = defineRequest({
   method: 'POST',
@@ -200,19 +190,19 @@ async function submitPost() {
 
 ## Core API Quick Reference
 
-| API                    | Description                     | Typical Usage                                                                  |
-| ---------------------- | ------------------------------- | ------------------------------------------------------------------------------ |
-| `createClient`         | Create a request client         | `createClient(withEndpoint('https://api.example.com'))`                        |
+| API                    | Description                     | Typical Usage                                                                                                                                                                        |
+| ---------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `createClient`         | Create a request client         | `createClient(withEndpoint('https://api.example.com'))`                                                                                                                              |
 | `defineRequest`        | Define an HTTP endpoint         | `defineRequest({ method: 'GET', path: '/user/:id', input: struct.request({ path: struct.object({ id: struct.number() }) }), output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | Define an SSE endpoint          | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
-| `defineWebSocket`      | Define a WebSocket endpoint     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
-| `struct`               | Struct builder                  | `struct.object({ id: struct.number() })`                                       |
-| `.alias(name)`         | Field wire-name alias           | `struct.string().alias('user_name')`                                           |
-| `withEndpoint`         | Set base URL                    | `withEndpoint('https://api.example.com')`                                      |
-| `withInterceptors`     | Register interceptors           | `withInterceptors(loggingInterceptor, authInterceptor)`                        |
-| `withCredentials`      | Enable cross-origin credentials | `withCredentials(true)`                                                        |
-| `withSSEReconnect`     | Configure SSE reconnect policy  | `withSSEReconnect({ attempts: 3, delayMs: 1000 })`                             |
-| `withWebSocketOptions` | Configure WebSocket options     | `withWebSocketOptions({ protocols: ['v1'] })`                                  |
+| `defineEventStream`    | Define an SSE endpoint          | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                                                                                                       |
+| `defineWebSocket`      | Define a WebSocket endpoint     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                                                                                               |
+| `struct`               | Struct builder                  | `struct.object({ id: struct.number() })`                                                                                                                                             |
+| `.alias(name)`         | Field wire-name alias           | `struct.string().alias('user_name')`                                                                                                                                                 |
+| `withEndpoint`         | Set base URL                    | `withEndpoint('https://api.example.com')`                                                                                                                                            |
+| `withInterceptors`     | Register interceptors           | `withInterceptors(loggingInterceptor, authInterceptor)`                                                                                                                              |
+| `withCredentials`      | Enable cross-origin credentials | `withCredentials(true)`                                                                                                                                                              |
+| `withSSEReconnect`     | Configure SSE reconnect policy  | `withSSEReconnect({ attempts: 3, delayMs: 1000 })`                                                                                                                                   |
+| `withWebSocketOptions` | Configure WebSocket options     | `withWebSocketOptions({ protocols: ['v1'] })`                                                                                                                                        |
 
 ## What's Next
 

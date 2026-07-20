@@ -97,12 +97,12 @@ const client = createClient(
 
 ### Options WebSocket
 
-| Option             | Type                      | Défaut      | Description                                                                                         |
-| ------------------ | ------------------------- | ----------- | --------------------------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`      | Activer le tracing WebSocket                                                                        |
+| Option             | Type                      | Défaut      | Description                                                                                                                                                                                                                            |
+| ------------------ | ------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                 | `true`      | Activer le tracing WebSocket                                                                                                                                                                                                           |
 | `queryPropagation` | `boolean`                 | `true`      | Injecter le contexte de trace dans la chaîne de requête de l'URL WebSocket pour la compatibilité navigateur. Pour un trafic de production sensible à la sécurité, la baseline recommandée est de le définir explicitement sur `false`. |
-| `requestHook`      | `(span, req) => void`     | `undefined` | Personnaliser la span WebSocket avant la requête de connexion                                       |
-| `responseHook`     | `(span, session) => void` | `undefined` | Personnaliser la span WebSocket après le retour de la session, `session` est `WebSocketSessionLike` |
+| `requestHook`      | `(span, req) => void`     | `undefined` | Personnaliser la span WebSocket avant la requête de connexion                                                                                                                                                                          |
+| `responseHook`     | `(span, session) => void` | `undefined` | Personnaliser la span WebSocket après le retour de la session, `session` est `WebSocketSessionLike`                                                                                                                                    |
 
 > **Gestion des exceptions de hooks** : Si `requestHook` ou `responseHook` lève une exception, l'erreur est enregistrée sur l'événement `defjs.otel.hook.error` de la span, mais la requête/flux/session client **continue normalement**.
 >
@@ -110,14 +110,14 @@ const client = createClient(
 
 ## Migration depuis l'ancienne API
 
-| Ancienne configuration    | Nouvelle configuration                                          |
-| ------------------------- | --------------------------------------------------------------- |
-| `http: false`             | `http: { enabled: false }`                                      |
-| `sse: false`              | `sse: { enabled: false }`                                       |
-| `webSocket: false`        | `webSocket: { enabled: false }`                                 |
-| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
-| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
-| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                  |
+| Ancienne configuration      | Nouvelle configuration                                              |
+| --------------------------- | ------------------------------------------------------------------- |
+| `http: false`               | `http: { enabled: false }`                                          |
+| `sse: false`                | `sse: { enabled: false }`                                           |
+| `webSocket: false`          | `webSocket: { enabled: false }`                                     |
+| `requestHook`               | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook`    |
+| `responseHook`              | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                        |
 
 Les anciens hooks de niveau supérieur et les bascules booléennes de transport ont été supprimés intentionnellement afin que chaque transport expose les bons types de requête/réponse. Passer maintenant ces anciennes options JavaScript supprimées déclenche une erreur de migration au lieu de les interpréter silencieusement comme une instrumentation activée.
 

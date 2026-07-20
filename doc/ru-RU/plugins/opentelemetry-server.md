@@ -97,12 +97,12 @@ const client = createClient(
 
 ### WebSocket-опции
 
-| Опция              | Тип                       | По умолчанию | Описание                                                                                 |
-| ------------------ | ------------------------- | ------------ | ---------------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`       | Включить WebSocket-трассировку                                                           |
+| Опция              | Тип                       | По умолчанию | Описание                                                                                                                                                                                             |
+| ------------------ | ------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                 | `true`       | Включить WebSocket-трассировку                                                                                                                                                                       |
 | `queryPropagation` | `boolean`                 | `true`       | Инжектировать trace context в query-строку URL WebSocket для совместимости с браузером. Для чувствительного к безопасности продакшн-трафика рекомендуемый базовый вариант — явно установить `false`. |
-| `requestHook`      | `(span, req) => void`     | `undefined`  | Кастомизировать WebSocket-span перед запросом соединения                                 |
-| `responseHook`     | `(span, session) => void` | `undefined`  | Кастомизировать WebSocket-span после возврата сессии, `session` — `WebSocketSessionLike` |
+| `requestHook`      | `(span, req) => void`     | `undefined`  | Кастомизировать WebSocket-span перед запросом соединения                                                                                                                                             |
+| `responseHook`     | `(span, session) => void` | `undefined`  | Кастомизировать WebSocket-span после возврата сессии, `session` — `WebSocketSessionLike`                                                                                                             |
 
 > **Обработка исключений в хуках**: Если `requestHook` или `responseHook` выбрасывают, ошибка записывается в событие span'а `defjs.otel.hook.error`, но клиентский запрос/поток/сессия **продолжается нормально**.
 >
@@ -110,14 +110,14 @@ const client = createClient(
 
 ## Миграция со старого API
 
-| Старая конфигурация       | Новая конфигурация                                              |
-| ------------------------- | --------------------------------------------------------------- |
-| `http: false`             | `http: { enabled: false }`                                      |
-| `sse: false`              | `sse: { enabled: false }`                                       |
-| `webSocket: false`        | `webSocket: { enabled: false }`                                 |
-| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
-| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
-| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                  |
+| Старая конфигурация         | Новая конфигурация                                                  |
+| --------------------------- | ------------------------------------------------------------------- |
+| `http: false`               | `http: { enabled: false }`                                          |
+| `sse: false`                | `sse: { enabled: false }`                                           |
+| `webSocket: false`          | `webSocket: { enabled: false }`                                     |
+| `requestHook`               | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook`    |
+| `responseHook`              | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                        |
 
 Старые хуки верхнего уровня и булевы переключатели транспортов намеренно удалены, чтобы каждый транспорт предоставлял корректные типы request/response. Передача этих удалённых старых JavaScript-опций теперь вызывает ошибку миграции вместо того, чтобы молча интерпретироваться как включённая инструментализация.
 

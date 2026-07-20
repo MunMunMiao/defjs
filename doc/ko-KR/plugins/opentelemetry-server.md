@@ -97,12 +97,12 @@ const client = createClient(
 
 ### WebSocket 옵션
 
-| 옵션               | 타입                      | 기본값      | 설명                                                                         |
-| ------------------ | ------------------------- | ----------- | ---------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`      | WebSocket 추적 활성화                                                        |
+| 옵션               | 타입                      | 기본값      | 설명                                                                                                                                                                          |
+| ------------------ | ------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                 | `true`      | WebSocket 추적 활성화                                                                                                                                                         |
 | `queryPropagation` | `boolean`                 | `true`      | 브라우저 호환성을 위해 WebSocket URL 쿼리 문자열에 추적 컨텍스트를 주입해요. 보안에 민감한 프로덕션 트래픽에서는 명시적으로 `false`로 설정하는 것을 권장 기본선으로 삼으세요. |
-| `requestHook`      | `(span, req) => void`     | `undefined` | 연결 요청 전 WebSocket 스팬 커스터마이징                                     |
-| `responseHook`     | `(span, session) => void` | `undefined` | 세션 반환 후 WebSocket 스팬 커스터마이징, `session`은 `WebSocketSessionLike` |
+| `requestHook`      | `(span, req) => void`     | `undefined` | 연결 요청 전 WebSocket 스팬 커스터마이징                                                                                                                                      |
+| `responseHook`     | `(span, session) => void` | `undefined` | 세션 반환 후 WebSocket 스팬 커스터마이징, `session`은 `WebSocketSessionLike`                                                                                                  |
 
 > **훅 예외 처리**: `requestHook` 또는 `responseHook`에서 예외가 발생하면 오류가 스팬의 `defjs.otel.hook.error` 이벤트로 기록되지만, 클라이언트 요청/스트림/세션은 **정상적으로 계속돼요**.
 >
@@ -110,14 +110,14 @@ const client = createClient(
 
 ## 이전 API에서 마이그레이션
 
-| 이전 설정                 | 새 설정                                                          |
-| ------------------------- | ---------------------------------------------------------------- |
-| `http: false`             | `http: { enabled: false }`                                       |
-| `sse: false`              | `sse: { enabled: false }`                                        |
-| `webSocket: false`        | `webSocket: { enabled: false }`                                  |
-| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
-| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
-| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                   |
+| 이전 설정                   | 새 설정                                                             |
+| --------------------------- | ------------------------------------------------------------------- |
+| `http: false`               | `http: { enabled: false }`                                          |
+| `sse: false`                | `sse: { enabled: false }`                                           |
+| `webSocket: false`          | `webSocket: { enabled: false }`                                     |
+| `requestHook`               | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook`    |
+| `responseHook`              | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                        |
 
 각 트랜스포트가 올바른 요청/응답 타입을 노출하도록 기존 최상위 훅과 불리언 트랜스포트 토글은 의도적으로 제거되었어요. 이제 제거된 예전 JavaScript 옵션을 전달하면 조용히 계측 활성화로 해석되는 대신 마이그레이션 오류가 발생해요.
 

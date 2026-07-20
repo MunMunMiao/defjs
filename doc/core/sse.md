@@ -129,12 +129,12 @@ for await (const event of stream) {
 
 `EventStreamHandle` implements `AsyncIterable`, so it can be directly used with `for await...of`. It also provides these properties. Note that `stream.open` is live handle state updated on every newly received open response: it is the latest open-response / latest connection-attempt response snapshot, not a guarantee of a successful connection or of having passed later validation. By contrast, `const [error, stream, open] = await client.execute(...)` returns a startup snapshot in its third tuple item; store that separately if you need to keep it.
 
-| Property / Method          | Description                                                               |
-| -------------------------- | ------------------------------------------------------------------------- |
+| Property / Method          | Description                                                                                                                                                                                              |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `open`                     | Latest open-response / latest connection-attempt `EventStreamOpenInfo` (contains `response` and `url`); updates on every new open response, including reconnect responses that may fail later validation |
-| `closed`                   | `Promise<EventStreamCloseInfo>`, resolves when the stream is fully closed |
-| `close(reason?)`           | Actively close the stream, optionally passing a reason                    |
-| `[Symbol.asyncIterator]()` | Returns an async iterator consuming the event queue                       |
+| `closed`                   | `Promise<EventStreamCloseInfo>`, resolves when the stream is fully closed                                                                                                                                |
+| `close(reason?)`           | Actively close the stream, optionally passing a reason                                                                                                                                                   |
+| `[Symbol.asyncIterator]()` | Returns an async iterator consuming the event queue                                                                                                                                                      |
 
 `closed` resolves when:
 

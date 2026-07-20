@@ -69,15 +69,15 @@ const client = createClient(
 
 ### Konfigurationsoptionen
 
-| Option              | Typ                                   | Default                    | Beschreibung                                                         |
-| ------------------- | ------------------------------------- | -------------------------- | -------------------------------------------------------------------- |
-| `tracer`            | `Tracer`                              | **Required**               | Externer OpenTelemetry-Tracer                                        |
-| `meter`             | `Meter`                               | `undefined`                | Externer OpenTelemetry-Meter, Weglassen deaktiviert Metrics          |
-| `propagator`        | `TextMapPropagator`                   | W3C TraceContext + Baggage | Eigener Context-Propagator                                           |
+| Option              | Typ                                   | Default                    | Beschreibung                                                           |
+| ------------------- | ------------------------------------- | -------------------------- | ---------------------------------------------------------------------- |
+| `tracer`            | `Tracer`                              | **Required**               | Externer OpenTelemetry-Tracer                                          |
+| `meter`             | `Meter`                               | `undefined`                | Externer OpenTelemetry-Meter, Weglassen deaktiviert Metrics            |
+| `propagator`        | `TextMapPropagator`                   | W3C TraceContext + Baggage | Eigener Context-Propagator                                             |
 | `requireParentSpan` | `boolean`                             | `false`                    | Nur ausgehende Spans erstellen, wenn ein aktiver Parent-Span existiert |
-| `http`              | `OpenTelemetryServerHttpOptions`      | `{}`                       | HTTP-Transport-Trace/Metric-Optionen                                 |
-| `sse`               | `OpenTelemetryServerSSEOptions`       | `{}`                       | SSE-Transport-Trace/Metric-Optionen                                  |
-| `webSocket`         | `OpenTelemetryServerWebSocketOptions` | `{}`                       | WebSocket-Transport-Trace/Metric-Optionen                            |
+| `http`              | `OpenTelemetryServerHttpOptions`      | `{}`                       | HTTP-Transport-Trace/Metric-Optionen                                   |
+| `sse`               | `OpenTelemetryServerSSEOptions`       | `{}`                       | SSE-Transport-Trace/Metric-Optionen                                    |
+| `webSocket`         | `OpenTelemetryServerWebSocketOptions` | `{}`                       | WebSocket-Transport-Trace/Metric-Optionen                              |
 
 ### HTTP-Optionen
 
@@ -97,12 +97,12 @@ const client = createClient(
 
 ### WebSocket-Optionen
 
-| Option             | Typ                       | Default     | Beschreibung                                                                      |
-| ------------------ | ------------------------- | ----------- | --------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`      | WebSocket-Tracing aktivieren                                                      |
+| Option             | Typ                       | Default     | Beschreibung                                                                                                                                                            |
+| ------------------ | ------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                 | `true`      | WebSocket-Tracing aktivieren                                                                                                                                            |
 | `queryPropagation` | `boolean`                 | `true`      | Zur Browser-Kompatibilität Trace-Context in den Query-String der WebSocket-URL injizieren. Für sicherheitssensible Produktionslast ist `false` die empfohlene Baseline. |
-| `requestHook`      | `(span, req) => void`     | `undefined` | WebSocket-Span vor Verbindungs-Request anpassen                                   |
-| `responseHook`     | `(span, session) => void` | `undefined` | WebSocket-Span nach Session-Return anpassen, `session` ist `WebSocketSessionLike` |
+| `requestHook`      | `(span, req) => void`     | `undefined` | WebSocket-Span vor Verbindungs-Request anpassen                                                                                                                         |
+| `responseHook`     | `(span, session) => void` | `undefined` | WebSocket-Span nach Session-Return anpassen, `session` ist `WebSocketSessionLike`                                                                                       |
 
 > **Ausnahmen in Hooks**: Wenn `requestHook` oder `responseHook` einen Fehler wirft, wird er als Span-Ereignis `defjs.otel.hook.error` aufgezeichnet, aber die Client-Anfrage, der Stream oder die Session **läuft normal weiter**.
 >
@@ -110,14 +110,14 @@ const client = createClient(
 
 ## Migration von der alten API
 
-| Alte Konfiguration        | Neue Konfiguration                                               |
-| ------------------------- | ---------------------------------------------------------------- |
-| `http: false`             | `http: { enabled: false }`                                       |
-| `sse: false`              | `sse: { enabled: false }`                                        |
-| `webSocket: false`        | `webSocket: { enabled: false }`                                  |
-| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
-| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
-| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                   |
+| Alte Konfiguration          | Neue Konfiguration                                                  |
+| --------------------------- | ------------------------------------------------------------------- |
+| `http: false`               | `http: { enabled: false }`                                          |
+| `sse: false`                | `sse: { enabled: false }`                                           |
+| `webSocket: false`          | `webSocket: { enabled: false }`                                     |
+| `requestHook`               | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook`    |
+| `responseHook`              | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                        |
 
 Die alten Top-Level-Hooks und die booleschen Transport-Toggles wurden absichtlich entfernt, damit jeder Transport die korrekten Request-/Response-Typen exponiert. Wenn diese entfernten alten JavaScript-Optionen jetzt noch übergeben werden, wird ein Migrationsfehler ausgelöst, statt sie stillschweigend als aktivierte Instrumentierung zu interpretieren.
 
@@ -133,9 +133,9 @@ HTTP-Tracing folgt den stabilen OpenTelemetry-Semantikkonventionen für HTTP-Cli
 
 Falls `meter` angegeben ist, werden folgende stabilen Metriken erfasst:
 
-| Metrik                         | Einheit | Attribute                                                                                                                         |
-| ------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `http.client.request.duration` | `s`  | `http.request.method`, optional `http.response.status_code`, optional `server.address`, optional `server.port`, optional `error.type` |
+| Metrik                         | Einheit | Attribute                                                                                                                             |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `http.client.request.duration` | `s`     | `http.request.method`, optional `http.response.status_code`, optional `server.address`, optional `server.port`, optional `error.type` |
 
 Standardmäßig werden **Request-/Response-Bodies, vollständige Header, Baggage-Werte, Payload-Größen und Message-Payloads nicht als benutzerdefinierte Telemetrie-Felder erfasst**. Dieses Paket **legt außerdem keine separaten Span-Attribute oder Metriken für rohe Query-Strings an**. `url.full` spiegelt jedoch die Request-URL wider, die deine Anwendung tatsächlich konstruiert; enthält diese URL bereits Query-Strings, können sie dort weiterhin erscheinen. Vermeide nach Möglichkeit Tokens, Benutzer-IDs oder andere sensitive bzw. hoch-kardinale Eingaben in URLs.
 

@@ -176,19 +176,19 @@ async function createPost() {
 
 ## 코어 API 퀵 참조
 
-| API                    | 설명                      | 일반적인 사용법                                                                |
-| ---------------------- | ------------------------- | ------------------------------------------------------------------------------ |
-| `createClient`         | 요청 클라이언트 생성      | `createClient(withEndpoint('https://api.example.com'))`                        |
+| API                    | 설명                      | 일반적인 사용법                                                                                         |
+| ---------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `createClient`         | 요청 클라이언트 생성      | `createClient(withEndpoint('https://api.example.com'))`                                                 |
 | `defineRequest`        | HTTP 엔드포인트 정의      | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | SSE 엔드포인트 정의       | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
-| `defineWebSocket`      | WebSocket 엔드포인트 정의 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
-| `struct`               | 스키마 빌더               | `struct.object({ id: struct.number() })`                                       |
-| `.alias(name)`         | 필드 wire 이름 별칭       | `struct.string().alias('user_name')`                                           |
-| `withEndpoint`         | 기본 URL 설정             | `withEndpoint('https://api.example.com')`                                      |
-| `withInterceptors`     | 인터셉터 등록             | `withInterceptors([...interceptors])`                                          |
-| `withCredentials`      | 교차 출처 인증 정보 포함  | `withCredentials(true)`                                                        |
-| `withSSEOptions`       | SSE 옵션 설정             | `withSSEOptions({ method: 'POST' })`                                           |
-| `withWebSocketOptions` | WebSocket 옵션 설정       | `withWebSocketOptions({ protocols: ['v1'] })`                                  |
+| `defineEventStream`    | SSE 엔드포인트 정의       | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
+| `defineWebSocket`      | WebSocket 엔드포인트 정의 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
+| `struct`               | 스키마 빌더               | `struct.object({ id: struct.number() })`                                                                |
+| `.alias(name)`         | 필드 wire 이름 별칭       | `struct.string().alias('user_name')`                                                                    |
+| `withEndpoint`         | 기본 URL 설정             | `withEndpoint('https://api.example.com')`                                                               |
+| `withInterceptors`     | 인터셉터 등록             | `withInterceptors([...interceptors])`                                                                   |
+| `withCredentials`      | 교차 출처 인증 정보 포함  | `withCredentials(true)`                                                                                 |
+| `withSSEOptions`       | SSE 옵션 설정             | `withSSEOptions({ method: 'POST' })`                                                                    |
+| `withWebSocketOptions` | WebSocket 옵션 설정       | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
 
 ## 다음 단계
 

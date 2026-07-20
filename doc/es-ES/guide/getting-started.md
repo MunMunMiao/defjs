@@ -176,19 +176,19 @@ async function createPost() {
 
 ## Referencia rápida de la API Core
 
-| API                    | Descripción                         | Uso típico                                                                     |
-| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
-| `createClient`         | Crear un cliente de peticiones      | `createClient(withEndpoint('https://api.example.com'))`                        |
+| API                    | Descripción                         | Uso típico                                                                                              |
+| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `createClient`         | Crear un cliente de peticiones      | `createClient(withEndpoint('https://api.example.com'))`                                                 |
 | `defineRequest`        | Definir un endpoint HTTP            | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | Definir un endpoint SSE             | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
-| `defineWebSocket`      | Definir un endpoint WebSocket       | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
-| `struct`               | Constructor de esquemas             | `struct.object({ id: struct.number() })`                                       |
-| `.alias(name)`         | Alias de clave wire para campos     | `struct.string().alias('user_name')`                                           |
-| `withEndpoint`         | Establecer URL base                 | `withEndpoint('https://api.example.com')`                                      |
-| `withInterceptors`     | Registrar interceptores             | `withInterceptors([...interceptors])`                                          |
-| `withCredentials`      | Habilitar credenciales cross-origin | `withCredentials(true)`                                                        |
-| `withSSEOptions`       | Configurar opciones SSE             | `withSSEOptions({ method: 'POST' })`                                           |
-| `withWebSocketOptions` | Configurar opciones WebSocket       | `withWebSocketOptions({ protocols: ['v1'] })`                                  |
+| `defineEventStream`    | Definir un endpoint SSE             | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
+| `defineWebSocket`      | Definir un endpoint WebSocket       | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
+| `struct`               | Constructor de esquemas             | `struct.object({ id: struct.number() })`                                                                |
+| `.alias(name)`         | Alias de clave wire para campos     | `struct.string().alias('user_name')`                                                                    |
+| `withEndpoint`         | Establecer URL base                 | `withEndpoint('https://api.example.com')`                                                               |
+| `withInterceptors`     | Registrar interceptores             | `withInterceptors([...interceptors])`                                                                   |
+| `withCredentials`      | Habilitar credenciales cross-origin | `withCredentials(true)`                                                                                 |
+| `withSSEOptions`       | Configurar opciones SSE             | `withSSEOptions({ method: 'POST' })`                                                                    |
+| `withWebSocketOptions` | Configurar opciones WebSocket       | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
 
 ## Qué sigue
 

@@ -178,20 +178,12 @@ When you need to forward request-specific headers or cookies during SSR or insid
 ```ts
 // server/lib/create-server-client.ts
 import { getCookie, getHeader, getRequestHeaders } from 'h3'
-import {
-  createClient,
-  createHttpInterceptor,
-  withEndpoint,
-  withInterceptors,
-} from '@defjs/core'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
 
 export function createServerClient(event: Parameters<typeof getRequestHeaders>[0]) {
   const requestId = getHeader(event, 'x-request-id')
   const reviewedCookieNames = ['session', 'csrf-token'] as const
-  const serializeForwardedCookie = (
-    name: (typeof reviewedCookieNames)[number],
-    value: string,
-  ) => `${name}=${encodeURIComponent(value)}`
+  const serializeForwardedCookie = (name: (typeof reviewedCookieNames)[number], value: string) => `${name}=${encodeURIComponent(value)}`
   const reviewedCookieHeader = reviewedCookieNames
     .flatMap((name) => {
       const value = getCookie(event, name)

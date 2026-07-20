@@ -129,12 +129,12 @@ for await (const event of stream) {
 
 `EventStreamHandle` 实现 `AsyncIterable`，因此可以直接与 `for await...of` 一起使用。它还提供以下属性。注意：这里的 `stream.open` 是句柄上的活动状态，会在每次收到新的 open 响应后更新；它表示最新 open 响应/最新连接尝试响应快照，不保证该响应已经通过校验或代表成功连接。`const [error, stream, open] = await client.execute(...)` 中的第三项 `open` 则只是启动完成时拿到的打开快照；如果你需要保留它，请单独保存。
 
-| 属性 / 方法                | 说明                                                                                     |
-| -------------------------- | ---------------------------------------------------------------------------------------- |
+| 属性 / 方法                | 说明                                                                                                                                                  |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `open`                     | 最新 open 响应/最新连接尝试响应的 `EventStreamOpenInfo`（包含 `response` 和 `url`）；每次收到新的 open 响应后都会更新，可能来自尚未通过校验的重连响应 |
-| `closed`                   | `Promise<EventStreamCloseInfo>`，流完全关闭时解析                                        |
-| `close(reason?)`           | 主动关闭流，可选传入原因                                                                 |
-| `[Symbol.asyncIterator]()` | 返回消费事件队列的异步迭代器                                                             |
+| `closed`                   | `Promise<EventStreamCloseInfo>`，流完全关闭时解析                                                                                                     |
+| `close(reason?)`           | 主动关闭流，可选传入原因                                                                                                                              |
+| `[Symbol.asyncIterator]()` | 返回消费事件队列的异步迭代器                                                                                                                          |
 
 `closed` 在以下情况下解析：
 

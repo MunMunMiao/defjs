@@ -176,19 +176,19 @@ async function createPost() {
 
 ## Référence rapide de l'API Core
 
-| API                    | Description                               | Usage typique                                                                  |
-| ---------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
-| `createClient`         | Créer un client de requête                | `createClient(withEndpoint('https://api.example.com'))`                        |
+| API                    | Description                               | Usage typique                                                                                           |
+| ---------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `createClient`         | Créer un client de requête                | `createClient(withEndpoint('https://api.example.com'))`                                                 |
 | `defineRequest`        | Définir un point de terminaison HTTP      | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | Définir un point de terminaison SSE       | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
-| `defineWebSocket`      | Définir un point de terminaison WebSocket | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
-| `struct`               | Constructeur de schéma                    | `struct.object({ id: struct.number() })`                                       |
-| `.alias(name)`         | Alias de clé wire pour les champs         | `struct.string().alias('user_name')`                                           |
-| `withEndpoint`         | Définir l'URL de base                     | `withEndpoint('https://api.example.com')`                                      |
-| `withInterceptors`     | Enregistrer des intercepteurs             | `withInterceptors([...interceptors])`                                          |
-| `withCredentials`      | Activer les credentials cross-origin      | `withCredentials(true)`                                                        |
-| `withSSEOptions`       | Configurer les options SSE                | `withSSEOptions({ method: 'POST' })`                                           |
-| `withWebSocketOptions` | Configurer les options WebSocket          | `withWebSocketOptions({ protocols: ['v1'] })`                                  |
+| `defineEventStream`    | Définir un point de terminaison SSE       | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
+| `defineWebSocket`      | Définir un point de terminaison WebSocket | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
+| `struct`               | Constructeur de schéma                    | `struct.object({ id: struct.number() })`                                                                |
+| `.alias(name)`         | Alias de clé wire pour les champs         | `struct.string().alias('user_name')`                                                                    |
+| `withEndpoint`         | Définir l'URL de base                     | `withEndpoint('https://api.example.com')`                                                               |
+| `withInterceptors`     | Enregistrer des intercepteurs             | `withInterceptors([...interceptors])`                                                                   |
+| `withCredentials`      | Activer les credentials cross-origin      | `withCredentials(true)`                                                                                 |
+| `withSSEOptions`       | Configurer les options SSE                | `withSSEOptions({ method: 'POST' })`                                                                    |
+| `withWebSocketOptions` | Configurer les options WebSocket          | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
 
 ## Prochaines étapes
 

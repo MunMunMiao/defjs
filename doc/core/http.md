@@ -176,10 +176,10 @@ const [error, result, response] = await client.execute(command(), {
 
 The returned `HttpAwaitResult` is a triplet:
 
-| Position | Type                                     | Meaning                                                                 |
-| -------- | ---------------------------------------- | ----------------------------------------------------------------------- |
-| 0        | `RequestError<TErrorData> \| null`       | Error object; `null` on success                                         |
-| 1        | `TSuccess \| undefined`                  | Success data; `undefined` on failure, and also `undefined` when `output` is omitted |
+| Position | Type                                     | Meaning                                                                                                                                                                   |
+| -------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0        | `RequestError<TErrorData> \| null`       | Error object; `null` on success                                                                                                                                           |
+| 1        | `TSuccess \| undefined`                  | Success data; `undefined` on failure, and also `undefined` when `output` is omitted                                                                                       |
 | 2        | `SettledResponse<TSuccess> \| undefined` | Raw response wrapper with `status`, `headers`, `body`, etc. When `output` is omitted, the wrapper is still returned for settled requests but its `body` is set to `null`. |
 
 ## Cancellation and Timeout
@@ -298,9 +298,7 @@ const getImage = defineRequest({
   method: 'GET',
   path: '/images/:id',
   responseType: 'blob',
-  output: [
-    { status: 200, body: struct.blob() },
-  ] as const,
+  output: [{ status: 200, body: struct.blob() }] as const,
 })
 
 // No output: use for status/header-only checks

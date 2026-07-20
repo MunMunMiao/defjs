@@ -1,6 +1,6 @@
 ---
 title: Vue
-description: "@defjs/core 的轻量 Vue 适配器，提供 provideClient 与 injectClient 接线，以及面向主流应用层集成的实践示例。"
+description: '@defjs/core 的轻量 Vue 适配器，提供 provideClient 与 injectClient 接线，以及面向主流应用层集成的实践示例。'
 ---
 
 # @defjs/vue
@@ -178,20 +178,12 @@ export default defineNuxtPlugin((nuxtApp) => {
 ```ts
 // server/lib/create-server-client.ts
 import { getCookie, getHeader, getRequestHeaders } from 'h3'
-import {
-  createClient,
-  createHttpInterceptor,
-  withEndpoint,
-  withInterceptors,
-} from '@defjs/core'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
 
 export function createServerClient(event: Parameters<typeof getRequestHeaders>[0]) {
   const requestId = getHeader(event, 'x-request-id')
   const reviewedCookieNames = ['session', 'csrf-token'] as const
-  const serializeForwardedCookie = (
-    name: (typeof reviewedCookieNames)[number],
-    value: string,
-  ) => `${name}=${encodeURIComponent(value)}`
+  const serializeForwardedCookie = (name: (typeof reviewedCookieNames)[number], value: string) => `${name}=${encodeURIComponent(value)}`
   const reviewedCookieHeader = reviewedCookieNames
     .flatMap((name) => {
       const value = getCookie(event, name)

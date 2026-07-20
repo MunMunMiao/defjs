@@ -134,7 +134,7 @@ for await (const event of stream) {
 | -------------------------- | --------------------------------------------------------------- |
 | `open`                     | 첫 연결 `EventStreamOpenInfo`(`response`와 `url` 포함)          |
 | `closed`                   | `Promise<EventStreamCloseInfo>`, 스트림이 완전히 닫히면 resolve |
-| `close(reason?)`           | 스트림을 직접 닫음, 선택적으로 이유 전달                         |
+| `close(reason?)`           | 스트림을 직접 닫음, 선택적으로 이유 전달                        |
 | `[Symbol.asyncIterator]()` | 이벤트 큐를 소비하는 비동기 이터레이터 반환                     |
 
 `closed`는 다음 상황에서 resolve돼요:

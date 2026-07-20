@@ -23,7 +23,9 @@ export interface WebSocketInterceptorOptions {
   responseHook?: (span: Span, session: WebSocketSessionLike) => void
 }
 
-export function createOpenTelemetryWebSocketInterceptor(options: WebSocketInterceptorOptions): ReturnType<typeof createWebSocketInterceptor> {
+export function createOpenTelemetryWebSocketInterceptor(
+  options: WebSocketInterceptorOptions,
+): ReturnType<typeof createWebSocketInterceptor> {
   return createWebSocketInterceptor(async (req, next) => {
     const { tracer, propagator, metrics, requireParentSpan, queryPropagation = true, requestHook, responseHook } = options
 

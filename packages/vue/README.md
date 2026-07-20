@@ -98,7 +98,6 @@ onMounted(async () => {
 
 If you need interceptors, withInterceptors(...) in this adapter accepts factory functions because the provider/plugin creates the real @defjs/core client later. Each call appends the interceptors produced by those factories in option application order, matching the core client's withInterceptors(...) composition model.
 
-
 ```ts
 import { createApp } from 'vue'
 import { createHttpInterceptor } from '@defjs/core'
@@ -114,10 +113,7 @@ const authInterceptor = createHttpInterceptor(async (request, next) => {
 
 const loggingInterceptor = createHttpInterceptor(async (request, next) => {
   const target = request.baseEndpoint
-    ? new URL(
-        `${request.endpoint}${request.queryString ? `?${request.queryString}` : ''}`,
-        request.baseEndpoint,
-      ).toString()
+    ? new URL(`${request.endpoint}${request.queryString ? `?${request.queryString}` : ''}`, request.baseEndpoint).toString()
     : `${request.endpoint}${request.queryString ? `?${request.queryString}` : ''}`
 
   console.log(request.method, target)
@@ -129,7 +125,10 @@ const app = createApp(App)
 app.use(
   provideClient(
     withEndpoint('https://api.example.com'),
-    withInterceptors(() => authInterceptor, () => loggingInterceptor),
+    withInterceptors(
+      () => authInterceptor,
+      () => loggingInterceptor,
+    ),
   ),
 )
 

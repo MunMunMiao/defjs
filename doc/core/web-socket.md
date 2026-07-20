@@ -142,15 +142,15 @@ idle → connecting → open → closing → closed
          (retry)      aborted
 ```
 
-| State          | Meaning                                                                           |
-| -------------- | --------------------------------------------------------------------------------- |
-| `idle`         | Before `execute()` is called.                                                                                                            |
-| `connecting`   | Opening the first connection attempt.                                                                                                    |
-| `open`         | Connection established, messages can flow.                                                                                               |
-| `closing`      | A current `CONNECTING`/`OPEN` socket is being shut down, typically by an external abort, while waiting for the close event. Manual `close()` is not guaranteed to expose this state publicly. |
-| `closed`       | Clean close (no error, including manual `close()`).                                                                                      |
-| `reconnecting` | Connection dropped, waiting before retry.                                                                                                |
-| `error`        | Terminal failure (validation error, transport error, non-abort close with cause, or an external abort whose reason does not normalize to `ABORTED`). |
+| State          | Meaning                                                                                                                                                                                              |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `idle`         | Before `execute()` is called.                                                                                                                                                                        |
+| `connecting`   | Opening the first connection attempt.                                                                                                                                                                |
+| `open`         | Connection established, messages can flow.                                                                                                                                                           |
+| `closing`      | A current `CONNECTING`/`OPEN` socket is being shut down, typically by an external abort, while waiting for the close event. Manual `close()` is not guaranteed to expose this state publicly.        |
+| `closed`       | Clean close (no error, including manual `close()`).                                                                                                                                                  |
+| `reconnecting` | Connection dropped, waiting before retry.                                                                                                                                                            |
+| `error`        | Terminal failure (validation error, transport error, non-abort close with cause, or an external abort whose reason does not normalize to `ABORTED`).                                                 |
 | `aborted`      | External cancellation normalized to transport code `ABORTED` after the socket lifecycle has started (for example default `controller.abort()`, `ERR_ABORTED`, or a DOMException named `AbortError`). |
 
 State transitions are emitted via `onStateChange`. After startup, an external abort only passes through `closing` when there is a current socket in `CONNECTING` or `OPEN`. If the runtime is between attempts during reconnect delay, the session finishes directly in `aborted` or `error` without re-entering `closing`. It reaches `aborted` only when the merged abort reason normalizes to transport code `ABORTED` (for example the default abort reason, `ERR_ABORTED`, or a DOMException named `AbortError`); other custom reasons finish in `error`. Manual `close()` still ends in `closed`, but consumers must not rely on observing a public `closing` state for that path. The `receive` async iterator ends when the socket reaches a terminal state (`closed`, `error`, or `aborted`).
@@ -180,12 +180,7 @@ const [error, socket] = await client.execute(useSocket(), {
 Heartbeat can be configured per-client with `withWebSocketHeartbeat(...)` or `withWebSocketOptions({ heartbeat: ... })`, and per-request via `execute()` options. Request-level config wins.
 
 ```typescript
-import {
-  createClient,
-  withEndpoint,
-  withWebSocketHeartbeat,
-  withWebSocketReconnect,
-} from '@defjs/core'
+import { createClient, withEndpoint, withWebSocketHeartbeat, withWebSocketReconnect } from '@defjs/core'
 
 const client = createClient(
   withEndpoint('https://api.example.com'),

@@ -176,19 +176,19 @@ async function createPost() {
 
 ## 核心 API 速查表
 
-| API                    | 說明                | 典型用法                                                                       |
-| ---------------------- | ------------------- | ------------------------------------------------------------------------------ |
-| `createClient`         | 建立請求用戶端      | `createClient(withEndpoint('https://api.example.com'))`                        |
+| API                    | 說明                | 典型用法                                                                                                |
+| ---------------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `createClient`         | 建立請求用戶端      | `createClient(withEndpoint('https://api.example.com'))`                                                 |
 | `defineRequest`        | 定義 HTTP 端點      | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | 定義 SSE 端點       | `defineEventStream({ path: '/events', events: { message: struct.string() } })` |
-| `defineWebSocket`      | 定義 WebSocket 端點 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                         |
-| `struct`               | 結構描述建構器      | `struct.object({ id: struct.number() })`                                       |
-| `.alias(name)`         | 欄位 wire 名別名    | `struct.string().alias('user_name')`                                           |
-| `withEndpoint`         | 設定基礎 URL        | `withEndpoint('https://api.example.com')`                                      |
-| `withInterceptors`     | 註冊攔截器          | `withInterceptors([...interceptors])`                                          |
-| `withCredentials`      | 啟用跨域憑證        | `withCredentials(true)`                                                        |
-| `withSSEOptions`       | 設定 SSE 選項       | `withSSEOptions({ method: 'POST' })`                                           |
-| `withWebSocketOptions` | 設定 WebSocket 選項 | `withWebSocketOptions({ protocols: ['v1'] })`                                  |
+| `defineEventStream`    | 定義 SSE 端點       | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
+| `defineWebSocket`      | 定義 WebSocket 端點 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
+| `struct`               | 結構描述建構器      | `struct.object({ id: struct.number() })`                                                                |
+| `.alias(name)`         | 欄位 wire 名別名    | `struct.string().alias('user_name')`                                                                    |
+| `withEndpoint`         | 設定基礎 URL        | `withEndpoint('https://api.example.com')`                                                               |
+| `withInterceptors`     | 註冊攔截器          | `withInterceptors([...interceptors])`                                                                   |
+| `withCredentials`      | 啟用跨域憑證        | `withCredentials(true)`                                                                                 |
+| `withSSEOptions`       | 設定 SSE 選項       | `withSSEOptions({ method: 'POST' })`                                                                    |
+| `withWebSocketOptions` | 設定 WebSocket 選項 | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
 
 ## 接下來
 

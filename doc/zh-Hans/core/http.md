@@ -176,10 +176,10 @@ const [error, result, response] = await client.execute(command(), {
 
 返回的 `HttpAwaitResult` 是一个三元组：
 
-| 位置 | 类型                                     | 含义                                                                 |
-| ---- | ---------------------------------------- | -------------------------------------------------------------------- |
-| 0    | `RequestError<TErrorData> \| null`       | 错误对象；成功时为 `null`                                            |
-| 1    | `TSuccess \| undefined`                  | 成功数据；失败时为 `undefined`，如果省略 `output` 也会是 `undefined` |
+| 位置 | 类型                                     | 含义                                                                                                                             |
+| ---- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | `RequestError<TErrorData> \| null`       | 错误对象；成功时为 `null`                                                                                                        |
+| 1    | `TSuccess \| undefined`                  | 成功数据；失败时为 `undefined`，如果省略 `output` 也会是 `undefined`                                                             |
 | 2    | `SettledResponse<TSuccess> \| undefined` | 原始响应包装，包含 `status`、`headers`、`body` 等；当省略 `output` 时，已完成请求仍会返回该包装，但其中的 `body` 会被设为 `null` |
 
 ## 取消和超时
@@ -298,9 +298,7 @@ const getImage = defineRequest({
   method: 'GET',
   path: '/images/:id',
   responseType: 'blob',
-  output: [
-    { status: 200, body: struct.blob() },
-  ] as const,
+  output: [{ status: 200, body: struct.blob() }] as const,
 })
 
 // 未声明 output：适合只检查状态码 / 响应头

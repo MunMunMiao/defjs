@@ -97,12 +97,12 @@ const client = createClient(
 
 ### WebSocket オプション
 
-| オプション         | 型                        | デフォルト  | 説明                                                                                   |
-| ------------------ | ------------------------- | ----------- | -------------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`      | WebSocket トレースを有効化                                                             |
+| オプション         | 型                        | デフォルト  | 説明                                                                                                                                                                              |
+| ------------------ | ------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                 | `true`      | WebSocket トレースを有効化                                                                                                                                                        |
 | `queryPropagation` | `boolean`                 | `true`      | ブラウザ互換性のために WebSocket URL のクエリ文字列へトレースコンテキストを注入します。セキュリティ重視の本番トラフィックでは、`false` を推奨ベースラインとして明示してください。 |
-| `requestHook`      | `(span, req) => void`     | `undefined` | 接続リクエスト前に WebSocket スパンをカスタマイズ                                      |
-| `responseHook`     | `(span, session) => void` | `undefined` | セッション返却後に WebSocket スパンをカスタマイズ。`session` は `WebSocketSessionLike` |
+| `requestHook`      | `(span, req) => void`     | `undefined` | 接続リクエスト前に WebSocket スパンをカスタマイズ                                                                                                                                 |
+| `responseHook`     | `(span, session) => void` | `undefined` | セッション返却後に WebSocket スパンをカスタマイズ。`session` は `WebSocketSessionLike`                                                                                            |
 
 > **フック例外処理**: `requestHook` または `responseHook` がスローしても、エラーはスパンの `defjs.otel.hook.error` イベントとして記録されますが、クライアントのリクエスト／ストリーム／セッションは**正常に継続します**。
 >
@@ -110,14 +110,14 @@ const client = createClient(
 
 ## 旧 API からの移行
 
-| 旧設定                    | 新設定                                                           |
-| ------------------------- | ---------------------------------------------------------------- |
-| `http: false`             | `http: { enabled: false }`                                       |
-| `sse: false`              | `sse: { enabled: false }`                                        |
-| `webSocket: false`        | `webSocket: { enabled: false }`                                  |
-| `requestHook`             | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook` |
-| `responseHook`            | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
-| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                   |
+| 旧設定                      | 新設定                                                              |
+| --------------------------- | ------------------------------------------------------------------- |
+| `http: false`               | `http: { enabled: false }`                                          |
+| `sse: false`                | `sse: { enabled: false }`                                           |
+| `webSocket: false`          | `webSocket: { enabled: false }`                                     |
+| `requestHook`               | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook`    |
+| `responseHook`              | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
+| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                        |
 
 各トランスポートが正しいリクエスト／レスポンス型を公開できるように、旧トップレベルフックと真偽値のトランスポート切り替えは意図的に削除されています。削除されたこれらの旧 JavaScript オプションを渡すと、現在は有効化済み計測として黙って解釈されるのではなく、移行エラーがスローされます。
 
