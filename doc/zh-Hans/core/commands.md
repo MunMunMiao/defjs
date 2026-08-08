@@ -1,316 +1,261 @@
 ---
 title: Commands
-description: Master defineRequest, defineEventStream, and defineWebSocket, including command object structure and input optional rules.
+description: 定义 endpoint，创建 command builder 和 command，把 Struct 输入映射到 wire，并推断 HTTP output 类型。
 ---
 
-# 命令
+# Commands
 
-Defjs 围绕“命令”构建：由 `defineRequest`、`defineEventStream` 和 `defineWebSocket` 创建的类型安全可执行值。运行时它们会携带端点元数据以及可选的调用输入，`Client.execute` 会使用内部传输元数据完成分发。把命令当作不透明值即可：用户代码应将它们传给 `Client.execute(...)`，而不是依赖公开的传输标签判断或内部反射。
+Defjs 分为三个相关阶段：
 
-## defineRequest：HTTP 端点定义
-
-`defineRequest` 定义一个 RESTful HTTP 端点。它接受一个定义对象，并返回一个命令构建器。
+1. **端点定义（endpoint definition）**描述稳定的 HTTP、SSE 或 WebSocket 契约。
+2. **Command builder** 是 `defineRequest`、`defineEventStream` 或 `defineWebSocket` 返回的函数。
+3. **Command** 是调用 builder 并传入 input 后得到的值。把它传给 `client.execute(...)`。
 
 ```typescript
-import { defineRequest } from '@defjs/core'
-import { struct } from '@defjs/core'
-
 const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
+})
+
+const command = getUser({ path: { id: 42 } })
+const result = await client.execute(command)
+```
+
+这里，传给 `defineRequest` 的对象是端点定义，`getUser` 是 command builder，`command` 是 command。
+
+## HTTP 端点定义
+
+`defineRequest(...)` 接受以下字段：
+
+| 字段           | 含义                                                                                |
+| -------------- | ----------------------------------------------------------------------------------- |
+| `method`       | HTTP method 字符串。                                                                |
+| `path`         | 相对 endpoint path，可以包含 `:name` placeholder。                                  |
+| `input`        | 对 command input 做结构化解码的 Struct。                                            |
+| `build`        | 把 input 字段投影到 request part 的 schema-bound projection。必须同时提供 `input`。 |
+| `output`       | 用于 response 解码和结果推断的 status-to-Struct 映射。                              |
+| `responseType` | 可选的 `json`、`text`、`blob` 或 `arraybuffer` response mode。                      |
+
+Command 字段直接对应 wire section 时，使用 `struct.request(...)`：
+
+```typescript
+import { defineRequest, struct } from '@defjs/core'
+
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/organizations/:organizationId/users',
+  input: struct.request({
+    path: struct.object({
+      organizationId: struct.string().alias('organization_id'),
+    }),
+    query: struct.object({
+      notify: struct.boolean().optional(),
+    }),
+    headers: struct.object({
+      requestId: struct.string().alias('x-request-id'),
+    }),
+    body: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  }),
   output: [
-    { status: 200, body: struct.object({ name: struct.string(), age: struct.number() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
+    { status: 201, body: struct.object({ id: struct.number() }) },
+    { status: 409, body: struct.object({ message: struct.string() }) },
   ] as const,
 })
 
-const command = getUser({ path: { id: 42 } })
+const command = createUser({
+  path: { organizationId: 'acme' },
+  query: { notify: true },
+  headers: { requestId: 'request-42' },
+  body: { displayName: 'Ada' },
+})
 ```
 
-### 定义对象字段
+调用方使用逻辑字段名，alias 决定 wire key。
 
-| 字段           | 类型                              | 说明                                             |
-| -------------- | --------------------------------- | ------------------------------------------------ |
-| `method`       | `string`                          | HTTP 方法，例如 `GET`、`POST`                    |
-| `path`         | `string`                          | URL 路径，支持 `:param` 占位符                   |
-| `input`        | `AnyStruct \| undefined`          | 输入数据 Struct 验证器                           |
-| `build`        | `RequestBuildHandler`             | 将解析后的输入映射到 HTTP 请求各部分             |
-| `output`       | `RequestOutputShape \| undefined` | 将状态码映射到响应 Struct                        |
-| `responseType` | `HttpResponseType`                | 可选，强制响应解析模式（`json`、`text`、`blob`） |
+## Command Builder 参数可选性
 
-### input / output / build 关系
-
-1. **input**：描述调用方必须提供的数据。执行时，客户端使用 `input` Struct 验证并解析原始输入。
-2. **build**：接收 `RequestBuilder` 和解析后的输入 (`RequestBuildInput`)，将数据映射到路径参数、查询参数、请求头和请求体。当公开输入形状与实际传输形状不同，或者你需要自定义映射逻辑时使用它。
-3. **output**：描述服务器可能返回的响应。客户端按 HTTP 状态码选择匹配的结构，并推断 2xx 成功类型和非 2xx 错误类型。
-
-当 `input` 使用 `struct.request({ path, query, headers, body })` 时，运行时可以自动构建请求各部分，此时无需提供 `build`。
-
-如果省略 `input`，则必须同时省略 `build`。该命令不接受输入，直接发送到 `path`。
-
-如果提供 `build`，则必须同时提供 `input`。
-
-### 无输入快捷方式
+没有 `input` 的 builder 不接收参数：
 
 ```typescript
-const ListUsers = defineRequest({
+const health = defineRequest({ method: 'GET', path: '/health' })
+health()
+```
+
+Object Struct 的输入属性在类型层面都是可选的，request section 也可选。结构化解码会用零值填充非 optional output 字段，因此这两种 shape 都不会让 builder 参数变成必填。
+
+```typescript
+const search = defineRequest({
   method: 'GET',
-  path: '/users',
+  path: '/search',
+  input: struct.request({
+    query: struct.object({ q: struct.string() }),
+  }),
 })
 
-const command = ListUsers() // 无需参数
+search() // Accepted. The decoded q value is ''.
+search({ query: { q: 'docs' } })
 ```
 
-### 输出类型推断
-
-`output` 同时支持数组和对象形式，行为等价。
-
-本指南主要使用数组形式，因为它能更明确地表达状态码 / 响应体配对，也便于将多个状态码归到同一组。对象形式依然受支持，适合较紧凑的参考示例。
+如果 builder 必须接收参数，请使用 primitive 或 array input。下面用 primitive，并把它投影到 path parameter：
 
 ```typescript
-output: [
-  { status: 200, body: UserStruct },
-  { status: [401, 403], body: AuthErrorStruct },
-] as const
+const getUserById = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.number(),
+  build(request, input) {
+    request.setPathParams({ id: input })
+  },
+})
 
-output: {
-  200: UserStruct,
-  '401': AuthErrorStruct,
-  '403': AuthErrorStruct,
+// getUserById() // TypeScript error: an argument is required.
+getUserById(42)
+```
+
+这只是参数可选性，不是业务校验。调用方仍可传入 Struct input type 接受的值；缺失的 object field 会得到零值。
+
+## 自动构建请求
+
+当 `input` 是 `struct.request(...)` 且没有提供 `build` 时，Defjs 会自动映射已声明的 section：
+
+- `path` 替换 path placeholder；
+- `query` 变成 query parameter；
+- `headers` 变成 request header；
+- `body` 使用对应的 body wrapper。
+
+Request body 必须声明受支持的 boundary：
+
+```typescript
+struct.json(struct.object({ name: struct.string() }))
+struct.text()
+struct.urlencoded({ name: struct.string() })
+struct.formData({ file: struct.file() })
+struct.blob()
+struct.arrayBuffer()
+```
+
+不要在 `request.body` 中直接放裸 `struct.object(...)`；`struct.request(...)` 会拒绝它。HTTP 支持所有 body 形式。SSE 不接受 body section，WebSocket 不接受 headers 和 body section。
+
+## 自定义 `build`
+
+逻辑字段需要映射到不同 wire 位置或 key 时，使用 `build(request, input)`。`input` 参数是 **schema-bound projection（受 schema 约束的投影）**，不是已解析的调用方运行时值。
+
+```typescript
+const createBatch = defineRequest({
+  method: 'POST',
+  path: '/accounts/:account_id/users',
+  input: struct.object({
+    accountId: struct.number(),
+    users: struct.array(
+      struct.object({
+        displayName: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  build(request, input) {
+    request.setPathParams({ account_id: input.accountId })
+    request.setJson({
+      users: input.users.map((user) => ({
+        display_name: user.displayName,
+        email: user.email,
+      })),
+    })
+  },
+  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }] as const,
+})
+```
+
+投影可以：
+
+- 选择已声明字段；
+- 指定目标 wire key；
+- 用 `.map(...)` 对数组做 item-to-item 投影；
+- 把选中的对象绑定到 JSON 时，按字段 alias 编码。
+
+投影不能检查调用方的值、按值分支、执行任意 transform、改变数组基数或注入字面量。例如，`request.setJson({ version: 'v1' })` 不是有效投影，因为 `'v1'` 不来自 input binding view。
+
+创建 command 之前，在应用层完成数据标准化和校验。`build` 只负责声明式 wire mapping。
+
+### Build 能力
+
+| Target                                                | HTTP | SSE    | WebSocket |
+| ----------------------------------------------------- | ---- | ------ | --------- |
+| `setPathParams`, `setQueryParams`                     | 支持 | 支持   | 支持      |
+| `setHeaders`, `addHeaders`                            | 支持 | 支持   | 不支持    |
+| JSON、text、HTML、form、Blob、ArrayBuffer body method | 支持 | 不支持 | 不支持    |
+
+TypeScript build context 会按 transport 收窄。即使绕过类型检查，runtime 也会拒绝不支持的输出。
+
+## HTTP Output 推断
+
+`output` 支持 object map 或 status/body pair 数组：
+
+```typescript
+const User = struct.object({ id: struct.number() })
+const NotFound = struct.object({ message: struct.string() })
+const Unauthorized = struct.object({ message: struct.string() })
+
+const objectOutput = {
+  '200': User,
+  '404': NotFound,
 }
+
+const arrayOutput = [
+  { status: 200, body: User },
+  { status: [401, 403], body: Unauthorized },
+] as const
 ```
 
-执行结果自动推断类型：2xx 数据进入成功分支，其余进入错误分支。
+HTTP 成功类型是所有已声明 2xx body 的 union。`error.data` 是所有已声明非 2xx body 的 union。数组形式需要 `as const`，才能保留 status 字面量和分组 readonly 数组。
 
----
+声明 `output` 后，每个返回的 status 都必须有匹配的 Struct。无论 2xx 还是非 2xx，未匹配都会产生 `UNDECLARED_STATUS`。省略 `output` 时，response body 会被忽略，结果是 `undefined`。
 
-## defineEventStream：SSE 流定义
+## SSE 与 WebSocket 定义
 
-`defineEventStream` 定义一个 Server-Sent Events (SSE) 端点。它将事件名称映射到 Struct，实现事件级类型安全。
+`defineEventStream(...)` 用 `events` map 取代 HTTP `output`。Event name 选择 Struct；可选的 `default` entry 在 runtime 处理未声明名称。
 
 ```typescript
-import { defineEventStream, struct } from '@defjs/core'
-
-const Notifications = defineEventStream({
+const notifications = defineEventStream({
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
-    userJoined: struct.json(struct.object({ userId: struct.number(), name: struct.string() })),
-  },
-})
-
-const command = Notifications()
-```
-
-### events 映射
-
-`events` 中的每个键对应 SSE 的 `event` 字段。消息到达时，客户端按 `event` 名称查找匹配的结构。
-
-### default 事件处理
-
-如果服务器发送了未声明的事件名，你可以提供 `default` 结构：
-
-```typescript
-import { defineEventStream, struct } from '@defjs/core'
-
-const Stream = defineEventStream({
-  path: '/events',
-  events: {
-    update: struct.json(struct.object({ version: struct.number() })),
-    default: struct.string(), // 未匹配的事件解析为字符串
+    default: struct.string(),
   },
 })
 ```
 
-没有 `default` 时，未匹配的事件将被丢弃。如果通过 `withSSEOptions({ onInvalidEvent })` 或 `withSSEOnInvalidEvent(...)` 配置了无效事件处理，该观察者会收到通知。
-
-### 带输入的 SSE
-
-SSE 默认使用 `GET`。如果需要查询参数，提供 `input` 和 `build`，与 `defineRequest` 相同：
+`defineWebSocket(...)` 声明 `incoming` 和可选的 `outgoing` message map。Message envelope 使用 `type` discriminator。
 
 ```typescript
-const FilteredStream = defineEventStream({
-  path: '/events',
-  input: struct.object({
-    category: struct.string(),
-  }),
-  build(ctx, input) {
-    ctx.setQueryParams({ category: input.category })
-  },
-  events: {
-    item: struct.json(struct.object({ id: struct.number(), title: struct.string() })),
-  },
-})
-
-const command = FilteredStream({ category: 'news' })
-```
-
-SSE 的 `build` 只支持映射 path、query 和 headers 这些请求部分。凭证应在客户端级别通过 `withCredentials(...)` 配置；`build(ctx, input)` 不暴露公开的凭证设置方法。
-
----
-
-## defineWebSocket：WebSocket 定义
-
-`defineWebSocket` 定义一个 WebSocket 端点，区分 **incoming**（服务器 → 客户端）和 **outgoing**（客户端 → 服务器）消息结构。
-
-```typescript
-import { defineWebSocket, struct } from '@defjs/core'
-
-const ChatSocket = defineWebSocket({
-  path: '/chat/:roomId',
-  input: struct.request({
-    path: struct.object({ roomId: struct.string() }),
-  }),
-  incoming: {
-    message: struct.object({ user: struct.string(), text: struct.string() }),
-    system: struct.object({ event: struct.string() }),
-  },
-  outgoing: {
-    sendMessage: struct.object({ text: struct.string() }),
-    joinRoom: struct.object({ roomId: struct.string() }),
-  },
-})
-
-const command = ChatSocket({ path: { roomId: 'lobby' } })
-```
-
-仅当公开输入形状与实际传输形状不同时，才使用 `build(ctx, input)`：
-
-```typescript
-const ChatSocketWithManualBuild = defineWebSocket({
-  path: '/chat/:roomId',
-  input: struct.object({
-    roomId: struct.string(),
-    tenant: struct.string(),
-  }),
-  build(ctx, input) {
-    ctx.setPathParams({ roomId: input.roomId })
-    ctx.setQueryParams({ tenant: input.tenant })
-  },
+const chat = defineWebSocket({
+  path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
   },
-})
-```
-
-### incoming 消息结构
-
-`incoming` 定义服务器推送的消息类型。每条消息必须包含一个 `type` 字段，匹配 `incoming` 中的键。如果负载是对象，其字段会与 `type` 合并：
-
-```typescript
-// 服务器发送：{ type: 'message', user: 'Alice', text: 'Hi' }
-// 解析为：    { type: 'message', user: 'Alice', text: 'Hi' }
-```
-
-如果负载是标量（字符串、数字等），它会被包装为 `{ type: 'xxx', data: <value> }`。
-
-### outgoing 消息结构
-
-`outgoing` 定义客户端发送的消息类型。`WebSocketSession.send(message)` 要求调用方传入一个消息对象，其中 `type` 必须是字符串，并匹配某个 `outgoing` 键；运行时不会在发送时根据 schema 键名自动补上 `type`。
-
-```typescript
-session.send({ type: 'sendMessage', text: 'hello' })
-session.send({ type: 'joinRoom', roomId: 'lobby' })
-```
-
-当 outgoing 负载 schema 是对象时，把它的字段直接放在与 `type` 同一层；当 schema 是标量时，用 `data` 承载该值：
-
-```typescript
-import { defineWebSocket, struct } from '@defjs/core'
-
-const BinarySocket = defineWebSocket({
-  path: '/binary',
-  incoming: {
-    ack: struct.boolean(),
-  },
   outgoing: {
-    chunk: struct.string(),
-  },
-})
-
-session.send({ type: 'chunk', data: 'hello' })
-```
-
-### 只接收的 WebSocket
-
-如果你不需要向服务器发送消息，省略 `outgoing`：
-
-```typescript
-const ReadOnlySocket = defineWebSocket({
-  path: '/feed',
-  incoming: {
-    tick: struct.object({ price: struct.number() }),
+    send: struct.object({ text: struct.string() }),
   },
 })
 ```
 
-### WebSocket build 限制
+解码、queue、reconnect 和关闭所有权见 [SSE](/zh-Hans/core/sse) 与 [WebSocket](/zh-Hans/core/web-socket)。
 
-WebSocket 的 `build` 仅支持 `setPathParams` 和 `setQueryParams`。不支持 HTTP 专属操作（请求头、请求体）。
+## 把 Command 当作不透明值
 
----
+应用代码应创建 command，并直接传给 `Client.execute(...)`。不要依赖 transport tag 或结构反射。
 
-## 命令对象结构
-
-无论定义类型如何，构建后的命令都是一个不透明的可执行值，对外主要承担两件事：
-
-- 保存由 `defineRequest`、`defineEventStream` 或 `defineWebSocket` 创建的端点定义
-- 保存你传给构建器的可选调用输入
-
-运行时内部还会附加传输元数据，让 `Client.execute(...)` 能分发到正确的执行器（HTTP fetch、SSE 流或 WebSocket 连接）。这些元数据属于实现细节，不是公开 API 的一部分。
-
-```typescript
-const getUser = defineRequest({ method: 'GET', path: '/users/:id' })
-const command = getUser({ path: { id: 42 } })
-
-await client.execute(command)
-```
-
-从公开 API 视角看，把返回的命令值当作要传给 `Client.execute(...)` 的不透明对象即可。不要在应用代码里依赖公开 `.kind` 判断、内部 symbol，或结构反射。
-
----
-
-## 输入可选规则
-
-命令构建器参数是否可选，取决于声明的 `input` 形状：
-
-1. **没有定义 `input`**：构建器可以不传参数调用。
-2. **定义了 `input`，但其中所有字段都可选**：构建器参数仍然可选。
-3. **`input` 中存在任意必填字段**：构建器参数变为必填。
-
-```typescript
-// 无 input — 可选
-const A = defineRequest({ method: 'GET', path: '/a' })
-A() // OK
-
-// input 中所有字段都可选 — 仍然可选
-const B = defineRequest({
-  method: 'GET',
-  path: '/b',
-  input: struct.request({
-    query: struct.object({ q: struct.string().optional() }),
-  }),
-})
-B() // OK
-B({ query: {} }) // OK
-
-// 存在必填字段 — 参数必填
-const C = defineRequest({
-  method: 'POST',
-  path: '/c',
-  input: struct.request({
-    body: struct.object({ name: struct.string() }),
-  }),
-})
-C() // TypeScript 错误：缺少参数
-C({ body: { name: 'defjs' } }) // OK
-```
+Root entry 目前会导出 transport command interface 和低层 executor function。推荐流程不需要这些导出，它们的长期稳定性承诺也尚未在本文档中确定。Runtime dispatch 使用的 command tag symbol 和 guard function 并未从 root 导出。
 
 ## 下一步
 
-- [SSE →](/core/sse) — SSE 执行、重连和事件处理
-- [WebSocket →](/core/web-socket) — WebSocket 连接、心跳和状态管理
-- [客户端 →](/core/client) — 客户端创建和 `execute` 用法
+- [Client](/zh-Hans/core/client)：execution overload 和 option 组合。
+- [HTTP](/zh-Hans/core/http)：URL、编码、response 和取消行为。
+- [Struct](/zh-Hans/core/struct)：结构化解码和零值。

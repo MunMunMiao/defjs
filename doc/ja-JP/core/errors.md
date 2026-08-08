@@ -1,35 +1,41 @@
 ---
 title: Errors
-description: RequestError structure, error classification, built-in constants, and recommended branching patterns.
+description: トランスポート別の結果タプルを処理し、プレーンオブジェクトである RequestError の判別可能なユニオンで分岐します。
 ---
 
-# エラー
+# Errors
 
-`@defjs/core` ですべての実行結果は `[error, result, response]` のトリプレットとして返されます。`error` は `RequestError` です：`kind` と `code` を持つ判別共用体です。`kind` と `code` による分岐が推奨されるパターンであり、文字列比較は避けるべきです。
-
-## RequestError の構造
-
-`RequestError` は 3 つのエラータイプの共用体です：
+対応するすべてのトランスポートは、エラーを先頭に置く 3 要素タプルを返します。ただし、3 番目の要素はトランスポートごとに異なります。
 
 ```typescript
-import type { RequestError } from '@defjs/core'
-
-type RequestError<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+const [httpError, data, response] = await client.execute(httpCommand)
+const [sseError, stream, startupOpen] = await client.execute(sseCommand)
+const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-すべてのエラーは以下の共通フィールドを持ちます：
+- HTTP はデコード済みデータと Defjs の `SettledResponse` ラッパーを返します。
+- SSE は論理ストリームハンドルと起動時オープンスナップショットを返します。
+- WebSocket は論理セッションと起動時接続スナップショットを返します。
 
-| フィールド | 型                                      | 説明                                                            |
-| ---------- | --------------------------------------- | --------------------------------------------------------------- |
-| `kind`     | `'http' \| 'transport' \| 'definition'` | トップレベル分岐用のエラーカテゴリー                            |
-| `code`     | `string`                                | 2 次レベル分岐用の正確なエラーコード                            |
-| `message`  | `string`                                | 人間が読めるエラー説明                                          |
-| `data`     | `unknown`                               | 追加データ（`http` と `definition` エラーのみ）                 |
-| `response` | `SettledResponseLike`                   | 生のレスポンスオブジェクト（`http` と `definition` エラーのみ） |
+失敗時は 2 番目の要素が `undefined` です。対応するスナップショットが作られる前に起動が失敗した場合、3 番目の要素も `undefined` になります。
 
-### HttpStatusError
+## `RequestError`
 
-サーバーが `output` で定義された非 2xx ステータスコードを返した場合に生成されます。
+`RequestError` はタプルで返る、判別用フィールドを持つプレーンオブジェクトです。ネイティブの `Error` クラスは継承していません。
+
+```typescript
+import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
+
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+```
+
+エクスポートされているユニオン名は `RequestError<TErrorData>` です。
+
+まず `kind`、必要に応じて次に `code` で分岐します。
+
+### HTTP ステータスエラー
+
+宣言済みの 2xx 以外の HTTP レスポンスは、次のエラーになります。
 
 ```typescript
 interface HttpStatusError<TErrorData = unknown> {
@@ -42,24 +48,26 @@ interface HttpStatusError<TErrorData = unknown> {
 }
 ```
 
-`data` の型は、一致するステータスコードに対する `output` スキーマから導出されます。例えば、`output: { 404: notFoundStruct }` は `error.data` を `notFoundStruct` の推論型に絞り込みます。
+`data` があるのは `HttpStatusError` だけです。その型は、エンドポイントで宣言した 2xx 以外の出力ボディをまとめたユニオンです。現在、`error.status` を確認してもこのユニオンの型は絞り込まれません。ステータスごとにボディの形が異なる場合は、アプリケーション側で構造または判別フィールドを確認してください。
 
-### TransportError
+### トランスポートエラー
 
-ネットワークまたはトランスポート層の障害（中断、タイムアウト、一般的なネットワークエラー）が発生した場合に生成されます。
+ネットワーク処理、キャンセル、タイムアウトの失敗は次のエラーになります。
 
 ```typescript
 interface TransportError {
   kind: 'transport'
-  code: 'ABORTED' | 'TIMEOUT' | 'NETWORK_ERROR'
+  code: 'ABORTED' | 'NETWORK_ERROR' | 'TIMEOUT'
   message: string
   cause?: unknown
 }
 ```
 
-### DefinitionError
+トランスポートエラーに `data` と `response` フィールドはありません。
 
-リクエスト定義または検証の失敗時に生成されます。
+### 定義エラー
+
+入力デコード、リクエスト構築、レスポンスデコード、未宣言の HTTP ステータスは、次のエラーになることがあります。
 
 ```typescript
 interface DefinitionError {
@@ -71,184 +79,89 @@ interface DefinitionError {
 }
 ```
 
-| コード                       | トリガーとなる状況                                                                            |
-| ---------------------------- | --------------------------------------------------------------------------------------------- |
-| `REQUEST_VALIDATION_FAILED`  | 入力パラメーターが `input` struct の検証に失敗した場合、または `build` が例外をスローした場合 |
-| `RESPONSE_VALIDATION_FAILED` | レスポンスボディが返されたステータスコードに対する `output` struct の検証に失敗した場合       |
-| `UNDECLARED_STATUS`          | サーバーが `output` に宣言されていない 2xx ステータスコードを返した場合                       |
+| コード                       | 現在の発生条件                                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------------------------- |
+| `REQUEST_VALIDATION_FAILED`  | 入力の構造デコード、リクエスト構築に失敗した、または `build` が無効なバインディングを生成した。 |
+| `RESPONSE_VALIDATION_FAILED` | 宣言済みレスポンスまたは SSE の起動時レスポンスが構造・内容の検証に失敗した。                   |
+| `UNDECLARED_STATUS`          | `output` が宣言されている状態で、対応する Struct のない HTTP ステータスが返った。               |
 
-## エラーの分類と分岐
+`UNDECLARED_STATUS` は、未対応の 2xx と 2xx 以外の両方に適用されます。
 
-**推奨しません**：文字列比較でエラータイプを判断することは避けてください：
-
-```typescript
-// 非推奨: 壊れやすく、型絞り込みができません
-if (error.message.includes('timeout')) { ... }
-```
-
-**推奨**：正確な型絞り込みのため、`kind` と `code` で分岐してください：
+## 分岐
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+declare const useUser: (user: unknown) => void
 
-const client = createClient(/* ... */)
+const [error, user, response] = await client.execute(getUser())
 
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ code: struct.string(), message: struct.string() }),
-  },
-})
-
-const [error, user] = await client.execute(getUser())
-
-if (error) {
+if (!error) {
+  useUser(user)
+} else {
   switch (error.kind) {
-    case 'http': {
-      // error は HttpStatusError に絞り込まれます
-      console.error('HTTP', error.status, error.message)
-      if (error.status === 404) {
-        // error.data は { code: string; message: string } に絞り込まれます
-        console.error('Not found:', error.data.code)
-      }
+    case 'http':
+      console.error('HTTP request failed', {
+        operation: 'get-user',
+        status: error.status,
+      })
       break
-    }
-    case 'transport': {
-      // error は TransportError に絞り込まれます
+
+    case 'transport':
       switch (error.code) {
         case 'ABORTED':
-          console.error('Request aborted')
+          console.info('get-user cancelled')
           break
         case 'TIMEOUT':
-          console.error('Request timed out')
+          console.warn('get-user timed out')
           break
         case 'NETWORK_ERROR':
-          console.error('Network error:', error.cause)
+          console.error('get-user transport failed')
           break
       }
       break
-    }
-    case 'definition': {
-      // error は DefinitionError に絞り込まれます
-      switch (error.code) {
-        case 'REQUEST_VALIDATION_FAILED':
-          console.error('Request validation failed:', error.cause)
-          break
-        case 'RESPONSE_VALIDATION_FAILED':
-          console.error('Response validation failed:', error.cause)
-          break
-        case 'UNDECLARED_STATUS':
-          console.error('Undeclared status:', error.response?.status)
-          break
-      }
+
+    case 'definition':
+      console.error('get-user contract failed', {
+        code: error.code,
+        status: error.response?.status,
+      })
       break
-    }
   }
 }
 ```
 
-## ビルトイン定数
+明示的なマスキングと保存ポリシーがない限り、`cause`、`data`、レスポンスヘッダー、ボディ、URL をログへ出さないでください。
 
-`@defjs/core` は、特定のトランスポートエラーを識別するための 2 つの定数をエクスポートします：
+## レスポンスの有無
 
-```typescript
-import { ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
+`SettledResponseLike` と `SettledResponse` は Defjs のラッパーであり、ネイティブの `Response` オブジェクトではありません。ステータス、ステータステキスト、ヘッダー、URL、ボディ、任意のエラー情報を公開し、確定済みレスポンスのラッパーには `ok` フラグもあります。`ok` はステータスが 2xx であることだけを表します。
 
-// ERR_ABORTED: リクエストが能動的にキャンセルされた
-// ERR_TIMEOUT: リクエストがタイムアウトした
-```
+HTTP では、次の規則になります。
 
-### インターセプター内でのキャンセル発火
+- 宣言済み HTTP ステータスエラーには `error.response` があります。
+- レスポンス出力の検証エラーと未宣言ステータスには `error.response` がある場合があります。
+- リクエスト検証、レスポンス前のキャンセル、インターセプターによる例外の送出、ステータス 0 のトランスポート失敗では、タプルのレスポンスがない場合があります。
 
-```typescript
-import { createHttpInterceptor, ERR_ABORTED } from '@defjs/core'
+SSE の起動失敗でも、レスポンス到着後に内容またはステータスの検証が失敗した場合は、3 番目にオープンスナップショットを返すことがあります。WebSocket の起動失敗で接続スナップショットを返せるのは、スナップショットが取得済みの場合だけです。
 
-const authInterceptor = createHttpInterceptor(async (req, next) => {
-  const token = await getToken()
-  if (!token) {
-    throw ERR_ABORTED
-  }
-  req.setHeader('Authorization', `Bearer ${token}`)
-  return next(req)
-})
-```
+## エラーファクトリーと定数
 
-### AbortController との組み合わせ
+ルートエントリーは統合コード向けのファクトリーヘルパーをエクスポートしています。
 
 ```typescript
-import { ERR_ABORTED } from '@defjs/core'
-
-const controller = new AbortController()
-controller.abort(ERR_ABORTED)
-
-const [error] = await client.execute(getUser(), { signal: controller.signal })
-// error.code === 'ABORTED'
+import { ERR_ABORTED, ERR_TIMEOUT, createDefinitionError, createHttpStatusError, createTransportError } from '@defjs/core'
 ```
 
-### トランスポートエラーの手動作成
+- `createTransportError(cause)` は中断、タイムアウト、その他の原因を正規化します。
+- `createDefinitionError(code, cause, response?)` は定義エラーを作ります。
+- `createHttpStatusError(status, message, response, data?)` は HTTP ステータスエラーを作ります。
+- `ERR_ABORTED` と `ERR_TIMEOUT` は正規化処理が認識する共有 `Error` 値です。
 
-```typescript
-import { createTransportError, ERR_TIMEOUT } from '@defjs/core'
+これらのヘルパーはプレーンな `RequestError` オブジェクトを作成し、例外としては送出しません。
 
-const error = createTransportError(ERR_TIMEOUT)
-// { kind: 'transport', code: 'TIMEOUT', message: 'Request timed out' }
-```
-
-## ヘルパー関数
-
-### `createTransportError`
-
-生の例外を `TransportError` に正規化します。
-
-```typescript
-import { createTransportError, ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
-
-createTransportError(ERR_ABORTED)
-// => { kind: 'transport', code: 'ABORTED', message: 'Request was aborted' }
-
-createTransportError(ERR_TIMEOUT)
-// => { kind: 'transport', code: 'TIMEOUT', message: 'Request timed out' }
-
-createTransportError(new Error('offline'))
-// => { kind: 'transport', code: 'NETWORK_ERROR', message: 'offline' }
-```
-
-### `createDefinitionError`
-
-生の例外を `DefinitionError` に正規化します。
-
-```typescript
-import { createDefinitionError } from '@defjs/core'
-
-createDefinitionError('REQUEST_VALIDATION_FAILED', new Error('invalid id'))
-// => { kind: 'definition', code: 'REQUEST_VALIDATION_FAILED', message: 'invalid id' }
-```
-
-### `createHttpStatusError`
-
-非 2xx レスポンスを `HttpStatusError` に正規化します。
-
-```typescript
-import { createHttpStatusError } from '@defjs/core'
-
-const response = {
-  body: { code: 'NOT_FOUND' },
-  headers: new Headers(),
-  ok: false,
-  status: 404,
-  statusText: 'Not Found',
-  url: 'https://api.example.com/v1/user',
-}
-
-createHttpStatusError(404, 'Not Found', response, { code: 'NOT_FOUND' })
-// => { kind: 'http', code: 'HTTP_STATUS', status: 404, message: 'Not Found', data: { code: 'NOT_FOUND' }, response }
-```
+組み込みのコマンド経路は、想定される起動時の失敗をタプルへ変換します。ただし、タプル処理が任意の拡張コードまで覆うわけではありません。カスタムインターセプターとアプリケーションコールバックは例外を送出することがあり、広いランタイム実装に未対応のコマンドを渡すと Promise が reject されます。
 
 ## 次に読む
 
-- [Client →](/core/client) — クライアントの作成とコマンドの実行
-- [HTTP Requests →](/core/http) — `defineRequest` と出力パターン
-- [SSE →](/core/sse) — SSE のエラーと再接続戦略
-- [WebSocket →](/core/web-socket) — WebSocket の接続エラー処理
+- [HTTP](/ja-JP/core/http) — ステータスディスパッチとレスポンスデコード
+- [SSE](/ja-JP/core/sse) — 起動失敗とオープン後のエラーの違い
+- [WebSocket](/ja-JP/core/web-socket) — ランタイムエラーと終端クローズ

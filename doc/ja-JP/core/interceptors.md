@@ -1,349 +1,266 @@
 ---
 title: Interceptors
-description: Per-transport HTTP, SSE, and WebSocket interceptors, onion-chain execution model, and common interceptor examples.
+description: トランスポート別の選別、オニオン順、安全なリクエスト複製、ショートサーキット、範囲を限定した認証・再試行ポリシーを説明します。
 ---
 
-# インターセプター
+# Interceptors
 
-`@defjs/core` のインターセプターは、トランスポート層ごとに HTTP、SSE、WebSocket に分類されます。3 つとも同じオニオンチェーン実行モデルを共有しますが、異なるリクエスト／レスポンス形状を扱います：HTTP は `Promise<HttpResponse>` を返し、SSE は `Promise<EventStreamHandle>` を返し、WebSocket は `Promise<WebSocketSessionLike>` を返します。
+インターセプターはトランスポート境界を包みます。HTTP、SSE、WebSocket には、それぞれ異なるインターセプター種別と結果型があります。
 
-インターセプターは `withInterceptors(...)` を介して `Client` レベルで登録されます。クライアントはコマンドタイプに基づいて自動的にフィルタリングし、正しいインターセプター連鎖にディスパッチします。
+| ファクトリー                 | リクエスト    | `next` の戻り値                       |
+| ---------------------------- | ------------- | ------------------------------------- |
+| `createHttpInterceptor`      | `HttpRequest` | `Promise<HttpResponse<unknown>>`      |
+| `createSSEInterceptor`       | `HttpRequest` | `Promise<EventStreamHandle<unknown>>` |
+| `createWebSocketInterceptor` | `HttpRequest` | `Promise<WebSocketSessionLike>`       |
 
-## 3 つのインターセプタータイプ
-
-### HTTP インターセプター
-
-HTTP インターセプターは `HttpRequest` を操作し、`Promise<HttpResponse>` を返します。典型的な用途：認証ヘッダーの注入、ログ出力、リトライ、エラー変換。
+複数トランスポートのインターセプターは `withInterceptors(...)` でまとめて登録します。クライアントは `kind` で選別し、トランスポート内では登録順を保ちます。
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpResponse, HttpInterceptorNext } from '@defjs/core'
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(httpLogger, sseAuth, socketObserver))
+```
 
-const loggingInterceptor = createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-  console.log(`[HTTP] ${req.method} ${req.endpoint}`)
-  const response = await next(req)
-  console.log(`[HTTP] ${req.method} ${req.endpoint} -> ${response.status}`)
+## オニオン順
+
+リクエストは登録順に進み、戻り処理は逆順にたどります。
+
+```typescript
+const first = createHttpInterceptor(async (request, next) => {
+  order.push('first:before')
+  const response = await next(request)
+  order.push('first:after')
   return response
 })
+
+const second = createHttpInterceptor(async (request, next) => {
+  order.push('second:before')
+  const response = await next(request)
+  order.push('second:after')
+  return response
+})
+
+// first:before -> second:before -> transport
+//               <- second:after <- first:after
 ```
 
-### SSE インターセプター
-
-SSE インターセプターは `HttpRequest`（接続前の HTTP リクエスト）を操作し、`Promise<EventStreamHandle>` を返します。典型的な用途：SSE 接続前の認証ヘッダー注入、接続状態の監視。
+`withInterceptors(...)` を複数回呼ぶと末尾へ追加されます。
 
 ```typescript
-import { createSSEInterceptor } from '@defjs/core'
-import type { HttpRequest, SSEHandler } from '@defjs/core'
-
-const sseAuthInterceptor = createSSEInterceptor(async (req: HttpRequest, next: SSEHandler) => {
-  const headers = new Headers(req.headers)
-  headers.set('Authorization', `Bearer ${getToken()}`)
-  const stream = await next({ ...req, headers })
-  return stream
-})
+createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
-### WebSocket インターセプター
+## リクエストを安全に複製する
 
-WebSocket インターセプターは `HttpRequest`（ハンドシェイク前の HTTP リクエスト）を操作し、`Promise<WebSocketSessionLike>` を返します。典型的な用途：WebSocket ハンドシェイク前の URL 変更やサブプロトコルヘッダーの注入。
-
-```typescript
-import { createWebSocketInterceptor } from '@defjs/core'
-import type { HttpRequest, WebSocketHandler } from '@defjs/core'
-
-const wsProtocolInterceptor = createWebSocketInterceptor(async (req: HttpRequest, next: WebSocketHandler) => {
-  const headers = new Headers(req.headers)
-  headers.set('Sec-WebSocket-Protocol', 'v1')
-  const session = await next({ ...req, headers })
-  return session
-})
-```
-
-## オニオンチェーン実行モデル
-
-3 つのインターセプター連鎖はすべて**オニオンモデル**を使用します：リクエストフェーズは登録順に入り、レスポンスフェーズは逆順に戻ります。
+受け取ったリクエストはチェーンが所有するものとして扱います。ヘッダーを変更する前に、新しい `Headers` オブジェクトを作ってください。
 
 ```typescript
-import { createHttpInterceptor, makeInterceptorChain } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext, HttpResponse } from '@defjs/core'
-
-const order: number[] = []
-
-const a = createHttpInterceptor(async (req, next) => {
-  order.push(1) // リクエストフェーズ: 最初に入る
-  const res = await next(req)
-  order.push(1.1) // レスポンスフェーズ: 最後に出る
-  return res
-})
-
-const b = createHttpInterceptor(async (req, next) => {
-  order.push(2)
-  const res = await next(req)
-  order.push(2.1)
-  return res
-})
-
-const c = createHttpInterceptor(async (req, next) => {
-  order.push(3) // リクエストフェーズ: 最後に入る
-  const res = await next(req)
-  order.push(3.1) // レスポンスフェーズ: 最初に出る
-  return res
-})
-
-// 登録順: a -> b -> c
-// 実行順: 1 -> 2 -> 3 -> 3.1 -> 2.1 -> 1.1
-```
-
-### リクエストとレスポンスの変更
-
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext } from '@defjs/core'
-
-const addHeaderInterceptor = createHttpInterceptor(async (req, next) => {
-  const headers = new Headers(req.headers)
-  headers.set('X-Request-Id', crypto.randomUUID())
-  return next({ ...req, headers })
-})
-
-const wrapErrorInterceptor = createHttpInterceptor(async (req, next) => {
-  try {
-    return await next(req)
-  } catch (error) {
-    throw new Error(`Request failed: ${error}`)
+const auth = createHttpInterceptor((request, next) => {
+  const token = getAccessToken()
+  if (!token) {
+    return next(request)
   }
+
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${token}`)
+  return next({ ...request, headers })
 })
 ```
 
-### 返り値のラッピング
+SSE ヘッダーでも同じパターンを使えます。ブラウザーの WebSocket コンストラクターは任意のハンドシェイクヘッダーを送れないため、WebSocket インターセプターで `request.headers` を変更してもブラウザー接続の認証にはなりません。
+
+HTTP ボディを置き換える場合はリクエストを展開し、`body` を置き換えます。Fetch 境界は、以前のボディに対応する Content-Type メタデータが新しいボディに合わないことを検出します。消費済みの `ReadableStream` ボディを再利用しないでください。
+
+## ショートサーキット
+
+インターセプターは `next` を呼ばずに終了できますが、トランスポートが期待する結果タイプを返す必要があります。HTTP では `makeResponse(...)` で Defjs ラッパーを作れます。
+
+```typescript
+import { createHttpInterceptor, makeResponse } from '@defjs/core'
+
+declare const isMaintenanceWindow: () => boolean
+
+const maintenanceGate = createHttpInterceptor(async (request, next) => {
+  if (isMaintenanceWindow()) {
+    return makeResponse({
+      status: 503,
+      statusText: 'Service Unavailable',
+      body: { message: 'Temporarily unavailable' },
+    })
+  }
+
+  return next(request)
+})
+```
+
+通常のコマンド層は、このレスポンスに対して引き続きステータスディスパッチと出力 Struct を適用します。エンドポイント契約の一部なら、そのステータスを宣言してください。
+
+SSE または WebSocket をショートサーキットする場合、クローズ時の動作まで含む完全な互換ハンドルまたはセッションが必要です。通常は合成 HTTP レスポンスより手間がかかります。
+
+## セッションのライブ getter を保つ
+
+WebSocket セッションを `{ ...session }` で包まないでください。オブジェクトの展開は `state` と `connection` をその時点で一度読み取り、ライブ getter を古い固定値に変えてしまいます。各メンバーを明示的に委譲します。
 
 ```typescript
 import { createWebSocketInterceptor } from '@defjs/core'
-import type { WebSocketInterceptorFn } from '@defjs/core'
 
-const wrapSessionInterceptor: WebSocketInterceptorFn = async (req, next) => {
-  const session = await next(req)
+const wrappedSession = createWebSocketInterceptor(async (request, next) => {
+  const session = await next(request)
+
   return {
-    ...session,
-    send(message: unknown) {
-      console.log('[WS] send:', message)
+    get connection() {
+      return session.connection
+    },
+    get state() {
+      return session.state
+    },
+    closed: session.closed,
+    receive: session.receive,
+    close(code, reason) {
+      session.close(code, reason)
+    },
+    onRuntimeError(listener) {
+      return session.onRuntimeError(listener)
+    },
+    onStateChange(listener) {
+      return session.onStateChange(listener)
+    },
+    send(message) {
       session.send(message)
     },
   }
-}
-```
-
-## 一般的なインターセプター例
-
-### 認証インターセプター
-
-Bearer Token をヘッダーに注入します。HTTP と SSE は同じロジックを共有します。
-
-```typescript
-import { createHttpInterceptor, createSSEInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext } from '@defjs/core'
-
-function getToken(): string {
-  return localStorage.getItem('token') ?? ''
-}
-
-const authHttpInterceptor = createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-  const headers = new Headers(req.headers)
-  headers.set('Authorization', `Bearer ${getToken()}`)
-  return next({ ...req, headers })
-})
-
-const authSSEInterceptor = createSSEInterceptor(async (req, next) => {
-  const headers = new Headers(req.headers)
-  headers.set('Authorization', `Bearer ${getToken()}`)
-  return next({ ...req, headers })
 })
 ```
 
-### ログ出力インターセプター
+ラッパーはリソースの所有権も保つ必要があります。意図したアプリケーション動作として明記する場合を除き、`closed` を置き換えたり、`close` を抑止したり、受信イテラブルを切り離したりしないでください。
 
-リクエスト所要時間とステータスコードを記録します。
+## 範囲を限定したログ
 
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext } from '@defjs/core'
-
-const timingInterceptor = createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-  const start = performance.now()
-  const response = await next(req)
-  const duration = (performance.now() - start).toFixed(2)
-  console.log(`[${duration}ms] ${req.method} ${req.endpoint} ${response.status}`)
-  return response
-})
-```
-
-### リトライインターセプター
-
-特定のステータスコードをリトライします。リトライインターセプターは連鎖の下位付近、ログ出力の後、実際のリクエストの前に登録するべきです。
+固定した操作名と、少数のレビュー済みフィールドを使います。
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext, HttpResponse } from '@defjs/core'
+function timingInterceptor(operation: string) {
+  return createHttpInterceptor(async (request, next) => {
+    const startedAt = performance.now()
+    const response = await next(request)
 
-function retryInterceptor(maxRetries = 3, delayMs = 1000) {
-  return createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-    let lastError: unknown
+    console.info('outbound request completed', {
+      durationMs: Math.round(performance.now() - startedAt),
+      operation,
+      status: response.status,
+    })
 
-    for (let i = 0; i <= maxRetries; i++) {
-      try {
-        const response = await next(req)
-        if (response.status >= 500) {
-          lastError = new Error(`Server error: ${response.status}`)
-          if (i < maxRetries) {
-            await new Promise((r) => setTimeout(r, delayMs * (i + 1))
-            continue
-          }
-        }
-        return response
-      } catch (error) {
-        lastError = error
-        if (i < maxRetries) {
-          await new Promise((r) => setTimeout(r, delayMs * (i + 1))
-          continue
-        }
-      }
-    }
-
-    throw lastError
+    return response
   })
 }
 ```
 
-### Basic Auth インターセプター（ビルトイン）
+エンドポイント URL、クエリ文字列、ヘッダー、ボディ、生の原因、SSE イベント ID、WebSocket ペイロードはデフォルトでログへ出さないでください。
 
-`@defjs/core` は HTTP と SSE 向けのビルトイン Basic Auth インターセプターを提供します。
+## HTTP 再試行は慎重に限定する
+
+再試行はアプリケーションの動作を変えます。次の例は `GET`、`HEAD`、`OPTIONS` だけを対象にし、ステータス `0`、`502`、`503`、`504` だけを再試行します。`Retry-After` を尊重し、中断時はすぐ停止し、ストリームボディは拒否します。
 
 ```typescript
-import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from '@defjs/core'
+import { createHttpInterceptor } from '@defjs/core'
+import type { HttpRequest, HttpResponse } from '@defjs/core'
 
-const credential = () => ({ username: 'admin', password: 'secret' })
+const RETRYABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+const RETRYABLE_STATUSES = new Set([0, 502, 503, 504])
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(basicAuthHttpInterceptor(credential), basicAuthSSEInterceptor(credential)),
-)
+function isReplayable(request: HttpRequest): boolean {
+  return !(typeof ReadableStream !== 'undefined' && request.body instanceof ReadableStream)
+}
+
+function retryAfterMs(response: HttpResponse<unknown>): number | undefined {
+  const value = response.headers.get('retry-after')
+  if (!value) {
+    return undefined
+  }
+
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1_000
+  }
+
+  const at = Date.parse(value)
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
+}
+
+async function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    throw signal.reason
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(finish, ms)
+
+    function finish() {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }
+
+    function abort() {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+      reject(signal?.reason)
+    }
+
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+    }
+  })
+}
+
+function retrySafeHttp(maxRetries = 2) {
+  return createHttpInterceptor(async (request, next) => {
+    if (!RETRYABLE_METHODS.has(request.method.toUpperCase()) || !isReplayable(request)) {
+      return next(request)
+    }
+
+    for (let retry = 0; ; retry += 1) {
+      const response = await next(request)
+      if (!RETRYABLE_STATUSES.has(response.status) || retry >= maxRetries) {
+        return response
+      }
+
+      const fallback = Math.min(250 * 2 ** retry, 5_000)
+      const delay = Math.min(retryAfterMs(response) ?? fallback, 30_000)
+      await abortableWait(delay, request.abort)
+    }
+  })
+}
 ```
 
-デフォルトのエンコーディングは `globalThis.btoa` を使用します。`btoa` がない環境（例: Node）では、`options.encode` でカスタマイズできます：
+このインターセプターは、別のインターセプターが送出した例外を安全に分類できないため再試行しません。ステータス `0` は Defjs Fetch 境界が返すトランスポート失敗のラッパーです。
+
+書き込みメソッドを安易に追加しないでください。`POST`、`PUT`、`PATCH`、`DELETE` の再試行には、アプリケーションレベルの冪等性契約、再送できるボディ、サーバー側の対応、レビュー済みステータスポリシーが必要です。
+
+## Basic 認証
+
+ルートエントリーは `basicAuthHttpInterceptor(...)` と `basicAuthSSEInterceptor(...)` をエクスポートしています。
 
 ```typescript
-import { basicAuthHttpInterceptor } from '@defjs/core'
-
-const interceptor = basicAuthHttpInterceptor(() => ({ username: 'user', password: 'pass' }), {
-  encode: (cred) => Buffer.from(`${cred.username}:${cred.password}`).toString('base64'),
-})
-```
-
-## 登録とフィルタリング
-
-### `withInterceptors` による登録
-
-インターセプターは `createClient` 時に `withInterceptors(...)` を介して登録されます。同じ配列に 3 種類のインターセプターを混在させられます；クライアントはコマンドタイプに基づいて自動的にフィルタリングします。
-
-```typescript
-import { createClient, withEndpoint, withInterceptors } from '@defjs/core'
-import { createHttpInterceptor, createSSEInterceptor, createWebSocketInterceptor } from '@defjs/core'
-
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withInterceptors(
-    createHttpInterceptor(async (req, next) => {
-      console.log('HTTP:', req.endpoint)
-      return next(req)
-    }),
-    createSSEInterceptor(async (req, next) => {
-      console.log('SSE:', req.endpoint)
-      return next(req)
-    }),
-    createWebSocketInterceptor(async (req, next) => {
-      console.log('WS:', req.endpoint)
-      return next(req)
-    }),
+    basicAuthHttpInterceptor(() => credentials),
+    basicAuthSSEInterceptor(() => credentials),
   ),
 )
 ```
 
-### フィルタリングルール
+Basic 認証情報は base64 エンコードされるだけで、暗号化はされません。TLS を使ってください。デフォルトエンコーダーは `globalThis.btoa` を使いますが、ランタイムによっては利用できず、受け付ける文字範囲にも制限があります。`btoa` がない場合や認証情報にレビュー済みの UTF-8/base64 実装が必要な場合は、`options.encode` を渡してください。
 
-クライアントはコマンドタイプでインターセプターをフィルタリングします：
+認証情報プロバイダーはリクエストがインターセプターを通るたびに実行されます。サーバー認証情報はリクエストスコープに保ち、生成されたヘッダーをログへ出さないでください。
 
-| コマンドタイプ                | フィルタ条件            | 内部関数                       |
-| ----------------------------- | ----------------------- | ------------------------------ |
-| HTTP (`defineRequest`)        | `kind === 'http'`       | `resolveHttpInterceptors`      |
-| SSE (`defineEventStream`)     | `kind === 'sse'`        | `resolveSSEInterceptors`       |
-| WebSocket (`defineWebSocket`) | `kind === 'web-socket'` | `resolveWebSocketInterceptors` |
+## オブザーバーとコールバックの安全性
 
-フィルタリングされたインターセプターは元の登録順を維持し、オニオンチェーンを形成します。
+SSE と WebSocket のインターセプターは、返されたハンドルにライフサイクルオブザーバーを付けられます。WebSocket リスナーは所有者の終了時に解除してください。リスナーと述語は例外を送出しないようにします。現在のリアルタイム実装は、すべてのリスナーや述語の失敗を隔離していません。
 
-```typescript
-// 簡略化された内部実行ロジック
-const httpInterceptors = resolveHttpInterceptors(clientConfig.interceptors)
-const chain = makeInterceptorChain(httpInterceptors)
-const response = await chain(request, (req) => fetchHandler(req, clientConfig.http.fetch))
-```
-
-### インターセプター順序と合成
-
-複数の `withInterceptors` 呼び出しは、順にインターセプターを追加します。
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(loggingInterceptor), // 最初
-  withInterceptors(authInterceptor, retryInterceptor), // 2 番目
-)
-// 最終順: logging -> auth -> retry
-```
-
-## ボディメタデータの注意点
-
-インターセプターが `body` を置き換えた場合、古い `bodyContentType` メタデータは自動的に無効化され、サーバーに誤った `Content-Type` が送信されるのを防ぎます。
-
-```typescript
-// 元のボディを保持: Content-Type メタデータは有効なまま
-const keepBody = createHttpInterceptor((req, next) => next({ ...req, headers: new Headers(req.headers) }))
-
-// ボディを置き換える: 古い Content-Type はクリアされ、新しいボディタイプが決定する
-const replaceBody = createHttpInterceptor((req, next) => next({ ...req, body: new FormData() }))
-```
-
-## API リファレンス
-
-### 作成関数
-
-| 関数                             | 説明                             |
-| -------------------------------- | -------------------------------- |
-| `createHttpInterceptor(fn)`      | HTTP インターセプターを作成      |
-| `createSSEInterceptor(fn)`       | SSE インターセプターを作成       |
-| `createWebSocketInterceptor(fn)` | WebSocket インターセプターを作成 |
-
-### 型
-
-| 型                     | 説明                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------- |
-| `HttpInterceptor`      | HTTP インターセプターオブジェクト `{ kind: 'http', fn: InterceptorFn }`                     |
-| `SSEInterceptor`       | SSE インターセプターオブジェクト `{ kind: 'sse', fn: SSEInterceptorFn }`                    |
-| `WebSocketInterceptor` | WebSocket インターセプターオブジェクト `{ kind: 'web-socket', fn: WebSocketInterceptorFn }` |
-| `Interceptor`          | 3 つのインターセプタータイプの共用体                                                        |
-| `HttpInterceptorNext`  | HTTP 次ハンドラー `(req: HttpRequest) => Promise<HttpResponse>`                             |
-| `SSEHandler`           | SSE 次ハンドラー `(req: HttpRequest) => Promise<EventStreamHandle>`                         |
-| `WebSocketHandler`     | WebSocket 次ハンドラー `(req: HttpRequest) => Promise<WebSocketSessionLike>`                |
-
-### ビルトインインターセプター
-
-| 関数                                             | 説明                             |
-| ------------------------------------------------ | -------------------------------- |
-| `basicAuthHttpInterceptor(credential, options?)` | HTTP Basic Auth インターセプター |
-| `basicAuthSSEInterceptor(credential, options?)`  | SSE Basic Auth インターセプター  |
+インターセプター自体は例外を送出したり、Promise を reject したりできます。高レベルのトランスポートが一部の失敗を `RequestError` へ正規化する場合はありますが、インターセプターコードで「絶対に reject しない」という保証に依存しないでください。
 
 ## 次に読む
 
-- [Client →](/core/client) — クライアントの作成とインターセプターの設定
-- [HTTP Requests →](/core/http) — `defineRequest` と出力パターン
-- [SSE →](/core/sse) — SSE の定義とストリーミング
-- [WebSocket →](/core/web-socket) — WebSocket の定義とライフサイクル
+- [Client](/ja-JP/core/client) — 登録とオプション合成
+- [HTTP](/ja-JP/core/http) — Fetch ラッパーとステータス 0 の動作
+- [SSE](/ja-JP/core/sse) と [WebSocket](/ja-JP/core/web-socket) — トランスポートライフサイクル

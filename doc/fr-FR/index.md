@@ -3,129 +3,69 @@ layout: home
 
 hero:
   name: Defjs
-  text: Typed APIs Across Transports
-  tagline: Définissez une fois. Typsé partout. HTTP, SSE et WebSocket avec validation à l'exécution et inférence TypeScript complète.
+  text: Des commandes typées pour HTTP, SSE et WebSocket
+  tagline: Décrivez les formats d'échange avec des Structs, créez des clients explicites et gardez visibles les résultats et le cycle de vie de chaque transport.
   actions:
     - theme: brand
-      text: Démarrer
-      link: /guide/getting-started
+      text: Bien démarrer
+      link: /fr-FR/guide/getting-started
     - theme: alt
       text: Voir sur GitHub
       link: https://github.com/defjs/defjs
 
 features:
-  - icon: 🔒
-    title: Sécurité des types
-    details: Définissez des schémas de requête avec struct. Obtenez une inférence de types end-to-end pour les entrées, les sorties et les branches d'erreur. La validation à l'exécution détecte les incompatibilités avant qu'elles n'atteignent la production.
-  - icon: 🌐
-    title: Multi-transport
-    details: Un style d'API unifié pour les requêtes HTTP, les Server-Sent Events et les connexions WebSocket. Changez de transport sans réécrire la logique de votre application.
-  - icon: 🧅
-    title: Intercepteurs
-    details: Des intercepteurs en modèle oignon par transport pour la journalisation, l'authentification, la réessai et les préoccupations transversales. HTTP, SSE et WebSocket ont chacun leur propre chaîne d'intercepteurs.
-  - icon: 📡
-    title: Streaming
-    details: Support natif SSE et WebSocket avec reconnexion automatique, heartbeat, mise en file d'attente de messages et contrôle de contre-pression. Conçu pour les applications en temps réel.
-  - icon: ⚡
-    title: Runtime universel
-    details: Fonctionne dans les navigateurs, Node.js, Bun et Deno. Pas de polyfills nécessaires. ESM pur avec zéro dépendance runtime pour le package core.
-  - icon: 🧩
-    title: Prêt pour les frameworks
-    details: Intégrations de première classe pour Vue et React avec les patterns provideClient / injectClient / useClient. Plugin OpenTelemetry pour l'observabilité côté serveur.
+  - title: Contrats d'endpoint
+    details: Distinguez les définitions d'endpoint, les constructeurs de commande et les commandes. Les Structs assurent le décodage structurel des entrées de l'appelant et des données du transport.
+  - title: Résultats propres au transport
+    details: HTTP, SSE et WebSocket renvoient chacun un tuple à trois éléments, avec l'erreur en premier. Le troisième contient selon le transport un wrapper de réponse, un instantané d'ouverture au démarrage ou un instantané de connexion au démarrage.
+  - title: Chaînes d'intercepteurs
+    details: Enregistrez des intercepteurs HTTP, SSE et WebSocket sur un client. Chaque transport sélectionne ses propres intercepteurs et les exécute en ordre « oignon ».
+  - title: Cycle de vie explicite
+    details: SSE peut réessayer après un échec réseau ou de lecture. La reconnexion WebSocket doit être activée explicitement. L'application reste responsable de la consommation, de l'annulation et de la fermeture définitive.
+  - title: Décodage à l'exécution
+    details: Décodez les entrées, réponses, événements de stream et messages WebSocket avec les mêmes contrats Struct qui pilotent l'inférence TypeScript.
+  - title: Intégrations applicatives
+    details: Partagez les clients avec Vue ou React et ajoutez une instrumentation OpenTelemetry sortante dans vos services serveur.
 ---
 
-## Démarrage rapide
+## Créer un client d'API typé
 
-Installe `@defjs/core` avec ton gestionnaire de paquets préféré :
+Commencez par décrire le contrat HTTP, SSE ou WebSocket appelé par votre application. Defjs transforme cette définition en constructeur de commande, valide les données à l'exécution et garde le résultat du transport explicite.
 
-::: code-group
-
-```bash [npm]
-npm install @defjs/core
-```
-
-```bash [yarn]
-yarn add @defjs/core
-```
-
-```bash [pnpm]
-pnpm add @defjs/core
-```
-
-```bash [bun]
-bun add @defjs/core
-```
-
-:::
-
-Définis une requête typée et exécute-la en trois lignes :
+Le parcours HTTP principal reste court : créez un client pour votre API, définissez un endpoint, appelez son constructeur de commande, puis exécutez la commande.
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-const [error, user] = await client.execute(getUser())
-if (!error) {
-  console.log(user.id, user.name) // entièrement typé
+const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
+
+if (error) {
+  console.error(error.kind, error.code)
+} else {
+  console.log(user.name, response.status)
 }
 ```
 
-## Intégrations framework
+Pointez le client vers le service utilisé par votre application et alignez les Structs sur son contrat de réponse réel. Votre application reste responsable des identifiants, de l'état de l'interface, des relances, de l'annulation et du nettoyage des ressources.
 
-<div class="framework-grid">
+## À lire ensuite
 
-### Vue
-
-`@defjs/vue` fournit `provideClient` en tant que plugin Vue et `injectClient` pour la Composition API. Partagez un client `@defjs/core` typé dans toute votre application.
-
-[En savoir plus →](/plugins/vue)
-
-### React
-
-`@defjs/react` fournit `ClientProvider`, `useClient` et des option helpers pour partager un client `@defjs/core` typé dans tout l’arbre de composants React.
-
-[En savoir plus →](/plugins/react)
-
-</div>
-
-## Prochaines étapes
-
-- [Démarrage →](/guide/getting-started) — Installation, utilisation CDN et ta première requête
-- [Concepts de base →](/core/client) — Client, commandes, contexte et gestion des erreurs
-- [Exemples →](/guide/examples) — CRUD REST, notifications SSE, chat WebSocket, patterns d'intercepteurs
-
-<style>
-.framework-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-}
-.framework-grid > div,
-.framework-grid > h3 {
-  margin: 0;
-}
-.framework-grid h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-.framework-grid p {
-  margin: 0 0 0.5rem;
-  color: var(--vp-c-text-2);
-}
-.framework-grid a {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--vp-c-brand-1);
-}
-</style>
+- [Bien démarrer](/fr-FR/guide/getting-started) installe le package et accompagne votre application jusqu'à sa première requête typée.
+- [Client](/fr-FR/core/client) explique la composition des options et les trois surcharges de `execute`.
+- [Commandes](/fr-FR/core/commands) décrit les définitions d'endpoint, constructeurs de commande, commandes et projections liées au schéma.
+- [HTTP](/fr-FR/core/http), [SSE](/fr-FR/core/sse) et [WebSocket](/fr-FR/core/web-socket) détaillent les transports et la responsabilité de leur cycle de vie.
+- [Vue](/fr-FR/plugins/vue), [React](/fr-FR/plugins/react) et [OpenTelemetry Server](/fr-FR/plugins/opentelemetry-server) montrent comment relier Defjs au framework et à la télémétrie de votre application.

@@ -14,7 +14,7 @@ Current workspace/package baseline: this repository uses `Node >=26`, `pnpm@11.6
 
 ## What this package does
 
-`ClientProvider` creates one `@defjs/core` client per provider mount and exposes it through React Context. `useClient()` reads the nearest provided client. `withEndpoint` and `withInterceptors` are React-specific option glue for provider setup.
+`ClientProvider` creates one `@defjs/core` client for a mounted provider instance and exposes it through React Context. Ordinary rerenders keep that initial client and do not reapply a changed `options` array. `useClient()` reads the nearest provided client. `withEndpoint` and `withInterceptors` are React-specific option glue for provider setup.
 
 This package is a thin adapter over `@defjs/core`. It does not add a query layer, data cache, Suspense integration, or application state management. Compose those patterns in your own React code by calling `client.execute(...)` from hooks, loaders, or third-party libraries.
 
@@ -110,7 +110,7 @@ export function UserProfile({ id }: { id: number }) {
 
 ## Cookbook
 
-When browsing this repository, see `doc/plugins/react.md` for recipes covering Next.js App Router request boundaries, application-owned header and cookie forwarding, TanStack Query integration, hydration boundaries, and `ClientProvider` lifecycle notes.
+When browsing this repository, see `doc/plugins/react.md` for recipes covering Next.js App Router request boundaries, application-owned header and cookie forwarding, TanStack Query integration, hydration boundaries, `ClientProvider` lifecycle, and SSE/WebSocket effect cleanup. Long-lived transports must be closed when their UI owner unmounts, including a successful handle that arrives after cleanup has started.
 
 ## API
 
@@ -132,8 +132,8 @@ Registers interceptor factories evaluated when `ClientProvider` creates the clie
 
 ## Notes
 
-- `ClientProvider` is marked with `"use client"`, so render it from a client component boundary in React Server Component applications.
-- If you need a different client instance, remount the provider. It does not recreate the client on every render.
+- The published entry is marked with `'use client'`, so React Server Component consumers treat this adapter as a client boundary.
+- If you need a different client instance, remount the provider at the lifecycle boundary that owns the new configuration. Ordinary rerenders retain the initial client.
 - `@defjs/react` does not change the request, command, interceptor, or error model from `@defjs/core`.
 
 ## License

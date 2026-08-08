@@ -1,197 +1,101 @@
 ---
-title: Getting Started
-description: Install @defjs/core, use it via CDN, and create your first typed request in three steps.
+title: Начало работы
+description: Установите Defjs, опишите типизированный HTTP-эндпоинт, создайте клиент и вызовите его из приложения.
 ---
 
 # Начало работы
 
-Defjs — это TypeScript-библиотека для определения типизированных API запросов и их выполнения через различные транспорты и JavaScript-рантаймы.
+Defjs позволяет один раз описать контракт API, а затем использовать его в приложении с типизированным вводом, декодированием во время выполнения и явными результатами транспорта.
 
 ## Установка
 
-Используйте ваш пакетный менеджер:
+Добавьте core-пакет в приложение:
 
-::: code-group
-
-```sh [npm]
-npm install @defjs/core
-```
-
-```sh [yarn]
-yarn add @defjs/core
-```
-
-```sh [pnpm]
+```sh
 pnpm add @defjs/core
 ```
 
-```sh [bun]
-bun add @defjs/core
-```
+Если проект использует другой менеджер пакетов, выполните аналогичную команду npm, Yarn или Bun. `@defjs/core` поставляется как ESM. При запуске в Node.js текущие метаданные пакета требуют Node 26 или новее.
 
+Устанавливайте адаптер только тогда, когда он нужен приложению:
+
+| Конфигурация            | Пакеты                                                                                    |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| React 18+               | `@defjs/core`, `@defjs/react`, `react`                                                    |
+| Vue 3+                  | `@defjs/core`, `@defjs/vue`, `vue`                                                        |
+| Серверный OpenTelemetry | `@defjs/core`, `@defjs/opentelemetry-server`, `@opentelemetry/api`, `@opentelemetry/core` |
+
+::: tip Используйте документацию установленной версии
+Эти страницы описывают API текущей версии документации. Проверьте версию, установленную в приложении. Если export или option отличается, используйте документацию и примечания к выпуску этой версии, а не смешивайте примеры разных версий.
 :::
 
-## Использование через CDN
+## Опишите первый запрос
 
-Импортируйте напрямую как ES-модуль без инструментов сборки:
-
-```typescript
-import { createClient, defineRequest, struct } from 'https://unpkg.com/@defjs/core/index.min.js'
-```
-
-## Три шага до первого запроса
-
-### Шаг 1: Создать клиент
-
-Клиент — это точка входа для выполнения всех запросов. Создайте экземпляр с помощью `createClient` и настройте базовый endpoint:
+Предположим, ваш API предоставляет `GET /users/:id`. Замените базовый URL и Struct ответа реальным контрактом своего сервиса.
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-```
-
-### Шаг 2: Определить запрос
-
-Используйте `defineRequest` для определения типизированного HTTP-ендпоинта. Используйте `struct` для описания формы входных данных и ответов:
-
-```typescript
-import { defineRequest, struct } from '@defjs/core'
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user/:id',
-  input: struct.object({
-    id: struct.number(),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-    404: struct.object({
-      message: struct.string(),
-    }),
-  },
-})
-```
-
-::: tip
-Ключи в `output` — это HTTP-коды состояния. Defjs автоматически выбирает подходящую схему во время выполнения и выводит TypeScript-типы соответственно: ответы 2xx типизируются как успешные данные, не-2xx — как данные ошибки.
-:::
-
-### Шаг 3: Выполнить
-
-Вызовите `client.execute` с вашей командой-запросом и необязательной конфигурацией:
-
-```typescript
-const [error, user, response] = await client.execute(getUser({ id: 1 }))
-
-if (error) {
-  // error типизируется на основе не-2xx схем в output
-  console.error(error.code, error.message)
-  return
-}
-
-// user типизируется как { id: number; name: string }
-console.log(user.name)
-```
-
-## Полный пример
-
-Вот сквозной пример с валидацией входных данных, валидацией выходных данных, обработкой ошибок и перехватчиком:
-
-```typescript
-import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
-
-// 1. Создать клиент
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors([
-    async (request, next) => {
-      request.headers.set('Authorization', 'Bearer token')
-      return next(request)
-    },
-  ]),
-)
-
-// 2. Определить запрос
-const createPost = defineRequest({
-  method: 'POST',
-  path: '/v1/posts',
-  input: struct.object({
-    title: struct.string(),
-    body: struct.string(),
-    'X-Request-ID': struct.string(),
-  }),
-  build: (input) => ({
-    body: { title: input.title, body: input.body },
-    headers: { 'X-Request-ID': input['X-Request-ID'] },
-  }),
-  output: {
-    201: struct.object({
-      id: struct.number(),
-      title: struct.string(),
-    }),
-    400: struct.object({
-      field: struct.string(),
-      reason: struct.string(),
-    }),
-  },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-// 3. Выполнить
-async function createPost() {
-  const [error, post, response] = await client.execute(
-    createPost({
-      title: 'Hello',
-      body: 'World',
-      'X-Request-ID': 'uuid-123',
-    }),
-  )
+async function loadUser(id: number) {
+  const [error, user, response] = await client.execute(getUser({ path: { id } }))
 
   if (error) {
-    switch (error.code) {
-      case 'HTTP_STATUS':
-        console.error('Validation failed:', error.data)
-        break
-      case 'REQUEST_VALIDATION_FAILED':
-        console.error('Request validation failed:', error.message)
-        break
-      case 'RESPONSE_VALIDATION_FAILED':
-        console.error('Response validation failed:', error.message)
-        break
-      case 'TRANSPORT_ERROR':
-        console.error('Network error:', error.message)
-        break
-      default:
-        console.error('Unknown error:', error)
-    }
+    console.error(error.kind, error.code)
     return
   }
 
-  console.log('Created post:', post.id, post.title)
+  console.log(user.name, response.status)
+}
+
+void loadUser(7)
+```
+
+`defineRequest(...)` возвращает **фабрику команды**. Вызов `getUser(...)` создаёт **команду**, в которой хранятся описание эндпоинта и входные данные вызова. Затем `client.execute(...)` возвращает трёхэлементный HTTP-кортеж:
+
+```typescript
+;[error, result, response]
+```
+
+При успехе `error` равен `null`, `result` содержит декодированный результат, а `response` — обёртку Defjs `SettledResponse`. При ошибке `result` равен `undefined`; если ответ не был получен, обёртка ответа тоже равна `undefined`.
+
+### Зачем нужен `as const`
+
+В массиве `output` литералы статусов отделяют тела успешных ответов 2xx от тел ошибок остальных статусов. `as const` сохраняет отдельные статусы и сгруппированные массивы статусов как readonly-литералы. Без него TypeScript может расширить их до `number` или `number[]`, и выведенные типы успешной и ошибочной веток станут менее точными.
+
+Поддерживается и объектная форма `output`:
+
+```typescript
+const output = {
+  '200': struct.object({ id: struct.number() }),
+  '404': struct.object({ message: struct.string() }),
 }
 ```
 
-## Краткая справка по Core API
+## Подключите к приложению
 
-| API                    | Описание                          | Типичное использование                                                                                  |
-| ---------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `createClient`         | Создать клиент запросов           | `createClient(withEndpoint('https://api.example.com'))`                                                 |
-| `defineRequest`        | Определить HTTP-ендпоинт          | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | Определить SSE-ендпоинт           | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
-| `defineWebSocket`      | Определить WebSocket-ендпоинт     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
-| `struct`               | Конструктор схем                  | `struct.object({ id: struct.number() })`                                                                |
-| `.alias(name)`         | Alias wire-имени для полей        | `struct.string().alias('user_name')`                                                                    |
-| `withEndpoint`         | Задать базовый URL                | `withEndpoint('https://api.example.com')`                                                               |
-| `withInterceptors`     | Зарегистрировать перехватчики     | `withInterceptors([...interceptors])`                                                                   |
-| `withCredentials`      | Включить cross-origin credentials | `withCredentials(true)`                                                                                 |
-| `withSSEOptions`       | Настроить SSE                     | `withSSEOptions({ method: 'POST' })`                                                                    |
-| `withWebSocketOptions` | Настроить WebSocket               | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
+Храните описания эндпоинтов в модулях, которые отражают API вашего сервиса. Используйте их фабрики команд в компонентах, route handler, фоновых задачах или store. Создавайте клиент на границе, которая владеет endpoint, учётными данными, перехватчиками и жизненным циклом.
+
+- Браузерное приложение обычно может использовать один общий клиент.
+- При серверном рендеринге создавайте клиент на каждый запрос, если меняются заголовки, cookies, пользователь или tenant.
+- Код, открывающий SSE или WebSocket, должен также читать и закрывать этот ресурс.
 
 ## Что дальше
 
-- [Клиент →](/core/client) — Создание клиентов, выполнение команд и конфигурация
-- [Команды →](/core/commands) — `defineRequest`, `defineEventStream`, `defineWebSocket`
-- [Ошибки →](/core/errors) — Структура `RequestError` и паттерны ветвления
+- [Команды](/ru-RU/core/commands) — автоматическое отображение запроса и пользовательские проекции, привязанные к схеме.
+- [Ошибки](/ru-RU/core/errors) — кортежи всех трёх транспортов и объединение `RequestError`.
+- [HTTP](/ru-RU/core/http) — разрешение URL, тела запросов, декодирование ответа, отмена и поведение XSRF.
+- [Примеры](/ru-RU/guide/examples) — рецепты, где этими контрактами управляет приложение.

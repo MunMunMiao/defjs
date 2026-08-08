@@ -1,211 +1,101 @@
 ---
-title: Getting Started
-description: 使用当前仓库 source/workspace API 创建你的第一个类型化请求，并为已发布 npm/CDN 用户补充单独说明。
+title: 快速开始
+description: 安装 Defjs，定义类型化 HTTP 端点，创建 client，并在自己的应用中调用它。
 ---
 
 # 快速开始
 
-Defjs 是一个 TypeScript 库，用于定义类型化的 HTTP、SSE 和 WebSocket API，并在 JavaScript 运行时上执行。
+Defjs 让应用只定义一次 API 契约，然后复用同一套类型化输入、运行时解码和明确的 transport 结果。
 
-## 仓库 source/workspace 路线
+## 安装
 
-本教程面向当前仓库里的 source/workspace API。
-
-如果你想原样跟随本页示例，请先安装 workspace 依赖，并在能从本仓库源码解析 `@defjs/core` 的 workspace package 中运行示例：
+在应用中安装 core package：
 
 ```sh
-pnpm install
-pnpm --dir doc run typecheck
+pnpm add @defjs/core
 ```
 
-::: info 开发基线
-本仓库使用 Node `>=26`、`pnpm@11.6.0` 和 `engine-strict=true` 开发。这个基线适用于在 monorepo 中协作的贡献者；如果你是在应用里安装已发布的 defjs 包，则应以该发布包声明的运行时和 bundler 约束为准。
+如果项目使用其他 package manager，请换成对应的 npm、Yarn 或 Bun 命令。`@defjs/core` 是 ESM。在 Node.js 中运行时，当前 package metadata 要求 Node 26 或更高版本。
+
+只在应用确实需要时安装 adapter：
+
+| 应用场景             | Packages                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| React 18+            | `@defjs/core`、`@defjs/react`、`react`                                                    |
+| Vue 3+               | `@defjs/core`、`@defjs/vue`、`vue`                                                        |
+| 服务端 OpenTelemetry | `@defjs/core`、`@defjs/opentelemetry-server`、`@opentelemetry/api`、`@opentelemetry/core` |
+
+::: tip 文档要和安装版本一致
+这些页面描述当前文档版本对应的 API。先确认应用实际安装的版本。如果 export 或 option 不同，请查看该版本的文档和 release notes，不要混用不同版本的示例。
 :::
 
-## 已发布 npm/CDN 的注意事项
+## 定义第一个请求
 
-如果你今天是从 npm 安装 `@defjs/core`，或通过 CDN 导入它，当前最新公开版本可能仍然落后于本教程。例如 `@defjs/core@0.3.3` 仍使用旧的 `createClient(options)` / `defineRequest(method, endpoint)` 风格。
+假设你的 API 提供 `GET /users/:id`。请把 base URL 和 response Struct 换成自己服务的真实契约。
 
-本页不提供完整的旧版 `0.3.3` 教程。在外部应用中复制 `withEndpoint(...)` 或 `struct.request(...)` 之前，请先确认你使用的已发布版本，其 README、包信息表或 release notes 已明确包含这一套 API。
-
-如果你需要面向当前已发布线的 CDN 导入，请单独导入那个已发布版本，并遵循它自己的 README/API 参考，而不是下面这些 source/workspace 示例。
-
-## 三步创建你的第一个请求
-
-### 第一步：创建客户端
-
-客户端是所有请求执行的入口。使用 `createClient` 创建实例，并配置基础端点：
-
-```typescript twoslash
-import { createClient, withEndpoint } from '@defjs/core'
-
-const client = createClient(withEndpoint('https://api.example.com'))
-```
-
-### 第二步：定义请求
-
-使用 `defineRequest` 定义类型化 HTTP 端点。当你的输入可以直接映射到 HTTP 的 path、query、headers 或 body 分区时，使用 `struct.request(...)`：
-
-```typescript twoslash
-import { defineRequest, struct } from '@defjs/core'
-
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/users/:id',
-  input: struct.request({
-    path: struct.object({
-      id: struct.number(),
-    }),
-  }),
-  output: [
-    {
-      status: 200,
-      body: struct.object({
-        id: struct.number(),
-        name: struct.string(),
-      }),
-    },
-    {
-      status: 404,
-      body: struct.object({
-        message: struct.string(),
-      }),
-    },
-  ] as const,
-})
-```
-
-::: tip
-本指南里的示例使用数组形式的 `output`，因为它能显式保留 status/body 配对，也便于多个状态码分组。对象形式的 `output` 仍然受支持，依然适合更紧凑的参考示例。
-:::
-
-### 第三步：执行
-
-调用 `client.execute` 并传入请求命令。HTTP 执行返回 error-first 元组：成功时是 `[null, result, response]`，失败时是 `[error, undefined, response?]`。
-
-```typescript twoslash
+```typescript
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/users/:id',
+  path: '/users/:id',
   input: struct.request({
-    path: struct.object({
-      id: struct.number(),
-    }),
+    path: struct.object({ id: struct.number() }),
   }),
   output: [
-    {
-      status: 200,
-      body: struct.object({
-        id: struct.number(),
-        name: struct.string(),
-      }),
-    },
-    {
-      status: 404,
-      body: struct.object({
-        message: struct.string(),
-      }),
-    },
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
   ] as const,
 })
 
-async function loadUser() {
-  const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
+async function loadUser(id: number) {
+  const [error, user, response] = await client.execute(getUser({ path: { id } }))
 
   if (error) {
-    console.error(error.code, error.message)
+    console.error(error.kind, error.code)
     return
   }
 
-  console.log(user.name)
+  console.log(user.name, response.status)
 }
+
+void loadUser(7)
 ```
 
-## 完整示例
-
-下面是一个端到端示例，包含自动请求映射、输出验证、错误处理和拦截器：
+`defineRequest(...)` 返回一个 **command builder**。调用 `getUser(...)` 会创建一个 **command**，其中保存端点定义和本次调用的输入。随后，`client.execute(...)` 返回 HTTP 三元素 tuple：
 
 ```typescript
-import { createClient, createHttpInterceptor, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
+;[error, result, response]
+```
 
-const authInterceptor = createHttpInterceptor(async (request, next) => {
-  const headers = request.headers ?? new Headers()
-  request.headers = headers
-  headers.set('Authorization', 'Bearer token')
-  return next(request)
-})
+成功时，`error` 是 `null`，`result` 是解码后的输出数据，`response` 是 Defjs `SettledResponse` wrapper。失败时，`result` 是 `undefined`；如果没有收到 response，response wrapper 也是 `undefined`。
 
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor))
+### 为什么需要 `as const`
 
-const createPostRequest = defineRequest({
-  method: 'POST',
-  path: '/v1/posts',
-  input: struct.request({
-    headers: struct.object({
-      'X-Request-ID': struct.string(),
-    }),
-    body: struct.object({
-      title: struct.string(),
-      body: struct.string(),
-    }),
-  }),
-  output: [
-    {
-      status: 201,
-      body: struct.object({
-        id: struct.number(),
-        title: struct.string(),
-      }),
-    },
-    {
-      status: 400,
-      body: struct.object({
-        field: struct.string(),
-        reason: struct.string(),
-      }),
-    },
-  ] as const,
-})
+数组形式的 `output` 用 status 字面量区分 2xx 成功 body 和非 2xx 错误 body。`as const` 会把这些 status 值和分组 status 数组保留为 readonly 字面量。不加它时，TypeScript 可能将其拓宽为 `number` 或 `number[]`，导致成功和错误分支的推断变弱。
 
-async function submitPost() {
-  const [error, post] = await client.execute(
-    createPostRequest({
-      headers: { 'X-Request-ID': 'uuid-123' },
-      body: { title: 'Hello', body: 'World' },
-    }),
-  )
+也可以使用对象形式的 output：
 
-  if (error) {
-    console.error(error)
-    return
-  }
-
-  console.log('Created post:', post.id, post.title)
+```typescript
+const output = {
+  '200': struct.object({ id: struct.number() }),
+  '404': struct.object({ message: struct.string() }),
 }
 ```
 
-## 核心 API 速查表
+## 接入你的应用
 
-| API                    | 说明                | 典型用法                                                                                                                                                                             |
-| ---------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `createClient`         | 创建请求客户端      | `createClient(withEndpoint('https://api.example.com'))`                                                                                                                              |
-| `defineRequest`        | 定义 HTTP 端点      | `defineRequest({ method: 'GET', path: '/user/:id', input: struct.request({ path: struct.object({ id: struct.number() }) }), output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | 定义 SSE 端点       | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                                                                                                       |
-| `defineWebSocket`      | 定义 WebSocket 端点 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                                                                                               |
-| `struct`               | 结构构建器          | `struct.object({ id: struct.number() })`                                                                                                                                             |
-| `.alias(name)`         | 字段 wire 名别名    | `struct.string().alias('user_name')`                                                                                                                                                 |
-| `withEndpoint`         | 设置基础 URL        | `withEndpoint('https://api.example.com')`                                                                                                                                            |
-| `withInterceptors`     | 注册拦截器          | `withInterceptors(loggingInterceptor, authInterceptor)`                                                                                                                              |
-| `withCredentials`      | 启用跨域凭证        | `withCredentials(true)`                                                                                                                                                              |
-| `withSSEReconnect`     | 配置 SSE 重连策略   | `withSSEReconnect({ attempts: 3, delayMs: 1000 })`                                                                                                                                   |
-| `withWebSocketOptions` | 配置 WebSocket 选项 | `withWebSocketOptions({ protocols: ['v1'] })`                                                                                                                                        |
+把端点定义放在描述服务 API 的 module 中，再从 component、route handler、job 或 store 复用 command builder。请在真正拥有 endpoint、credential、interceptor 和生命周期的边界创建 client：
+
+- 浏览器应用通常可以共享一个 client；
+- 服务端渲染中，如果 header、cookie、用户或 tenant 会随请求变化，应为每个请求创建 client；
+- 打开 SSE 或 WebSocket 资源的代码，也必须负责消费并关闭它。
 
 ## 下一步
 
-- [客户端 →](/core/client) — 创建客户端、执行命令和配置
-- [命令 →](/core/commands) — `defineRequest`、`defineEventStream`、`defineWebSocket`
-- [错误 →](/core/errors) — `RequestError` 结构和分支模式
+- [Commands](/zh-Hans/core/commands)：自动请求映射和自定义 schema-bound projection。
+- [Errors](/zh-Hans/core/errors)：三种 transport tuple 和 `RequestError` union。
+- [HTTP](/zh-Hans/core/http)：URL 解析、请求 body、输出解码、取消和 XSRF 行为。
+- [示例](/zh-Hans/guide/examples)：把这些契约组合成由应用管理的配方。

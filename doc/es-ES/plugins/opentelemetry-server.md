@@ -1,214 +1,182 @@
 ---
 title: OpenTelemetry Server
-description: Server-side outbound tracing without SDK initialization. Supports HTTP, SSE, and WebSocket with OpenTelemetry metrics and trace collection.
+description: Instrumenta clientes Defjs salientes HTTP, SSE y WebSocket con un Tracer y, opcionalmente, un Meter de OpenTelemetry proporcionados por la aplicación.
 ---
 
-# @defjs/opentelemetry-server
+# `@defjs/opentelemetry-server`
 
-Paquete de integración OpenTelemetry para el lado del servidor, proporcionando recolección de trazas y métricas outbound para clientes HTTP, SSE y WebSocket de `@defjs/core`.
+A pesar del nombre del paquete, este adaptador instrumenta el trabajo saliente de clientes Defjs. No instrumenta peticiones entrantes del servidor ni inicializa un SDK de OpenTelemetry.
 
-**Posicionamiento core**:
+La aplicación es responsable de:
 
-- **Entorno de servidor** (Node.js, Bun, Deno), no dependiente del entorno del navegador.
-- **No inicializa el SDK** — Debes inicializar el SDK de OpenTelemetry externamente, luego pasar el `Tracer` creado (y opcionalmente `Meter`).
-- **Separación por transporte** — HTTP, SSE y WebSocket tienen interceptores independientes, ciclos de vida de span y dimensiones de métricas.
+- inicializar el SDK y los proveedores;
+- configurar exportadores y procesadores;
+- configurar el gestor de contexto y el contexto activo;
+- definir el muestreo, la política de atributos y el enmascarado de datos sensibles;
+- forzar el volcado y cerrar los recursos.
 
-## Configuración del workspace del repositorio
+Pasa a `withOpenTelemetryServer(...)` un `Tracer` de la aplicación y, si necesitas métricas, un `Meter`.
 
-Esta página documenta actualmente el uso de source/workspace dentro de este repositorio. `@defjs/opentelemetry-server` vive en `packages/opentelemetry-server`, y su peer dependency espera la versión de workspace correspondiente de `@defjs/core` en `packages/core`.
-
-Los import specifiers que aparecen abajo usan nombres de paquete, pero dentro de este repositorio se resuelven contra paquetes fuente del workspace, no contra un par de paquetes publicados en un registry. Sigue instalando e inicializando por separado las dependencias del SDK de OpenTelemetry de tu aplicación.
-
-El npm público no ofrece actualmente `@defjs/opentelemetry-server`, y la versión standalone más reciente de `@defjs/core` disponible allí no es un peer compatible para este paquete del workspace. Si más adelante publicas tanto `@defjs/opentelemetry-server` como una versión compatible de `@defjs/core` en un registry que controles, o en otro registry que distribuya ambas versiones, instala juntas esas dos versiones publicadas en ese entorno en lugar de mezclar este paquete del workspace con una versión standalone incompatible de `@defjs/core`.
-
-## Uso básico
-
-Pasa un `Tracer` creado externamente y configura el cliente mediante `withOpenTelemetryServer`:
+## Configurar el cliente
 
 ```typescript
 import { createClient, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
-import { trace } from '@opentelemetry/api'
+import { metrics, trace } from '@opentelemetry/api'
 
-// 1. Inicializar SDK de OpenTelemetry externamente, luego obtener tracer
-const tracer = trace.getTracer('my-service')
+// Initialize and register the application's SDK/providers before this point.
+const tracer = trace.getTracer('orders-service')
+const meter = metrics.getMeter('orders-service')
 
-// 2. Inyectar tracer en la configuración del cliente
-const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer }))
-```
-
-## Configuración completa
-
-```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withOpenTelemetryServer({
-    tracer, // Requerido
-    meter, // Opcional, métricas solo recolectadas cuando se proporciona
-    propagator, // Opcional, por defecto W3C TraceContext + Baggage
-    requireParentSpan: false,
-    http: {
-      enabled: true,
-      requestHook(span, req) {
-        span.setAttribute('defjs.operation', req.endpoint)
-      },
-      responseHook(span, res) {
-        span.setAttribute('defjs.response.status_text', res.statusText)
-      },
-    },
-    sse: {
-      enabled: true,
-    },
+    tracer,
+    meter,
     webSocket: {
-      enabled: true,
       queryPropagation: false,
     },
   }),
 )
 ```
 
-### Opciones de configuración
+El adaptador añade un interceptor por cada transporte habilitado. Las opciones se ejecutan en el orden normal del cliente, por lo que su posición respecto a otros interceptores determina qué trabajo envuelve cada span.
 
-| Opción              | Tipo                                  | Por defecto                | Descripción                                                  |
-| ------------------- | ------------------------------------- | -------------------------- | ------------------------------------------------------------ |
-| `tracer`            | `Tracer`                              | **Requerido**              | Tracer de OpenTelemetry externo                              |
-| `meter`             | `Meter`                               | `undefined`                | Meter de OpenTelemetry externo, omitir desactiva métricas    |
-| `propagator`        | `TextMapPropagator`                   | W3C TraceContext + Baggage | Propagador de contexto personalizado                         |
-| `requireParentSpan` | `boolean`                             | `false`                    | Solo crear spans outbound cuando existe un span padre activo |
-| `http`              | `OpenTelemetryServerHttpOptions`      | `{}`                       | Opciones de traza/métrica para transporte HTTP               |
-| `sse`               | `OpenTelemetryServerSSEOptions`       | `{}`                       | Opciones de traza/métrica para transporte SSE                |
-| `webSocket`         | `OpenTelemetryServerWebSocketOptions` | `{}`                       | Opciones de traza/métrica para transporte WebSocket          |
+## Opciones
 
-### Opciones HTTP
+```typescript
+interface OpenTelemetryServerOptions {
+  tracer: Tracer
+  meter?: Meter
+  propagator?: TextMapPropagator
+  requireParentSpan?: boolean
+  http?: OpenTelemetryServerHttpOptions
+  sse?: OpenTelemetryServerSSEOptions
+  webSocket?: OpenTelemetryServerWebSocketOptions
+}
+```
 
-| Opción         | Tipo                  | Por defecto | Descripción                                                                      |
-| -------------- | --------------------- | ----------- | -------------------------------------------------------------------------------- |
-| `enabled`      | `boolean`             | `true`      | Habilitar trazado HTTP                                                           |
-| `requestHook`  | `(span, req) => void` | `undefined` | Personalizar span HTTP antes de la petición, `req` es `HttpRequest`              |
-| `responseHook` | `(span, res) => void` | `undefined` | Personalizar span HTTP después de la respuesta, `res` es `HttpResponse<unknown>` |
+Las opciones de los tres transportes aceptan `enabled?: boolean`, `requestHook` y `responseHook`. WebSocket acepta además `queryPropagation?: boolean`.
 
-### Opciones SSE
-
-| Opción         | Tipo                     | Por defecto | Descripción                                                                                               |
-| -------------- | ------------------------ | ----------- | --------------------------------------------------------------------------------------------------------- |
-| `enabled`      | `boolean`                | `true`      | Habilitar trazado SSE                                                                                     |
-| `requestHook`  | `(span, req) => void`    | `undefined` | Personalizar span SSE antes de la petición de flujo                                                       |
-| `responseHook` | `(span, stream) => void` | `undefined` | Personalizar span SSE después de devolver el manejador de flujo, `stream` es `EventStreamHandle<unknown>` |
-
-### Opciones WebSocket
-
-| Opción             | Tipo                      | Por defecto | Descripción                                                                                                                                                                                                                      |
-| ------------------ | ------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`      | Habilitar trazado WebSocket                                                                                                                                                                                                      |
-| `queryPropagation` | `boolean`                 | `true`      | Inyectar contexto de traza en la cadena de consulta de la URL WebSocket para compatibilidad con navegador. Para tráfico de producción sensible a seguridad, la línea base recomendada es establecerlo explícitamente en `false`. |
-| `requestHook`      | `(span, req) => void`     | `undefined` | Personalizar span WebSocket antes de la petición de conexión                                                                                                                                                                     |
-| `responseHook`     | `(span, session) => void` | `undefined` | Personalizar span WebSocket después de devolver la sesión, `session` es `WebSocketSessionLike`                                                                                                                                   |
-
-> **Manejo de excepciones en hooks**: Si `requestHook` o `responseHook` lanza, el error se registra en el evento `defjs.otel.hook.error` del span, pero la petición/flujo/sesión del cliente **continúa normalmente**.
->
-> **Higiene de atributos**: En `requestHook` / `responseHook`, prioriza allowlists explícitas, redaction y atributos estables de baja cardinalidad. No adjuntes cadenas de consulta crudas, cuerpos de petición o respuesta, cabeceras completas, valores de baggage ni payloads de mensaje salvo que tu aplicación ya haya revisado los requisitos de privacidad, cardinalidad, retención y redaction.
-
-## Migración desde la API antigua
-
-| Configuración antigua       | Configuración nueva                                                 |
-| --------------------------- | ------------------------------------------------------------------- |
-| `http: false`               | `http: { enabled: false }`                                          |
-| `sse: false`                | `sse: { enabled: false }`                                           |
-| `webSocket: false`          | `webSocket: { enabled: false }`                                     |
-| `requestHook`               | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook`    |
-| `responseHook`              | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
-| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                        |
-
-Los hooks antiguos de nivel superior y los toggles booleanos de transporte se eliminaron intencionalmente para que cada transporte exponga los tipos correctos de request/response. Pasar ahora esas opciones antiguas eliminadas desde JavaScript lanza un error de migración en lugar de interpretarlas silenciosamente como instrumentación habilitada.
-
-## Convenciones semánticas HTTP y métricas
-
-El trazado HTTP sigue las convenciones semánticas estables de cliente HTTP de OpenTelemetry. Por defecto, registra spans `SpanKind.CLIENT` con los siguientes atributos principales:
-
-- `http.request.method`
-- `url.full`
-- `server.address`
-- `server.port`
-- `http.response.status_code`
-
-Cuando se proporciona `meter`, se recolectan las siguientes métricas estables:
-
-| Métrica                        | Unidad | Atributos                                                                                                                             |
-| ------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `http.client.request.duration` | `s`    | `http.request.method`, opcional `http.response.status_code`, opcional `server.address`, opcional `server.port`, opcional `error.type` |
-
-Por defecto, **este paquete no añade cuerpos de petición/respuesta, cabeceras completas, valores de baggage, tamaños de payload ni payloads de mensajes como campos de telemetría personalizados**. Tampoco **crea atributos de span ni métricas separados para cadenas de consulta sin procesar**. Pero `url.full` refleja la URL que realmente construye tu aplicación, así que si esa URL ya incluye query strings, también pueden aparecer ahí. Evita poner tokens, user ids u otras entradas sensibles o de alta cardinalidad en las URL cuando sea posible.
-
-No añadas cadenas de consulta crudas, cuerpos de petición o respuesta, cabeceras completas, valores de baggage ni payloads de mensaje a spans o métricas salvo que la aplicación ya haya revisado los requisitos de privacidad, cardinalidad, retención y redaction. Al extender la telemetría mediante hooks, prefiere allowlists explícitas, redaction y atributos estables de baja cardinalidad.
-
-## Trazado a nivel de conexión SSE y métricas personalizadas
-
-SSE es una respuesta HTTP de larga duración. La duración normal de petición HTTP termina en el establecimiento del flujo, lo cual no refleja si el flujo sigue ejecutándose, fue interrumpido o dio error. Por tanto, este paquete trata SSE como telemetría **a nivel de conexión**.
-
-### Ciclo de vida del span
-
-El span SSE permanece abierto hasta que `stream.closed` se resuelve, registrando los siguientes eventos de ciclo de vida:
-
-- `sse.connected` — Flujo establecido exitosamente
-- `sse.closed` — Fin normal del flujo (EOF del servidor)
-- `sse.aborted` — Cierre activo mediante `stream.close()`
-- `sse.error` — Error de conexión o agotamiento de reconexiones
-
-### Métricas personalizadas
-
-Cuando se proporciona `meter`, se recolectan las siguientes métricas personalizadas de defjs (no convenciones semánticas oficiales estables de OpenTelemetry):
-
-| Métrica                                | Unidad     | Significado                                                       |
-| -------------------------------------- | ---------- | ----------------------------------------------------------------- |
-| `defjs.client.sse.connect.duration`    | `s`        | Tiempo para establecer conexión de flujo                          |
-| `defjs.client.sse.connection.duration` | `s`        | Duración total desde establecimiento del flujo hasta cierre/error |
-| `defjs.client.sse.active_streams`      | `{stream}` | Cantidad actual de flujos SSE activos                             |
-
-Por defecto, **no se crean spans por evento**, y **los payloads de eventos, IDs de eventos, `Last-Event-ID`, latencia de entrega, eventos perdidos o colas de reconexión no se recolectan**. Estas son semánticas a nivel de aplicación que pueden producir telemetría de alta cardinalidad o sensible. Impleméntalas en la capa de aplicación si es necesario.
-
-## Trazado a nivel de conexión WebSocket y métricas personalizadas
-
-WebSocket comienza con un handshake HTTP Upgrade, pero los entornos de producción se preocupan más por el ciclo de vida post-handshake: conexiones activas, duración de conexión, comportamiento de cierre/error y tasa de fallo de conexión. Dado que las convenciones semánticas WebSocket de OpenTelemetry aún no son estables, este paquete usa métricas personalizadas a nivel de conexión.
-
-### Ciclo de vida del span
-
-El span WebSocket permanece abierto hasta que `session.closed` se resuelve, registrando los siguientes eventos de ciclo de vida:
-
-- `websocket.connected` — Sesión establecida exitosamente
-- `websocket.closed` — Cierre normal de conexión
-- `websocket.error` — Error de conexión
-
-### Métricas personalizadas
-
-Cuando se proporciona `meter`, se recolectan las siguientes métricas personalizadas de defjs:
-
-| Métrica                                      | Unidad         | Significado                                                       |
-| -------------------------------------------- | -------------- | ----------------------------------------------------------------- |
-| `defjs.client.websocket.connect.duration`    | `s`            | Tiempo para establecer sesión WebSocket                           |
-| `defjs.client.websocket.connection.duration` | `s`            | Duración total desde establecimiento de sesión hasta cierre/error |
-| `defjs.client.websocket.active_connections`  | `{connection}` | Cantidad actual de conexiones WebSocket activas                   |
-
-Por defecto, **no se crean spans por mensaje**, y **los payloads de mensaje, tamaños de mensaje, contrapresión, cantidad en buffer, subprotocolos o colas de reconexión no se recolectan**. La telemetría a nivel de mensaje debe implementarse en la capa de aplicación con estrategias de muestreo.
-
-## Riesgo de seguridad de propagación por query en WebSocket
-
-Los clientes WebSocket de navegador normalmente no pueden establecer cabeceras HTTP arbitrarias, así que `webSocket.queryPropagation` tiene como valor por defecto `true` para compatibilidad. Ese valor por defecto inyecta el contexto de traza en la cadena de consulta de la URL WebSocket.
-
-Las cadenas de consulta pueden quedar registradas por proxies, navegadores, herramientas APM, logs de acceso y herramientas de depuración de red. También pueden contener tokens, user ids u otras entradas de alta cardinalidad. Si el propagador incluye `baggage`, los valores de baggage también pueden escribirse en la URL y exponer datos sensibles.
-
-Para tráfico WebSocket de producción sensible a seguridad, desactiva explícitamente la propagación por query como línea base recomendada:
+Los tres transportes están habilitados por defecto. Utiliza un objeto de opciones para deshabilitar uno:
 
 ```typescript
 withOpenTelemetryServer({
   tracer,
-  webSocket: { queryPropagation: false },
+  http: { enabled: false },
+  sse: { enabled: true },
+  webSocket: { enabled: false },
 })
 ```
 
-Después de desactivarla, el contexto de traza deja de viajar en la URL WebSocket. Si el servidor todavía necesita vincular la conexión con una traza, usa en la capa de aplicación otro mecanismo de correlación ya revisado.
+Los antiguos campos booleanos de transporte, los hooks de primer nivel y `webSocketQueryPropagation` se rechazan en tiempo de ejecución con errores de migración. Las formas actuales son objetos de opciones por transporte, hooks dentro de su transporte y `webSocket.queryPropagation`.
 
-## Qué sigue
+## Propagación
 
-- [Client](/core/client) — `createClient` y configuración completa de transportes
-- [SSE](/core/sse) — `defineEventStream` y consumo de eventos de streaming
-- [WebSocket](/core/web-socket) — `defineWebSocket` y comunicación en tiempo real
+Si omites `propagator`, el paquete crea su propio `CompositePropagator` con W3C Trace Context y W3C Baggage. No lee la configuración del propagador global.
+
+HTTP y SSE inyectan en las cabeceras de la petición todos los campos que produzca ese propagador. Si `req.headers` ya es una instancia de `Headers`, la implementación actual reutiliza y modifica esa misma instancia. En caso contrario, crea un objeto `Headers` nuevo. La propagación por query de WebSocket está activada por defecto porque los sockets del navegador no pueden añadir cabeceras arbitrarias durante el handshake. Se añaden a la cadena de query de la conexión todos los campos producidos por el propagador.
+
+Antes de crear un span, cada interceptor también llama a `propagator.extract(...)` con las cabeceras de la petición. Trata ese carrier como una entrada de confianza controlada por la aplicación. No permitas que un llamador no fiable aporte `traceparent`, `tracestate` o `baggage`: esos campos pueden sustituir el contexto padre activo. Elimina o normaliza los campos de propagación no fiables antes de que la petición llegue a este interceptor.
+
+```typescript
+withOpenTelemetryServer({
+  tracer,
+  webSocket: {
+    queryPropagation: false,
+  },
+})
+```
+
+Desactiva la propagación por query salvo que se haya revisado para ese despliegue. El contexto de traza y el baggage pueden quedar registrados en navegadores, proxies, logs de acceso y sistemas de telemetría. Un propagador personalizado puede añadir más campos aparte de `traceparent`.
+
+`requireParentSpan: true` comprueba si hay un span padre activo antes de realizar cualquier instrumentación. Si no lo hay, omite la creación del span, la propagación, los hooks y las métricas, y llama sin cambios al siguiente manejador.
+
+## Comportamiento de los hooks
+
+Los hooks reciben el span y la petición o resultado propios del transporte:
+
+```typescript
+withOpenTelemetryServer({
+  tracer,
+  http: {
+    requestHook(span, request) {
+      span.setAttribute('app.operation', 'list-orders')
+    },
+    responseHook(span, response) {
+      span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
+    },
+  },
+})
+```
+
+Los hooks son síncronos. Si lanzan de forma síncrona, la excepción se captura y se registra como `defjs.otel.hook.error` sin detener la operación del cliente. Si se elude el tipo de JavaScript y se devuelve una promesa rechazada, el envoltorio del hook no espera ni captura ese rechazo asíncrono.
+
+Utiliza atributos permitidos explícitamente y de baja cardinalidad. No adjuntes cabeceras sin filtrar, cadenas de query, cuerpos, baggage, IDs de evento, payloads de mensajes ni credenciales.
+
+## Semántica HTTP
+
+El interceptor HTTP crea un span `SpanKind.CLIENT` y registra:
+
+- `http.request.method`;
+- `url.full`;
+- `server.address` y, si existe, `server.port`;
+- `http.response.status_code` después de recibir una respuesta.
+
+Esto no supone que cumpla por completo las convenciones semánticas HTTP.
+
+El comportamiento actual de los estados es más limitado de lo que esperan muchas aplicaciones:
+
+- un estado `500` o superior marca el span como `ERROR`;
+- los estados entre `400` y `499` lo marcan como `OK`;
+- una respuesta de transporte Defjs con estado 0 lo marca como `OK`;
+- un error lanzado a través del interceptor lo marca como `ERROR` y registra una excepción.
+
+El span HTTP termina cuando el interceptor HTTP recibe el `HttpResponse` de Defjs. La selección de salida de alto nivel por estado y la decodificación Struct se producen después de que el interceptor haya devuelto el control. Por tanto, un `RESPONSE_VALIDATION_FAILED` o `UNDECLARED_STATUS` posterior no puede actualizar el span ya terminado.
+
+Cuando proporcionas un Meter, HTTP registra `http.client.request.duration` en segundos. Los atributos incluyen el método, la dirección y el puerto del servidor, el estado opcional de la respuesta y un `error.type` opcional para errores lanzados.
+
+## Semántica SSE
+
+Después de un arranque SSE correcto, el span permanece abierto hasta que se resuelve `stream.closed`. Registra `sse.connected` y, en las rutas de cierre cubiertas, uno entre `sse.closed`, `sse.aborted` y `sse.error`.
+
+Con un Meter, SSE instrumenta:
+
+| Métrica                                | Significado                                                                |
+| -------------------------------------- | -------------------------------------------------------------------------- |
+| `defjs.client.sse.connect.duration`    | Tiempo hasta que se devuelve el manejador lógico del stream.               |
+| `defjs.client.sse.connection.duration` | Tiempo desde que se devuelve el manejador hasta el cierre definitivo.      |
+| `defjs.client.sse.active_streams`      | Número de manejadores lógicos cuya promesa `closed` aún no se ha resuelto. |
+
+Son métricas personalizadas de Defjs. El contador activo incluye el tiempo entre intentos de reconexión física. No cuenta conexiones HTTP abiertas en ese momento.
+
+Si una ruta de callback de Core deja `stream.closed` sin resolver, el span y el contador tampoco pueden terminar mediante esa promesa. Los callbacks de reconexión no deben lanzar.
+
+## Semántica WebSocket
+
+Después de un arranque correcto, el span WebSocket permanece abierto hasta que se resuelve `session.closed`. Registra `websocket.connected` y, en las rutas cubiertas, `websocket.closed` o `websocket.error`.
+
+Con un Meter, WebSocket utiliza:
+
+| Métrica                                      | Significado                                                             |
+| -------------------------------------------- | ----------------------------------------------------------------------- |
+| `defjs.client.websocket.connect.duration`    | Tiempo hasta que se devuelve la sesión lógica.                          |
+| `defjs.client.websocket.connection.duration` | Tiempo desde que se devuelve la sesión hasta el cierre definitivo.      |
+| `defjs.client.websocket.active_connections`  | Número de sesiones lógicas cuya promesa `closed` aún no se ha resuelto. |
+
+Aunque el nombre de la métrica habla de conexiones, la implementación cuenta sesiones lógicas, incluidos los intervalos de espera entre reconexiones. No cuenta sockets físicos.
+
+Aquí no hay convenciones semánticas genéricas y estables para WebSocket. El paquete no crea un span por mensaje ni registra por defecto payloads o tamaños de cola.
+
+## Datos sensibles y límites de cobertura
+
+El valor por defecto de `url.full` se resuelve a partir del endpoint y el endpoint base de la petición, no de la cadena de query serializada. Aun así, las rutas resueltas pueden contener identificadores sensibles. Por separado, la propagación WebSocket sí añade campos a la cadena de query real.
+
+`recordException(...)` recibe errores lanzados y determinadas causas de cierre. Los mensajes y las trazas de pila pueden exponer datos sensibles. Configura procesadores en el SDK y enmascarado de datos sensibles en el exportador según corresponda; este adaptador no sanea las excepciones en nombre de la aplicación.
+
+Antes de desplegar, valida el adaptador con el SDK, exporters, processors, context manager e instrumentación automática de tu servicio. Comprueba baggage de extremo a extremo, enmascarado de datos sensibles, cierre y volcado, y spans duplicados con tráfico real.
+
+## Siguiente paso
+
+- [Interceptores](/es-ES/core/interceptors) explica el orden respecto a otros interceptores del cliente.
+- [SSE](/es-ES/core/sse) y [WebSocket](/es-ES/core/web-socket) explican la duración de los manejadores y sesiones lógicos que cuentan estas métricas.

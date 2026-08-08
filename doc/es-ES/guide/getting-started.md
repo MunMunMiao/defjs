@@ -1,197 +1,101 @@
 ---
-title: Getting Started
-description: Install @defjs/core, use it via CDN, and create your first typed request in three steps.
+title: Primeros pasos
+description: Instala Defjs, define un endpoint HTTP tipado, crea un cliente y úsalo desde tu aplicación.
 ---
 
-# Empezar
+# Primeros pasos
 
-Defjs es una librería TypeScript para definir APIs de petición tipadas y ejecutarlas a través de múltiples transportes y runtimes JavaScript.
+Defjs permite que tu aplicación describa una vez el contrato de una API y lo reutilice con entradas tipadas, decodificación en tiempo de ejecución y resultados de transporte explícitos.
 
 ## Instalación
 
-Usa tu gestor de paquetes preferido:
+Añade el paquete Core a tu aplicación:
 
-::: code-group
-
-```sh [npm]
-npm install @defjs/core
-```
-
-```sh [yarn]
-yarn add @defjs/core
-```
-
-```sh [pnpm]
+```sh
 pnpm add @defjs/core
 ```
 
-```sh [bun]
-bun add @defjs/core
-```
+Utiliza el comando equivalente de npm, Yarn o Bun si tu proyecto usa otro gestor de paquetes. `@defjs/core` es ESM. Al ejecutarlo en Node.js, los metadatos actuales del paquete requieren Node 26 o posterior.
 
+Añade un adaptador solo cuando tu aplicación lo necesite:
+
+| Configuración             | Paquetes                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------- |
+| React 18+                 | `@defjs/core`, `@defjs/react`, `react`                                                    |
+| Vue 3+                    | `@defjs/core`, `@defjs/vue`, `vue`                                                        |
+| OpenTelemetry en servidor | `@defjs/core`, `@defjs/opentelemetry-server`, `@opentelemetry/api`, `@opentelemetry/core` |
+
+::: tip Usa la documentación de la versión instalada
+Estas páginas describen la API de esta versión de la documentación. Comprueba qué versión tiene instalada tu aplicación. Si cambia un export o una opción, consulta la documentación y las notas de esa versión en lugar de mezclar ejemplos de versiones distintas.
 :::
 
-## Uso con CDN
+## Define tu primera petición
 
-Importa directamente como un módulo ES sin herramienta de build:
-
-```typescript
-import { createClient, defineRequest, struct } from 'https://unpkg.com/@defjs/core/index.min.js'
-```
-
-## Tres pasos para tu primera petición
-
-### Paso 1: Crear un Cliente
-
-El Cliente es el punto de entrada para toda ejecución de peticiones. Crea una instancia con `createClient` y configura el endpoint base:
+Supón que tu API expone `GET /users/:id`. Sustituye la URL base y los Structs de respuesta por el contrato real de tu servicio.
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-```
-
-### Paso 2: Definir una petición
-
-Usa `defineRequest` para definir un endpoint HTTP tipado. Usa `struct` para describir la forma de las entradas y respuestas:
-
-```typescript
-import { defineRequest, struct } from '@defjs/core'
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user/:id',
-  input: struct.object({
-    id: struct.number(),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-    404: struct.object({
-      message: struct.string(),
-    }),
-  },
-})
-```
-
-::: tip
-Las claves en `output` son códigos de estado HTTP. Defjs selecciona automáticamente el esquema coincidente en tiempo de ejecución y deriva los tipos TypeScript en consecuencia: las respuestas 2xx se tipan como datos de éxito, las no-2xx como datos de error.
-:::
-
-### Paso 3: Ejecutar
-
-Llama a `client.execute` con tu comando de petición y configuración opcional:
-
-```typescript
-const [error, user, response] = await client.execute(getUser({ id: 1 }))
-
-if (error) {
-  // error está tipado según los esquemas no-2xx en output
-  console.error(error.code, error.message)
-  return
-}
-
-// user está tipado como { id: number; name: string }
-console.log(user.name)
-```
-
-## Ejemplo completo
-
-Aquí tienes un ejemplo end-to-end con validación de entrada, validación de salida, manejo de errores y un interceptor:
-
-```typescript
-import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
-
-// 1. Crear Cliente
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors([
-    async (request, next) => {
-      request.headers.set('Authorization', 'Bearer token')
-      return next(request)
-    },
-  ]),
-)
-
-// 2. Definir petición
-const createPost = defineRequest({
-  method: 'POST',
-  path: '/v1/posts',
-  input: struct.object({
-    title: struct.string(),
-    body: struct.string(),
-    'X-Request-ID': struct.string(),
-  }),
-  build: (input) => ({
-    body: { title: input.title, body: input.body },
-    headers: { 'X-Request-ID': input['X-Request-ID'] },
-  }),
-  output: {
-    201: struct.object({
-      id: struct.number(),
-      title: struct.string(),
-    }),
-    400: struct.object({
-      field: struct.string(),
-      reason: struct.string(),
-    }),
-  },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-// 3. Ejecutar
-async function createPost() {
-  const [error, post, response] = await client.execute(
-    createPost({
-      title: 'Hello',
-      body: 'World',
-      'X-Request-ID': 'uuid-123',
-    }),
-  )
+async function loadUser(id: number) {
+  const [error, user, response] = await client.execute(getUser({ path: { id } }))
 
   if (error) {
-    switch (error.code) {
-      case 'HTTP_STATUS':
-        console.error('Validation failed:', error.data)
-        break
-      case 'REQUEST_VALIDATION_FAILED':
-        console.error('Request validation failed:', error.message)
-        break
-      case 'RESPONSE_VALIDATION_FAILED':
-        console.error('Response validation failed:', error.message)
-        break
-      case 'TRANSPORT_ERROR':
-        console.error('Network error:', error.message)
-        break
-      default:
-        console.error('Unknown error:', error)
-    }
+    console.error(error.kind, error.code)
     return
   }
 
-  console.log('Created post:', post.id, post.title)
+  console.log(user.name, response.status)
+}
+
+void loadUser(7)
+```
+
+`defineRequest(...)` devuelve un **constructor de comandos**. Al llamar a `getUser(...)`, creas un **comando** que conserva la definición del endpoint y la entrada de esa llamada. Después, `client.execute(...)` devuelve una tupla HTTP de tres elementos:
+
+```typescript
+;[error, result, response]
+```
+
+Si todo va bien, `error` es `null`, `result` contiene los datos de salida decodificados y `response` es un wrapper `SettledResponse` de Defjs. Si hay un error, `result` es `undefined`; el wrapper de respuesta también será `undefined` si no se recibió ninguna respuesta.
+
+### Por qué importa `as const`
+
+Cuando `output` es un array, sus literales de estado separan los cuerpos correctos 2xx de los cuerpos de error no 2xx. `as const` conserva esos estados y los arrays agrupados de estados como literales de solo lectura. Sin él, TypeScript puede ampliarlos a `number` o `number[]`, lo que debilita los tipos inferidos para las ramas de éxito y error.
+
+También puedes declarar la salida como un objeto:
+
+```typescript
+const output = {
+  '200': struct.object({ id: struct.number() }),
+  '404': struct.object({ message: struct.string() }),
 }
 ```
 
-## Referencia rápida de la API Core
+## Llévalo a tu aplicación
 
-| API                    | Descripción                         | Uso típico                                                                                              |
-| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `createClient`         | Crear un cliente de peticiones      | `createClient(withEndpoint('https://api.example.com'))`                                                 |
-| `defineRequest`        | Definir un endpoint HTTP            | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | Definir un endpoint SSE             | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
-| `defineWebSocket`      | Definir un endpoint WebSocket       | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
-| `struct`               | Constructor de esquemas             | `struct.object({ id: struct.number() })`                                                                |
-| `.alias(name)`         | Alias de clave wire para campos     | `struct.string().alias('user_name')`                                                                    |
-| `withEndpoint`         | Establecer URL base                 | `withEndpoint('https://api.example.com')`                                                               |
-| `withInterceptors`     | Registrar interceptores             | `withInterceptors([...interceptors])`                                                                   |
-| `withCredentials`      | Habilitar credenciales cross-origin | `withCredentials(true)`                                                                                 |
-| `withSSEOptions`       | Configurar opciones SSE             | `withSSEOptions({ method: 'POST' })`                                                                    |
-| `withWebSocketOptions` | Configurar opciones WebSocket       | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
+Guarda las definiciones de endpoints en módulos que describan la API de tu servicio. Reutiliza sus constructores de comandos desde componentes, route handlers, jobs o stores. Crea el cliente en el límite que controla endpoint, credenciales, interceptores y ciclo de vida:
 
-## Qué sigue
+- Una aplicación de navegador normalmente puede compartir un cliente.
+- En renderizado de servidor, crea un cliente por petición cuando cambien cabeceras, cookies, usuarios o tenants.
+- El código que abre recursos SSE o WebSocket también debe consumirlos y cerrarlos.
 
-- [Cliente →](/core/client) — Crear clientes, ejecutar comandos y configuración
-- [Comandos →](/core/commands) — `defineRequest`, `defineEventStream`, `defineWebSocket`
-- [Errores →](/core/errors) — Estructura de `RequestError` y patrones de ramificación
+## Siguientes pasos
+
+- [Comandos](/es-ES/core/commands) explica el mapeo automático de peticiones y las proyecciones personalizadas vinculadas al esquema.
+- [Errores](/es-ES/core/errors) documenta las tuplas de los tres transportes y la unión `RequestError`.
+- [HTTP](/es-ES/core/http) cubre la resolución de URLs, los cuerpos de petición, la decodificación de la salida, la cancelación y el comportamiento XSRF.
+- [Ejemplos](/es-ES/guide/examples) combina estos contratos en recetas cuyos recursos controla la aplicación.

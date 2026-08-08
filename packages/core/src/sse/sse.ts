@@ -16,6 +16,7 @@ import { makeResponse, toSettledResponse } from '../internal/http_response'
 import type { RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct, Infer } from '../struct'
 import { decodeJson } from '../struct/codec/json'
+import { isStruct } from '../struct/guards'
 import { parseStructValue } from '../struct/introspection'
 import { DEFINITION } from '../struct/symbols'
 import type { RuntimeStruct } from '../struct/types'
@@ -30,16 +31,18 @@ interface UseEventStreamBaseConfig {
 
 export type EventStructs = { [key: string]: AnyStruct }
 
+type EventName<TKey extends string | number> = `${TKey}`
+
 type KnownEventUnion<TEvents extends EventStructs> = {
-  [K in keyof TEvents & string as K extends 'default' ? never : K]: {
-    data: Infer<TEvents[K]>
-    event: K
-    id?: string
-    retry?: number
-  }
-} extends infer O
-  ? O[keyof O]
-  : never
+  [K in keyof TEvents & (number | string)]: EventName<K> extends 'default'
+    ? never
+    : {
+        data: Infer<TEvents[K]>
+        event: EventName<K>
+        id?: string
+        retry?: number
+      }
+}[keyof TEvents & (number | string)]
 
 type DefaultEventUnion<TEvents extends EventStructs> = 'default' extends keyof TEvents
   ? {
@@ -48,14 +51,11 @@ type DefaultEventUnion<TEvents extends EventStructs> = 'default' extends keyof T
       id?: string
       retry?: number
     }
-  : {
-      data: string
-      event: string
-      id?: string
-      retry?: number
-    }
+  : never
 
-export type EventStreamData<TEvents extends EventStructs> = KnownEventUnion<TEvents> | DefaultEventUnion<TEvents>
+export type EventStreamData<TEvents extends EventStructs> = TEvents extends EventStructs
+  ? KnownEventUnion<TEvents> | DefaultEventUnion<TEvents>
+  : never
 
 interface EventStreamDefinitionBase<TEvents extends EventStructs = EventStructs> {
   events: TEvents
@@ -346,14 +346,20 @@ async function notifyInvalidEvent(
 }
 
 function resolveEventStruct<TEvents extends EventStructs>(events: TEvents, eventName: string): AnyStruct | undefined {
-  const exact = events[eventName]
-  if (exact) {
-    return exact
+  if (Object.hasOwn(events, eventName)) {
+    return events[eventName]
   }
 
-  const defaultStruct = events['default']
-  if (defaultStruct) {
-    return defaultStruct
+  // JavaScript treats an object-literal __proto__ field as the object's prototype instead of an own property.
+  if (eventName === '__proto__') {
+    const prototype = Object.getPrototypeOf(events) as unknown
+    if (isStruct(prototype)) {
+      return prototype
+    }
+  }
+
+  if (Object.hasOwn(events, 'default')) {
+    return events['default']
   }
 
   return undefined

@@ -1,17 +1,13 @@
 ---
 title: Struct
-description: Declarative struct definition, type inference, error mapping, and the field alias support.
+description: Describe structural decoding, zero values, partial object input, aliases, and StructError handling.
 ---
 
 # Struct
 
-`@defjs/core` provides a lightweight struct facade for declaring structs, validating inputs, and inferring types. The design intent is modeled after Go's `encoding/json`: zero-value defaulting, accepting partial input, and stable, predictable runtime behavior.
+Structs describe structural decoding and wire encoding. Their selected zero-value behavior is inspired by Go, but it is not a complete implementation of Go's `encoding/json` semantics.
 
-## Primitive Types
-
-All structs are created through the `struct` namespace, supporting chain calls `.optional()`, `.null()`, `.nullish()`, and `.alias(name)`.
-
-### Scalars
+Use the `struct` facade and `Infer<T>` from the root entry:
 
 ```typescript
 import { struct, type Infer } from '@defjs/core'
@@ -20,213 +16,191 @@ const User = struct.object({
   id: struct.number(),
   name: struct.string(),
   active: struct.boolean(),
-  role: struct.literal('admin'),
 })
 
 type User = Infer<typeof User>
-// { id: number; name: string; active: boolean; role: 'admin' }
+// { id: number; name: string; active: boolean }
 ```
 
-Available scalars:
+## Constructors
 
-| Constructor            | Input Type                              | Output Type   | Zero Value           |
-| ---------------------- | --------------------------------------- | ------------- | -------------------- |
-| `struct.string()`      | `string \| undefined`                   | `string`      | `''`                 |
-| `struct.number()`      | `number \| undefined`                   | `number`      | `0`                  |
-| `struct.boolean()`     | `boolean \| undefined`                  | `boolean`     | `false`              |
-| `struct.bigint()`      | `bigint \| string \| undefined`         | `bigint`      | `0n`                 |
-| `struct.date()`        | `Date \| number \| string \| undefined` | `Date`        | `new Date(0)`        |
-| `struct.null()`        | `null`                                  | `null`        | `null`               |
-| `struct.any()`         | `unknown`                               | `any`         | `undefined`          |
-| `struct.unknown()`     | `unknown`                               | `unknown`     | `undefined`          |
-| `struct.blob()`        | `Blob \| undefined`                     | `Blob`        | `new Blob()`         |
-| `struct.file()`        | `File \| undefined`                     | `File`        | `new File([], '')`   |
-| `struct.arrayBuffer()` | `ArrayBuffer \| undefined`              | `ArrayBuffer` | `new ArrayBuffer(0)` |
-
-### Optional and Nullable
+Common constructors include:
 
 ```typescript
-const Profile = struct.object({
-  bio: struct.string().optional(), // Output type: string | undefined
-  age: struct.number().null(), // Output type: number | null
-  nick: struct.string().nullish(), // Output type: string | null | undefined
-})
-```
-
-### Enums and Literals
-
-```typescript
-const Status = struct.enum(['pending', 'done', 'cancelled'])
-const Priority = struct.enum({ Low: 1, Medium: 2, High: 3 })
-
-const Flag = struct.literal(true)
-```
-
-### Arrays, Tuples, Records
-
-```typescript
-const Tags = struct.array(struct.string())
-const Pair = struct.tuple([struct.string(), struct.number()])
-const Dict = struct.record(struct.number())
-```
-
-### Unions and Intersections
-
-```typescript
-const Id = struct.or(struct.string(), struct.number())
-const Named = struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
-```
-
-### Discriminated Unions
-
-```typescript
-const Event = struct.discriminatedUnion('kind', [
-  struct.object({ kind: struct.literal('click'), x: struct.number(), y: struct.number() }),
+struct.string()
+struct.number()
+struct.boolean()
+struct.bigint()
+struct.date()
+struct.null()
+struct.literal('ready')
+struct.enum(['pending', 'done'])
+struct.array(struct.string())
+struct.tuple([struct.string(), struct.number()])
+struct.object({ id: struct.number() })
+struct.record(struct.number())
+struct.or(struct.string(), struct.number())
+struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
+struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('click'), x: struct.number() }),
   struct.object({ kind: struct.literal('key'), key: struct.string() }),
 ])
 ```
 
-## Request Structs
+`struct.any()` and `struct.unknown()` accept unconstrained values. Binary constructors are `struct.blob()`, `struct.file()`, and `struct.arrayBuffer()`.
 
-`struct.request(...)` organizes `path`, `query`, `headers`, and `body` into a single input structure for automatic HTTP request building by the endpoint.
+Every Struct supports these modifiers:
 
 ```typescript
-const CreateUser = struct.request({
-  path: struct.object({ orgId: struct.number() }),
-  query: struct.object({ dryRun: struct.boolean().optional() }),
-  headers: struct.object({
-    'X-Api-Key': struct.string().alias('X-Api-Key'),
-  }),
+struct.string().optional()
+struct.string().null()
+struct.string().nullish()
+struct.string().alias('wire_name')
+```
+
+## Zero Values
+
+Missing or `undefined` values decode to a zero value unless the Struct is optional. A non-nullable `null` follows the same zero-value path. A nullable Struct decodes missing, `undefined`, or `null` to `null`.
+
+Selected zero values are:
+
+| Struct                        | Zero value                                       |
+| ----------------------------- | ------------------------------------------------ |
+| `string`                      | `''`                                             |
+| `number`                      | `0`                                              |
+| `boolean`                     | `false`                                          |
+| `bigint`                      | `0n`                                             |
+| `date`                        | `new Date(0)`                                    |
+| array                         | `[]`                                             |
+| object                        | an object whose fields contain their zero values |
+| tuple                         | a tuple whose items contain their zero values    |
+| enum                          | the first declared value                         |
+| literal                       | the declared literal                             |
+| `blob`, `file`, `arrayBuffer` | an empty corresponding value                     |
+| `any`, `unknown`              | `undefined`                                      |
+
+Inside an object, a missing field marked only with `.optional()` is omitted from the decoded output. `.nullish()` is both optional and nullable; nullable handling takes precedence for a missing value, so it currently decodes to `null`.
+
+```typescript
+const Profile = struct.object({
+  name: struct.string(),
+  nickname: struct.string().optional(),
+  biography: struct.string().null(),
+})
+
+// Decoding {} produces an object equivalent to:
+// { name: '', biography: null }
+```
+
+Unknown object keys are dropped. Parsed object and record outputs use a null prototype. Code that depends on `Object.prototype` methods should use `Object.keys`, `Object.entries`, or copy into a normal object deliberately.
+
+## Partial Input Is Intentional
+
+Object input properties are optional at the TypeScript boundary, even when the decoded output property is present. Request sections in `struct.request(...)` are optional too.
+
+```typescript
+const Point = struct.object({
+  x: struct.number(),
+  y: struct.number(),
+})
+
+// A command using Point as input accepts {}.
+// Structural decoding produces { x: 0, y: 0 }.
+```
+
+Do not describe these fields as required. Structs do not provide application-level required-field, authorization, range, amount, format, or state-transition validation. There is no public refine/range/format DSL.
+
+`struct.number()` accepts positive and negative `Infinity`; it excludes only `NaN` among JavaScript numbers. Apply finite, range, and domain checks in application code before creating a command. Do not put those checks in `build`, because `build` receives a schema-bound projection rather than caller runtime values.
+
+## Request Bodies
+
+`struct.request(...)` groups direct wire sections:
+
+```typescript
+const input = struct.request({
+  path: struct.object({ organizationId: struct.string() }),
+  query: struct.object({ includeDisabled: struct.boolean().optional() }),
+  headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
   body: struct.json(
     struct.object({
-      name: struct.string().alias('user_name'),
+      displayName: struct.string().alias('display_name'),
     }),
   ),
 })
 ```
 
-Body wrappers determine transport encoding:
+Body boundaries are:
 
-| Wrapper                    | Encoding           |
-| -------------------------- | ------------------ |
-| `struct.json(struct)`      | `JSON.stringify`   |
-| `struct.urlencoded(shape)` | `URLSearchParams`  |
-| `struct.formData(shape)`   | `FormData`         |
-| `struct.text()`            | Plain text         |
-| `struct.blob()`            | Binary Blob        |
-| `struct.arrayBuffer()`     | Binary ArrayBuffer |
+| Struct                     | Encoding          |
+| -------------------------- | ----------------- |
+| `struct.json(inner)`       | JSON              |
+| `struct.text()`            | Plain text        |
+| `struct.urlencoded(shape)` | `URLSearchParams` |
+| `struct.formData(shape)`   | `FormData`        |
+| `struct.blob()`            | `Blob`            |
+| `struct.arrayBuffer()`     | `ArrayBuffer`     |
 
-## `Infer<T>` Type Inference
+See [Commands](/core/commands) for automatic request mapping and transport restrictions.
 
-`Infer<T>` extracts the output type of a struct. It is the only type-level helper you need to master.
+## Aliases
+
+`.alias(name)` changes the wire key without changing the logical TypeScript key.
 
 ```typescript
-const Person = struct.object({
-  name: struct.string(),
-  age: struct.number().optional(),
+const UserBody = struct.object({
+  id: struct.number().alias('user_id'),
+  displayName: struct.string().alias('display_name'),
 })
 
-type Person = Infer<typeof Person>
-// { name: string; age?: number }
+// Caller input uses { id, displayName }.
+// JSON wire data uses { user_id, display_name }.
 ```
 
-`Infer` also works for `struct.array(...)`, `struct.or(...)`, `struct.request(...)`:
+Aliases decode and encode JSON keys. Automatic request building also uses them for outbound path, query, header, URL-encoded, and multipart keys. Callers continue to use logical keys. Explicit target keys in a custom `build` projection remain explicit.
+
+## `StructError`
+
+Failed structural decoding produces a `StructError`, often as `RequestError.cause`.
 
 ```typescript
-type Tags = Infer<typeof Tags> // string[]
-type Id = Infer<typeof Id> // string | number
-type Req = Infer<typeof CreateUser>
-// { path: { orgId: number }; query: { dryRun?: boolean }; headers: { 'X-Api-Key': string }; body: { name: string } }
+import { StructError, type RequestError, type StructIssue } from '@defjs/core'
+
+export function structIssues(error: RequestError): readonly StructIssue[] {
+  if (error.kind === 'definition' && error.cause instanceof StructError) {
+    return error.cause.issues
+  }
+  return []
+}
 ```
 
-## StructError and Error Mapping
+A `StructError` exposes:
 
-`StructError` is the runtime container for `StructIssue[]`. Defjs may use it as the underlying `cause` of request/response validation failures, and you can also construct it directly when you want to format or propagate collected issues. Missing object fields are filled with zero values, so the common failure cases are invalid types, invalid enum/literal values, or union mismatches rather than `missing_key`. The public package intentionally does not export generic helpers like `struct.parseTuple(...)` or `struct.parseValue(...)`; parsing happens when Defjs consumes command input or transport data.
+- `issues`, the original `StructIssue[]`;
+- `format()`, a nested message tree;
+- `flatten()`, top-level form and field messages;
+- `prettify()`, a human-readable multiline string.
 
-```typescript
-import { StructError } from '@defjs/core'
+`StructIssue.received` can contain input or response data. Default messages can include a representation of that value. Paths and formatted keys can also originate in untrusted data, especially for records. Redact or review `issues`, messages, `format()`, `flatten()`, and `prettify()` before logging or returning them.
 
-const error = new StructError([
-  {
-    code: 'invalid_type',
-    path: ['name'],
-    expected: 'string',
-    received: 42,
-    message: 'Expected string at [name], received 42',
-  },
-])
+## Global Error Messages
 
-console.log(error.issues)
-```
-
-### Error Formatting
-
-```typescript
-error.format() // Tree object { _errors: [], name: { _errors: ['...'] } }
-error.flatten() // Flat object { formErrors: [], fieldErrors: { name: ['...'] } }
-error.prettify() // String: "× name: Expected string at [name], received 42"
-```
-
-### Global Error Mapping
-
-Replace default messages via `setErrorMap`:
+`setErrorMap(...)` replaces message generation process-wide:
 
 ```typescript
 import { setErrorMap } from '@defjs/core'
 
 setErrorMap((issue) => {
   if (issue.code === 'invalid_type') {
-    return `Field ${issue.path.join('.')} has the wrong type`
+    return `Invalid value at ${issue.path.join('.')}`
   }
-  return undefined // Uncovered issues use default messages
+  return undefined
 })
 ```
 
-## Field Aliases
+The map is global, not client-scoped. Changing it affects later Struct issues in every client in the same JavaScript realm. Avoid request-specific state in the callback, and coordinate installation in applications that share a process.
 
-`.alias(name)` is the only built-in field wire-name mechanism. It changes the external key used by JSON, query, headers, path, urlencoded and FormData encoding/decoding. It does not change the TypeScript property name, output type, request section, body codec, or keys written explicitly inside `build(ctx, input)`. Fields without an alias use their object field key.
+## Next
 
-```typescript
-import { struct } from '@defjs/core'
-
-const UserBody = struct.object({
-  id: struct.number().alias('user_id'),
-  name: struct.string().alias('user_name'),
-})
-```
-
-The same alias is used by JSON, query, path params, headers, urlencoded bodies, and multipart bodies. If the same logical value needs different names in different targets, split the struct or write explicit keys in `build(ctx, input)`.
-
-## Field Introspection
-
-Field introspection helpers such as `getStructFields(...)` and `isObjectStruct(...)` exist in internal modules and core tests, but they are not part of the public `@defjs/core` export surface. Public docs should treat aliases as a write-time/read-time encoding feature rather than promise runtime reflection APIs.
-
-## Zero-Value Defaults and Partial Input
-
-The struct parser follows Go `encoding/json` semantics:
-
-1. **Missing fields** → filled with the type's zero value, not throwing `missing_key`.
-2. **Partial input** → allows passing only some fields; unset fields auto-filled with zero values.
-3. **`undefined` and `null`** → `optional` fields return `undefined`; `nullable` fields return `null`; others return zero values.
-
-```typescript
-const Point = struct.object({ x: struct.number(), y: struct.number() })
-
-// Parsed command input / response data follows the same zero-value behavior:
-// {} -> { x: 0, y: 0 }
-// { x: 1 } -> { x: 1, y: 0 }
-```
-
-This is by design, not a bug. Benefits:
-
-- Front-end forms can send only modified fields; the backend still receives a complete structure.
-- Avoids `undefined` spreading through objects; output is always safely traversable.
-- Consistent mental model with Go's json unmarshaling, unifying cross-language collaboration.
-
-If you need strict validation (missing fields should error), explicitly check for required business fields in the endpoint's `build` function or before creating the command input.
-
-## What's Next
-
-- [Commands →](/core/commands) — Using struct with `defineRequest`, `defineEventStream`, and `defineWebSocket`
-- [HTTP →](/core/http) — Request body encoding and response validation
-- [Context →](/core/context) — Auto-build and request builder capabilities
+- [Commands](/core/commands) maps Struct fields to requests and messages.
+- [Errors](/core/errors) explains how Struct failures appear in execution tuples.
+- [HTTP](/core/http) covers response decoding and the current malformed-JSON limitation.

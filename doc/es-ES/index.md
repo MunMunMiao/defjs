@@ -3,129 +3,69 @@ layout: home
 
 hero:
   name: Defjs
-  text: Typed APIs Across Transports
-  tagline: Define una vez. Seguro de tipos en todas partes. HTTP, SSE y WebSocket con validación en tiempo de ejecución y inferencia completa de TypeScript.
+  text: Comandos tipados para HTTP, SSE y WebSocket
+  tagline: Define los datos que viajan por la red con Structs, crea clientes explícitos y mantén visibles los resultados y el ciclo de vida propios de cada transporte.
   actions:
     - theme: brand
       text: Empezar
-      link: /guide/getting-started
+      link: /es-ES/guide/getting-started
     - theme: alt
       text: Ver en GitHub
       link: https://github.com/defjs/defjs
 
 features:
-  - icon: 🔒
-    title: Seguridad de tipos
-    details: Define esquemas de petición con struct. Obtén inferencia de tipos end-to-end para entradas, salidas y ramas de error. La validación en tiempo de ejecución detecta discrepancias antes de que lleguen a producción.
-  - icon: 🌐
-    title: Multi-Transporte
-    details: Un estilo de API unificado para peticiones HTTP, Server-Sent Events y conexiones WebSocket. Cambia de transporte sin reescribir la lógica de tu aplicación.
-  - icon: 🧅
-    title: Interceptores
-    details: Interceptores por transporte con modelo de cebolla para registro, autenticación, reintento y preocupaciones transversales. HTTP, SSE y WebSocket tienen su propia cadena de interceptores.
-  - icon: 📡
-    title: Streaming
-    details: Soporte nativo SSE y WebSocket con reconexión automática, latido, encolamiento de mensajes y control de contrapresión. Diseñado para aplicaciones en tiempo real.
-  - icon: ⚡
-    title: Runtime Universal
-    details: Funciona en navegadores, Node.js, Bun y Deno. Sin polyfills necesarios. ESM puro con cero dependencias de runtime para el paquete core.
-  - icon: 🧩
-    title: Listo para Frameworks
-    details: Integraciones de primera clase para Vue y React con patrones provideClient / injectClient / useClient. Plugin OpenTelemetry para observabilidad en el servidor.
+  - title: Contratos de endpoint
+    details: Separa las definiciones de endpoint, los constructores de comandos y los comandos. Los Structs decodifican en tiempo de ejecución tanto la entrada de quien llama como los datos del transporte.
+  - title: Resultados propios de cada transporte
+    details: HTTP, SSE y WebSocket devuelven tuplas de tres elementos con el error en primer lugar. El tercer elemento es, según el transporte, un wrapper de respuesta, una instantánea de la apertura inicial o una instantánea de la conexión inicial.
+  - title: Cadenas de interceptores
+    details: Registra interceptores HTTP, SSE y WebSocket en un cliente. Cada transporte selecciona los suyos y los ejecuta en orden de cebolla.
+  - title: Ciclo de vida explícito
+    details: SSE puede reintentar tras fallos de red o de lectura. La reconexión WebSocket es opcional. La aplicación sigue siendo responsable de la iteración, la cancelación y el cierre definitivo.
+  - title: Decodificación en ejecución
+    details: Decodifica entradas, respuestas, eventos de stream y mensajes WebSocket con los mismos contratos Struct que controlan la inferencia de TypeScript.
+  - title: Integraciones de aplicación
+    details: Comparte clientes mediante Vue o React y añade instrumentación OpenTelemetry saliente en servicios de servidor.
 ---
 
-## Inicio rápido
+## Crea un cliente de API tipado
 
-Instala `@defjs/core` con tu gestor de paquetes preferido:
+Empieza describiendo el contrato HTTP, SSE o WebSocket que consume tu aplicación. Defjs convierte esa definición en un constructor de comandos, valida los datos en ejecución y mantiene explícito el resultado del transporte.
 
-::: code-group
-
-```bash [npm]
-npm install @defjs/core
-```
-
-```bash [yarn]
-yarn add @defjs/core
-```
-
-```bash [pnpm]
-pnpm add @defjs/core
-```
-
-```bash [bun]
-bun add @defjs/core
-```
-
-:::
-
-Define una petición tipada y ejecútala en tres líneas:
+El flujo HTTP principal es breve: crea un cliente para tu API, define un endpoint, llama a su constructor de comandos y ejecuta el comando.
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-const [error, user] = await client.execute(getUser())
-if (!error) {
-  console.log(user.id, user.name) // totalmente tipado
+const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
+
+if (error) {
+  console.error(error.kind, error.code)
+} else {
+  console.log(user.name, response.status)
 }
 ```
 
-## Integraciones con Frameworks
+Apunta el cliente al servicio que usa tu aplicación y haz que los Structs coincidan con su contrato real de respuesta. Tu aplicación sigue controlando credenciales, estado de interfaz, reintentos, cancelación y liberación de recursos.
 
-<div class="framework-grid">
+## Sigue leyendo
 
-### Vue
-
-`@defjs/vue` proporciona `provideClient` como un plugin de Vue e `injectClient` para la Composition API. Comparte un client `@defjs/core` tipado en toda la aplicación.
-
-[Aprender más →](/plugins/vue)
-
-### React
-
-`@defjs/react` proporciona `ClientProvider`, `useClient` y option helpers para compartir un client `@defjs/core` tipado en todo el árbol de componentes React.
-
-[Aprender más →](/plugins/react)
-
-</div>
-
-## Qué sigue
-
-- [Empezar →](/guide/getting-started) — Instalación, uso con CDN y tu primera petición
-- [Conceptos Core →](/core/client) — Cliente, comandos, contexto y manejo de errores
-- [Ejemplos →](/guide/examples) — CRUD REST, notificaciones SSE, chat WebSocket, patrones de interceptores
-
-<style>
-.framework-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-}
-.framework-grid > div,
-.framework-grid > h3 {
-  margin: 0;
-}
-.framework-grid h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-.framework-grid p {
-  margin: 0 0 0.5rem;
-  color: var(--vp-c-text-2);
-}
-.framework-grid a {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--vp-c-brand-1);
-}
-</style>
+- [Primeros pasos](/es-ES/guide/getting-started) instala el paquete y lleva tu aplicación hasta la primera petición tipada.
+- [Cliente](/es-ES/core/client) describe la composición de opciones y las tres sobrecargas de `execute`.
+- [Comandos](/es-ES/core/commands) explica definiciones de endpoint, constructores de comandos, comandos y proyecciones vinculadas al esquema.
+- [HTTP](/es-ES/core/http), [SSE](/es-ES/core/sse) y [WebSocket](/es-ES/core/web-socket) documentan cada transporte y la responsabilidad de su ciclo de vida.
+- [Vue](/es-ES/plugins/vue), [React](/es-ES/plugins/react) y [OpenTelemetry Server](/es-ES/plugins/opentelemetry-server) muestran cómo conectar Defjs con el framework y la telemetría de tu aplicación.

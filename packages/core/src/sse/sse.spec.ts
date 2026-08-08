@@ -190,6 +190,67 @@ describe('request event stream runtime', () => {
     ])
   })
 
+  test('should use the default struct for event names inherited from Object.prototype', async () => {
+    const client = createSSEClientFromText('event: constructor\ndata: prototype-safe\n\n')
+    const useStream = defineEventStream({
+      events: { default: struct.string() },
+      path: '/events',
+    })
+
+    const [error, stream] = await client.execute(useStream())
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+    await expect(collectStreamEvents(stream)).resolves.toEqual([
+      { data: 'prototype-safe', event: 'constructor', id: undefined, retry: undefined },
+    ])
+  })
+
+  test('should use the default struct for an undeclared __proto__ event', async () => {
+    const client = createSSEClientFromText('event: __proto__\ndata: fallback\n\n')
+    const useStream = defineEventStream({ events: { default: struct.string() }, path: '/events' })
+
+    const [error, stream] = await client.execute(useStream())
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+    await expect(collectStreamEvents(stream)).resolves.toEqual([{ data: 'fallback', event: '__proto__', id: undefined, retry: undefined }])
+  })
+
+  test('should decode an object-literal __proto__ event declaration', async () => {
+    const client = createSSEClientFromText('event: __proto__\ndata: 7\n\n')
+    const events = { __proto__: struct.number() }
+    expect(Object.hasOwn(events, '__proto__')).toBe(false)
+    const useStream = defineEventStream({ events, path: '/events' })
+
+    const [error, stream] = await client.execute(useStream())
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+    await expect(collectStreamEvents(stream)).resolves.toEqual([{ data: 7, event: '__proto__', id: undefined, retry: undefined }])
+  })
+
+  test('should prefer an object-literal __proto__ declaration over the default struct', async () => {
+    const client = createSSEClientFromText('event: __proto__\ndata: 7\n\n')
+    const events = { __proto__: struct.number(), default: struct.string() }
+    expect(Object.hasOwn(events, '__proto__')).toBe(false)
+    const useStream = defineEventStream({ events, path: '/events' })
+
+    const [error, stream] = await client.execute(useStream())
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+    await expect(collectStreamEvents(stream)).resolves.toEqual([{ data: 7, event: '__proto__', id: undefined, retry: undefined }])
+  })
+
   test('should decode struct.json event payloads with struct key aliases', async () => {
     const useAliasStream = defineEventStream({
       events: {

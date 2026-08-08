@@ -1,0 +1,14 @@
+{
+  "name": "@defjs/example-http-typed-status",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@defjs/core": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "catalog:"
+  }
+}

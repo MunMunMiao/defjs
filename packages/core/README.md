@@ -6,16 +6,15 @@ Type-safe HTTP, SSE, and WebSocket commands for TypeScript.
 
 This README follows the current repository source/workspace API for `@defjs/core`.
 
-Use these commands to install the workspace and typecheck the docs twoslash blocks. Ordinary fenced snippets in this README still need manual review:
+Install the workspace dependencies before running this source/workspace example:
 
 ```bash
 pnpm install
-pnpm --dir doc run typecheck
 ```
 
-To experiment with the snippet inside this repository, paste it into a workspace package or docs twoslash block that resolves `@defjs/core` from source.
+To experiment with the snippet inside this repository, place it in a workspace package that resolves `@defjs/core` from source.
 
-> Published package users: before copying `withEndpoint(...)` or `struct.request(...)` into an external app, check the installed package metadata and release notes to confirm that your published release includes this API.
+> Published package users: as checked on July 20, 2026, public npm provides `@defjs/core@0.3.3`, which predates the source/workspace API shown here. Check the installed package metadata and release notes before copying this example into an external app.
 
 ## Quick start
 
@@ -51,5 +50,7 @@ if (error) {
 - **Struct** declares request and response shapes, including request-shaped inputs via `struct.request({ path, query, headers, body })` and field wire names via `.alias(name)`.
 - **Build** lets you manually map parsed input to request parts via `build(ctx, input)` when the public input shape differs from the wire shape.
 - **Client** executes commands and dispatches to the right transport.
+
+Repository browser tests cover HTTP, SSE, and WebSocket flows. The current workspace toolchain and package manifest require Node.js 26 or newer; other runtimes require separate compatibility verification. The current core manifest declares no runtime dependencies.
 
 See `packages/core/design.md` for the full implementation boundary.

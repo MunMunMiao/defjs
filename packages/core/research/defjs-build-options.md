@@ -373,8 +373,7 @@ type BuildInput<S, Root = S> =
 type JsonProjection<Root> = BoundFor<'jsonBody', Root> | ArrayProjection<Root> | { readonly [targetKey: string]: JsonProjection<Root> }
 
 type KeyValueProjection<TTarget extends 'header' | 'pathParam' | 'searchParam' | 'urlencoded', Root> =
-  | Record<string, BoundFor<TTarget, Root>>
-  | ObjectSourceFor<TTarget, Root>
+  Record<string, BoundFor<TTarget, Root>> | ObjectSourceFor<TTarget, Root>
 
 type PathParamsProjection<Root> = KeyValueProjection<'pathParam', Root>
 

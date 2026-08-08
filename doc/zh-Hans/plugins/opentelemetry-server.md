@@ -1,214 +1,182 @@
 ---
 title: OpenTelemetry Server
-description: Server-side outbound tracing without SDK initialization. Supports HTTP, SSE, and WebSocket with OpenTelemetry metrics and trace collection.
+description: 使用应用提供的 OpenTelemetry Tracer 和可选 Meter，观测 outbound Defjs HTTP、SSE 和 WebSocket client。
 ---
 
-# @defjs/opentelemetry-server
+# `@defjs/opentelemetry-server`
 
-服务端 OpenTelemetry 集成包，为 `@defjs/core` 的 HTTP、SSE 和 WebSocket 客户端提供出站追踪和指标收集。
+虽然 package 名称带有 server，但这个 adapter 观测的是 outbound Defjs client 工作。它不处理 inbound server instrumentation，也不会初始化 OpenTelemetry SDK。
 
-**核心定位**：
+应用负责：
 
-- **服务端环境**（Node.js、Bun、Deno），不依赖浏览器环境。
-- **不初始化 SDK** —— 你必须在外部初始化 OpenTelemetry SDK，然后传入创建的 `Tracer`（以及可选的 `Meter`）。
-- **按传输协议分离** —— HTTP、SSE 和 WebSocket 各自拥有独立的拦截器、Span 生命周期和指标维度。
+- SDK 和 provider setup；
+- exporter 和 processor 配置；
+- context manager 和 active-context setup；
+- sampling、attribute policy 和敏感数据脱敏；
+- force-flush 和 shutdown。
 
-## 仓库工作区使用说明
+把应用提供的 `Tracer` 和可选 `Meter` 传给 `withOpenTelemetryServer(...)`。
 
-本页当前记录的是本仓库里的 source/workspace 用法。`@defjs/opentelemetry-server` 位于 `packages/opentelemetry-server`，它的 peer dependency 期望使用 `packages/core` 中与之匹配的 `@defjs/core` 工作区版本。
-
-下面示例中的 import specifier 使用包名，但在这个仓库里它们解析到的是工作区源码包，而不是一对已发布到 registry 的包。你的应用仍然需要单独安装并初始化自己的 OpenTelemetry SDK 相关依赖。
-
-公开 npm 目前并没有提供 `@defjs/opentelemetry-server`，而且那里最新的独立 `@defjs/core` 发布版本也不是这个工作区包的兼容 peer。以后如果你把 `@defjs/opentelemetry-server` 和兼容版本的 `@defjs/core` 一起发布到你控制的 registry，或发布到同时承载这两个版本的其他 registry，请在对应环境里成对安装那些已发布版本，而不要把这里的工作区包和不兼容的独立 `@defjs/core` 发布版本混用。
-
-## 基本用法
-
-传入外部创建的 `Tracer`，并通过 `withOpenTelemetryServer` 配置客户端：
+## 配置 Client
 
 ```typescript
 import { createClient, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
-import { trace } from '@opentelemetry/api'
+import { metrics, trace } from '@opentelemetry/api'
 
-// 1. 在外部初始化 OpenTelemetry SDK，然后获取 tracer
-const tracer = trace.getTracer('my-service')
+// Initialize and register the application's SDK/providers before this point.
+const tracer = trace.getTracer('orders-service')
+const meter = metrics.getMeter('orders-service')
 
-// 2. 将 tracer 注入客户端配置
-const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer }))
-```
-
-## 完整配置
-
-```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withOpenTelemetryServer({
-    tracer, // 必填
-    meter, // 可选，仅在提供时收集指标
-    propagator, // 可选，默认 W3C TraceContext + Baggage
-    requireParentSpan: false,
-    http: {
-      enabled: true,
-      requestHook(span, req) {
-        span.setAttribute('defjs.operation', req.endpoint)
-      },
-      responseHook(span, res) {
-        span.setAttribute('defjs.response.status_text', res.statusText)
-      },
-    },
-    sse: {
-      enabled: true,
-    },
+    tracer,
+    meter,
     webSocket: {
-      enabled: true,
       queryPropagation: false,
     },
   }),
 )
 ```
 
-### 配置选项
+Adapter 会为每种启用的 transport 添加一个 interceptor。Option 按正常 client 顺序执行，因此它相对其他 interceptor 的位置决定 span 包裹哪些工作。
 
-| 选项                | 类型                                  | 默认值                     | 说明                                     |
-| ------------------- | ------------------------------------- | -------------------------- | ---------------------------------------- |
-| `tracer`            | `Tracer`                              | **必填**                   | 外部 OpenTelemetry tracer                |
-| `meter`             | `Meter`                               | `undefined`                | 外部 OpenTelemetry meter，省略则禁用指标 |
-| `propagator`        | `TextMapPropagator`                   | W3C TraceContext + Baggage | 自定义上下文传播器                       |
-| `requireParentSpan` | `boolean`                             | `false`                    | 仅当存在活跃父 Span 时才创建出站 Span    |
-| `http`              | `OpenTelemetryServerHttpOptions`      | `{}`                       | HTTP 传输追踪/指标选项                   |
-| `sse`               | `OpenTelemetryServerSSEOptions`       | `{}`                       | SSE 传输追踪/指标选项                    |
-| `webSocket`         | `OpenTelemetryServerWebSocketOptions` | `{}`                       | WebSocket 传输追踪/指标选项              |
+## Options
 
-### HTTP 选项
+```typescript
+interface OpenTelemetryServerOptions {
+  tracer: Tracer
+  meter?: Meter
+  propagator?: TextMapPropagator
+  requireParentSpan?: boolean
+  http?: OpenTelemetryServerHttpOptions
+  sse?: OpenTelemetryServerSSEOptions
+  webSocket?: OpenTelemetryServerWebSocketOptions
+}
+```
 
-| 选项           | 类型                  | 默认值      | 说明                                                       |
-| -------------- | --------------------- | ----------- | ---------------------------------------------------------- |
-| `enabled`      | `boolean`             | `true`      | 启用 HTTP 追踪                                             |
-| `requestHook`  | `(span, req) => void` | `undefined` | 在请求前自定义 HTTP Span，`req` 为 `HttpRequest`           |
-| `responseHook` | `(span, res) => void` | `undefined` | 在响应后自定义 HTTP Span，`res` 为 `HttpResponse<unknown>` |
+每种 transport option 都接受 `enabled?: boolean`、`requestHook` 和 `responseHook`。WebSocket 还接受 `queryPropagation?: boolean`。
 
-### SSE 选项
-
-| 选项           | 类型                     | 默认值      | 说明                                                                    |
-| -------------- | ------------------------ | ----------- | ----------------------------------------------------------------------- |
-| `enabled`      | `boolean`                | `true`      | 启用 SSE 追踪                                                           |
-| `requestHook`  | `(span, req) => void`    | `undefined` | 在流请求前自定义 SSE Span                                               |
-| `responseHook` | `(span, stream) => void` | `undefined` | 在流句柄返回后自定义 SSE Span，`stream` 为 `EventStreamHandle<unknown>` |
-
-### WebSocket 选项
-
-| 选项               | 类型                      | 默认值      | 说明                                                                                                           |
-| ------------------ | ------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`      | 启用 WebSocket 追踪                                                                                            |
-| `queryPropagation` | `boolean`                 | `true`      | 为兼容浏览器，将追踪上下文注入 WebSocket URL 查询字符串；对安全敏感的生产流量，推荐明确设为 `false` 作为基线。 |
-| `requestHook`      | `(span, req) => void`     | `undefined` | 在连接请求前自定义 WebSocket Span                                                                              |
-| `responseHook`     | `(span, session) => void` | `undefined` | 在会话返回后自定义 WebSocket Span，`session` 为 `WebSocketSessionLike`                                         |
-
-> **钩子异常处理**：如果 `requestHook` 或 `responseHook` 抛出异常，错误会记录在 Span 的 `defjs.otel.hook.error` 事件中，但客户端请求/流/会话**继续正常运行**。
->
-> **属性卫生**：在 `requestHook` / `responseHook` 中，优先使用显式 allowlist、redaction 和稳定的低基数属性。除非应用已经审查隐私、基数、保留和脱敏要求，否则不要附加原始查询字符串、请求/响应体、完整请求头、baggage 值或消息负载。
-
-## 从旧 API 迁移
-
-| 旧配置                      | 新配置                                                              |
-| --------------------------- | ------------------------------------------------------------------- |
-| `http: false`               | `http: { enabled: false }`                                          |
-| `sse: false`                | `sse: { enabled: false }`                                           |
-| `webSocket: false`          | `webSocket: { enabled: false }`                                     |
-| `requestHook`               | `http.requestHook` / `sse.requestHook` / `webSocket.requestHook`    |
-| `responseHook`              | `http.responseHook` / `sse.responseHook` / `webSocket.responseHook` |
-| `webSocketQueryPropagation` | `webSocket.queryPropagation`                                        |
-
-旧的顶层 Hook 和布尔传输开关被有意移除，这样每个传输协议都能暴露正确的请求/响应类型。现在如果继续从 JavaScript 传入这些已删除的旧选项，会直接抛出迁移错误，而不是被静默解释为已启用遥测。
-
-## HTTP 语义约定和指标
-
-HTTP 追踪遵循稳定的 OpenTelemetry HTTP 客户端语义约定。默认记录 `SpanKind.CLIENT` 类型的 Span，包含以下基础属性：
-
-- `http.request.method`
-- `url.full`
-- `server.address`
-- `server.port`
-- `http.response.status_code`
-
-提供 `meter` 时，收集以下稳定指标：
-
-| 指标                           | 单位 | 属性                                                                                                                  |
-| ------------------------------ | ---- | --------------------------------------------------------------------------------------------------------------------- |
-| `http.client.request.duration` | `s`  | `http.request.method`、可选 `http.response.status_code`、可选 `server.address`、可选 `server.port`、可选 `error.type` |
-
-默认情况下，**本包不会把请求/响应体、完整请求头、baggage 值、负载大小或消息负载作为自定义遥测字段附加**。它也**不会为原始查询字符串额外创建单独的 Span 属性或指标**。但 `url.full` 反映的是应用实际构造的请求 URL，因此只要 URL 本身包含查询字符串，这些值仍可能出现在该属性里。请尽量避免在 URL 中放入 token、user id 或其他敏感、高基数输入。
-
-除非应用已经审查隐私、基数、保留和脱敏要求，否则不要把原始查询字符串、请求/响应体、完整请求头、baggage 值或消息负载附加到 Span 或指标里。通过 Hook 扩展遥测时，优先使用显式 allowlist、redaction 和稳定的低基数属性。
-
-## SSE 连接级追踪和自定义指标
-
-SSE 是长寿命的 HTTP 响应。正常的 HTTP 请求耗时在流建立时结束，这无法反映流是否仍在运行、中断或出错。因此，本包将 SSE 视为**连接级**遥测。
-
-### Span 生命周期
-
-SSE Span 保持打开直到 `stream.closed` 解析，记录以下生命周期事件：
-
-- `sse.connected` — 流成功建立
-- `sse.closed` — 流正常结束（服务器 EOF）
-- `sse.aborted` — 通过 `stream.close()` 主动关闭
-- `sse.error` — 连接错误或重连耗尽
-
-### 自定义指标
-
-提供 `meter` 时，收集以下 defjs 自定义指标（非官方 OpenTelemetry 稳定语义约定）：
-
-| 指标                                   | 单位       | 含义                        |
-| -------------------------------------- | ---------- | --------------------------- |
-| `defjs.client.sse.connect.duration`    | `s`        | 建立流连接所需时间          |
-| `defjs.client.sse.connection.duration` | `s`        | 从流建立到关闭/错误的总耗时 |
-| `defjs.client.sse.active_streams`      | `{stream}` | 当前活跃 SSE 流数量         |
-
-默认情况下，**不会创建逐事件 Span**，且**不会收集事件负载、事件 ID、`Last-Event-ID`、投递延迟、丢失事件或重连队列**。这些是应用级语义，可能产生高基数或敏感遥测。如需实现，请在应用层自行处理。
-
-## WebSocket 连接级追踪和自定义指标
-
-WebSocket 以 HTTP Upgrade 握手开始，但生产环境更关注握手后的连接生命周期：活跃连接数、连接持续时间、关闭/错误行为和连接失败率。由于 OpenTelemetry WebSocket 语义约定尚未稳定，本包使用连接级自定义指标。
-
-### Span 生命周期
-
-WebSocket Span 保持打开直到 `session.closed` 解析，记录以下生命周期事件：
-
-- `websocket.connected` — 会话成功建立
-- `websocket.closed` — 连接正常关闭
-- `websocket.error` — 连接错误
-
-### 自定义指标
-
-提供 `meter` 时，收集以下 defjs 自定义指标：
-
-| 指标                                         | 单位           | 含义                          |
-| -------------------------------------------- | -------------- | ----------------------------- |
-| `defjs.client.websocket.connect.duration`    | `s`            | 建立 WebSocket 会话所需时间   |
-| `defjs.client.websocket.connection.duration` | `s`            | 从会话建立到关闭/错误的总耗时 |
-| `defjs.client.websocket.active_connections`  | `{connection}` | 当前活跃 WebSocket 连接数量   |
-
-默认情况下，**不会创建逐消息 Span**，且**不会收集消息负载、消息大小、背压、缓冲量、子协议或重连队列**。消息级遥测应在应用层通过采样策略实现。
-
-## WebSocket 查询传播安全风险
-
-浏览器 WebSocket 客户端通常无法设置任意 HTTP 请求头，因此 `webSocket.queryPropagation` 的运行时默认值是 `true`，用来兼容浏览器。这个默认值会把追踪上下文注入到 WebSocket URL 查询字符串里。
-
-查询字符串可能被代理、浏览器、APM 工具、访问日志和网络调试工具记录。它们也可能包含 token、user id 或其他高基数输入。如果传播器包含 `baggage`，baggage 值也可能被写入 URL，并带出敏感数据。
-
-对于安全敏感的生产 WebSocket 流量，建议把查询传播显式禁用，作为推荐的安全基线：
+三种 transport 默认全部启用。用 option object 禁用其中一个：
 
 ```typescript
 withOpenTelemetryServer({
   tracer,
-  webSocket: { queryPropagation: false },
+  http: { enabled: false },
+  sse: { enabled: true },
+  webSocket: { enabled: false },
 })
 ```
 
-禁用后，追踪上下文不再通过 WebSocket URL 传递。如果服务端仍需要把连接关联到 trace，请在应用层使用其他已经审查过的关联机制。
+旧的 boolean transport field、顶层 hook 和 `webSocketQueryPropagation` 会在 runtime 以 migration error 拒绝。当前形式是 transport option object、transport-scoped hook 和 `webSocket.queryPropagation`。
+
+## Propagation
+
+省略 `propagator` 时，package 会创建自己的 `CompositePropagator`，其中包含 W3C Trace Context 和 W3C Baggage propagator。它不会读取 global propagator 配置。
+
+HTTP 和 SSE 会把 propagator 产生的每个字段注入 request header。如果 `req.headers` 已经是 `Headers` 实例，当前实现会复用并原地修改这个实例；否则才会新建 `Headers` 对象。WebSocket query propagation 默认是 `true`，因为浏览器 socket 不能添加任意 handshake header。它会把 propagator 产生的每个字段追加到连接 query string。
+
+每个 interceptor 创建 span 前，还会对 request header 调用 `propagator.extract(...)`。请只把这个 carrier 当作应用自己控制的可信 input。不要让不可信调用方传入 `traceparent`、`tracestate` 或 `baggage`，这些字段可能替换当前 active parent context。请求到达这个 interceptor 前，应删除或归一化不可信的 propagation field。
+
+```typescript
+withOpenTelemetryServer({
+  tracer,
+  webSocket: {
+    queryPropagation: false,
+  },
+})
+```
+
+除非部署环境已经审查 URL propagation，否则应关闭 query propagation。Trace context 和 baggage 可能被 browser、proxy、access log 和 telemetry system 记录。Custom propagator 还可能加入 `traceparent` 之外的更多字段。
+
+`requireParentSpan: true` 会在 interceptor 执行任何 instrumentation 前检查 active parent span。没有 active span 时，它会跳过 span creation、propagation、hook 和 metric，然后原样调用下一个 handler。
+
+## Hook 行为
+
+Hook 接收 transport-specific span 和 request/result：
+
+```typescript
+withOpenTelemetryServer({
+  tracer,
+  http: {
+    requestHook(span, request) {
+      span.setAttribute('app.operation', 'list-orders')
+    },
+    responseHook(span, response) {
+      span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
+    },
+  },
+})
+```
+
+Hook 是同步的。同步 throw 会被捕获并记录为 `defjs.otel.hook.error`，不会中断 client operation。如果 JavaScript 绕过类型并返回 rejected promise，hook wrapper 不会 await 或捕获这个异步 rejection。
+
+只使用 allowlist 中的低基数 attribute。不要附加原始 header、query string、body、baggage、event ID、message payload 或 credential。
+
+## HTTP 语义
+
+HTTP interceptor 创建 `SpanKind.CLIENT` span，并记录：
+
+- `http.request.method`；
+- `url.full`；
+- `server.address` 和可选 `server.port`；
+- 收到 response 后的 `http.response.status_code`。
+
+这不代表完整支持 HTTP semantic convention。
+
+当前 status 行为比很多应用预期的范围更窄：
+
+- status `500` 及以上会把 span 标记为 `ERROR`；
+- status `400` 到 `499` 会标记为 `OK`；
+- Defjs status-0 transport response 会标记为 `OK`；
+- 经过 interceptor 抛出的错误会标记为 `ERROR`，并记录 exception。
+
+HTTP interceptor 收到 Defjs `HttpResponse` 时就会结束 span。高层 output status dispatch 和 Struct 解码发生在 interceptor 返回之后。因此，后续 `RESPONSE_VALIDATION_FAILED` 或 `UNDECLARED_STATUS` 无法更新已经结束的 span。
+
+提供 Meter 时，HTTP 会以秒为单位记录 `http.client.request.duration`。Attribute 包括 method、server address/port、可选 response status，以及 thrown error 的可选 `error.type`。
+
+## SSE 语义
+
+SSE 启动成功后，span 会保持打开，直到 `stream.closed` settle。它先记录 `sse.connected`，再在覆盖到的 close path 上记录 `sse.closed`、`sse.aborted` 或 `sse.error`。
+
+有 Meter 时，SSE 记录：
+
+| Metric                                 | 含义                                              |
+| -------------------------------------- | ------------------------------------------------- |
+| `defjs.client.sse.connect.duration`    | 返回逻辑 stream handle 前的耗时。                 |
+| `defjs.client.sse.connection.duration` | 从返回 handle 到终止关闭的耗时。                  |
+| `defjs.client.sse.active_streams`      | `closed` promise 尚未 settle 的逻辑 handle 数量。 |
+
+这些是 Defjs 自定义 metric。Active counter 包含物理重连尝试之间的时间，不表示当前打开的 HTTP connection 数量。
+
+如果 core callback path 让 `stream.closed` 一直无法 settle，span 和 counter 也无法通过该 promise 结束。Reconnect callback 应保持不抛错。
+
+## WebSocket 语义
+
+WebSocket 启动成功后，span 会保持打开，直到 `session.closed` settle。它先记录 `websocket.connected`，再在覆盖到的 path 上记录 `websocket.closed` 或 `websocket.error`。
+
+有 Meter 时，WebSocket instrumentation 使用：
+
+| Metric                                       | 含义                                               |
+| -------------------------------------------- | -------------------------------------------------- |
+| `defjs.client.websocket.connect.duration`    | 返回逻辑 session 前的耗时。                        |
+| `defjs.client.websocket.connection.duration` | 从返回 session 到终止关闭的耗时。                  |
+| `defjs.client.websocket.active_connections`  | `closed` promise 尚未 settle 的逻辑 session 数量。 |
+
+Metric 名称写的是 connection，但实现统计逻辑 session，包括 reconnect delay gap，不统计物理 socket。
+
+这里没有稳定的通用 WebSocket semantic convention。Package 默认不会为每条 message 创建 span，也不会记录 payload 和 queue length。
+
+## 敏感数据与覆盖限制
+
+默认 `url.full` 根据 request endpoint 和 base endpoint 解析，而不是根据已序列化 query string 生成；但解析后的 path 仍可能包含敏感 identifier。WebSocket propagation 会另外把字段追加到实际 query string。
+
+`recordException(...)` 会收到 thrown error 和部分 close cause。Error message 和 stack 可能暴露敏感数据。请配置 SDK-level processor 和 exporter 脱敏；这个 adapter 不会替应用清理 exception。
+
+部署前，请把 adapter 和服务实际使用的 SDK、exporter、processor、context manager、自动 instrumentation 一起验证。在真实流量下检查端到端 baggage、敏感数据脱敏、shutdown/flush 和重复 span。
 
 ## 下一步
 
-- [客户端](/core/client) — `createClient` 和完整传输配置
-- [SSE](/core/sse) — `defineEventStream` 和流式事件消费
-- [WebSocket](/core/web-socket) — `defineWebSocket` 和实时通信
+- [Interceptors](/zh-Hans/core/interceptors)：与其他 client interceptor 的顺序。
+- [SSE](/zh-Hans/core/sse) 和 [WebSocket](/zh-Hans/core/web-socket)：这里统计的逻辑 handle/session 生命周期。

@@ -1,27 +1,22 @@
 ---
 title: Vue
-description: Vue 3 plugin integration — provideClient and injectClient for composable API usage with typed HTTP, SSE, and WebSocket clients.
+description: شارك Defjs client عبر Vue injection، واضبطه للـ API، واحفظ SSR request scope، ونظّف transport resources.
 ---
 
-# @defjs/vue
+# `@defjs/vue`
 
-`@defjs/vue` هو إضافة Vue 3 لـ `@defjs/core`. يوفر `provideClient` لتسجيل نسخة `Client` على مستوى التطبيق، و `injectClient` للوصول إلى تلك النسخة داخل المكونات أو composables.
+`@defjs/vue` محول injection خفيف لـ `@defjs/core`. وهو يصدّر:
 
-يشارك كلاهما نفس مساعدي الإعداد `withEndpoint` و `withInterceptors` من `@defjs/core`.
+- `provideClient(...)`، وهي Vue plugin تنشئ core client وتوفّره؛
+- `injectClient()`، التي تعيد أقرب client محقون؛
+- `HTTP_CLIENT`، وهو injection key المستخدم للتجاوزات؛
+- مساعد adapter باسم `withEndpoint(...)` ومساعد `withInterceptors(...)` لمصانع المعترضات.
 
-## التثبيت
+لا يضيف المحول سلوك transport أو caching أو state management أو retries أو Nuxt module. ثبّته إلى جانب `@defjs/core` وVue، وضع هذه المسؤوليات داخل composables وstores وتكاملات framework في تطبيقك.
 
-```bash
-npm install @defjs/vue @defjs/core
-# أو
-pnpm add @defjs/vue @defjs/core
-# أو
-bun add @defjs/vue @defjs/core
-```
+## تثبيت Plugin
 
-## البدء السريع
-
-### 1. توفير العميل عند دخول التطبيق
+ينشئ كل تثبيت للـ plugin عميلًا واحدًا:
 
 ```typescript
 // main.ts
@@ -32,153 +27,191 @@ import App from './App.vue'
 const app = createApp(App)
 
 app.use(provideClient(withEndpoint('https://api.example.com')))
+
 app.mount('#app')
 ```
 
-يُرجع `provideClient` إضافة Vue قياسية. يستخدم داخليًا `app.provide()` لحقن نسخة `Client` في سياق التطبيق. يمكن لجميع المكونات الفرعية الوصول إليها عبر `injectClient()`.
-
-### 2. الحقن والاستخدام في المكونات
+تقبل `provideClient(...options)` أي `ClientOption` من `@defjs/core`، لا الخيارات التي يعيد المحول تصديرها أو إنشاءها فقط:
 
 ```typescript
-// UserCard.vue
+import { withCredentials, withSSEReconnect } from '@defjs/core'
+import { provideClient, withEndpoint } from '@defjs/vue'
+
+app.use(provideClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEReconnect({ attempts: 3 })))
+```
+
+تعمل الخيارات عندما تُثبّت plugin وتنشئ العميل. ويؤدي تثبيت plugin object نفسه في تطبيق آخر إلى إنشاء عميل آخر.
+
+## حقن أقرب عميل
+
+استدعِ `injectClient()` داخل component `setup` أو `<script setup>` أو composable/injection context نشط:
+
+```vue
 <script setup lang="ts">
 import { injectClient } from '@defjs/vue'
-import { defineRequest, struct } from '@defjs/core'
 
 const client = injectClient()
-
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-      email: struct.string(),
-    }),
-  },
-})
-
-async function loadUser() {
-  const [error, user] = await client.execute(getUser())
-  if (error) {
-    console.error('Request failed:', error.code, error.message)
-    return
-  }
-  console.log(user.id, user.name, user.email) // fully typed
-}
 </script>
 ```
 
-## إعداد الاعتراضات
+ترمي الدالة إذا لم يتوفر `HTTP_CLIENT`. لا تستدعها في module scope اعتباطي.
 
-استخدم `withInterceptors` لتسجيل مصفوفات دوال المصنع. يُنفّذ كل مصنع أثناء تثبيت الإضافة، وتُسجّل نسخة الاعتراض المُرجعة في العميل.
+تنطبق قاعدة Vue المعتادة لأقرب provider. يستطيع component توفير override لأحفاده:
 
-```typescript
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
-import { createHttpInterceptor } from '@defjs/core'
-
-const authInterceptor = createHttpInterceptor((req, next) => {
-  req.headers.set('Authorization', `Bearer ${localStorage.getItem('token')}`)
-  return next(req)
-})
-
-app.use(
-  provideClient(
-    withEndpoint('https://api.example.com'),
-    withInterceptors(() => authInterceptor),
-  ),
-)
-```
-
-> ملاحظة: يقبل `withInterceptors` **دوال مصنع** (`() => Interceptor`)، وليس نسخ اعتراضات. هذا يسمح بإنشاء النسخة عند الطلب أثناء مرحلة توفير Vue.
-
-## أمثلة SSE و WebSocket
-
-تدعم نسخة العميل SSE و WebSocket بنفس الاستخدام الموجود في الحزمة الأساسية:
-
-```typescript
+```vue
 <script setup lang="ts">
-import { injectClient } from '@defjs/vue'
-import { defineEventStream, defineWebSocket, struct } from '@defjs/core'
-
-const client = injectClient()
-
-// SSE
-const notifications = defineEventStream({
-  path: '/v1/notifications',
-  events: {
-    message: struct.object({ id: struct.number(), text: struct.string() }),
-  },
-})
-
-const [error, stream] = await client.execute(notifications())
-if (!error) {
-  for await (const event of stream) {
-    console.log(event.message) // typed as { id: number, text: string }
-  }
-}
-
-// WebSocket
-const chat = defineWebSocket({
-  path: '/v1/chat',
-  incoming: {
-    message: struct.object({ user: struct.string(), text: struct.string() }),
-  },
-  outgoing: {
-    send: struct.object({ text: struct.string() }),
-  },
-})
-
-const [wsError, ws] = await client.execute(chat())
-if (!wsError) {
-  ws.send({ type: 'send', data: { text: 'Hello' } })
-  for await (const msg of ws.receive) {
-    console.log(msg.message)
-  }
-}
-</script>
-```
-
-لمزيد من تفاصيل النقل، راجع:
-
-- [التوثيق الأساسي](/core/client) — الاستخدام الكامل لـ `defineRequest` و `defineEventStream` و `defineWebSocket`
-- [توثيق SSE](/core/sse) — إعادة اتصال SSE التلقائية، نبضة القلب، والضغط العكسي
-- [توثيق WebSocket](/core/web-socket) — اتصال WebSocket وأنواع الرسائل
-
-## مرجع واجهة برمجة التطبيقات
-
-### `provideClient(...feature: ClientOption[]): Plugin`
-
-يُنشئ إضافة Vue. عند التثبيت، يُنشئ نسخة `Client` عبر `createClient(...)` ويوفرها لسياق التطبيق باستخدام `HTTP_CLIENT` كمفتاح الحقن.
-
-### `injectClient(): Client`
-
-استدعِ داخل `setup` المكون أو composables لاسترجاع نسخة العميل المُحقت. إذا لم يُستدعَ `app.use(provideClient(...))` أولاً، يُرمى خطأ وقت التشغيل:
-
-```
-No HTTP client provided. Did you forget to call app.use(provideClient(...))?
-```
-
-### `withEndpoint(endpoint: string): ClientOption`
-
-يضبط عنوان URL الأساسي لطلبات HTTP. إذا حُذف، تكون الطلبات الافتراضية مُسبقة بـ `document.location.origin`.
-
-### `withInterceptors(...fns: (() => Interceptor)[]): ClientOption`
-
-يضبط الاعتراضات. يُنفّذ كل مصنع أثناء تثبيت الإضافة، وتُشكّل الاعتراضات المُرجعة سلسلة استدعاء بصل بترتيب التسجيل.
-
-### `HTTP_CLIENT`
-
-`InjectionKey<Client>` في Vue، يُستخدم كمفتاح `provide` / `inject` الأساسي. عادةً لا تحتاجه مباشرة، لكنه متاح للتسلسلات الهرمية للحقن المخصصة:
-
-```typescript
+import { provide } from 'vue'
+import { createClient, withEndpoint } from '@defjs/core'
 import { HTTP_CLIENT } from '@defjs/vue'
-import { inject } from 'vue'
 
-const client = inject(HTTP_CLIENT)
+const scopedClient = createClient(withEndpoint('https://preview.example.com'))
+provide(HTTP_CLIENT, scopedClient)
+</script>
+
+<template>
+  <slot />
+</template>
 ```
 
-## ما التالي
+يحصل الأحفاد الذين يستدعون `injectClient()` على `scopedClient`، بينما يستمر siblings خارج هذه الشجرة الفرعية في الحصول على client مستوى التطبيق.
 
-- [التوثيق الأساسي](/core/client) — الاستخدام الكامل لـ `defineRequest` و `defineEventStream` و `defineWebSocket`
+## مصانع المعترضات
+
+تقبل `withInterceptors(...)` الخاصة بالمحول factories لا interceptor instances. تقيّم هذه المصانع عند إنشاء client، وتُلحق نتائجها بترتيب الخيارات.
+
+```typescript
+import { createHttpInterceptor } from '@defjs/core'
+import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
+import { readAccessToken } from './auth'
+
+function createAuthInterceptor() {
+  return createHttpInterceptor((request, next) => {
+    const token = readAccessToken()
+    if (!token) {
+      return next(request)
+    }
+
+    const headers = new Headers(request.headers)
+    headers.set('Authorization', `Bearer ${token}`)
+    return next({ ...request, headers })
+  })
+}
+
+app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)))
+```
+
+يختلف هذا عن `withInterceptors(...)` في core، التي تقبل قيم interceptor منشأة مسبقًا. أبقِ factories التي تلتقط server credentials ضمن نطاق الطلب.
+
+## الاستجابة لتغير Input
+
+اربط عمل HTTP بالقيمة التفاعلية التي بدأته. تقرأ `onMounted` وحدها prop الأولى فقط. يلغي `watch` مع cleanup العمل الذي تجاوزه تغيير لاحق:
+
+```vue
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { injectClient } from '@defjs/vue'
+import { getUser } from './api'
+
+const props = defineProps<{ id: number }>()
+const client = injectClient()
+const name = ref('')
+const errorMessage = ref('')
+
+watch(
+  () => props.id,
+  (id, _previousId, onCleanup) => {
+    const abort = new AbortController()
+    let current = true
+
+    onCleanup(() => {
+      current = false
+      abort.abort()
+    })
+
+    void client
+      .execute(getUser({ path: { id } }), { signal: abort.signal })
+      .then(([error, user]) => {
+        if (!current) {
+          return
+        }
+
+        if (error) {
+          errorMessage.value = 'Unable to load user.'
+          return
+        }
+
+        errorMessage.value = ''
+        name.value = user.name
+      })
+      .catch(() => {
+        if (current) {
+          errorMessage.value = 'Unable to load user.'
+        }
+      })
+  },
+  { immediate: true },
+)
+</script>
+
+<template>
+  <p v-if="errorMessage">{{ errorMessage }}</p>
+  <p v-else>{{ name }}</p>
+</template>
+```
+
+يملك منشئ الأمر `getUser` المستورد عقد نقطة النهاية. ويملك هذا component الإلغاء عندما يتغير `id` أو يُزال component.
+
+## حدود SSR
+
+يستطيع تطبيق متصفح تثبيت plugin client واحد عندما يكون إعداده آمنًا للمتصفح ومستقلًا عن الطلب.
+
+في SSR، لا تلتقط request headers أو cookies أو user data أو tenant data داخل app singleton مشترك بين الطلبات. أنشئ core client داخل حد كل server request ومرّره أو وفّره داخل render tree الخاصة بذلك الطلب فقط.
+
+لا يعزل المحول application closures بين طلبات SSR المتزامنة. كما لا يقرر أي inbound headers أو cookies آمنة للتمرير.
+
+تستطيع Nuxt client plugin تثبيت Vue adapter لمستهلكي المتصفح:
+
+```typescript
+// plugins/defjs.client.ts
+import { provideClient, withEndpoint } from '@defjs/vue'
+
+export default defineNuxtPlugin((nuxtApp) => {
+  nuxtApp.vueApp.use(provideClient(withEndpoint(useRuntimeConfig().public.apiBase)))
+})
+```
+
+تجعل اللاحقة `.client.ts` هذا الملف خاصًا بالمتصفح. فهو ليس client ضمن نطاق server request ويجب ألا يُستخدم لتمرير SSR credentials. في تطبيق Nuxt، اختبر هذا الحد مع plugins وroute handlers وhydration الفعلية.
+
+## ملكية الموارد
+
+لا يؤدي تثبيت أو unmount لـ Vue provider إلى إلغاء عمل HTTP أو إغلاق موارد SSE وWebSocket. ينشئ المحول client، ولا يملك core client دالة `dispose()`.
+
+يجب على component أو composable أو route أو store الذي يبدأ عمل realtime أن:
+
+- يسجّل cleanup قبل startup غير المتزامن أو بالتزامن معه؛
+- يلغي startup عند انتهاء نطاقه؛
+- يغلق handle أو session تصل بعد disposal؛
+- يستهلك `stream` أو `session.receive` باستمرار؛
+- يستدعي `stream.close(...)` أو `session.close(...)` للمورد النشط؛
+- يلغي اشتراك WebSocket observers.
+
+لا تفتح WebSocket لمجرد ربط state listener ثم تترك incoming queue غير المحدودة بلا قراءة. راجع [SSE](/ar/core/sse) و[WebSocket](/ar/core/web-socket) لقواعد دورة الحياة الكاملة.
+
+## API
+
+```typescript
+import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { InjectionKey, Plugin } from 'vue'
+
+declare const HTTP_CLIENT: InjectionKey<Client>
+declare function provideClient(...options: ClientOption[]): Plugin
+declare function injectClient(): Client
+declare function withEndpoint(endpoint: string): ClientOption
+declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
+```
+
+## التالي
+
+- تغطي [العميل](/ar/core/client) تركيب خيارات core ونطاق العميل.
+- تغطي [الأوامر](/ar/core/commands) تعريفات نقاط النهاية وcommand input.
+- تغطي [المعترضات](/ar/core/interceptors) عقد interceptor في core.

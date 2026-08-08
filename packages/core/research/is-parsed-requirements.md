@@ -183,11 +183,11 @@ Object-like outputs should be marked when parse succeeds. Current object parsing
 
 ### Composition structs
 
-| Struct                                    | `isParsed` implementation                                                                               |
+| Struct | `isParsed` implementation |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------- | --- | -------------------------------------------------------------- |
-| `struct.or(a, b)`                         | `hasParsedBrand(struct, value)                                                                          |     | options.some(option => option.isParsed(value))`                |
+| `struct.or(a, b)` | `hasParsedBrand(struct, value)                                                                          |     | options.some(option => option.isParsed(value))` |
 | `struct.discriminatedUnion(key, options)` | `hasParsedBrand(struct, value)                                                                          |     | option selected by discriminator calls option.isParsed(value)` |
-| `struct.intersection(a, b)`               | Prefer `hasParsedBrand(struct, value)`; alternate check may be `a.isParsed(value) && b.isParsed(value)` |
+| `struct.intersection(a, b)` | Prefer `hasParsedBrand(struct, value)`; alternate check may be `a.isParsed(value) && b.isParsed(value)` |
 
 Intersection parsing can merge object outputs into a new final object. The final merged value must be marked with the intersection struct brand if provenance checking is used.
 
@@ -206,12 +206,12 @@ Request body structs wrap an inner struct. They are primarily endpoint input con
 
 ### Modifiers
 
-| Modifier      | `isParsed` implementation                                                                                                                     |
+| Modifier | `isParsed` implementation |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --- | --------------------- | --- | --------------------- |
 | `.optional()` | `value === undefined                                                                                                                          |     | base.isParsed(value)` |
-| `.null()`     | `value === null                                                                                                                               |     | base.isParsed(value)` |
-| `.nullish()`  | `value === null                                                                                                                               |     | value === undefined   |     | base.isParsed(value)` |
-| `.tag(...)`   | Does not change output type. If brands are struct-instance specific, values parsed by the tagged struct should carry the tagged struct brand. |
+| `.null()` | `value === null                                                                                                                               |     | base.isParsed(value)` |
+| `.nullish()` | `value === null                                                                                                                               |     | value === undefined   |     | base.isParsed(value)` |
+| `.tag(...)` | Does not change output type. If brands are struct-instance specific, values parsed by the tagged struct should carry the tagged struct brand. |
 
 ## Type Behavior
 

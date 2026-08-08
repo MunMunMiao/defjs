@@ -27,11 +27,11 @@ export default defineConfig({
       instances: [
         {
           browser: 'chromium',
-          include: ['src/**/*.browser.spec.tsx', 'src/**/*.chrome.spec.tsx'],
+          include: ['src/**/*.browser.spec.ts', 'src/**/*.chrome.spec.ts'],
         },
         {
           browser: 'firefox',
-          include: ['src/**/*.browser.spec.tsx', 'src/**/*.firefox.spec.tsx'],
+          include: ['src/**/*.browser.spec.ts', 'src/**/*.firefox.spec.ts'],
         },
       ],
     },

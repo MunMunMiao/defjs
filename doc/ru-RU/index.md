@@ -3,129 +3,69 @@ layout: home
 
 hero:
   name: Defjs
-  text: Typed APIs Across Transports
-  tagline: Определите один раз. Типобезопасность везде. HTTP, SSE и WebSocket с проверкой во время выполнения и полным выводом типов TypeScript.
+  text: Типизированные команды для HTTP, SSE и WebSocket
+  tagline: Описывайте формат данных с помощью Struct, создавайте клиентов явно и учитывайте особенности результата и жизненного цикла каждого транспорта.
   actions:
     - theme: brand
-      text: Начать
-      link: /guide/getting-started
+      text: Начать работу
+      link: /ru-RU/guide/getting-started
     - theme: alt
-      text: GitHub
+      text: Открыть на GitHub
       link: https://github.com/defjs/defjs
 
 features:
-  - icon: 🔒
-    title: Типовая безопасность
-    details: Определяйте схемы запросов через struct. Получайте сквозной вывод типов для входных данных, выходных данных и веток ошибок. Валидация во время выполнения отлавливает несоответствия ещё до попадания в продакшн.
-  - icon: 🌐
-    title: Мультитранспорт
-    details: Единый стиль API для HTTP-запросов, Server-Sent Events и WebSocket-соединений. Меняйте транспорт без переписывания логики приложения.
-  - icon: 🧅
-    title: Перехватчики
-    details: Луковичные перехватчики для каждого транспорта — логирование, аутентификация, повторные попытки и сквозная логика. HTTP, SSE и WebSocket имеют собственные цепочки перехватчиков.
-  - icon: 📡
-    title: Потоковая передача
-    details: Нативная поддержка SSE и WebSocket с автоматическим переподключением, heartbeat, очередью сообщений и контролем обратного давления. Разработано для приложений реального времени.
-  - icon: ⚡
-    title: Универсальный рантайм
-    details: Работает в браузерах, Node.js, Bun и Deno. Полифиллы не нужны. Чистый ESM с нулевым количеством зависимостей рантайма для основного пакета.
-  - icon: 🧩
-    title: Готовность к фреймворкам
-    details: Первоклассные интеграции для Vue и React через паттерны provideClient / injectClient / useClient. Плагин OpenTelemetry для серверной наблюдаемости.
+  - title: Контракты эндпоинтов
+    details: Отделяйте описание эндпоинта от фабрики команды и самой команды. Struct декодируют входные данные и данные транспорта во время выполнения.
+  - title: Результаты с учётом транспорта
+    details: HTTP, SSE и WebSocket возвращают трёхэлементные кортежи с ошибкой на первом месте. Третий элемент — обёртка ответа, снимок открытия при запуске или снимок подключения при запуске.
+  - title: Цепочки перехватчиков
+    details: Регистрируйте на клиенте перехватчики HTTP, SSE и WebSocket. Каждый транспорт отбирает только свои перехватчики и выполняет их в луковичном порядке.
+  - title: Явный жизненный цикл
+    details: SSE умеет повторять попытки после сетевых ошибок и ошибок чтения. Переподключение WebSocket включается явно. За чтение, отмену и окончательное закрытие всё равно отвечает приложение.
+  - title: Декодирование во время выполнения
+    details: Декодируйте входные данные, ответы, события потоков и сообщения WebSocket теми же контрактами Struct, которые управляют выводом типов TypeScript.
+  - title: Интеграции приложения
+    details: Передавайте клиенты через Vue или React и добавляйте исходящую инструментацию OpenTelemetry в серверные сервисы.
 ---
 
-## Быстрый старт
+## Создайте типизированный API-клиент
 
-Установите `@defjs/core` с помощью вашего пакетного менеджера:
+Сначала опишите контракт HTTP, SSE или WebSocket, который вызывает ваше приложение. Defjs превращает его в фабрику команд, проверяет данные во время выполнения и оставляет результат транспорта явным.
 
-::: code-group
-
-```bash [npm]
-npm install @defjs/core
-```
-
-```bash [yarn]
-yarn add @defjs/core
-```
-
-```bash [pnpm]
-pnpm add @defjs/core
-```
-
-```bash [bun]
-bun add @defjs/core
-```
-
-:::
-
-Определите типизированный запрос и выполните его в три строки:
+Основной HTTP-процесс короткий: создайте клиент для своего API, опишите эндпоинт, вызовите фабрику команды и выполните команду.
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-const [error, user] = await client.execute(getUser())
-if (!error) {
-  console.log(user.id, user.name) // полностью типизировано
+const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
+
+if (error) {
+  console.error(error.kind, error.code)
+} else {
+  console.log(user.name, response.status)
 }
 ```
 
-## Интеграции с фреймворками
+Направьте клиент на сервис приложения и приведите Struct в соответствие с реальным контрактом ответа. Учётные данные, состояние интерфейса, повторы, отмена и освобождение ресурсов остаются ответственностью приложения.
 
-<div class="framework-grid">
+## Что читать дальше
 
-### Vue
-
-`@defjs/vue` предоставляет `provideClient` как Vue-плагин и `injectClient` для Composition API. Совместное использование одного типизированного клиента `@defjs/core` между приложениями.
-
-[Подробнее →](/plugins/vue)
-
-### React
-
-`@defjs/react` предоставляет `ClientProvider`, `useClient` и option helpers для совместного использования одного типизированного client `@defjs/core` в дереве React-компонентов.
-
-[Подробнее →](/plugins/react)
-
-</div>
-
-## Что дальше
-
-- [Начало работы →](/guide/getting-started) — Установка, использование через CDN и ваш первый запрос
-- [Основные концепции →](/core/client) — Клиент, команды, контекст и обработка ошибок
-- [Примеры →](/guide/examples) — REST CRUD, SSE-уведомления, WebSocket-чат, паттерны перехватчиков
-
-<style>
-.framework-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-}
-.framework-grid > div,
-.framework-grid > h3 {
-  margin: 0;
-}
-.framework-grid h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-.framework-grid p {
-  margin: 0 0 0.5rem;
-  color: var(--vp-c-text-2);
-}
-.framework-grid a {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--vp-c-brand-1);
-}
-</style>
+- [Начало работы](/ru-RU/guide/getting-started) — установка пакета и первый типизированный запрос из приложения.
+- [Клиент](/ru-RU/core/client) — композиция опций и три перегрузки `execute`.
+- [Команды](/ru-RU/core/commands) — описания эндпоинтов, фабрики команд, команды и проекции, привязанные к схеме.
+- [HTTP](/ru-RU/core/http), [SSE](/ru-RU/core/sse) и [WebSocket](/ru-RU/core/web-socket) — поведение транспортов и управление жизненным циклом.
+- [Vue](/ru-RU/plugins/vue), [React](/ru-RU/plugins/react) и [OpenTelemetry Server](/ru-RU/plugins/opentelemetry-server) — подключение Defjs к фреймворку и телеметрии приложения.

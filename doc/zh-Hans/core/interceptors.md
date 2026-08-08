@@ -1,359 +1,266 @@
 ---
 title: Interceptors
-description: Per-transport HTTP, SSE, and WebSocket interceptors, onion-chain execution model, and common interceptor examples.
+description: 按 transport 筛选 interceptor，以洋葱顺序组合，安全 clone request，short-circuit 工作，并实现受限的 auth 和 retry 策略。
 ---
 
-# 拦截器
+# Interceptors
 
-`@defjs/core` 拦截器按传输层分为 HTTP、SSE 和 WebSocket。它们共享相同的洋葱链执行模型，但处理不同的请求/响应形状：HTTP 返回 `Promise<HttpResponse>`，SSE 返回 `Promise<EventStreamHandle>`，WebSocket 返回 `Promise<WebSocketSessionLike>`。
+Interceptor 包裹 transport boundary。HTTP、SSE 和 WebSocket 各有独立的 interceptor kind 和结果类型。
 
-拦截器在 `Client` 级别通过 `withInterceptors(...)` 注册。客户端根据命令类型自动过滤并分发到正确的拦截器链。
+| Factory                      | Request       | `next` 的结果                         |
+| ---------------------------- | ------------- | ------------------------------------- |
+| `createHttpInterceptor`      | `HttpRequest` | `Promise<HttpResponse<unknown>>`      |
+| `createSSEInterceptor`       | `HttpRequest` | `Promise<EventStreamHandle<unknown>>` |
+| `createWebSocketInterceptor` | `HttpRequest` | `Promise<WebSocketSessionLike>`       |
 
-## 三种拦截器类型
-
-### HTTP 拦截器
-
-HTTP 拦截器操作 `HttpRequest` 并返回 `Promise<HttpResponse>`。典型用途：注入认证请求头、日志、重试、错误转换。
+用 `withInterceptors(...)` 注册混合 interceptor。Client 按 `kind` 筛选，并在每种 transport 内保留注册顺序。
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpResponse, HttpInterceptorNext } from '@defjs/core'
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(httpLogger, sseAuth, socketObserver))
+```
 
-const loggingInterceptor = createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-  console.log(`[HTTP] ${req.method} ${req.endpoint}`)
-  const response = await next(req)
-  console.log(`[HTTP] ${req.method} ${req.endpoint} -> ${response.status}`)
+## 洋葱顺序
+
+Request 按注册顺序向内流动，返回时按相反顺序向外展开：
+
+```typescript
+const first = createHttpInterceptor(async (request, next) => {
+  order.push('first:before')
+  const response = await next(request)
+  order.push('first:after')
   return response
 })
+
+const second = createHttpInterceptor(async (request, next) => {
+  order.push('second:before')
+  const response = await next(request)
+  order.push('second:after')
+  return response
+})
+
+// first:before -> second:before -> transport
+//               <- second:after <- first:after
 ```
 
-### SSE 拦截器
-
-SSE 拦截器操作 `HttpRequest`（连接前的 HTTP 请求）并返回 `Promise<EventStreamHandle>`。典型用途：在 SSE 连接前注入认证请求头、监控连接状态。
+多次调用 `withInterceptors(...)` 会追加：
 
 ```typescript
-import { createSSEInterceptor } from '@defjs/core'
-import type { HttpRequest, SSEHandler } from '@defjs/core'
-
-const sseAuthInterceptor = createSSEInterceptor(async (req: HttpRequest, next: SSEHandler) => {
-  const headers = new Headers(req.headers)
-  headers.set('Authorization', `Bearer ${getToken()}`)
-  const stream = await next({ ...req, headers })
-  return stream
-})
+createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
-### WebSocket 拦截器
+## 安全 Clone Request
 
-WebSocket 拦截器操作 `HttpRequest`（打开 socket 之前的请求）并返回 `Promise<WebSocketSessionLike>`。典型用途：检查或改写最终 URL、添加日志，或者包装返回的 session。
-
-WebSocket 子协议协商应通过公开的 WebSocket 选项 API 配置，而不是在拦截器里直接改握手请求头。可以使用这些公开入口：
-
-- 端点级 `protocols: ['v1']`
-- `withWebSocketProtocols(['v1'])`
-- `withWebSocketOptions({ protocols: ['v1'] })`
-- `client.execute(command, { protocols: ['v1'] })`
+把传入 request 视为 chain 所拥有的对象。修改 header 前先创建新的 `Headers`：
 
 ```typescript
-import { createWebSocketInterceptor } from '@defjs/core'
-import type { HttpRequest, WebSocketHandler } from '@defjs/core'
-
-const wsLoggingInterceptor = createWebSocketInterceptor(async (req: HttpRequest, next: WebSocketHandler) => {
-  const target = req.queryString ? `${req.endpoint}?${req.queryString}` : req.endpoint
-  console.log(`[WS] ${target}`)
-  const session = await next(req)
-  console.log('[WS] protocol:', session.connection.protocol)
-  return session
-})
-```
-
-## 洋葱链执行模型
-
-三种拦截器链都使用**洋葱模型**：请求阶段按注册顺序进入，响应阶段按逆序返回。
-
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-
-const order: number[] = []
-
-const a = createHttpInterceptor(async (req, next) => {
-  order.push(1) // 请求阶段：第一个进入
-  const res = await next(req)
-  order.push(1.1) // 响应阶段：最后一个退出
-  return res
-})
-
-const b = createHttpInterceptor(async (req, next) => {
-  order.push(2)
-  const res = await next(req)
-  order.push(2.1)
-  return res
-})
-
-const c = createHttpInterceptor(async (req, next) => {
-  order.push(3) // 请求阶段：最后一个进入
-  const res = await next(req)
-  order.push(3.1) // 响应阶段：第一个退出
-  return res
-})
-
-// 通过 withInterceptors(a, b, c) 注册
-// 执行顺序：1 -> 2 -> 3 -> 3.1 -> 2.1 -> 1.1
-```
-
-### 修改请求和响应
-
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext } from '@defjs/core'
-
-const addHeaderInterceptor = createHttpInterceptor(async (req, next) => {
-  const headers = new Headers(req.headers)
-  headers.set('X-Request-Id', crypto.randomUUID())
-  return next({ ...req, headers })
-})
-
-const wrapErrorInterceptor = createHttpInterceptor(async (req, next) => {
-  try {
-    return await next(req)
-  } catch (error) {
-    throw new Error(`Request failed: ${error}`)
+const auth = createHttpInterceptor((request, next) => {
+  const token = getAccessToken()
+  if (!token) {
+    return next(request)
   }
+
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${token}`)
+  return next({ ...request, headers })
 })
 ```
 
-### 包装返回结果
+同一模式也适用于 SSE header。浏览器 WebSocket constructor 不能发送任意 handshake header，因此在 WebSocket interceptor 中修改 `request.headers` 并不能认证浏览器连接。
+
+替换 HTTP body 时，spread request 并替换 `body`。Fetch boundary 会检测旧 body 的 content-type metadata 已不再属于新 body。不要复用已消费的 `ReadableStream` body。
+
+## Short-Circuit
+
+Interceptor 可以跳过 `next`，但必须返回该 transport 期望的结果类型。HTTP 可以用 `makeResponse(...)` 创建 Defjs wrapper：
+
+```typescript
+import { createHttpInterceptor, makeResponse } from '@defjs/core'
+
+declare const isMaintenanceWindow: () => boolean
+
+const maintenanceGate = createHttpInterceptor(async (request, next) => {
+  if (isMaintenanceWindow()) {
+    return makeResponse({
+      status: 503,
+      statusText: 'Service Unavailable',
+      body: { message: 'Temporarily unavailable' },
+    })
+  }
+
+  return next(request)
+})
+```
+
+正常 command layer 仍会按 status 和 output Struct 分派这个 response。如果该 status 属于 endpoint contract，请把它声明出来。
+
+Short-circuit SSE 或 WebSocket 需要提供完整兼容的 handle 或 session，包括关闭语义。通常，这比返回 synthetic HTTP response 麻烦得多。
+
+## 保留 Live Session Getter
+
+不要用 `{ ...session }` 包装 WebSocket session。Spread 会读取一次 `state` 和 `connection`，把 live getter 变成 stale value。请逐个 member 显式 delegate：
 
 ```typescript
 import { createWebSocketInterceptor } from '@defjs/core'
-import type { WebSocketInterceptorFn } from '@defjs/core'
 
-const wrapSessionInterceptor: WebSocketInterceptorFn = async (req, next) => {
-  const session = await next(req)
+const wrappedSession = createWebSocketInterceptor(async (request, next) => {
+  const session = await next(request)
+
   return {
-    ...session,
-    send(message: unknown) {
-      console.log('[WS] send:', message)
+    get connection() {
+      return session.connection
+    },
+    get state() {
+      return session.state
+    },
+    closed: session.closed,
+    receive: session.receive,
+    close(code, reason) {
+      session.close(code, reason)
+    },
+    onRuntimeError(listener) {
+      return session.onRuntimeError(listener)
+    },
+    onStateChange(listener) {
+      return session.onStateChange(listener)
+    },
+    send(message) {
       session.send(message)
     },
   }
-}
-```
-
-## 常见拦截器示例
-
-### 认证拦截器
-
-将 Bearer Token 注入请求头。HTTP 和 SSE 共享相同逻辑。
-
-```typescript
-import { createHttpInterceptor, createSSEInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext } from '@defjs/core'
-
-function getToken(): string {
-  return localStorage.getItem('token') ?? ''
-}
-
-const authHttpInterceptor = createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-  const headers = new Headers(req.headers)
-  headers.set('Authorization', `Bearer ${getToken()}`)
-  return next({ ...req, headers })
-})
-
-const authSSEInterceptor = createSSEInterceptor(async (req, next) => {
-  const headers = new Headers(req.headers)
-  headers.set('Authorization', `Bearer ${getToken()}`)
-  return next({ ...req, headers })
 })
 ```
 
-### 日志拦截器
+Wrapper 还必须保留资源所有权。除非应用明确设计并记录了不同语义，否则不要替换 `closed`、吞掉 `close`，或断开 incoming iterable。
 
-记录请求耗时和状态码。
+## 有界日志
 
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext } from '@defjs/core'
-
-const timingInterceptor = createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-  const start = performance.now()
-  const response = await next(req)
-  const duration = (performance.now() - start).toFixed(2)
-  console.log(`[${duration}ms] ${req.method} ${req.endpoint} ${response.status}`)
-  return response
-})
-```
-
-### 重试拦截器
-
-对特定状态码重试。重试拦截器应注册在靠近链底部的位置，在日志之后、实际请求之前。
+优先使用固定 operation name 和少量经过审查的字段：
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext, HttpResponse } from '@defjs/core'
+function timingInterceptor(operation: string) {
+  return createHttpInterceptor(async (request, next) => {
+    const startedAt = performance.now()
+    const response = await next(request)
 
-function retryInterceptor(maxRetries = 3, delayMs = 1000) {
-  return createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-    let lastError: unknown
+    console.info('outbound request completed', {
+      durationMs: Math.round(performance.now() - startedAt),
+      operation,
+      status: response.status,
+    })
 
-    for (let i = 0; i <= maxRetries; i++) {
-      try {
-        const response = await next(req)
-        if (response.status >= 500) {
-          lastError = new Error(`Server error: ${response.status}`)
-          if (i < maxRetries) {
-            await new Promise((r) => setTimeout(r, delayMs * (i + 1)))
-            continue
-          }
-        }
-        return response
-      } catch (error) {
-        lastError = error
-        if (i < maxRetries) {
-          await new Promise((r) => setTimeout(r, delayMs * (i + 1)))
-          continue
-        }
-      }
-    }
-
-    throw lastError
+    return response
   })
 }
 ```
 
-### Basic Auth 拦截器（内置）
+默认不要记录 endpoint URL、query string、header、body、raw cause、SSE event ID 或 WebSocket payload。
 
-`@defjs/core` 为 HTTP 和 SSE 提供内置 Basic Auth 拦截器。
+## 保守重试 HTTP
+
+Retry 会改变应用行为。下面的示例只处理 `GET`、`HEAD` 和 `OPTIONS`；只重试 status `0`、`502`、`503` 和 `504`；遵守 `Retry-After`；收到 abort 后立即停止；并拒绝 stream body。
 
 ```typescript
-import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from '@defjs/core'
+import { createHttpInterceptor } from '@defjs/core'
+import type { HttpRequest, HttpResponse } from '@defjs/core'
 
-const credential = () => ({ username: 'admin', password: 'secret' })
+const RETRYABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+const RETRYABLE_STATUSES = new Set([0, 502, 503, 504])
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(basicAuthHttpInterceptor(credential), basicAuthSSEInterceptor(credential)),
-)
+function isReplayable(request: HttpRequest): boolean {
+  return !(typeof ReadableStream !== 'undefined' && request.body instanceof ReadableStream)
+}
+
+function retryAfterMs(response: HttpResponse<unknown>): number | undefined {
+  const value = response.headers.get('retry-after')
+  if (!value) {
+    return undefined
+  }
+
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1_000
+  }
+
+  const at = Date.parse(value)
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
+}
+
+async function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    throw signal.reason
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(finish, ms)
+
+    function finish() {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }
+
+    function abort() {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+      reject(signal?.reason)
+    }
+
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+    }
+  })
+}
+
+function retrySafeHttp(maxRetries = 2) {
+  return createHttpInterceptor(async (request, next) => {
+    if (!RETRYABLE_METHODS.has(request.method.toUpperCase()) || !isReplayable(request)) {
+      return next(request)
+    }
+
+    for (let retry = 0; ; retry += 1) {
+      const response = await next(request)
+      if (!RETRYABLE_STATUSES.has(response.status) || retry >= maxRetries) {
+        return response
+      }
+
+      const fallback = Math.min(250 * 2 ** retry, 5_000)
+      const delay = Math.min(retryAfterMs(response) ?? fallback, 30_000)
+      await abortableWait(delay, request.abort)
+    }
+  })
+}
 ```
 
-默认编码使用 `globalThis.btoa`。对于没有 `btoa` 的环境（如 Node），通过 `options.encode` 自定义：
+这个 interceptor 不重试其他 interceptor 抛出的错误，因为它无法安全分类。Status `0` 是 Defjs Fetch boundary 的 transport-failure wrapper。
+
+不要习惯性扩展到写 method。重试 `POST`、`PUT`、`PATCH` 或 `DELETE` 需要应用级 idempotency contract、可重放 body、服务端支持和经过审查的 status policy。
+
+## Basic Authentication
+
+Root entry 导出 `basicAuthHttpInterceptor(...)` 和 `basicAuthSSEInterceptor(...)`。
 
 ```typescript
-import { basicAuthHttpInterceptor } from '@defjs/core'
-
-const interceptor = basicAuthHttpInterceptor(() => ({ username: 'user', password: 'pass' }), {
-  encode: (cred) => Buffer.from(`${cred.username}:${cred.password}`).toString('base64'),
-})
-```
-
-## 注册和过滤
-
-### 通过 `withInterceptors` 注册
-
-拦截器在 `createClient` 时通过 `withInterceptors(...)` 注册。同一个数组可以混合三种拦截器类型；客户端按命令类型自动过滤。
-
-```typescript
-import { createClient, withEndpoint, withInterceptors } from '@defjs/core'
-import { createHttpInterceptor, createSSEInterceptor, createWebSocketInterceptor } from '@defjs/core'
-
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withInterceptors(
-    createHttpInterceptor(async (req, next) => {
-      console.log('HTTP:', req.endpoint)
-      return next(req)
-    }),
-    createSSEInterceptor(async (req, next) => {
-      console.log('SSE:', req.endpoint)
-      return next(req)
-    }),
-    createWebSocketInterceptor(async (req, next) => {
-      console.log('WS:', req.endpoint)
-      return next(req)
-    }),
+    basicAuthHttpInterceptor(() => credentials),
+    basicAuthSSEInterceptor(() => credentials),
   ),
 )
 ```
 
-### 过滤规则
+Basic credential 只是 Base64 编码，没有加密。必须使用 TLS。默认 encoder 使用 `globalThis.btoa`，它可能不存在，而且只接受有限字符范围。Runtime 没有 `btoa`，或 credential 需要经过审查的 UTF-8/Base64 实现时，请传入 `options.encode`。
 
-客户端按命令类型过滤拦截器：
+Credential provider 会在 request 经过 interceptor 时执行。服务端 credential 必须保持 request-scoped；不要记录最终 header。
 
-| 命令类型                      | 过滤条件                |
-| ----------------------------- | ----------------------- |
-| HTTP (`defineRequest`)        | `kind === 'http'`       |
-| SSE (`defineEventStream`)     | `kind === 'sse'`        |
-| WebSocket (`defineWebSocket`) | `kind === 'web-socket'` |
+## Observer 与 Callback 安全
 
-过滤后的拦截器保持原始注册顺序，然后形成洋葱链。
+SSE 和 WebSocket interceptor 可以给返回的 handle 附加生命周期 observer。所有者结束时要取消 WebSocket listener。Listener 和 predicate 应保持不抛错；当前 realtime 实现没有隔离所有 listener 或 reconnect predicate failure。
 
-```typescript
-// 概念性执行示意：公开 API 会在内部完成过滤和组链。
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(loggingInterceptor, authInterceptor, retryInterceptor),
-)
-
-const [error, result] = await client.execute(command)
-```
-
-### 拦截器顺序和组合
-
-多次调用 `withInterceptors` 按顺序追加拦截器。
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(loggingInterceptor), // 第一个
-  withInterceptors(authInterceptor, retryInterceptor), // 第二个
-)
-// 最终顺序：logging -> auth -> retry
-```
-
-## 请求体元数据说明
-
-当拦截器替换 `body` 时，旧的 `bodyContentType` 元数据会自动失效，以防止错误的 `Content-Type` 被发送到服务器。
-
-```typescript
-// 保留原始 body：Content-Type 元数据保持有效
-const keepBody = createHttpInterceptor((req, next) => next({ ...req, headers: new Headers(req.headers) }))
-
-// 替换 body：旧 Content-Type 被清除，新 body 类型决定新的 Content-Type
-const replaceBody = createHttpInterceptor((req, next) => next({ ...req, body: new FormData() }))
-```
-
-## API 参考
-
-### 创建函数
-
-| 函数                             | 说明                  |
-| -------------------------------- | --------------------- |
-| `createHttpInterceptor(fn)`      | 创建 HTTP 拦截器      |
-| `createSSEInterceptor(fn)`       | 创建 SSE 拦截器       |
-| `createWebSocketInterceptor(fn)` | 创建 WebSocket 拦截器 |
-
-### 类型
-
-| 类型                   | 说明                                                                         |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| `HttpInterceptor`      | HTTP 拦截器对象 `{ kind: 'http', fn: InterceptorFn }`                        |
-| `SSEInterceptor`       | SSE 拦截器对象 `{ kind: 'sse', fn: SSEInterceptorFn }`                       |
-| `WebSocketInterceptor` | WebSocket 拦截器对象 `{ kind: 'web-socket', fn: WebSocketInterceptorFn }`    |
-| `Interceptor`          | 三种拦截器的联合类型                                                         |
-| `HttpInterceptorNext`  | HTTP 下一个处理器 `(req: HttpRequest) => Promise<HttpResponse>`              |
-| `SSEHandler`           | SSE 下一个处理器 `(req: HttpRequest) => Promise<EventStreamHandle>`          |
-| `WebSocketHandler`     | WebSocket 下一个处理器 `(req: HttpRequest) => Promise<WebSocketSessionLike>` |
-
-### 内置拦截器
-
-| 函数                                             | 说明                   |
-| ------------------------------------------------ | ---------------------- |
-| `basicAuthHttpInterceptor(credential, options?)` | HTTP Basic Auth 拦截器 |
-| `basicAuthSSEInterceptor(credential, options?)`  | SSE Basic Auth 拦截器  |
+Interceptor 可以 throw 或 reject。高层 transport 可能把部分 failure 归一化成 `RequestError`，但 interceptor 代码不应依赖“绝不 reject”的笼统保证。
 
 ## 下一步
 
-- [客户端 →](/core/client) — 创建客户端和配置拦截器
-- [HTTP 请求 →](/core/http) — `defineRequest` 和输出模式
-- [SSE →](/core/sse) — SSE 定义和流式传输
-- [WebSocket →](/core/web-socket) — WebSocket 定义和生命周期
+- [Client](/zh-Hans/core/client)：注册和 option 组合。
+- [HTTP](/zh-Hans/core/http)：Fetch wrapper 和 status-0 行为。
+- [SSE](/zh-Hans/core/sse) 与 [WebSocket](/zh-Hans/core/web-socket)：各 transport 的生命周期细节。

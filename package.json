@@ -4,37 +4,27 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm -r run build",
+    "build": "pnpm run typecheck && pnpm -r run build",
     "changeset": "changeset",
-    "changeset:version": "changeset version",
-    "check": "pnpm lint && pnpm fmt:check && pnpm typecheck",
     "fmt": "oxfmt . --write",
     "fmt:check": "oxfmt . --check",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
+    "release": "pnpm run build && pnpm changeset publish",
     "test": "pnpm -r run test",
-    "typecheck": "pnpm -r --if-present run typecheck"
+    "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@changesets/changelog-github": "catalog:",
     "@changesets/cli": "catalog:",
     "@hono/node-server": "catalog:",
-    "@hono/node-ws": "catalog:",
     "@types/node": "catalog:",
-    "@typescript/native-preview": "catalog:",
-    "@vitest/browser": "catalog:",
-    "@vitest/browser-playwright": "catalog:",
-    "@vitest/coverage-istanbul": "catalog:",
     "hono": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "playwright": "catalog:",
-    "tsdown": "catalog:",
-    "tsx": "catalog:",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   },
   "engines": {
     "node": ">=26"

@@ -1,8 +1,7 @@
 import { expectTypeOf } from 'vitest'
 import type { EVENT_STREAM_COMMAND } from '../client/command'
 import { COMMAND_TYPE } from '../client/command'
-import { defineEventStream } from './sse'
-import { struct } from '../struct'
+import { createClient, defineEventStream, struct, type EventStreamData, type EventStructs } from '../index'
 
 const useEvents = defineEventStream({
   path: '/events',
@@ -12,5 +11,86 @@ const useEvents = defineEventStream({
 const command = useEvents()
 expectTypeOf(command[COMMAND_TYPE]).toEqualTypeOf<typeof EVENT_STREAM_COMMAND>()
 expectTypeOf(command.endpoint.path).toEqualTypeOf<string>()
+
+const catalogEventStructs = {
+  'price-updated': struct.json(struct.object({ priceCents: struct.number(), sku: struct.string() })),
+  'product-retired': struct.json(struct.object({ reason: struct.string(), sku: struct.string() })),
+} satisfies EventStructs
+
+expectTypeOf<EventStreamData<typeof catalogEventStructs>['event']>().toEqualTypeOf<'price-updated' | 'product-retired'>()
+
+const catalogEvents = defineEventStream({ path: '/catalog/events', events: catalogEventStructs })
+
+async function assertNamedEventNarrowing(): Promise<void> {
+  const [error, stream] = await createClient().execute(catalogEvents())
+  if (error) return
+
+  for await (const event of stream) {
+    // @ts-expect-error Variant-only fields require event-name narrowing.
+    void event.data.priceCents
+
+    switch (event.event) {
+      case 'price-updated':
+        expectTypeOf(event.data).toEqualTypeOf<{ priceCents: number; sku: string }>()
+        expectTypeOf(event.data.priceCents).toEqualTypeOf<number>()
+        // @ts-expect-error Retirement-only fields remain unavailable in this branch.
+        void event.data.reason
+        break
+      case 'product-retired':
+        expectTypeOf(event.data).toEqualTypeOf<{ reason: string; sku: string }>()
+        expectTypeOf(event.data.reason).toEqualTypeOf<string>()
+        // @ts-expect-error Price-only fields remain unavailable in this branch.
+        void event.data.priceCents
+        break
+      default: {
+        const exhaustive: never = event
+        void exhaustive
+      }
+    }
+  }
+}
+
+void assertNamedEventNarrowing
+
+type CatalogEvent = EventStreamData<typeof catalogEventStructs>
+// @ts-expect-error Undeclared events are dropped when no default Struct exists.
+const undeclaredCatalogEvent: CatalogEvent = { data: 'raw', event: 'inventory-reset' }
+void undeclaredCatalogEvent
+
+const defaultEventStructs = { default: struct.string() } satisfies EventStructs
+expectTypeOf<EventStreamData<typeof defaultEventStructs>['event']>().toEqualTypeOf<string>()
+expectTypeOf<EventStreamData<typeof defaultEventStructs>['data']>().toEqualTypeOf<string>()
+
+const mixedEventStructs = {
+  default: struct.string(),
+  message: struct.json(struct.object({ text: struct.string() })),
+} satisfies EventStructs
+expectTypeOf<EventStreamData<typeof mixedEventStructs>['event']>().toEqualTypeOf<string>()
+expectTypeOf<EventStreamData<typeof mixedEventStructs>['data']>().toEqualTypeOf<string | { text: string }>()
+
+const alphaStruct = struct.object({ alpha: struct.string() })
+const betaStruct = struct.object({ beta: struct.number() })
+type DistributedEvent = EventStreamData<{ alpha: typeof alphaStruct } | { beta: typeof betaStruct }>
+expectTypeOf<DistributedEvent['event']>().toEqualTypeOf<'alpha' | 'beta'>()
+
+function assertDistributedEventNarrowing(event: DistributedEvent): void {
+  switch (event.event) {
+    case 'alpha':
+      expectTypeOf(event.data.alpha).toEqualTypeOf<string>()
+      break
+    case 'beta':
+      expectTypeOf(event.data.beta).toEqualTypeOf<number>()
+      break
+  }
+}
+void assertDistributedEventNarrowing
+
+const numericEventStructs = { 404: struct.string() } satisfies EventStructs
+expectTypeOf<EventStreamData<typeof numericEventStructs>['event']>().toEqualTypeOf<'404'>()
+expectTypeOf<EventStreamData<typeof numericEventStructs>['data']>().toEqualTypeOf<string>()
+
+const prototypeEventStructs = { __proto__: struct.number() } satisfies EventStructs
+expectTypeOf<EventStreamData<typeof prototypeEventStructs>['event']>().toEqualTypeOf<'__proto__'>()
+expectTypeOf<EventStreamData<typeof prototypeEventStructs>['data']>().toEqualTypeOf<number>()
 
 export type Cases = true

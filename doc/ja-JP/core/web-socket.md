@@ -1,336 +1,302 @@
 ---
 title: WebSocket
-description: Typed WebSocket endpoints with struct-driven messages, automatic reconnect, heartbeat, and send queueing.
+description: メッセージエンベロープ、起動とライブセッション、受信ワークキュー、明示設定の再接続、ハートビート、リソースのクローズを説明します。
 ---
 
 # WebSocket
 
-`@defjs/core` は `defineWebSocket` を介して型付き WebSocket エンドポイントを提供します。各エンドポイントは以下を宣言します：
-
-- `incoming` スキーマ — サーバーがクライアントに送信するメッセージ。
-- `outgoing` スキーマ — クライアントがサーバーに送信するメッセージ。
-- `input` スキーマ + `build` ハンドラー — リクエストパラメーターとクエリ／パス構築（オプション）。
-
-メッセージは JSON エンコードされ、宣言されたスキーマに対して実行時に検証されます。
-
-## WebSocket エンドポイントの定義
-
-`defineWebSocket` を使って型付きコマンドビルダーを作成します。ビルダーは `client.execute()` で実行されます。
+`defineWebSocket(...)` は、JSON メッセージを使う WebSocket エンドポイントのコマンドビルダーを作ります。
 
 ```typescript
-import { createClient, defineWebSocket, struct } from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('wss://api.example.com'))
 
-const useChatSocket = defineWebSocket({
-  // オプション: 入力から接続 URL を構築
-  input: struct.request({
-    query: struct.object({ roomId: struct.string() }),
-  }),
-  build: (request, input) => {
-    request.setQueryParams({ roomId: input.query.roomId })
-  },
-
-  // サーバー → クライアントのメッセージ
+const chat = defineWebSocket({
+  path: '/chat',
   incoming: {
-    joined: struct.object({ roomId: struct.string(), userId: struct.number() }),
-    message: struct.object({ text: struct.string(), userId: struct.number() }),
+    message: struct.object({ userId: struct.number(), text: struct.string() }),
+    pong: struct.object({}),
   },
-
-  // クライアント → サーバーのメッセージ
   outgoing: {
-    message: struct.object({ text: struct.string() }),
+    send: struct.object({ text: struct.string() }),
+    ping: struct.object({}),
   },
-
-  path: '/ws/chat',
-  protocols: ['json'],
 })
 ```
 
-### スキーマ形状
+## メッセージエンベロープ
 
-**Incoming メッセージ**は `type` でキー付けされます。メッセージが到着すると、その JSON の `type` フィールドがスキーマキーと一致します。ペイロードがプレーンオブジェクトの場合、そのフィールドは `type` とマージされます：
+すべてのメッセージは、空でない文字列の `type` を持つ JSON オブジェクトです。タイプによって `incoming` または `outgoing` の Struct が選ばれます。
 
-```typescript
-// サーバー送信: { "type": "message", "text": "hi", "userId": 1 }
-// クライアント受信: { type: 'message', text: 'hi', userId: 1 }
+オブジェクトペイロードのフィールドは `type` と同じ階層に置けます。
+
+```json
+{ "type": "message", "userId": 7, "text": "Hello" }
 ```
 
-ペイロードがスカラーまたは配列の場合、`data` の下にラップされます：
+スカラーまたは配列のペイロードは `data` に入れます。
 
-```typescript
-// サーバー送信: { "type": "notification", "data": [1, 2, 3] }
-// クライアント受信: { type: 'notification', data: [1, 2, 3] }
+```json
+{ "type": "count", "data": 3 }
 ```
 
-**Outgoing メッセージ**も同じ規約に従います。`send()` メソッドは `outgoing` キーのいずれかに一致する `type` を持つメッセージを受け付けます：
+`type` と `data` はエンベロープの予約キーです。オブジェクトペイロード自体が `data` フィールドを持つ場合、ランタイムがそのフィールドをエンベロープペイロードと誤認しないよう、ペイロード全体を包んでください。
 
 ```typescript
-socket.send({ type: 'message', text: 'hello' })
-```
+const audit = defineWebSocket({
+  path: '/audit',
+  incoming: {
+    entry: struct.object({ data: struct.string(), source: struct.string() }),
+  },
+  outgoing: {
+    write: struct.object({ data: struct.string(), source: struct.string() }),
+  },
+})
 
-`incoming` で `default` キーを使うと、宣言されていないメッセージタイプを共有スキーマでキャッチできます。
-
-## 実行とメッセージの消費
-
-`client.execute()` はタプル `[error, socket, connection]` を返します：
-
-```typescript
-const [error, socket, connection] = await client.execute(useChatSocket({ query: { roomId: 'room-1' } }))
-
-if (error || !socket) {
-  // 起動失敗を処理（検証、トランスポート、中断など）
-  return
+const [auditError, auditSession] = await client.execute(audit())
+if (!auditError) {
+  auditSession.send({
+    type: 'write',
+    data: { data: 'reviewed-value', source: 'settings' },
+  })
 }
+```
 
-// 受信メッセージを反復
-for await (const message of socket.receive) {
-  switch (message.type) {
-    case 'joined':
-      console.log('User joined:', message.userId)
-      break
-    case 'message':
-      console.log('New message:', message.text)
-      break
+対応する通信形式は `{ "type": "write", "data": { "data": "reviewed-value", "source": "settings" } }` です。
+
+`type` を通常のペイロードフィールドとして宣言しないでください。エンベロープの正規化処理が管理します。
+
+任意の `incoming.default` Struct は、未宣言のメッセージタイプを処理します。指定がなければ未知のタイプは破棄されます。
+
+## 起動時のタプル
+
+```typescript
+const [error, session, startupConnection] = await client.execute(chat())
+```
+
+WebSocket は次の形を返します。
+
+```typescript
+type SocketAwaitResult<TIncoming, TOutgoing> =
+  | [error: null, session: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
+  | [error: RequestError<unknown>, session: undefined, connection: WebSocketConnectionInfo | undefined]
+```
+
+成功時の 3 番目の要素は、起動時接続スナップショットです。最初の物理ソケットがオープンした時点で取得した `url`、`protocol`、`extensions` を含むことがあります。
+
+`session.connection` はライブ getter です。再接続では内部の物理ソケットが置き換わり、この値も更新されることがあります。起動時スナップショットが必要なら、タプルの 3 番目の要素を保持してください。
+
+接続 URL はログへ出さないでください。パス識別子、アプリケーションのクエリデータ、テレメトリー伝播フィールドを含む可能性があります。
+
+## ライブセッション
+
+`WebSocketSession` は、複数の物理接続試行にまたがる 1 つの論理セッションです。
+
+| メンバー                   | 動作                                                                 |
+| -------------------------- | -------------------------------------------------------------------- |
+| `connection`               | 最新の接続情報を返すライブ getter。                                  |
+| `state`                    | 論理セッションの現在状態を返すライブ getter。                        |
+| `receive`                  | 検証済み受信メッセージの共有非同期ワークキュー。                     |
+| `send(message)`            | 送信メッセージを検証・シリアライズし、送信またはキューへ追加します。 |
+| `close(code?, reason?)`    | 終端クローズを要求します。                                           |
+| `closed`                   | 観測された終端クローズ情報を返す Promise。                           |
+| `onStateChange(listener)`  | 状態オブザーバーを追加し、購読解除関数を返します。                   |
+| `onRuntimeError(listener)` | ランタイムエラーオブザーバーを追加し、購読解除関数を返します。       |
+
+クライアントは返却後のセッションを追跡しません。呼び出し側がメッセージの消費、オブザーバー、キャンセル、クローズを所有します。
+
+## メッセージを受信する
+
+テキスト、ArrayBuffer、型付き配列、Blob のメッセージは UTF-8 JSON としてデコードされます。次の入力は通知なしで破棄されます。
+
+- 不正な JSON
+- オブジェクトでないエンベロープ
+- `type` がない、または空文字列
+- `incoming.default` Struct のない未知のタイプ
+
+Struct が選ばれた後のデコード失敗は `onRuntimeError` へ通知され、そのメッセージは破棄されます。
+
+```typescript
+const unsubscribeError = session.onRuntimeError(() => {
+  recordSocketFailure({ operation: 'chat-receive' })
+})
+
+try {
+  for await (const message of session.receive) {
+    if (message.type === 'message') {
+      renderMessage(message.userId, message.text)
+    }
   }
-}
-
-// または非同期イテレーターを直接使用
-const iterator = socket.receive[Symbol.asyncIterator]()
-const next = await iterator.next()
-if (!next.done) {
-  console.log(next.value)
+} finally {
+  unsubscribeError()
+  session.close(1000, 'consumer-finished')
+  await session.closed
 }
 ```
 
-## `WebSocketSession` API
+受信イテラブルは、上限のない共有ワークキューです。複数のイテレーターはメッセージを奪い合い、独立した購読にはなりません。キューが増えてもトランスポートはサーバーの送信を遅くしません。受信メッセージを必ず継続して消費するか、セッションを速やかにクローズしてください。
 
-| メンバー                   | 型                                         | 説明                                                                    |
-| -------------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
-| `connection`               | `WebSocketConnectionInfo`                  | 基盤ソケットからの `{ url?, protocol?, extensions? }`。                 |
-| `state`                    | `WebSocketState`                           | 現在のライフサイクル状態（下記参照）。                                  |
-| `receive`                  | `AsyncIterable<TIncoming>`                 | 検証済み受信メッセージの非同期イテレーター。                            |
-| `closed`                   | `Promise<WebSocketCloseInfo>`              | ソケットが `{ code?, reason?, wasClean?, cause? }` で閉じたときに解決。 |
-| `send(message)`            | `(message: TOutgoing) => void`             | 送信メッセージを送信。未オープン時はキューに入る。                      |
-| `close(code?, reason?)`    | `(code?: number, reason?: string) => void` | グレースフルに接続を閉じる。                                            |
-| `onStateChange(listener)`  | `(state: WebSocketState) => void`          | 購読解除関数を返す。                                                    |
-| `onRuntimeError(listener)` | `(error: unknown) => void`                 | 購読解除関数を返す。                                                    |
+## メッセージを送信する
 
-```typescript
-// 状態監視
-const unsubscribe = socket.onStateChange((state) => {
-  console.log('Socket state:', state)
-})
+`send(...)` は同期メソッドです。次の場合は同期的に例外を送出することがあります。
 
-// 実行時エラー（スキーマ失敗、ハートビートタイムアウトなど）
-socket.onRuntimeError((error) => {
-  console.error('Runtime error:', error)
-})
-
-// グレースフルクローズ
-socket.close(1000, 'done')
-await socket.closed
-```
-
-## 接続ライフサイクル状態マシン
-
-```
-idle → connecting → open → closing → closed
-            ↓           ↓
-         reconnecting   error
-            ↓           ↓
-         (retry)      aborted
-```
-
-| 状態           | 意味                                                                   |
-| -------------- | ---------------------------------------------------------------------- |
-| `idle`         | `execute()` 呼び出し前。                                               |
-| `connecting`   | 最初の接続試行を開始中。                                               |
-| `open`         | 接続確立。メッセージの送受信が可能。                                   |
-| `closing`      | `close()` または `abort` がトリガーされ、クローズイベントを待機中。    |
-| `closed`       | クリーンクローズ（エラーなし、または手動クローズ）。                   |
-| `reconnecting` | 接続が切断され、リトライ前に待機中。                                   |
-| `error`        | 終了失敗（検証エラー、トランスポートエラー、原因付き非中断クローズ）。 |
-| `aborted`      | `AbortSignal` または `close()` による明示的な中断。                    |
-
-状態遷移は `onStateChange` を介して発行されます。`receive` 非同期イテレーターは、ソケットが終了状態（`closed`、`error`、`aborted`）に達すると終了します。
-
-## ハートビート
-
-定期的な ping/ack を設定して、接続を維持したり、無効なピアを検出したりします。
+- エンドポイントに `outgoing` マップがない
+- メッセージに有効な `type` がない
+- タイプが未宣言
+- ペイロードの構造デコードまたはエンコーディングに失敗した
+- 上限付き送信キューが `overflow: 'error'` を使っている
+- 即時送信中にネイティブソケットが例外を送出した
 
 ```typescript
-const [error, socket] = await client.execute(useSocket(), {
-  heartbeat: {
-    intervalMs: 30_000, // 30 秒ごとに送信
-    message: () => ({ type: 'ping' }),
-    timeoutMs: 10_000, // 10 秒以内に ack を期待
-    isAck: (message) => message.type === 'pong',
-  },
+try {
+  session.send({ type: 'send', text: 'Hello' })
+} catch (error) {
+  handleSendFailure(error)
+}
+```
+
+オープン前または再接続試行の間に送ったメッセージは送信キューに入ります。物理ソケットがオープンするとキューの内容が送信されます。
+
+終端状態の後に `send` を呼ばないでください。現在の実装にはクローズ後の安定した拒否契約がなく、終端クローズ後にキューへ入ったデータは送信されない可能性があります。
+
+## 状態
+
+`session.state` は次のいずれかです。
+
+| State          | 意味                                                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `idle`         | 実行開始前の初期内部状態。                                                                                                           |
+| `connecting`   | 最初の物理接続試行を開始中。                                                                                                         |
+| `open`         | 物理ソケットが開いた後、最後に通知された論理状態。再接続の待機中は、物理ソケットが存在しなくても `open` のままになることがあります。 |
+| `reconnecting` | 遅延後に次の物理接続試行を開始中。                                                                                                   |
+| `closing`      | キャンセルにより、接続中またはオープン中のソケットをクローズ中。                                                                     |
+| `closed`       | 正規化されたエラーのない終端クローズ。                                                                                               |
+| `aborted`      | 外部キャンセルが `ABORTED` に正規化された終端状態。                                                                                  |
+| `error`        | その他の終端失敗。                                                                                                                   |
+
+`reconnecting` は遅延中には通知されません。遅延後、次の試行を開始するときに通知されます。`session.state` は最後に通知されたライフサイクル状態であり、現在ネイティブソケットが存在する証明ではありません。この間に送ったメッセージは送信キューへ入ります。
+
+状態リスナーは直接実行されます。例外を送出しないようにし、所有者の終了時に購読を解除してください。
+
+### 各試行の前処理
+
+`beforeConnect` はクライアントまたは 1 回の実行に設定できます。最初の試行と各再接続試行で、ネイティブコンストラクターより前に実行されます。
+
+```typescript
+declare const refreshConnectionState: () => Promise<void>
+
+const [error, session] = await client.execute(chat(), {
+  beforeConnect: refreshConnectionState,
 })
 ```
 
-| オプション   | 説明                                                                             |
-| ------------ | -------------------------------------------------------------------------------- |
-| `intervalMs` | ハートビート送信間隔（必須）。                                                   |
-| `message`    | ハートビートメッセージを返すファクトリー。`TOutgoing` に対して型付けされる。     |
-| `timeoutMs`  | 設定された場合、ack が時間内に到着しないとコード `4000` でソケットが閉じられる。 |
-| `isAck`      | 受信メッセージをハートビート ack として認識する述語。                            |
+コマンド入力とリクエストプロジェクションは、すでに構築済みです。このフックは `build` を再実行せず、束縛済みクエリ値も変更しません。実行環境のハンドシェイク処理が使う状態の更新など、アプリケーションが所有する準備処理に使います。例外の送出または Promise の reject は終端トランスポート失敗になり、クローズ結果の再接続述語には渡りません。
 
-ハートビートはクライアントレベル（`createClient({ webSocket: { heartbeat: ... } })`）またはリクエストレベル（`execute()` オプション）で設定できます。リクエストレベルの設定が優先されます。
+## 再接続は明示設定
 
-## 再接続
-
-予期しない接続切断時に自動再接続がトリガーされます。
+再接続オブジェクトを指定しなければ再接続しません。クライアントごと、または実行ごとに設定します。
 
 ```typescript
-const [error, socket] = await client.execute(useSocket(), {
+const [error, session] = await client.execute(chat(), {
   reconnect: {
     attempts: 5,
     delayMs: 1_000,
     factor: 2,
     maxDelayMs: 30_000,
     jitter: 0.2,
-    shouldReconnect: ({ attempt, code, reason, wasClean }) => {
-      return !wasClean && attempt < 3
+    shouldReconnect({ attempt, code, wasClean }) {
+      return !wasClean && code !== 1008 && attempt <= 5
     },
   },
 })
 ```
 
-| オプション        | デフォルト   | 説明                                                       |
-| ----------------- | ------------ | ---------------------------------------------------------- |
-| `attempts`        | `3`          | 最大リトライ回数。`<= 0` で再接続を無効化。                |
-| `delayMs`         | `1000`       | 初回リトライ前のベース遅延。                               |
-| `factor`          | `2`          | 指数バックオフ乗数。                                       |
-| `maxDelayMs`      | `30000`      | 計算された遅延の上限。                                     |
-| `jitter`          | `0`          | ランダム化係数（`0`〜`1`）。                               |
-| `shouldReconnect` | `() => true` | 特定のクローズがリトライをトリガーすべきかを判定する述語。 |
+`attempts` は最初の試行後に行う再試行回数です。空オブジェクトを渡すと、次のデフォルトで 3 回再試行します。
 
-遅延計算式: `min(delayMs * factor^(attempt - 1), maxDelayMs)`、その後ジッターが適用されます。
+| フィールド        | デフォルト                             |
+| ----------------- | -------------------------------------- |
+| `attempts`        | `3`                                    |
+| `delayMs`         | `1000`                                 |
+| `factor`          | `2`                                    |
+| `maxDelayMs`      | `30000`                                |
+| `jitter`          | `0`                                    |
+| `shouldReconnect` | すべてのクローズ結果で `true` を返す。 |
 
-再接続はクライアントレベルでも `createClient({ webSocket: { reconnect: ... } })` で設定できます。
+デフォルト述語は、正常・異常のどちらのリモートクローズも再試行します。正常なクローズを終端にする場合は述語を指定してください。`attempt` は最初の再試行が 1 です。
 
-## 送信キュー
+基準遅延は `min(delayMs * factor ** (attempt - 1), maxDelayMs)` です。WebSocket の jitter は乗算です。たとえば `0.2` なら `0.8` 以上 `1.2` 以下のランダムな係数を選びます。ミリ秒を加算する SSE の jitter とは異なります。
 
-ソケットが `open` になる前（または一時的な切断中）に送信されたメッセージはキューに入り、接続準備が整うとフラッシュされます。
+`shouldReconnect` は同期かつ例外を送出しない処理にしてください。再接続は、同じ論理セッション内で新しい物理ソケットを開きます。受信/送信キューもその論理セッションに属します。
+
+## ハートビート
+
+ハートビートも明示的な設定が必要です。
 
 ```typescript
-const [error, socket] = await client.execute(useSocket(), {
+const [error, session] = await client.execute(chat(), {
+  heartbeat: {
+    intervalMs: 30_000,
+    timeoutMs: 10_000,
+    message: () => ({ type: 'ping' }),
+    isAck: (message) => message.type === 'pong',
+  },
+  reconnect: { attempts: 3 },
+})
+```
+
+`message` はエンドポイントの送信マップに対して有効な値を返す必要があります。`isAck` が認識したメッセージはハートビートタイムアウトを解除し、`receive` には追加されません。
+
+正の `timeoutMs` を超えると、ランタイムはランタイムエラーリスナーに `Error('WebSocket heartbeat timeout')` を通知し、ネイティブクローズコード `4000` と理由 `heartbeat timeout` でクローズを要求します。その後に再接続するには、クローズを許可する再接続ポリシーが別途必要です。
+
+`timeoutMs < intervalMs` にしてください。現在の実装はこの関係を検証しません。タイムアウトが間隔以上だと、後続のハートビートタイマーと重なる可能性があります。
+
+## キュー
+
+`queue` オプションが設定するのは送信メッセージだけです。
+
+```typescript
+const [error, session] = await client.execute(chat(), {
   queue: {
     maxSize: 100,
-    overflow: 'drop-oldest', // 'drop-newest' | 'drop-oldest' | 'error'
+    overflow: 'drop-oldest',
   },
 })
 ```
 
-| オプション | 説明                                             |
-| ---------- | ------------------------------------------------ |
-| `maxSize`  | 最大キュー済みメッセージ数。デフォルトは無制限。 |
-| `overflow` | `maxSize` を超過した場合の動作。                 |
+送信キューはデフォルトで無制限です。上限を設定した場合、デフォルトのオーバーフロー方式は `drop-oldest` です。ほかに `drop-newest` と `error` があります。終端クローズ時には送信キューが空になります。
 
-キューは終了クローズ（`error`、`aborted`、`closed`）時にクリアされます。
+受信キューには公開された上限・オーバーフローオプションがありません。上限のない共有ワークキューで、バックプレッシャーも提供しません。リソース所有者は継続して消費するか、セッションをクローズする必要があります。
 
-## 手動クローズと中断動作
+## クローズの所有権
 
-### `socket.close(code?, reason?)`
+`session.close(code, reason)` は現在のネイティブソケットの `close` メソッドを呼び、手動クローズのマーカーで論理セッションを中断します。クローズを要求するだけで、正常なハンドシェイク、目に見える `closing` 状態、最終的な `closed` 値が要求したコードや理由と完全一致することは保証しません。
 
-グレースフルクローズを実行します：
-
-1. ネイティブ `WebSocket.close(code, reason)` を呼び出します。
-2. 内部 `AbortController` を `manual-web-socket-close` 理由で中断します。
-3. ソケットは `closing` → `closed` に遷移します。
-4. `socket.closed` は指定された `code` と `reason` で解決します。
-
-### `AbortSignal`（外部）
-
-`execute()` オプションで外部 `AbortSignal` を渡します：
+`session.closed` はランタイムが観測したクローズ情報で解決されます。
 
 ```typescript
-const controller = new AbortController()
-const promise = client.execute(useSocket(), { signal: controller.signal })
-
-// 後から:
-controller.abort() // 即座にソケットを閉じ、'aborted' に遷移
-```
-
-ソケットがオープンする**前**に中断された場合、`execute()` はトランスポートエラーで解決し、`socket` は `undefined` です。オープン**後**に中断された場合、ソケットは `aborted` に遷移し、`receive` は終了します。
-
-### `timeout`
-
-リクエストレベルのタイムアウトはサポートされていますが、同じリクエストで `abort` と組み合わせることはできません（定義エラーが返されます）：
-
-```typescript
-// OK
-client.execute(useSocket(), { timeout: 10_000 })
-
-// エラー — abort と timeout を混在させることはできない
-client.execute(useSocket(), { abort: signal, timeout: 10_000 })
-```
-
-## 完全な例
-
-```typescript
-import { createClient, defineWebSocket, struct } from '@defjs/core'
-
-const client = createClient({ endpoint: 'https://api.example.com' })
-
-const useSocket = defineWebSocket({
-  input: struct.request({
-    query: struct.object({ token: struct.string() }),
-  }),
-  build: (request, input) => {
-    request.setQueryParams({ token: input.query.token })
-  },
-  incoming: {
-    status: struct.object({ online: struct.boolean() }),
-    alert: struct.object({ level: struct.string(), message: struct.string() }),
-  },
-  outgoing: {
-    subscribe: struct.object({ channel: struct.string() }),
-    ping: struct.object({}),
-  },
-  path: '/ws/live',
-})
-
-async function run(token: string) {
-  const [error, socket] = await client.execute(useSocket({ query: { token } }), {
-    heartbeat: {
-      intervalMs: 30_000,
-      message: () => ({ type: 'ping' }),
-    },
-    reconnect: {
-      attempts: 5,
-      delayMs: 1_000,
-      factor: 2,
-    },
-  })
-
-  if (error || !socket) {
-    console.error('Failed to connect:', error)
-    return
-  }
-
-  socket.onStateChange((state) => console.log('State:', state))
-  socket.onRuntimeError((err) => console.error('Error:', err))
-
-  socket.send({ type: 'subscribe', channel: 'news' })
-
-  for await (const msg of socket.receive) {
-    if (msg.type === 'status') {
-      console.log('Online:', msg.online)
-    } else if (msg.type === 'alert') {
-      console.warn('Alert:', msg.level, msg.message)
-    }
-  }
-
-  await socket.closed
-  console.log('Socket closed')
+interface WebSocketCloseInfo {
+  cause?: unknown
+  code?: number
+  reason?: string
+  wasClean?: boolean
 }
 ```
 
+ネイティブ実装がクローズイベントを通知しない場合、確定が遅れることがあります。外部キャンセルは、正規化された理由に応じて `aborted` または `error` で終了します。セッションが試行間にある場合は `closing` を経由しないこともあります。
+
+セッションを開いたコンポーネント、ルート、ジョブ、サービスの境界でリスナーの購読を解除し、クローズしてください。プロバイダーのアンマウントだけでは実行されません。
+
+## URL と認証の安全性
+
+HTTP ベース URL は WebSocket スキームへ変換されます。`http:` は `ws:`、`https:` は `wss:` です。パスプレースホルダーはセグメントとしてエンコードされません。クエリ値は設定済みのシリアライザーを使います。
+
+プロトコルの優先順位は、実行オプション、クライアントオプション、エンドポイント定義の順です。明示的な空のプロトコル配列は、優先順位の低い値を抑止します。
+
+ブラウザー WebSocket API は任意のハンドシェイクヘッダーを設定できません。クエリパラメーターを汎用的な認証情報の経路として扱わないでください。URL はブラウザーの開発者ツール、プロキシ、アクセスログ、テレメトリーに記録されることがあります。TLS（`wss:`）と、デプロイ先に合わせてレビューした認証設計を使ってください。たとえば、適切な same-site Cookie フローや短命の接続チケットです。
+
 ## 次に読む
 
-- [SSE →](/core/sse) — 型付きスキーマと再接続を備えた Server-Sent Events。
-- [Client →](/core/client) — クライアントの作成と WebSocket 設定。
-- [Commands →](/core/commands) — `defineWebSocket` の入力と build ルール。
+- [SSE](/ja-JP/core/sse) — ストリーム再試行とキュー動作の違い
+- [Interceptors](/ja-JP/core/interceptors) — セッションのライブ getter を保つラッパー
+- [Errors](/ja-JP/core/errors) — 起動時タプル失敗

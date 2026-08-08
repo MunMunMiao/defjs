@@ -30,7 +30,15 @@ import { trace } from '@opentelemetry/api'
 const tracer = trace.getTracer('my-service')
 
 // 2. Inject the tracer into defjs client configuration
-const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer }))
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withOpenTelemetryServer({
+    tracer,
+    webSocket: {
+      queryPropagation: false,
+    },
+  }),
+)
 ```
 
 ## Full Configuration
@@ -133,7 +141,7 @@ HTTP tracing follows stable OpenTelemetry HTTP client semantic conventions. By d
 - `server.port`
 - `http.response.status_code`
 
-`url.full` reflects the request URL your application constructs. Avoid placing tokens or other sensitive or high-cardinality user input in URLs when possible.
+In the current implementation, `url.full` is resolved from `req.endpoint` and the optional `req.baseEndpoint`; it does not append `req.queryString`. This is an implementation boundary, not a guarantee that URLs are safe: endpoint fields and WebSocket propagation can still contain sensitive or high-cardinality values.
 
 When `meter` is provided, the following stable metrics are collected:
 
@@ -151,7 +159,7 @@ SSE is a long-lived HTTP response. Normal HTTP request duration ends at stream e
 
 ### Span Lifecycle
 
-The SSE span stays open until `stream.closed` resolves, recording the following lifecycle events:
+After startup succeeds, the SSE interceptor attaches to `stream.closed` and keeps the span open until that promise settles. If the core stream reaches an exceptional callback path that never settles `stream.closed`, this instrumentation cannot finish that span from the close promise alone. On settled lifecycle paths it records:
 
 - `sse.connected` — Stream successfully established
 - `sse.closed` — Stream normal end (server EOF)

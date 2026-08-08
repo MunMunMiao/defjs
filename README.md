@@ -23,23 +23,19 @@ Defjs is a TypeScript library for defining typed HTTP, SSE, and WebSocket APIs a
 - Runtime validation and full TypeScript inference.
 - Streaming support.
 - Interceptor support.
-- Works across browsers, Node.js, Bun, and Deno.
-- ESM.
+- Works in browser and server applications that provide the required platform transports.
+- The current package metadata requires Node.js 26 or newer when running in Node.
+- ESM. `@defjs/core` declares no runtime dependencies.
 
 ## Quick Start
 
-The example below targets the current repository source/workspace API.
-
-Use these commands to install the workspace and typecheck the docs twoslash blocks. Ordinary fenced snippets in this README still need manual review:
+Install the core package in your application:
 
 ```sh
-pnpm install
-pnpm --dir doc run typecheck
+pnpm add @defjs/core
 ```
 
-To experiment with the snippet, paste it into a workspace package or docs twoslash block that resolves `@defjs/core` from repository source. The repository root itself is not an app package that imports `@defjs/core`.
-
-If an external application installs `@defjs/core` from a published package, confirm that the installed release explicitly includes this API before copying the sample into that app. Use this snippet for repository source/workspace onboarding unless your published package metadata or release notes confirm the same API surface.
+Use the documentation and release notes that match the version installed in your project.
 
 ```ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
@@ -62,7 +58,7 @@ const getUser = defineRequest({
 
 const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
 if (error) {
-  console.error(error)
+  console.error(error.kind, error.code)
 } else {
   console.log(user.name)
 }
@@ -70,15 +66,11 @@ if (error) {
 
 ## Documentation
 
-Documentation source lives in `doc/`. This README and the repository docs source now both target the current source/workspace API. This repository does not currently claim a live online documentation site; use the local preview commands below if you want to inspect the docs source.
+The full guides live in `doc/` and cover HTTP, SSE, WebSocket, Structs, interceptors, errors, React, Vue, and server-side OpenTelemetry integration.
 
-> Note: some already-published npm package READMEs may lag behind this repository and may still mention an unavailable online site. Published npm users should check the repository package table and release notes before assuming the current source/workspace API has shipped in a public package.
-
-- Primary repository onboarding: this root README and `doc/index.md` / `doc/guide/getting-started.md`
-- Docs source directory: `doc/`
-- Local preview of docs source: `pnpm --dir doc docs:dev`
-- Local build of docs source: `pnpm --dir doc docs:build`
-- Local preview of the built docs site: `pnpm --dir doc docs:preview`
+- Start with `doc/guide/getting-started.md`.
+- Choose one of the 11 language tracks from the documentation site.
+- Match the documentation to the package version installed in your application.
 
 ## Repository packages
 
@@ -88,6 +80,27 @@ Documentation source lives in `doc/`. This README and the repository docs source
 | [`@defjs/react`](packages/react)                               | React thin adapter for sharing a typed core client through `ClientProvider` and `useClient`. |
 | [`@defjs/vue`](packages/vue)                                   | Vue thin adapter for providing and injecting a typed core client.                            |
 | [`@defjs/opentelemetry-server`](packages/opentelemetry-server) | Server-side outbound OpenTelemetry instrumentation for core clients.                         |
+
+## Repository tasks
+
+Repository commands are classified by scope. A command being exposed at the root does not mean every workspace should implement it.
+
+| Scope                          | Commands                                                                     | Execution model                                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Repository-wide checks         | `pnpm fmt`, `pnpm fmt:check`, `pnpm lint`, `pnpm lint:fix`, `pnpm typecheck` | Run once from the repository root and scan the complete configured scope.                            |
+| Workspace aggregation          | `pnpm test`, `pnpm build`                                                    | The root delegates to workspace-owned tasks; `build` first runs the repository-wide type check once. |
+| Workspace-local lifecycle      | Package `build`/`test`, examples `test`, documentation `build`               | Each workspace handles only its own tests or output.                                                 |
+| Explicit, on-demand operations | Example `start`, documentation `dev`/`preview`, `changeset`, `release`       | Run directly when that operation is needed; these are not ordinary recursive quality checks.         |
+
+Formatting, linting, and TypeScript checking are repository-wide gates. Workspace manifests must not duplicate them, and CI must not invoke them through `pnpm -r`, `--recursive`, or per-package filters.
+
+Tests and builds are intentionally different. Their environments, configurations, and outputs belong to specific workspaces, so the root commands aggregate the relevant workspace lifecycle scripts. An example's `start` command is only an interactive runner and is never used as a test command.
+
+### Dependency ownership
+
+- The repository root owns repository-wide gates, root-shared test sources, and CI test bootstrap tools.
+- Each workspace directly owns its build and test tools and any required peer dependencies.
+- The same version declared by multiple workspaces is not incorrect duplication when each owner actually uses it.
 
 ## Status and Roadmap
 

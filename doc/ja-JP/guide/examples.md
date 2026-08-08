@@ -1,449 +1,477 @@
 ---
-title: Examples
-description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket, interceptor patterns, and Vue integration.
+title: 使用例
+description: REST、SSE、WebSocket、認証、Vue、React のアプリケーションへ組み込める実用例です。
 ---
 
 # 使用例
 
-このページでは、最も一般的なユースケースに対してコピー＆ペーストで使えるコード例を提供します。
+この例を自分のアプリケーションの出発点として使ってください。エンドポイントパス、Struct、認証情報、状態更新、テレメトリー名は、実際のサービス契約とポリシーに置き換えます。
 
-## REST CRUD
+各例は、モジュールまたはファイルの一部として必要なコードを揃えています。ネットワーク例では、示した契約をサーバーが実装している必要があります。エンドポイント値、認証情報、UI 状態、ログ、キャンセル、トランスポートのクリーンアップはアプリケーションで管理します。
 
-### スキーマとエンドポイントの定義
+## REST CRUD モジュール
+
+このモジュールは Core への依存を明示し、すべてのボディにボディ Struct を使い、タプルで返る失敗を処理し、所有者が渡すキャンセル用の signal を受け取ります。
 
 ```typescript
-import { createClient, defineRequest, struct, withEndpoint, RequestError } from '@defjs/core'
+// users-api.ts
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-// データモデル
-const UserStruct = struct.object({
+const User = struct.object({
   id: struct.number(),
   name: struct.string(),
   email: struct.string(),
 })
 
-const UserListStruct = struct.object({
-  items: struct.array(UserStruct),
-  total: struct.number(),
+const ApiError = struct.object({
+  code: struct.string(),
+  message: struct.string(),
 })
 
-const CreateUserInput = struct.object({
-  name: struct.string(),
-  email: struct.string(),
-  role: struct.string().alias('role'),
-})
+const client = createClient(withEndpoint('https://api.example.com/v1'))
 
-// リクエスト定義
-const createUser = defineRequest({
+const createUserRequest = defineRequest({
   method: 'POST',
-  path: '/v1/users',
-  input: CreateUserInput,
-  build: (input) => ({
-    body: input,
+  path: '/users',
+  input: struct.request({
+    body: struct.json(
+      struct.object({
+        name: struct.string(),
+        email: struct.string(),
+      }),
+    ),
   }),
-  output: {
-    201: UserStruct,
-    400: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 201, body: User },
+    { status: [400, 409], body: ApiError },
+  ] as const,
 })
 
-const listUsers = defineRequest({
+export const listUsersRequest = defineRequest({
   method: 'GET',
-  path: '/v1/users',
-  output: {
-    200: UserListStruct,
-  },
+  path: '/users',
+  input: struct.request({
+    query: struct.object({
+      cursor: struct.string().optional(),
+    }),
+  }),
+  output: [
+    {
+      status: 200,
+      body: struct.object({
+        items: struct.array(User),
+        nextCursor: struct.string().optional().alias('next_cursor'),
+      }),
+    },
+  ] as const,
 })
 
-const getUser = defineRequest({
+export const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-  }),
-  output: {
-    200: UserStruct,
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: ApiError },
+  ] as const,
 })
 
-const updateUser = defineRequest({
+const updateUserRequest = defineRequest({
   method: 'PUT',
-  path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
-    name: struct.string(),
-    email: struct.string(),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+    body: struct.json(
+      struct.object({
+        name: struct.string(),
+        email: struct.string(),
+      }),
+    ),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-    body: { name: input.name, email: input.email },
-  }),
-  output: {
-    200: UserStruct,
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: ApiError },
+  ] as const,
 })
 
-const deleteUser = defineRequest({
+const deleteUserRequest = defineRequest({
   method: 'DELETE',
-  path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-  }),
-  output: {
-    204: struct.unknown(),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 204, body: struct.unknown() },
+    { status: 404, body: ApiError },
+  ] as const,
 })
-```
 
-### 実行
+export async function createUser(input: { name: string; email: string }, signal: AbortSignal) {
+  const [error, user] = await client.execute(createUserRequest({ body: input }), { signal })
 
-```typescript
-const client = createClient(withEndpoint('https://api.example.com'))
-
-async function handleCreate() {
-  const [error, user] = await client.execute(createUser({ name: 'Alice', email: 'alice@example.com', role: 'admin' }))
   if (error) {
-    handleError(error)
-    return
+    throw error
   }
-  console.log('Created:', user)
+  return user
 }
 
-async function handleList() {
-  const [error, list] = await client.execute(listUsers())
+export async function listUsers(cursor: string | undefined, signal: AbortSignal) {
+  const [error, page] = await client.execute(listUsersRequest({ query: { cursor } }), { signal })
+
   if (error) {
-    handleError(error)
-    return
+    throw error
   }
-  console.log('Total:', list.total)
+  return page
 }
 
-async function handleGet(id: number) {
-  const [error, user] = await client.execute(getUser({ id }))
+export async function updateUser(id: number, input: { name: string; email: string }, signal: AbortSignal) {
+  const [error, user] = await client.execute(updateUserRequest({ path: { id }, body: input }), { signal })
+
   if (error) {
-    handleError(error)
-    return
+    throw error
   }
-  console.log('User:', user.name)
+  return user
 }
 
-async function handleUpdate(id: number) {
-  const [error, user] = await client.execute(updateUser({ id, name: 'Bob', email: 'bob@example.com' }))
+export async function deleteUser(id: number, signal: AbortSignal): Promise<void> {
+  const [error] = await client.execute(deleteUserRequest({ path: { id } }), { signal })
+
   if (error) {
-    handleError(error)
-    return
-  }
-  console.log('Updated:', user)
-}
-
-async function handleDelete(id: number) {
-  const [error] = await client.execute(deleteUser({ id }))
-  if (error) {
-    handleError(error)
-    return
-  }
-  console.log('Deleted')
-}
-```
-
-### エラー処理
-
-```typescript
-function handleError(error: RequestError<unknown>) {
-  switch (error.kind) {
-    case 'transport':
-      console.error('Network error:', error.code, error.message)
-      break
-    case 'definition':
-      console.error('Struct error:', error.code, error.message)
-      break
-    case 'http':
-      console.error('HTTP error:', error.status, error.message)
-      console.error('Error data:', error.data)
-      break
+    throw error
   }
 }
 ```
 
-## SSE リアルタイム通知
+エクスポート関数からエラーを例外として送出するのは、アプリケーション統合としての選択です。Core の実行自体は引き続きタプルを返します。
+
+## SSE 通知コンシューマー
+
+この関数は再試行とバッファに上限を設け、Struct でデコードされたイベントのユニオンをイベント名で絞り込み、自分で開いたストリームをクローズします。
 
 ```typescript
-import { createClient, defineEventStream, struct, withEndpoint, withSSEReconnect } from '@defjs/core'
+// consume-notifications.ts
+import {
+  createClient,
+  defineEventStream,
+  struct,
+  type Infer,
+  withEndpoint,
+  withSSEOnInvalidEvent,
+  withSSEQueue,
+  withSSEReconnect,
+} from '@defjs/core'
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEReconnect({
-    attempts: 5,
-    delayMs: 1000,
-    factor: 2,
-    maxDelayMs: 30000,
-  }),
-)
+const notificationStruct = struct.object({
+  id: struct.number(),
+  text: struct.string(),
+})
+type Notification = Infer<typeof notificationStruct>
 
-const notificationStream = defineEventStream({
-  path: '/v1/notifications',
+interface NotificationHandlers {
+  onInvalid(event: { eventName: string; reason: string }): void
+  onMessage(notification: Notification): void
+}
+
+const notifications = defineEventStream({
+  path: '/notifications',
   events: {
-    message: struct.object({
-      id: struct.string(),
-      content: struct.string(),
-      timestamp: struct.number(),
-    }),
-    alert: struct.object({
-      level: struct.enum(['info', 'warning', 'critical'] as const),
-      title: struct.string(),
-    }),
-    default: struct.string(),
+    message: struct.json(notificationStruct),
   },
 })
 
-async function listenNotifications() {
-  const [error, stream, open] = await client.execute(notificationStream())
+export async function consumeNotifications(signal: AbortSignal, handlers: NotificationHandlers): Promise<void> {
+  const client = createClient(
+    withEndpoint('https://api.example.com'),
+    withSSEReconnect({ attempts: 5, delayMs: 1_000, maxDelayMs: 10_000 }),
+    withSSEQueue({ maxSize: 100, overflow: 'drop-oldest' }),
+    withSSEOnInvalidEvent(({ reason, message }) => {
+      handlers.onInvalid({ eventName: message.event, reason })
+    }),
+  )
 
+  const [error, stream] = await client.execute(notifications(), { signal })
   if (error) {
-    console.error('Failed to connect:', error.message)
-    return
+    throw error
   }
 
-  console.log('Connected:', open.url, open.response?.status)
-
-  for await (const event of stream) {
-    switch (event.event) {
-      case 'message':
-        console.log('Message:', event.data.content)
-        break
-      case 'alert':
-        console.log('Alert:', event.data.level, event.data.title)
-        break
-      default:
-        console.log('Unknown event:', event.data)
-        break
+  try {
+    for await (const event of stream) {
+      switch (event.event) {
+        case 'message':
+          handlers.onMessage(event.data)
+          break
+      }
     }
+  } finally {
+    stream.close('consumer-finished')
+    await stream.closed
   }
-
-  const closeInfo = await stream.closed
-  console.log('Stream closed:', closeInfo.code, closeInfo.reason)
 }
 ```
 
-## WebSocket チャットルーム
+ハンドラーは短時間で終わり、例外を送出しない処理にしてください。この例は生のイベントデータ、ID、URL を記録しません。
+
+## WebSocket ルームコンシューマー
+
+再接続を明示的に設定しています。この関数は論理セッションの存続中、上限のない受信キューを消費し続け、送信キューには上限を設け、すべての終了経路でクローズします。
 
 ```typescript
-import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketReconnect, withWebSocketHeartbeat } from '@defjs/core'
+// consume-room.ts
+import {
+  createClient,
+  defineWebSocket,
+  struct,
+  withEndpoint,
+  withWebSocketHeartbeat,
+  withWebSocketQueue,
+  withWebSocketReconnect,
+} from '@defjs/core'
 
-const client = createClient(
-  withEndpoint('wss://chat.example.com'),
-  withWebSocketReconnect({
-    attempts: 10,
-    delayMs: 2000,
-  }),
-  withWebSocketHeartbeat({
-    intervalMs: 30000,
-    message: () => ({ type: 'ping' }),
-    isAck: (msg) => msg.type === 'pong',
-  }),
-)
+interface RoomHandlers {
+  onMessage(message: { text: string; userId: number }): void
+  onRuntimeError(): void
+}
 
-const chatRoom = defineWebSocket({
-  path: '/room/:roomId',
-  input: struct.object({
-    roomId: struct.string().alias('roomId'),
-  }),
-  build: (input) => ({
-    params: { roomId: input.roomId },
+const room = defineWebSocket({
+  path: '/rooms/:roomId',
+  input: struct.request({
+    path: struct.object({ roomId: struct.string() }),
   }),
   incoming: {
-    message: struct.object({
-      userId: struct.string(),
-      text: struct.string(),
-      sentAt: struct.number(),
-    }),
-    userJoined: struct.object({
-      userId: struct.string(),
-      userName: struct.string(),
-    }),
-    userLeft: struct.object({
-      userId: struct.string(),
-    }),
+    message: struct.object({ text: struct.string(), userId: struct.number() }),
+    pong: struct.object({}),
   },
   outgoing: {
-    sendMessage: struct.object({
-      text: struct.string(),
-    }),
+    join: struct.object({}),
+    ping: struct.object({}),
   },
 })
 
-async function joinChat(roomId: string) {
-  const [error, session, connection] = await client.execute(chatRoom({ roomId }))
+export async function consumeRoom(roomId: string, signal: AbortSignal, handlers: RoomHandlers): Promise<void> {
+  const client = createClient(
+    withEndpoint('wss://chat.example.com'),
+    withWebSocketReconnect({
+      attempts: 5,
+      shouldReconnect: ({ wasClean }) => !wasClean,
+    }),
+    withWebSocketHeartbeat({
+      intervalMs: 30_000,
+      timeoutMs: 10_000,
+      message: () => ({ type: 'ping' }),
+      isAck: (message) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'pong',
+    }),
+    withWebSocketQueue({ maxSize: 20, overflow: 'drop-oldest' }),
+  )
+
+  const encodedRoomId = encodeURIComponent(roomId)
+  const [error, session] = await client.execute(room({ path: { roomId: encodedRoomId } }), { signal })
 
   if (error) {
-    console.error('Connection failed:', error.message)
-    return
+    throw error
   }
 
-  console.log('Joined room:', connection.url, connection.protocol)
-
-  session.onStateChange((state) => {
-    console.log('WebSocket state:', state)
+  const unsubscribeError = session.onRuntimeError(() => {
+    handlers.onRuntimeError()
   })
 
-  session.onRuntimeError((err) => {
-    console.error('Runtime error:', err)
-  })
+  try {
+    session.send({ type: 'join' })
 
-  session.send({ type: 'sendMessage', data: { text: 'Hello everyone!' } })
-
-  for await (const msg of session.receive) {
-    switch (msg.type) {
-      case 'message':
-        console.log(`${msg.data.userId}: ${msg.data.text}`)
-        break
-      case 'userJoined':
-        console.log(`${msg.data.userName} joined`)
-        break
-      case 'userLeft':
-        console.log(`${msg.data.userId} left`)
-        break
+    for await (const message of session.receive) {
+      if (message.type === 'message') {
+        handlers.onMessage({ text: message.text, userId: message.userId })
+      }
     }
+  } finally {
+    unsubscribeError()
+    session.close(1000, 'consumer-finished')
+    await session.closed
   }
-
-  const closeInfo = await session.closed
-  console.log('Closed:', closeInfo.code, closeInfo.reason)
 }
 ```
 
-## インターセプター構成
+エンドポイントパスはプレースホルダーをエンコードしないため、この例ではコマンド作成前に 1 セグメントをエンコードしています。結果の URL やペイロードはログへ出しません。
 
-### 認証
+## 認証と操作メトリクス
+
+このファクトリーは HTTP/SSE 認証と、記録項目を限定した HTTP の所要時間計測を組み合わせます。操作名は URL ではなく、明示的な `HttpContext` トークンから取得します。
 
 ```typescript
+// observed-client.ts
 import {
   createClient,
   createHttpInterceptor,
   createSSEInterceptor,
-  createWebSocketInterceptor,
-  withInterceptors,
+  makeHttpContext,
+  makeHttpContextToken,
   withEndpoint,
+  withInterceptors,
 } from '@defjs/core'
+import type { HttpRequest } from '@defjs/core'
 
-function authInterceptor(getToken: () => string | null) {
-  const apply = (req: HttpRequest) => {
-    const token = getToken()
-    if (!token) return req
-    const headers = new Headers(req.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return { ...req, headers }
-  }
+export type Operation = 'create-user' | 'delete-user' | 'list-users' | 'update-user'
 
-  return [
-    createHttpInterceptor((req, next) => next(apply(req))),
-    createSSEInterceptor((req, next) => next(apply(req))),
-    createWebSocketInterceptor((req, next) => next(apply(req))),
-  ]
+interface MetricRecorder {
+  record(value: { durationMs: number; operation: Operation | 'unknown'; status: number }): void
 }
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(...authInterceptor(() => localStorage.getItem('token'))),
-)
+const operationToken = makeHttpContextToken<Operation | 'unknown'>(() => 'unknown')
+
+function addBearerToken(request: HttpRequest, token: string) {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${token}`)
+  return { ...request, headers }
+}
+
+export function contextFor(operation: Operation) {
+  return makeHttpContext().set(operationToken, operation)
+}
+
+export function createObservedClient(getToken: () => string | null, metrics: MetricRecorder) {
+  const httpAuth = createHttpInterceptor((request, next) => {
+    const token = getToken()
+    return next(token ? addBearerToken(request, token) : request)
+  })
+
+  const sseAuth = createSSEInterceptor((request, next) => {
+    const token = getToken()
+    return next(token ? addBearerToken(request, token) : request)
+  })
+
+  const timing = createHttpInterceptor(async (request, next) => {
+    const startedAt = performance.now()
+    const response = await next(request)
+
+    metrics.record({
+      durationMs: Math.round(performance.now() - startedAt),
+      operation: request.context?.get(operationToken) ?? 'unknown',
+      status: response.status,
+    })
+
+    return response
+  })
+
+  return createClient(withEndpoint('https://api.example.com'), withInterceptors(timing, httpAuth, sseAuth))
+}
 ```
 
-### ログ出力
+実行時にコンテキストを渡します。
 
 ```typescript
-function loggingInterceptor() {
-  return createHttpInterceptor(async (req, next) => {
-    const start = performance.now()
-    console.log(`[HTTP] ${req.method} ${req.url}`)
+import { getAccessToken } from './auth'
+import { listUsersRequest } from './users-api'
+import { contextFor, createObservedClient } from './observed-client'
+import { outboundMetrics } from './telemetry'
 
-    try {
-      const response = await next(req)
-      const duration = (performance.now() - start).toFixed(2)
-      console.log(`[HTTP] ${req.method} ${req.url} — ${response.status} (${duration}ms)`)
-      return response
-    } catch (error) {
-      const duration = (performance.now() - start).toFixed(2)
-      console.error(`[HTTP] ${req.method} ${req.url} — ERROR (${duration}ms)`, error)
-      throw error
-    }
-  })
+const client = createObservedClient(getAccessToken, outboundMetrics)
+const [error, users] = await client.execute(listUsersRequest(), {
+  context: contextFor('list-users'),
+})
+
+if (error) {
+  throw error
 }
 ```
 
-## Vue 統合
+認証情報プロバイダーはアプリケーションが所有します。サーバーではリクエストスコープに保ってください。ネイティブブラウザーソケットはこのヘッダーを追加できないため、ブラウザーの WebSocket 認証にはデプロイ先に合わせてレビューした別設計が必要です。
+
+## Vue で組み合わせる
+
+アプリケーションにはブラウザークライアントを 1 つインストールします。コンポーネントは prop を監視し、古くなった HTTP 処理をキャンセルします。
 
 ```typescript
 // main.ts
 import { createApp } from 'vue'
+import { provideClient, withEndpoint } from '@defjs/vue'
 import App from './App.vue'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
-import { authInterceptor } from './interceptors'
 
-const app = createApp(App)
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor)))
-
-app.mount('#app')
+createApp(App)
+  .use(provideClient(withEndpoint('https://api.example.com')))
+  .mount('#app')
 ```
 
 ```vue
-<!-- UserCard.vue -->
+<!-- UserName.vue -->
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import { injectClient } from '@defjs/vue'
-import { defineRequest, struct } from '@defjs/core'
+import { getUser } from './users-api'
 
+const props = defineProps<{ id: number }>()
 const client = injectClient()
+const name = ref('')
 
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ name: struct.string() }),
+watch(
+  () => props.id,
+  (id, _previous, onCleanup) => {
+    const abort = new AbortController()
+    onCleanup(() => abort.abort())
+
+    void client.execute(getUser({ path: { id } }), { signal: abort.signal }).then(([error, user]) => {
+      if (!abort.signal.aborted) {
+        name.value = error ? '' : user.name
+      }
+    })
   },
-})
-
-async function loadUser() {
-  const [error, user] = await client.execute(getUser())
-  if (error) {
-    console.error('Failed:', error.message)
-    return
-  }
-  console.log('User:', user.name)
-}
+  { immediate: true },
+)
 </script>
 
 <template>
-  <button @click="loadUser">Load User</button>
+  <span>{{ name }}</span>
 </template>
 ```
 
-## API チートシート
+## React で組み合わせる
 
-| エクスポート                                                                                | 典型的な使い方                 |
-| ------------------------------------------------------------------------------------------- | ------------------------------ |
-| `createClient(...options)`                                                                  | クライアントインスタンスを作成 |
-| `withEndpoint(url)`                                                                         | ベース URL を設定              |
-| `withInterceptors(...interceptors)`                                                         | インターセプターを登録         |
-| `defineRequest({ method, path, input?, build?, output? })`                                  | HTTP エンドポイントを定義      |
-| `defineEventStream({ path, events, input?, build? })`                                       | SSE エンドポイントを定義       |
-| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                            | WebSocket エンドポイントを定義 |
-| `struct.object(shape)`                                                                      | オブジェクトスキーマ           |
-| `struct.string()` / `struct.number()` / `struct.boolean()`                                  | プリミティブスキーマ           |
-| `struct.array(item)`                                                                        | 配列スキーマ                   |
-| `struct.enum(values)`                                                                       | 列挙型スキーマ                 |
-| `struct.alias(name)                                                                         | フィールドエイリアス           |
-| `createHttpInterceptor(fn)` / `createSSEInterceptor(fn)` / `createWebSocketInterceptor(fn)` | インターセプターを作成         |
-| `basicAuthHttpInterceptor(fn)` / `basicAuthSSEInterceptor(fn)`                              | ビルトイン Basic Auth          |
+プロバイダーがクライアントスコープを作り、コンポーネントがエフェクトのキャンセルを所有します。
+
+```tsx
+// App.tsx
+import { ClientProvider, withEndpoint } from '@defjs/react'
+import { UserName } from './UserName'
+
+export function App() {
+  return (
+    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+      <UserName id={7} />
+    </ClientProvider>
+  )
+}
+```
+
+```tsx
+// UserName.tsx
+import { useEffect, useState } from 'react'
+import { useClient } from '@defjs/react'
+import { getUser } from './users-api'
+
+export function UserName({ id }: { id: number }) {
+  const client = useClient()
+  const [name, setName] = useState('')
+
+  useEffect(() => {
+    const abort = new AbortController()
+
+    void client.execute(getUser({ path: { id } }), { signal: abort.signal }).then(([error, user]) => {
+      if (!abort.signal.aborted) {
+        setName(error ? '' : user.name)
+      }
+    })
+
+    return () => abort.abort()
+  }, [client, id])
+
+  return <span>{name}</span>
+}
+```
+
+プロバイダーを破棄するだけでは処理をキャンセルしません。各コンポーネントが、自分で開始したリクエスト、ストリーム、セッションを所有します。
 
 ## 次に読む
 
-- [Client →](/core/client) — クライアントの作成と `execute` の使い方
-- [Commands →](/core/commands) — コマンド定義と入力のオプショナルルール
-- [Interceptors →](/core/interceptors) — インターセプターの型とオニオンチェーンの仕組み
+- [Commands](/ja-JP/core/commands) — これらの例で使う定義
+- [Interceptors](/ja-JP/core/interceptors) — 再試行と認証ポリシー
+- [Vue](/ja-JP/plugins/vue) と [React](/ja-JP/plugins/react) — アダプター固有のスコープと SSR 境界

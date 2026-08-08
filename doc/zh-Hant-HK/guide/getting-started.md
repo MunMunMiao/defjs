@@ -1,197 +1,101 @@
 ---
-title: Getting Started
-description: Install @defjs/core, use it via CDN, and create your first typed request in three steps.
+title: 快速上手
+description: 安裝 Defjs、定義 typed HTTP endpoint、建立 client，再由自己的應用程式呼叫。
 ---
 
-# 立即開始
+# 快速上手
 
-Defjs 是一款用於定義類型請求 API 並在多種傳輸協定與 JavaScript 執行環境上執行的 TypeScript 函式庫。
+Defjs 讓應用程式只需定義一次 API contract，之後便可重用同一套 typed input、runtime decoding 同清楚的 transport result。
 
 ## 安裝
 
-使用你偏好的套件管理器：
+在應用程式加入 core package：
 
-::: code-group
-
-```sh [npm]
-npm install @defjs/core
-```
-
-```sh [yarn]
-yarn add @defjs/core
-```
-
-```sh [pnpm]
+```sh
 pnpm add @defjs/core
 ```
 
-```sh [bun]
-bun add @defjs/core
-```
+如果 project 使用其他 package manager，請改用相應的 npm、Yarn 或 Bun 指令。`@defjs/core` 是 ESM。在 Node.js 執行時，目前 package metadata 要求 Node 26 或以上。
 
+只在應用程式真正需要時安裝 adapter：
+
+| 應用場景                  | Packages                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------- |
+| React 18+                 | `@defjs/core`、`@defjs/react`、`react`                                                    |
+| Vue 3+                    | `@defjs/core`、`@defjs/vue`、`vue`                                                        |
+| Server-side OpenTelemetry | `@defjs/core`、`@defjs/opentelemetry-server`、`@opentelemetry/api`、`@opentelemetry/core` |
+
+::: tip 文件要配合已安裝版本
+這些頁面描述目前文件版本對應的 API。先確認應用程式實際安裝的版本。如果 export 或 option 不同，請查看該版本的文件及 release notes，不要混用不同版本的範例。
 :::
 
-## CDN 使用方式
+## 定義第一個 Request
 
-無需建置工具，直接以 ES 模組方式匯入：
-
-```typescript
-import { createClient, defineRequest, struct } from 'https://unpkg.com/@defjs/core/index.min.js'
-```
-
-## 三步完成你的第一個請求
-
-### 步驟一：建立用戶端
-
-用戶端（Client）是所有請求執行的入口。使用 `createClient` 建立實例，並設定基礎端點：
+假設你的 API 提供 `GET /users/:id`。請把 base URL 同 response Struct 換成自己 service 的實際 contract。
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-```
-
-### 步驟二：定義請求
-
-使用 `defineRequest` 定義類型 HTTP 端點。使用 `struct` 描述輸入與回應的形狀：
-
-```typescript
-import { defineRequest, struct } from '@defjs/core'
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user/:id',
-  input: struct.object({
-    id: struct.number(),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-    404: struct.object({
-      message: struct.string(),
-    }),
-  },
-})
-```
-
-::: tip
-`output` 的鍵為 HTTP 狀態碼。Defjs 會在執行階段自動選擇對應的結構描述，並據此推導 TypeScript 類型：2xx 回應視為成功資料，非 2xx 則視為錯誤資料。
-:::
-
-### 步驟三：執行
-
-呼叫 `client.execute` 並傳入請求指令與選擇性設定：
-
-```typescript
-const [error, user, response] = await client.execute(getUser({ id: 1 }))
-
-if (error) {
-  // error 的型別由 output 中的非 2xx 結構描述推導
-  console.error(error.code, error.message)
-  return
-}
-
-// user 的型別為 { id: number; name: string }
-console.log(user.name)
-```
-
-## 完整範例
-
-以下是一個端到端範例，套件含輸入驗證、輸出驗證、錯誤處理與攔截器：
-
-```typescript
-import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
-
-// 1. 建立用戶端
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors([
-    async (request, next) => {
-      request.headers.set('Authorization', 'Bearer token')
-      return next(request)
-    },
-  ]),
-)
-
-// 2. 定義請求
-const createPost = defineRequest({
-  method: 'POST',
-  path: '/v1/posts',
-  input: struct.object({
-    title: struct.string(),
-    body: struct.string(),
-    'X-Request-ID': struct.string(),
-  }),
-  build: (input) => ({
-    body: { title: input.title, body: input.body },
-    headers: { 'X-Request-ID': input['X-Request-ID'] },
-  }),
-  output: {
-    201: struct.object({
-      id: struct.number(),
-      title: struct.string(),
-    }),
-    400: struct.object({
-      field: struct.string(),
-      reason: struct.string(),
-    }),
-  },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-// 3. 執行
-async function createPost() {
-  const [error, post, response] = await client.execute(
-    createPost({
-      title: 'Hello',
-      body: 'World',
-      'X-Request-ID': 'uuid-123',
-    }),
-  )
+async function loadUser(id: number) {
+  const [error, user, response] = await client.execute(getUser({ path: { id } }))
 
   if (error) {
-    switch (error.code) {
-      case 'HTTP_STATUS':
-        console.error('Validation failed:', error.data)
-        break
-      case 'REQUEST_VALIDATION_FAILED':
-        console.error('Request validation failed:', error.message)
-        break
-      case 'RESPONSE_VALIDATION_FAILED':
-        console.error('Response validation failed:', error.message)
-        break
-      case 'TRANSPORT_ERROR':
-        console.error('Network error:', error.message)
-        break
-      default:
-        console.error('Unknown error:', error)
-    }
+    console.error(error.kind, error.code)
     return
   }
 
-  console.log('Created post:', post.id, post.title)
+  console.log(user.name, response.status)
+}
+
+void loadUser(7)
+```
+
+`defineRequest(...)` 回傳一個 **command builder**。呼叫 `getUser(...)` 會建立一個 **command**，內含 endpoint 定義和這次呼叫的 input。之後，`client.execute(...)` 會回傳 HTTP 三項 tuple：
+
+```typescript
+;[error, result, response]
+```
+
+成功時，`error` 是 `null`，`result` 是解碼後的 output data，`response` 是 Defjs `SettledResponse` wrapper。失敗時，`result` 是 `undefined`；如果未收到 response，response wrapper 亦是 `undefined`。
+
+### 為甚麼需要 `as const`
+
+Array 形式的 `output` 以 status literal 區分 2xx success body 與非 2xx error body。`as const` 會把這些 status 值及分組 status array 保留成 readonly literal。省略後，TypeScript 可能把它們 widen 成 `number` 或 `number[]`，令 success 與 error branch 的 type inference 變弱。
+
+亦可使用 object 形式的 `output`：
+
+```typescript
+const output = {
+  '200': struct.object({ id: struct.number() }),
+  '404': struct.object({ message: struct.string() }),
 }
 ```
 
-## 核心 API 速查表
+## 接入你的應用程式
 
-| API                    | 說明                | 典型用法                                                                                                |
-| ---------------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
-| `createClient`         | 建立請求用戶端      | `createClient(withEndpoint('https://api.example.com'))`                                                 |
-| `defineRequest`        | 定義 HTTP 端點      | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | 定義 SSE 端點       | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
-| `defineWebSocket`      | 定義 WebSocket 端點 | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
-| `struct`               | 結構描述建構器      | `struct.object({ id: struct.number() })`                                                                |
-| `.alias(name)`         | 欄位 wire 名別名    | `struct.string().alias('user_name')`                                                                    |
-| `withEndpoint`         | 設定基礎 URL        | `withEndpoint('https://api.example.com')`                                                               |
-| `withInterceptors`     | 註冊攔截器          | `withInterceptors([...interceptors])`                                                                   |
-| `withCredentials`      | 啟用跨域憑證        | `withCredentials(true)`                                                                                 |
-| `withSSEOptions`       | 設定 SSE 選項       | `withSSEOptions({ method: 'POST' })`                                                                    |
-| `withWebSocketOptions` | 設定 WebSocket 選項 | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
+把 endpoint definition 放在描述 service API 的 module，再由 component、route handler、job 或 store 重用 command builder。請在真正擁有 endpoint、credentials、interceptors 同 lifecycle 的 boundary 建立 client：
 
-## 接下來
+- Browser application 通常可以共用一個 client；
+- Server rendering 中，如果 headers、cookies、user 或 tenant 會隨 request 改變，應為每個 request 建立 client；
+- 開啟 SSE 或 WebSocket resource 的 code，亦要負責 consume 同 close。
 
-- [用戶端 →](/core/client) — 建立用戶端、執行指令與設定
-- [指令 →](/core/commands) — `defineRequest`、`defineEventStream`、`defineWebSocket`
-- [錯誤 →](/core/errors) — `RequestError` 結構與分支模式
+## 下一步
+
+- [Commands](/zh-Hant-HK/core/commands)：自動 request mapping 與自訂 schema-bound projection。
+- [Errors](/zh-Hant-HK/core/errors)：三種 transport tuple 與 `RequestError` union。
+- [HTTP](/zh-Hant-HK/core/http)：URL 解析、request body、output 解碼、取消與 XSRF 行為。
+- [範例](/zh-Hant-HK/guide/examples)：把這些 contract 組合成由應用程式管理的實作範例。

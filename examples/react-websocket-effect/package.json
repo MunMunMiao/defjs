@@ -1,0 +1,19 @@
+{
+  "name": "@defjs/example-react-websocket-effect",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@defjs/core": "workspace:*",
+    "@defjs/react": "workspace:*",
+    "@types/react": "^19.2.17",
+    "react": "19.2.8",
+    "react-test-renderer": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react-test-renderer": "19.1.0",
+    "tsx": "catalog:"
+  }
+}

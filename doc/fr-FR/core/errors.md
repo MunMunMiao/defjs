@@ -1,35 +1,41 @@
 ---
-title: Errors
-description: RequestError structure, error classification, built-in constants, and recommended branching patterns.
+title: Erreurs
+description: Gérez les tuples propres à chaque transport et branchez sur l'union discriminée RequestError.
 ---
 
 # Erreurs
 
-Tous les résultats d'exécution dans `@defjs/core` sont retournés comme des triplets `[error, result, response]`. `error` est un `RequestError` : une union discriminée avec `kind` et `code`. Le branchement par `kind` et `code` est le pattern recommandé plutôt que la comparaison de chaînes.
-
-## Structure de RequestError
-
-`RequestError` est une union de trois types d'erreur :
+Chaque transport pris en charge renvoie un tuple à trois éléments, avec l'erreur en premier. Le troisième dépend du transport.
 
 ```typescript
-import type { RequestError } from '@defjs/core'
-
-type RequestError<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+const [httpError, data, response] = await client.execute(httpCommand)
+const [sseError, stream, startupOpen] = await client.execute(sseCommand)
+const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-Toutes les erreurs partagent ces champs communs :
+- HTTP renvoie les données décodées et un wrapper Defjs `SettledResponse`.
+- SSE renvoie un handle logique de flux et un instantané d'ouverture au démarrage.
+- WebSocket renvoie une session logique et un instantané de connexion au démarrage.
 
-| Champ      | Type                                    | Description                                                                |
-| ---------- | --------------------------------------- | -------------------------------------------------------------------------- |
-| `kind`     | `'http' \| 'transport' \| 'definition'` | Catégorie d'erreur pour le branchement de premier niveau                   |
-| `code`     | `string`                                | Code d'erreur précis pour le branchement de second niveau                  |
-| `message`  | `string`                                | Description d'erreur lisible par un humain                                 |
-| `data`     | `unknown`                               | Données additionnelles (seulement pour les erreurs `http` et `definition`) |
-| `response` | `SettledResponseLike`                   | Objet de réponse brute (seulement pour les erreurs `http` et `definition`) |
+En cas d'échec, le deuxième élément vaut `undefined`. Le troisième peut lui aussi valoir `undefined` si le démarrage a échoué avant que le transport ne produise l'instantané correspondant.
 
-### HttpStatusError
+## `RequestError`
 
-Produite quand le serveur retourne un code de statut non-2xx qui est défini dans `output`.
+`RequestError` est un objet discriminé ordinaire renvoyé dans le tuple. Il n'étend pas la classe native `Error`.
+
+```typescript
+import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
+
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+```
+
+L'union exportée s'appelle `RequestError<TErrorData>`.
+
+Testez d'abord `kind`, puis `code` lorsque la branche l'exige.
+
+### Erreurs de statut HTTP
+
+Une réponse HTTP non-2xx déclarée produit :
 
 ```typescript
 interface HttpStatusError<TErrorData = unknown> {
@@ -42,24 +48,26 @@ interface HttpStatusError<TErrorData = unknown> {
 }
 ```
 
-Le type `data` est déduit du schéma `output` pour le code de statut correspondant. Par exemple, `output: { 404: notFoundStruct }` rétrécit `error.data` au type inféré de `notFoundStruct`.
+`data` n'existe que sur `HttpStatusError`. Son type est l'union de tous les corps de sortie non-2xx déclarés pour cet endpoint. Vérifier `error.status` ne réduit pas actuellement cette union. Utilisez un test structurel ou un discriminant défini par l'application lorsque la forme du corps varie selon le statut.
 
-### TransportError
+### Erreurs de transport
 
-Produite lors d'échecs réseau ou de la couche transport, incluant l'annulation, le délai d'attente et les erreurs réseau génériques.
+Un échec réseau, une annulation ou un timeout produisent :
 
 ```typescript
 interface TransportError {
   kind: 'transport'
-  code: 'ABORTED' | 'TIMEOUT' | 'NETWORK_ERROR'
+  code: 'ABORTED' | 'NETWORK_ERROR' | 'TIMEOUT'
   message: string
   cause?: unknown
 }
 ```
 
-### DefinitionError
+Les erreurs de transport n'ont pas de champs `data` ou `response`.
 
-Produite lors d'échecs de définition ou de validation de la requête.
+### Erreurs de définition
+
+Le décodage de l'entrée, la construction de la requête, le décodage de la réponse ou la gestion d'un statut HTTP non déclaré peut produire :
 
 ```typescript
 interface DefinitionError {
@@ -71,184 +79,89 @@ interface DefinitionError {
 }
 ```
 
-| Code                         | Scénario de déclenchement                                                                           |
-| ---------------------------- | --------------------------------------------------------------------------------------------------- |
-| `REQUEST_VALIDATION_FAILED`  | Les paramètres d'entrée ont échoué la validation du `input` struct, ou `build` a levé une exception |
-| `RESPONSE_VALIDATION_FAILED` | Le corps de réponse a échoué la validation du `output` struct pour le code de statut retourné       |
-| `UNDECLARED_STATUS`          | Le serveur a retourné un code de statut 2xx non déclaré dans `output`                               |
+| Code                         | Déclencheur actuel                                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `REQUEST_VALIDATION_FAILED`  | Le décodage structurel de l'entrée, la construction de la requête ou les liaisons produites par `build` ont échoué. |
+| `RESPONSE_VALIDATION_FAILED` | Une réponse déclarée ou une réponse de démarrage SSE a échoué à la validation structurelle ou de contenu.           |
+| `UNDECLARED_STATUS`          | HTTP a renvoyé un statut sans Struct de sortie correspondante alors que `output` était déclaré.                     |
 
-## Classification et branchement des erreurs
+`UNDECLARED_STATUS` s'applique aux statuts 2xx et non-2xx sans correspondance.
 
-**N'utilise pas** la comparaison de chaînes pour juger les types d'erreur :
-
-```typescript
-// Non recommandé : fragile et sans rétrécissement de type
-if (error.message.includes('timeout')) { ... }
-```
-
-**Recommandé** : Branche par `kind` et `code` pour un rétrécissement de type précis :
+## Traiter les différents types d'erreur
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+declare const useUser: (user: unknown) => void
 
-const client = createClient(/* ... */)
+const [error, user, response] = await client.execute(getUser())
 
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ code: struct.string(), message: struct.string() }),
-  },
-})
-
-const [error, user] = await client.execute(getUser())
-
-if (error) {
+if (!error) {
+  useUser(user)
+} else {
   switch (error.kind) {
-    case 'http': {
-      // error est rétréci à HttpStatusError
-      console.error('HTTP', error.status, error.message)
-      if (error.status === 404) {
-        // error.data est rétréci à { code: string; message: string }
-        console.error('Not found:', error.data.code)
-      }
+    case 'http':
+      console.error('HTTP request failed', {
+        operation: 'get-user',
+        status: error.status,
+      })
       break
-    }
-    case 'transport': {
-      // error est rétréci à TransportError
+
+    case 'transport':
       switch (error.code) {
         case 'ABORTED':
-          console.error('Request aborted')
+          console.info('get-user cancelled')
           break
         case 'TIMEOUT':
-          console.error('Request timed out')
+          console.warn('get-user timed out')
           break
         case 'NETWORK_ERROR':
-          console.error('Network error:', error.cause)
+          console.error('get-user transport failed')
           break
       }
       break
-    }
-    case 'definition': {
-      // error est rétréci à DefinitionError
-      switch (error.code) {
-        case 'REQUEST_VALIDATION_FAILED':
-          console.error('Request validation failed:', error.cause)
-          break
-        case 'RESPONSE_VALIDATION_FAILED':
-          console.error('Response validation failed:', error.cause)
-          break
-        case 'UNDECLARED_STATUS':
-          console.error('Undeclared status:', error.response?.status)
-          break
-      }
+
+    case 'definition':
+      console.error('get-user contract failed', {
+        code: error.code,
+        status: error.response?.status,
+      })
       break
-    }
   }
 }
 ```
 
-## Constantes intégrées
+Ne journalisez pas `cause`, `data`, les en-têtes ou corps de réponse, ni les URL sans politique explicite de masquage et de rétention.
 
-`@defjs/core` exporte deux constantes pour identifier des erreurs de transport spécifiques :
+## Disponibilité de la réponse
 
-```typescript
-import { ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
+`SettledResponseLike` et `SettledResponse` sont des wrappers Defjs, pas des objets `Response` natifs. Ils exposent le statut, son libellé, les en-têtes, l'URL, le corps, d'éventuelles informations d'erreur et, pour les wrappers finalisés, l'indicateur `ok`. Celui-ci signifie seulement que le statut appartient à la plage 2xx.
 
-// ERR_ABORTED : La requête a été activement annulée
-// ERR_TIMEOUT : La requête a expiré
-```
+Pour HTTP :
 
-### Déclencher une annulation dans les intercepteurs
+- une erreur de statut HTTP déclarée possède `error.response` ;
+- les erreurs de validation de sortie et les statuts non déclarés peuvent posséder `error.response` ;
+- la validation de requête, l'annulation avant réponse, une exception d'intercepteur et un échec de transport de statut 0 peuvent ne fournir aucune réponse dans le tuple.
 
-```typescript
-import { createHttpInterceptor, ERR_ABORTED } from '@defjs/core'
+Pour SSE, un démarrage échoué peut tout de même renvoyer un instantané d'ouverture en troisième position si une réponse est arrivée avant l'échec de validation du contenu ou du statut. Pour WebSocket, un démarrage échoué ne peut renvoyer un instantané de connexion que si celui-ci a été capturé.
 
-const authInterceptor = createHttpInterceptor(async (req, next) => {
-  const token = await getToken()
-  if (!token) {
-    throw ERR_ABORTED
-  }
-  req.setHeader('Authorization', `Bearer ${token}`)
-  return next(req)
-})
-```
+## Fabriques et constantes d'erreur
 
-### Utilisation avec AbortController
+L'entrée racine exporte des fonctions de fabrique destinées au code d'intégration :
 
 ```typescript
-import { ERR_ABORTED } from '@defjs/core'
-
-const controller = new AbortController()
-controller.abort(ERR_ABORTED)
-
-const [error] = await client.execute(getUser(), { signal: controller.signal })
-// error.code === 'ABORTED'
+import { ERR_ABORTED, ERR_TIMEOUT, createDefinitionError, createHttpStatusError, createTransportError } from '@defjs/core'
 ```
 
-### Créer des erreurs de transport manuellement
+- `createTransportError(cause)` normalise les causes d'annulation, de timeout et les autres causes.
+- `createDefinitionError(code, cause, response?)` crée une erreur de définition.
+- `createHttpStatusError(status, message, response, data?)` crée une erreur de statut HTTP.
+- `ERR_ABORTED` et `ERR_TIMEOUT` sont des valeurs `Error` partagées reconnues par le normaliseur.
 
-```typescript
-import { createTransportError, ERR_TIMEOUT } from '@defjs/core'
+Ces helpers créent des objets `RequestError` ordinaires. Ils ne les lèvent pas.
 
-const error = createTransportError(ERR_TIMEOUT)
-// { kind: 'transport', code: 'TIMEOUT', message: 'Request timed out' }
-```
+Les parcours de commande intégrés convertissent leurs échecs de démarrage attendus en tuples. Cette gestion ne couvre pas tout code d'extension : les intercepteurs et callbacks applicatifs peuvent lever une exception, et transmettre une commande non prise en charge à l'implémentation générale rejette la promesse.
 
-## Fonctions utilitaires
+## Étapes suivantes
 
-### `createTransportError`
-
-Normalise une exception brute en `TransportError`.
-
-```typescript
-import { createTransportError, ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
-
-createTransportError(ERR_ABORTED)
-// => { kind: 'transport', code: 'ABORTED', message: 'Request was aborted' }
-
-createTransportError(ERR_TIMEOUT)
-// => { kind: 'transport', code: 'TIMEOUT', message: 'Request timed out' }
-
-createTransportError(new Error('offline'))
-// => { kind: 'transport', code: 'NETWORK_ERROR', message: 'offline' }
-```
-
-### `createDefinitionError`
-
-Normalise une exception brute en `DefinitionError`.
-
-```typescript
-import { createDefinitionError } from '@defjs/core'
-
-createDefinitionError('REQUEST_VALIDATION_FAILED', new Error('invalid id'))
-// => { kind: 'definition', code: 'REQUEST_VALIDATION_FAILED', message: 'invalid id' }
-```
-
-### `createHttpStatusError`
-
-Normalise une réponse non-2xx en `HttpStatusError`.
-
-```typescript
-import { createHttpStatusError } from '@defjs/core'
-
-const response = {
-  body: { code: 'NOT_FOUND' },
-  headers: new Headers(),
-  ok: false,
-  status: 404,
-  statusText: 'Not Found',
-  url: 'https://api.example.com/v1/user',
-}
-
-createHttpStatusError(404, 'Not Found', response, { code: 'NOT_FOUND' })
-// => { kind: 'http', code: 'HTTP_STATUS', status: 404, message: 'Not Found', data: { code: 'NOT_FOUND' }, response }
-```
-
-## Prochaines étapes
-
-- [Client →](/core/client) — Créer des clients et exécuter des commandes
-- [Requêtes HTTP →](/core/http) — `defineRequest` et patterns de sortie
-- [SSE →](/core/sse) — Erreurs SSE et stratégies de reconnexion
-- [WebSocket →](/core/web-socket) — Gestion des erreurs de connexion WebSocket
+- [HTTP](/fr-FR/core/http) explique la sélection par statut et le décodage des réponses.
+- [SSE](/fr-FR/core/sse) distingue les échecs au démarrage des erreurs après ouverture.
+- [WebSocket](/fr-FR/core/web-socket) couvre les erreurs d'exécution et la fermeture définitive.

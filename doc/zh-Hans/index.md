@@ -3,55 +3,36 @@ layout: home
 
 hero:
   name: Defjs
-  text: 跨传输的类型化 API
-  tagline: 一次定义，处处类型安全。支持 HTTP、SSE 和 WebSocket，具备运行时验证与完整的 TypeScript 类型推断。
+  text: HTTP、SSE 和 WebSocket 的类型化命令
+  tagline: 用 Struct 定义 wire shape，显式创建 client，并清楚保留每种 transport 的结果与生命周期语义。
   actions:
     - theme: brand
-      text: 快速开始
+      text: 开始使用
       link: /zh-Hans/guide/getting-started
     - theme: alt
-      text: 在 GitHub 上查看
+      text: 在 GitHub 查看
       link: https://github.com/defjs/defjs
 
 features:
-  - icon: 🔒
-    title: 类型安全
-    details: 使用 struct 定义请求结构。实现输入、输出和错误分支的端到端类型推断。运行时验证能够在问题到达生产环境之前捕获类型不匹配。
-  - icon: 🌐
-    title: 多传输协议
-    details: 一套统一的 API 风格，同时支持 HTTP 请求、服务器推送事件（SSE）和 WebSocket 连接。切换传输协议无需重写应用逻辑。
-  - icon: 🧅
-    title: 拦截器
-    details: 按传输协议隔离的洋葱模型拦截器，支持日志、认证、重试和横切关注点。HTTP、SSE 和 WebSocket 各自拥有独立的拦截器链。
-  - icon: 📡
-    title: 流式传输
-    details: 原生支持 SSE 事件流，具备自动重连和可配置的事件队列处理；同时支持带重连、心跳与发送队列的 WebSocket 连接。为实时应用而生。
-  - icon: ⚡
-    title: 通用运行时
-    details: 支持浏览器、Node.js、Bun 和 Deno。无需 polyfill。核心包为纯 ESM，零运行时依赖。
-  - icon: 🧩
-    title: 框架就绪
-    details: 为 Vue 和 React 提供一等公民集成，采用 provideClient / injectClient / useClient 模式。服务端可观测性支持 OpenTelemetry 插件。
+  - title: 端点契约
+    details: 明确区分端点定义、command builder 和 command。Struct 会在运行时解码调用方输入和 transport 数据。
+  - title: 按 transport 区分结果
+    details: HTTP、SSE 和 WebSocket 都返回 error-first 三元素 tuple；第三项分别是 response wrapper、启动 open 快照或启动 connection 快照。
+  - title: Interceptor 链
+    details: 在 client 上注册 HTTP、SSE 和 WebSocket interceptor。每种 transport 只筛选自己的 interceptor，并按洋葱顺序执行。
+  - title: 显式生命周期
+    details: SSE 可以重试网络错误和读取错误。WebSocket 重连需要显式开启。应用仍负责迭代、取消和终止关闭。
+  - title: 运行时解码
+    details: 使用驱动 TypeScript 推断的同一套 Struct 契约，解码输入、response、stream event 和 WebSocket message。
+  - title: 应用集成
+    details: 通过 Vue 或 React 共享 client，并在服务端应用中添加 outbound OpenTelemetry instrumentation。
 ---
 
-## 快速开始
+## 创建类型化 API Client
 
-这个首页快速开始面向当前仓库里的 source/workspace API。
+先描述应用需要调用的 HTTP、SSE 或 WebSocket 契约。Defjs 会把定义变成 command builder，在运行时验证数据，并保留明确的 transport 结果。
 
-仓库工作区基线：请使用 Node `>=26`、`pnpm@11.6.0` 和 `engine-strict=true`。这是当前源码工作区以及基于仓库现有 manifests 构建出的包的最低要求；如果你未来安装某个已发布版本，请以那个发布版本随附的 `engines` 字段和 release notes 为准。
-
-使用下面的命令安装 workspace，并验证文档示例：
-
-```bash
-pnpm install
-pnpm --dir doc run typecheck
-```
-
-如果你想直接试运行下面的片段，请把它粘贴到能从源码解析 `@defjs/core` 的 workspace package 或文档 twoslash block 中。仓库根目录本身不是一个直接导入 `@defjs/core` 的应用 package。
-
-> 对已发布 npm/CDN 用户：当前公开发布线可能落后于本页。本首页不讲解旧版 `@defjs/core@0.3.3` API。在外部应用中复制 `withEndpoint(...)` 或 `struct.request(...)` 之前，请先确认你使用的已发布版本，其包信息表或 release notes 已明确包含这一套 API。
-
-定义一个类型化请求并执行：
+HTTP 的核心流程很短：为自己的 API 创建 client，定义端点，调用 command builder，再执行 command。
 
 ```typescript
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
@@ -60,7 +41,7 @@ const client = createClient(withEndpoint('https://api.example.com'))
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/users/:id',
+  path: '/users/:id',
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
@@ -70,59 +51,21 @@ const getUser = defineRequest({
   ] as const,
 })
 
-const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
-if (!error) {
-  console.log(user.id, user.name) // 完整类型推断
+const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
+
+if (error) {
+  console.error(error.kind, error.code)
+} else {
+  console.log(user.name, response.status)
 }
 ```
 
-## 框架集成
+把 client 指向应用实际使用的服务，并让 Struct 匹配该服务的真实 response 契约。Credential、UI state、retry、取消和资源清理仍由应用负责。
 
-<div class="framework-grid">
+## 接着读
 
-### Vue
-
-`@defjs/vue` 将 `provideClient` 作为 Vue 插件提供，并在组合式 API 中使用 `injectClient`，在应用间共享一个类型化的 `@defjs/core` 客户端。
-
-[了解更多 →](/zh-Hans/plugins/vue)
-
-### React
-
-`@defjs/react` 提供 `ClientProvider`、`useClient` 和 option helpers，用于在 React 组件树中共享一个类型化 `@defjs/core` client。
-
-[了解更多 →](/zh-Hans/plugins/react)
-
-</div>
-
-## 下一步
-
-- [快速开始 →](/zh-Hans/guide/getting-started) — 仓库 source/workspace 入门、已发布包注意事项，以及第一个请求
-- [核心概念 →](/zh-Hans/core/client) — 客户端、命令、上下文和错误处理
-- [示例 →](/zh-Hans/guide/examples) — REST CRUD、SSE 通知、WebSocket 聊天、拦截器模式
-
-<style>
-.framework-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-}
-.framework-grid > div,
-.framework-grid > h3 {
-  margin: 0;
-}
-.framework-grid h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-.framework-grid p {
-  margin: 0 0 0.5rem;
-  color: var(--vp-c-text-2);
-}
-.framework-grid a {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--vp-c-brand-1);
-}
-</style>
+- [快速开始](/zh-Hans/guide/getting-started)：安装 package，并在应用中完成第一个类型化请求。
+- [Client](/zh-Hans/core/client)：option 组合规则和三个 `execute` overload。
+- [Commands](/zh-Hans/core/commands)：端点定义、command builder、command 和 schema-bound projection。
+- [HTTP](/zh-Hans/core/http)、[SSE](/zh-Hans/core/sse) 和 [WebSocket](/zh-Hans/core/web-socket)：各 transport 的行为与生命周期责任。
+- [Vue](/zh-Hans/plugins/vue)、[React](/zh-Hans/plugins/react) 和 [OpenTelemetry Server](/zh-Hans/plugins/opentelemetry-server)：把 Defjs 接入应用 framework 和 telemetry 配置。

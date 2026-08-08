@@ -2,38 +2,22 @@ name: Checks
 
 on:
   workflow_call:
-    inputs:
-      package:
-        description: 'Package to run checks for (empty = all packages)'
-        required: false
-        type: string
-        default: ''
+
+permissions:
+  contents: read
 
 jobs:
-  lockfile:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm-deps
       - name: Check lockfile health
         run: pnpm dedupe --check
-
-  quality:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        task: [lint, typecheck]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-pnpm-deps
-      - name: ${{ matrix.task }}
-        run: |
-          if [ -n "${{ inputs.package }}" ]; then
-            pnpm --filter @defjs/${{ inputs.package }} run ${{ matrix.task }}
-          else
-            pnpm run ${{ matrix.task }}
-          fi
+      - name: Lint
+        run: pnpm lint
+      - name: Check formatting
+        run: pnpm fmt:check
 
   test:
     runs-on: ubuntu-latest
@@ -52,23 +36,12 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium firefox
       - name: Test
-        run: |
-          if [ -n "${{ inputs.package }}" ]; then
-            pnpm --filter @defjs/${{ inputs.package }} run test
-          else
-            pnpm run test
-          fi
+        run: pnpm test
 
   build:
-    needs: [lockfile, quality, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm-deps
       - name: Build
-        run: |
-          if [ -n "${{ inputs.package }}" ]; then
-            pnpm --filter @defjs/${{ inputs.package }} run build
-          else
-            pnpm run build
-          fi
+        run: pnpm build

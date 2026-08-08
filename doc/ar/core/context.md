@@ -1,345 +1,112 @@
 ---
-title: Context
-description: HttpContext passing, request builder capabilities, input parsing, and transport-specific configuration.
+title: السياق
+description: مرّر metadata ضمن نطاق الطلب عبر سلاسل معترضات HTTP وSSE باستخدام HttpContext.
 ---
 
 # السياق
 
-تدفق تنفيذ Defjs: يوفر إعداد العميل الإعدادات الافتراضية العالمية؛ تصف تعريفات الأوامر بنية نقطة النهاية؛ يعيّن `build` المدخلات المُحلّلة إلى أجزاء طلب HTTP؛ ويعمل `HttpContext` كأمتعة غير مرئية تُمرّر بين الاعتراضات خلال دورة حياة تنفيذ واحدة.
+`HttpContext` حاوية metadata مفهرسة بـ tokens. تنتقل مع تنفيذ HTTP أو SSE، وتكون متاحة على `HttpRequest` الذي تراه المعترضات. ولا تسلسل نفسها إلى URL أو headers أو body.
 
-## تمرير HttpContext
+## Tokens والقيم الافتراضية
 
-`HttpContext` هو حاوية مفتاح-قيمة تعتمد على Token للبيانات الوصفية ضمن دورة حياة طلب/اتصال واحدة. لا يشارك في تسلسل URL أو الرأس أو الجسم. يقرأه ويكتبه الاعتراضات.
-
-### الإنشاء والاستخدام
+أنشئ token مضبوط النوع باستخدام factory للقيمة الافتراضية:
 
 ```typescript
-import { makeHttpContext, makeHttpContextToken } from '@defjs/core'
+import { makeHttpContextToken } from '@defjs/core'
 
-// 1. تعريف Token (مع قيمة افتراضية)
-const requestIdToken = makeHttpContextToken(() => 'unknown')
-const authToken = makeHttpContextToken(() => ({ role: 'guest' }))
-
-// 2. إنشاء السياق وتعيين القيم
-const ctx = makeHttpContext().set(requestIdToken, 'req-42').set(authToken, { role: 'admin' })
-
-// 3. التمرير وقت التنفيذ
-const [error, data] = await client.execute(getUser(), { context: ctx })
+const operationToken = makeHttpContextToken(() => 'unknown-operation')
+const requestIdToken = makeHttpContextToken(() => 'missing-request-id')
 ```
 
-### القراءة في الاعتراضات
+تستدعي `context.get(token)` مصنع token عندما لا يحمل السياق قيمة مخزنة. ولا تُدرج القيمة الافتراضية في السياق، لذلك يستطيع factory ذو حالة إنتاج قيمة جديدة في كل قراءة مفقودة. فضّل قيمًا افتراضية حتمية.
+
+## إنشاء السياق وتمريره
+
+```typescript
+import { makeHttpContext } from '@defjs/core'
+
+const context = makeHttpContext().set(operationToken, 'get-user').set(requestIdToken, 'request-42')
+
+const [error, user] = await client.execute(getUser({ path: { id: 42 } }), {
+  context,
+})
+```
+
+تعدّل `set(...)` السياق وتعيد الكائن نفسه لتسلسل الاستدعاءات. وترمي `get(...)` و`set(...)` خطأ `TypeError` للقيم التي ليست tokens أنشأتها `makeHttpContextToken(...)`.
+
+يقرأ المعترض الكائن نفسه:
 
 ```typescript
 import { createHttpInterceptor } from '@defjs/core'
 
-const loggingInterceptor = createHttpInterceptor(async (req, next) => {
-  const requestId = req.context?.get(requestIdToken) ?? 'unknown'
-  console.log(`[${requestId}] → ${req.method} ${req.endpoint}`)
-  return next(req)
+const operationLogger = createHttpInterceptor(async (request, next) => {
+  const operation = request.context?.get(operationToken) ?? 'unknown-operation'
+  const requestId = request.context?.get(requestIdToken) ?? 'missing-request-id'
+
+  console.info('outbound request started', { operation, requestId })
+  const response = await next(request)
+  console.info('outbound request finished', { operation, requestId, status: response.status })
+  return response
 })
 ```
 
-### دمج السياقات
+استخدم أسماء عمليات ثابتة وmetadata خضعت للمراجعة. لا تضع secrets أو headers خامًا أو bodies أو URLs أو query strings في السجلات افتراضيًا.
+
+## دلالات المرجع
+
+يمرّر التنفيذ `HttpContext` بالمرجع. إذا عدّله معترض، تستطيع المعترضات اللاحقة والمستدعي الذي يحتفظ بالكائن رؤية التغيير.
+
+أنشئ سياقًا جديدًا لكل طلب عندما يحتوي على بيانات request أو user أو tenant أو trace أو cookie أو authorization. قد تؤدي إعادة استخدام سياق واحد قابل للتعديل بين أعمال متزامنة إلى تسريب metadata أو الكتابة فوقها.
+
+تقبل خيارات تنفيذ HTTP وSSE حاليًا `context`. أما خيارات تنفيذ WebSocket فلا تقبله. يحتفظ مقبض SSE المنطقي بسياق الطلب المرتبط بمحاولات اتصاله، ومع ذلك ينبغي للتطبيق اعتباره مملوكًا لنطاق طلب stream.
+
+## النسخ والدمج
+
+تنشئ `makeHttpContext(existing)` نسخة سطحية من خريطة tokens:
+
+```typescript
+const base = makeHttpContext().set(operationToken, 'list-users')
+const copy = makeHttpContext(base)
+
+copy.set(requestIdToken, 'request-43')
+```
+
+الخريطتان منفصلتان، لكن قيم الكائنات المخزنة لا تُنسخ بعمق.
+
+تقبل `makeHttpContext(entries)` أزواج token/value:
+
+```typescript
+const context = makeHttpContext([
+  [operationToken, 'create-user'],
+  [requestIdToken, 'request-44'],
+])
+```
+
+تعيد `mergeHttpContexts(primary, secondary)` سياقًا جديدًا. تستبدل قيم `secondary` قيم `primary` عند استخدام token نفسه.
 
 ```typescript
 import { mergeHttpContexts } from '@defjs/core'
 
-const baseCtx = makeHttpContext().set(requestIdToken, 'req-42')
-const extraCtx = makeHttpContext().set(authToken, { role: 'admin' })
+const primary = makeHttpContext().set(operationToken, 'default-operation')
+const secondary = makeHttpContext().set(operationToken, 'get-user')
+const merged = mergeHttpContexts(primary, secondary)
 
-const merged = mergeHttpContexts(baseCtx, extraCtx)
-// merged يحتوي على requestId و auth معًا
+merged.get(operationToken) // 'get-user'
 ```
 
-### واجهة برمجة التطبيقات الرئيسية
+حتى تمرير سياق واحد فقط يعيد نسخة منه. وتمرير لا شيء يعيد سياقًا فارغًا.
 
-| Export                                           | الوصف                                                    |
-| ------------------------------------------------ | -------------------------------------------------------- |
-| `makeHttpContextToken<T>(defaultValue: () => T)` | إنشاء Token مع قيمة افتراضية                             |
-| `makeHttpContext()`                              | إنشاء سياق فارغ                                          |
-| `makeHttpContext(entries)`                       | إنشاء من مصفوفة `[token, value]`                         |
-| `makeHttpContext(otherContext)`                  | نسخ سياق آخر                                             |
-| `mergeHttpContexts(primary, secondary)`          | دمج سياقين؛ الثانوي يتجاوز الأولي لنفس Token             |
-| `ctx.set(token, value)`                          | كتابة قيمة؛ يُرجع self (قابل للتسلسل)                    |
-| `ctx.get(token)`                                 | قراءة قيمة؛ يُرجع القيمة الافتراضية للToken إذا لم تُضبط |
-| `ctx.has(token) / ctx.del(token)`                | التحقق / الحذف                                           |
-| `ctx.keys() / ctx.length`                        | التكرار / العد                                           |
+## API السياق
 
----
+| العضو               | السلوك                                                     |
+| ------------------- | ---------------------------------------------------------- |
+| `set(token, value)` | يخزّن قيمة ويعيد السياق نفسه.                              |
+| `get(token)`        | يعيد القيمة المخزنة أو يستدعي factory الافتراضي للـ token. |
+| `has(token)`        | يختبر وجود قيمة مخزنة.                                     |
+| `del(token)`        | يحذف قيمة ويعيد السياق نفسه.                               |
+| `keys()`            | يكرّر على tokens المخزنة.                                  |
+| `length`            | عدد tokens المخزنة.                                        |
 
-## منشئ الطلب وتحليل المدخلات
+تتوفر `isHttpContext(...)` و`isHttpContextToken(...)` عندما يحتاج الكود إلى runtime guards.
 
-### تدفق تحليل المدخلات
-
-عند تنفيذ أمر، يعالج العميل المدخلات بالترتيب التالي:
-
-1. **التحقق**: يتحقق ويحلّل بيانات المتصل الخام باستخدام `input` Struct.
-2. **البناء**: يستدعي `build(request, parsedInput)` ليعيّن البيانات المُحلّلة إلى أجزاء الطلب.
-3. **النقل**: يوزّع على HTTP fetch أو دفق SSE أو اتصال WebSocket بناءً على `kind`.
-
-```typescript
-import { defineRequest, struct } from '@defjs/core'
-
-const CreateUser = defineRequest({
-  method: 'POST',
-  path: '/users',
-  input: struct.object({
-    body: struct.object({
-      name: struct.string(),
-      email: struct.string(),
-    }),
-  }),
-  build(request, input) {
-    request.setJson(input.body)
-  },
-  output: {
-    201: struct.object({ id: struct.number() }),
-  },
-})
-
-const [error, user] = await client.execute(CreateUser({ body: { name: 'Alice', email: 'alice@example.com' } }))
-```
-
-### مصفوفة قدرات معالج البناء
-
-تدعم وسائل النقل المختلفة عمليات `build` مختلفة:
-
-| طريقة البناء                              | HTTP | SSE | WebSocket |
-| ----------------------------------------- | ---- | --- | --------- |
-| `setPathParams` / `setQueryParams`        | ✓    | ✓   | ✓         |
-| `setHeaders` / `addHeaders`               | ✓    | ✓   | ✗         |
-| `setJson` / `setText` / `setHtml`         | ✓    | ✗   | ✗         |
-| `setFormData` / `addFormData`             | ✓    | ✗   | ✗         |
-| `setFormUrlEncoded` / `addFormUrlEncoded` | ✓    | ✗   | ✗         |
-| `setBlob` / `setArrayBuffer`              | ✓    | ✗   | ✗         |
-| `withCredentials`                         | ✓    | ✗   | ✗         |
-
-يُلقى استخدام طريقة غير مدعومة من وسيلة النقل خطأ `REQUEST_VALIDATION_FAILED` وقت التنفيذ.
-
-### البناء التلقائي
-
-إذا حذفت `build`، يجب أيضًا حذف `input`. لكن يمكنك استخدام شكل `request` في Struct لاستنتاج منطق البناء تلقائيًا:
-
-```typescript
-import { defineRequest, struct } from '@defjs/core'
-
-const GetUser = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.string() }),
-    query: struct.object({ include: struct.optional(struct.string()) }),
-  }),
-  // لا حاجة لـ build؛ يقوم الإطار بتعيين المسار/الاستعلام تلقائيًا
-})
-```
-
-عند توفير `build`، يجب أيضًا توفير `input`. هذه قاعدة صارمة في التصميم.
-
----
-
-## إعداد العميل
-
-أنشئ عميلًا بـ `createClient` ودالة إعداد واحدة أو أكثر. الدوال اللاحقة تتجاوز السابقة لنفس المفتاح.
-
-```typescript
-import { createClient, withEndpoint, withCredentials, withQueryParamsSerializer, withXSRF } from '@defjs/core'
-
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withCredentials(true),
-  withXSRF({ cookieName: 'CSRF-TOKEN', headerName: 'X-CSRF-Token' }),
-  withQueryParamsSerializer((params, raw) => {
-    return params.toString()
-  }),
-)
-```
-
-### الخيارات الأساسية
-
-#### `withEndpoint(url)`
-
-يضبط عنوان API الأساسي. يتم إلحاق جميع قيم `path` في الطلب بعد هذا URL.
-
-```typescript
-withEndpoint('https://api.example.com/v1')
-// طلب /users ينتج https://api.example.com/v1/users
-```
-
-#### `withCredentials(boolean)`
-
-ما إذا كان يتضمن بيانات الاعتماد عبر النطاقات (ملفات تعريف الارتباط، رؤوس HTTP auth، شهادات TLS العميل). يتوافق مع خيار `credentials` في `fetch`.
-
-```typescript
-withCredentials(true) // تضمين ملفات تعريف الارتباط في الطلبات عبر النطاقات
-withCredentials(false) // الافتراضي
-```
-
-#### `withXSRF(options)`
-
-يضبط سلوك قراءة وحقن رمز XSRF. يقرأ افتراضيًا `XSRF-TOKEN` من `document.cookie` ويحقنه في رأس `X-XSRF-TOKEN`.
-
-```typescript
-withXSRF({
-  cookieName: 'XSRF-TOKEN',
-  headerName: 'X-XSRF-TOKEN',
-  tokenProvider: ({ request }) => {
-    // منطق قراءة مخصص، مثلاً من localStorage
-    return localStorage.getItem('xsrf-token')
-  },
-})
-```
-
-| الحقل           | النوع                                  | الافتراضي                 |
-| --------------- | -------------------------------------- | ------------------------- |
-| `cookieName`    | `string`                               | `'XSRF-TOKEN'`            |
-| `headerName`    | `string`                               | `'X-XSRF-TOKEN'`          |
-| `tokenProvider` | `(ctx) => string \| null \| undefined` | يقرأ من `document.cookie` |
-
-#### `withQueryParamsSerializer(fn)`
-
-تسلسل مخصص لمعاملات الاستعلام. يتسلسل افتراضيًا بـ `URLSearchParams.toString()`.
-
-```typescript
-withQueryParamsSerializer((params, raw) => {
-  return qs.stringify(raw ?? Object.fromEntries(params))
-})
-```
-
-عند توفير مسلسل مخصص، تسمح طلبات HTTP و SSE بمعاملات استعلام معقدة.
-
----
-
-## إعداد خاص بوسيلة النقل
-
-### خيارات SSE
-
-اضبط عبر `withSSEOptions` أو دوال إعداد فردية.
-
-```typescript
-import { withSSEOptions, withSSEHandle, withSSEReconnect, withSSEQueue, withSSEOnInvalidEvent } from '@defjs/core'
-
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEHandle(customFetch),
-  withSSEOptions({
-    reconnect: {
-      attempts: 5,
-      delayMs: 1000,
-      factor: 2,
-      jitter: 0.5,
-      maxDelayMs: 30000,
-      shouldReconnect: ({ attempt, cause, lastEventId, open }) => {
-        return attempt < 3
-      },
-    },
-    queue: {
-      maxSize: 100,
-      overflow: 'drop-oldest',
-    },
-    onInvalidEvent: ({ reason, message, cause }) => {
-      console.warn('Invalid SSE event:', reason, message.event)
-    },
-    maxBufferSize: 1024 * 1024,
-  }),
-)
-```
-
-| الخيار               | الوصف                                                                                      |
-| -------------------- | ------------------------------------------------------------------------------------------ |
-| `sse.fetch`          | تنفيذ `fetch` خاص بـ SSE                                                                   |
-| `sse.reconnect`      | استراتيجية إعادة الاتصال: محاولات، تأخير، معامل تراجع، اهتزاز، تأخير أقصى، دالة قرار مخصصة |
-| `sse.queue`          | طابور الأحداث: سعة قصوى، استراتيجية الانتشار                                               |
-| `sse.onInvalidEvent` | مراقب الأحداث غير الصالحة (مخطط مفقود أو فشل التحقق)                                       |
-| `sse.maxBufferSize`  | حد حجم المخزن المؤقت الأساسي (بايت)                                                        |
-
-### خيارات WebSocket
-
-اضبط عبر `withWebSocketOptions` أو دوال إعداد فردية.
-
-```typescript
-import {
-  withWebSocketOptions,
-  withWebSocketHandle,
-  withWebSocketHeartbeat,
-  withWebSocketReconnect,
-  withWebSocketQueue,
-  withWebSocketBeforeConnect,
-  withWebSocketProtocols,
-} from '@defjs/core'
-
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withWebSocketHandle(WebSocket),
-  withWebSocketProtocols(['json', 'v1']),
-  withWebSocketBeforeConnect(async () => {
-    await refreshToken()
-  }),
-  withWebSocketHeartbeat({
-    intervalMs: 30000,
-    timeoutMs: 10000,
-    message: () => ({ type: 'ping' }),
-    isAck: (msg) => msg.type === 'pong',
-  }),
-  withWebSocketReconnect({
-    attempts: 10,
-    delayMs: 1000,
-    factor: 2,
-    jitter: 0.3,
-    maxDelayMs: 30000,
-    shouldReconnect: ({ attempt, cause, code, reason, wasClean }) => {
-      return !wasClean && attempt < 5
-    },
-  }),
-  withWebSocketQueue({
-    maxSize: 50,
-    overflow: 'drop-newest',
-  }),
-)
-```
-
-| الخيار                    | الوصف                                                                                      |
-| ------------------------- | ------------------------------------------------------------------------------------------ |
-| `webSocket.WebSocket`     | منشئ `WebSocket` مخصص                                                                      |
-| `webSocket.protocols`     | مصفوفة البروتوكولات الفرعية RFC 6455                                                       |
-| `webSocket.beforeConnect` | خطاف ما قبل الاتصال (مثلاً، جلب رمز ديناميكي)                                              |
-| `webSocket.heartbeat`     | نبضة القلب: فاصل، مهلة، مصنع رسائل، شرط ACK                                                |
-| `webSocket.reconnect`     | استراتيجية إعادة الاتصال: محاولات، تأخير، معامل تراجع، اهتزاز، تأخير أقصى، دالة قرار مخصصة |
-| `webSocket.queue`         | طابور الإرسال: سعة قصوى، استراتيجية الانتشار                                               |
-
-### تفاصيل نبضة القلب
-
-تكتشف نبضة قلب WebSocket حيوية الاتصال. إذا تم ضبطها، يرسل الإطار رسائل نبضة قلب كل `intervalMs` وينتظر ACK خلال `timeoutMs`. إذا انتهت مهلة ACK، يُطلَب إعادة الاتصال.
-
-```typescript
-withWebSocketHeartbeat({
-  intervalMs: 30000, // إرسال نبضة كل 30 ثانية
-  timeoutMs: 10000, // يجب استلام ACK خلال 10 ثوانٍ
-  message: () => ({ type: 'ping', timestamp: Date.now() }),
-  isAck: (msg) => msg.type === 'pong',
-})
-```
-
-- يجب أن يكون نوع رسالة نبضة القلب متوافقًا مع تعريفات `outgoing`.
-- `isAck` يحدد ما إذا كانت رسالة واردة هي استجابة نبضة قلب. عندما يُرجع `true`، لا تدخل الرسالة إلى مكرر `receive`.
-
----
-
-## ترتيب الإعداد وتركيبه
-
-تُطبّق دوال الإعداد بالترتيب؛ اللاحقة تتجاوز السابقة. خيارات وقت التنفيذ (`client.execute(cmd, { timeout: 5000 })`) لها الأولوية القصوى، تليها إعداد مستوى العميل.
-
-```typescript
-const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEOptions({ reconnect: { attempts: 3 } }))
-
-// تجاوز إعادة اتصال SSE وقت التنفيذ
-const [error, stream] = await client.execute(watchLogs(), { reconnect: { attempts: 10 } })
-```
-
-## ما التالي
-
-- [العميل →](/core/client) — إنشاء العميل واستخدام `execute`
-- [الأوامر →](/core/commands) — تعريفات الأوامر وقواعد المدخلات الاختيارية
-- [SSE →](/core/sse) — تنفيذ SSE، إعادة الاتصال، ومعالجة الأحداث
-- [WebSocket →](/core/web-socket) — اتصال WebSocket، نبضة القلب، وإدارة الحالة
-- [الاعتراضات →](/core/interceptors) — أنواع الاعتراضات وميكانيكية سلسلة البصل
+ربط الطلب موضوع منفصل. راجع [الأوامر](/ar/core/commands) لأقسام الطلب التلقائية والإسقاطات المرتبطة بالـ Struct، و[المعترضات](/ar/core/interceptors) لسلوك السلسلة.

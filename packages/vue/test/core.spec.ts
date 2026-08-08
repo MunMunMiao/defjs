@@ -1,6 +1,6 @@
 import type { Client, ClientConfig, Interceptor } from '@defjs/core'
-import { describe, expect, it } from 'vitest'
-import { createApp, h } from 'vue'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createApp, h, type App } from 'vue'
 import { injectClient, provideClient, withEndpoint, withInterceptors } from '../src'
 
 function makeClientConfig(overrides: Partial<ClientConfig> = {}): ClientConfig {
@@ -80,77 +80,91 @@ describe('injectClient', () => {
 
 describe('provideClient', () => {
   const endpoint = 'https://api.example.com'
+  const mountedApps: App[] = []
+
+  afterEach(() => {
+    for (const app of mountedApps.splice(0)) {
+      app.unmount()
+    }
+  })
+
+  function mount(app: App) {
+    const root = document.createElement('div')
+    app.mount(root)
+    mountedApps.push(app)
+    return root
+  }
 
   it('should create a Plugin', () => {
     const plugin = provideClient(withEndpoint(endpoint), withInterceptors((() => ({})) as unknown as () => Interceptor))
     expect(plugin).toHaveProperty('install')
   })
 
-  it('should provide client via app.provide', async () => {
+  it('should provide client via app.provide', () => {
     let injectedClient: Client | undefined
     const app = createApp({
       setup() {
         injectedClient = injectClient()
-        return { client: injectedClient }
+        return () => h('div')
       },
-      template: '<div></div>',
     })
 
     app.use(provideClient(withEndpoint(endpoint), withInterceptors((() => ({})) as unknown as () => Interceptor)))
 
-    app.mount(document.createElement('div'))
+    const root = mount(app)
     expect(injectedClient).toBeDefined()
+    expect(root.querySelector('div')).not.toBeNull()
   })
 
-  it('should provide client configured with only host', async () => {
+  it('should provide client configured with only host', () => {
     let injectedClient: Client | undefined
     const app = createApp({
       setup() {
         injectedClient = injectClient()
-        return { client: injectedClient }
+        return () => h('div')
       },
-      template: '<div></div>',
     })
 
     app.use(provideClient(withEndpoint(endpoint)))
 
-    app.mount(document.createElement('div'))
+    const root = mount(app)
     expect(injectedClient).toBeDefined()
+    expect(root.querySelector('div')).not.toBeNull()
   })
 
   it('should create a Plugin with only interceptors', () => {
     const plugin = provideClient(withInterceptors((() => ({})) as unknown as () => Interceptor))
     expect(plugin).toHaveProperty('install')
   })
-  it('should provide client configured with only interceptors', async () => {
+  it('should provide client configured with only interceptors', () => {
     let injectedClient: Client | undefined
     const app = createApp({
       setup() {
         injectedClient = injectClient()
-        return { client: injectedClient }
+        return () => h('div')
       },
-      template: '<div></div>',
     })
 
     app.use(provideClient(withInterceptors((() => ({})) as unknown as () => Interceptor)))
 
-    app.mount(document.createElement('div'))
+    const root = mount(app)
     expect(injectedClient).toBeDefined()
+    expect(root.querySelector('div')).not.toBeNull()
   })
 
-  it('should provide client configured with no options', async () => {
+  it('should provide client configured with no options', () => {
     let injectedClient: Client | undefined
     const app = createApp({
       setup() {
         injectedClient = injectClient()
-        return { client: injectedClient }
+        return () => h('div')
       },
-      template: '<div></div>',
     })
 
     app.use(provideClient())
 
-    app.mount(document.createElement('div'))
+    const root = mount(app)
     expect(injectedClient).toBeDefined()
+    expect(root.querySelector('div')).not.toBeNull()
   })
 })

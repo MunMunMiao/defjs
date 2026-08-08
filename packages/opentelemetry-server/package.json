@@ -10,36 +10,30 @@
     "url": "git+https://github.com/defjs/defjs.git"
   },
   "type": "module",
-  "module": "src/index.ts",
-  "typings": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
+  "main": "src/index.ts",
+  "types": "src/index.ts",
   "publishConfig": {
-    "directory": "dist"
+    "directory": "dist",
+    "linkDirectory": false
   },
   "scripts": {
-    "build": "tsdown",
-    "pub": "pnpm publish",
-    "test": "vitest run --coverage && pnpm run test:type",
-    "test:type": "vitest run --config vitest.config.node.ts --typecheck.only --typecheck.include \"src/**/*.type.test.ts\"",
-    "typecheck": "tsgo --project tsconfig.json --noEmit"
+    "build": "tsdown --config-loader native --config tsdown.config.ts",
+    "test": "vitest run --coverage"
   },
   "devDependencies": {
     "@hono/node-server": "catalog:",
     "@hono/node-ws": "catalog:",
-    "@typescript/native-preview": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
     "hono": "catalog:",
     "tsdown": "catalog:",
-    "tsx": "catalog:",
     "typescript": "catalog:",
+    "vite": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
     "@defjs/core": "workspace:^",
     "@opentelemetry/api": "^1.0.0",
-    "@opentelemetry/core": "^1.0.0"
+    "@opentelemetry/core": "^2.0.0"
   },
   "engines": {
     "node": ">=26"

@@ -1,336 +1,302 @@
 ---
 title: WebSocket
-description: Typed WebSocket endpoints with struct-driven messages, automatic reconnect, heartbeat, and send queueing.
+description: 메시지 envelope를 정의하고 라이브 세션을 시작·관찰하며 incoming 작업을 소비하고 명시적 재연결과 heartbeat를 설정하고 소유한 리소스를 닫습니다.
 ---
 
 # WebSocket
 
-`@defjs/core`는 `defineWebSocket`으로 타입이 부여된 WebSocket 엔드포인트를 제공해요. 각 엔드포인트는 다음을 선언해요:
-
-- `incoming` 스키마 — 서버가 클라이언트에게 보내는 메시지.
-- `outgoing` 스키마 — 클라이언트가 서버에게 보내는 메시지.
-- `input` 스키마 + `build` 핸들러 — 요청 파라미터와 쿼리/경로 구성(선택적).
-
-메시지는 JSON 인코딩되고 선언된 스키마에 대해 런타임에 검증돼요.
-
-## WebSocket 엔드포인트 정의
-
-`defineWebSocket`으로 타입이 부여된 커맨드 빌더를 만들어요. 그런 다음 `client.execute()`로 실행해요.
+`defineWebSocket(...)`은 JSON 메시지 WebSocket 엔드포인트용 커맨드 빌더를 만듭니다.
 
 ```typescript
-import { createClient, defineWebSocket, struct } from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('wss://api.example.com'))
 
-const useChatSocket = defineWebSocket({
-  // 선택적: 입력으로 연결 URL을 빌드
-  input: struct.request({
-    query: struct.object({ roomId: struct.string() }),
-  }),
-  build: (request, input) => {
-    request.setQueryParams({ roomId: input.query.roomId })
-  },
-
-  // 서버 → 클라이언트 메시지
+const chat = defineWebSocket({
+  path: '/chat',
   incoming: {
-    joined: struct.object({ roomId: struct.string(), userId: struct.number() }),
-    message: struct.object({ text: struct.string(), userId: struct.number() }),
+    message: struct.object({ userId: struct.number(), text: struct.string() }),
+    pong: struct.object({}),
   },
-
-  // 클라이언트 → 서버 메시지
   outgoing: {
-    message: struct.object({ text: struct.string() }),
+    send: struct.object({ text: struct.string() }),
+    ping: struct.object({}),
   },
-
-  path: '/ws/chat',
-  protocols: ['json'],
 })
 ```
 
-### 스키마 형태
+## 메시지 envelope
 
-**Incoming 메시지**는 `type` 키로 구분돼요. 메시지가 도착하면 JSON의 `type` 필드가 스키마 키와 일치하는지 확인해요. 페이로드가 평범한 객체이면 필드가 `type`과 병합돼요:
+모든 메시지는 비어 있지 않은 string `type`을 가진 JSON 객체를 사용합니다. 이 type으로 `incoming` 또는 `outgoing`의 Struct를 선택합니다.
 
-```typescript
-// 서버가 보냄: { "type": "message", "text": "hi", "userId": 1 }
-// 클라이언트가 받음: { type: 'message', text: 'hi', userId: 1 }
+object payload의 필드는 `type` 옆에 둘 수 있습니다.
+
+```json
+{ "type": "message", "userId": 7, "text": "Hello" }
 ```
 
-페이로드가 스칼라나 배열이면 `data` 아래에 감싸져요:
+scalar 또는 배열 payload는 `data`에 넣습니다.
 
-```typescript
-// 서버가 보냄: { "type": "notification", "data": [1, 2, 3] }
-// 클라이언트가 받음: { type: 'notification', data: [1, 2, 3] }
+```json
+{ "type": "count", "data": 3 }
 ```
 
-**Outgoing 메시지**도 같은 규칙을 따릅니다. `send()` 메서드는 `outgoing` 키 중 하나와 일치하는 `type`을 가진 메시지를 받아요:
+`type`과 `data`는 예약된 envelope key입니다. object payload 자체에 `data` 필드가 있다면 런타임이 그 필드를 envelope payload로 오인하지 않도록 payload 전체를 감싸세요.
 
 ```typescript
-socket.send({ type: 'message', text: 'hello' })
-```
+const audit = defineWebSocket({
+  path: '/audit',
+  incoming: {
+    entry: struct.object({ data: struct.string(), source: struct.string() }),
+  },
+  outgoing: {
+    write: struct.object({ data: struct.string(), source: struct.string() }),
+  },
+})
 
-`incoming`에 `default` 키를 사용하여 선언되지 않은 메시지 타입을 공통 스키마로 잡을 수 있어요.
-
-## 실행과 메시지 소비
-
-`client.execute()`는 `[error, socket, connection]` 튜플을 반환해요:
-
-```typescript
-const [error, socket, connection] = await client.execute(useChatSocket({ query: { roomId: 'room-1' } }))
-
-if (error || !socket) {
-  // 시작 실패 처리(검증, 트랜스포트, 중단 등)
-  return
+const [auditError, auditSession] = await client.execute(audit())
+if (!auditError) {
+  auditSession.send({
+    type: 'write',
+    data: { data: 'reviewed-value', source: 'settings' },
+  })
 }
+```
 
-// 수신 메시지 순회
-for await (const message of socket.receive) {
-  switch (message.type) {
-    case 'joined':
-      console.log('User joined:', message.userId)
-      break
-    case 'message':
-      console.log('New message:', message.text)
-      break
+이에 대응하는 wire 형태는 `{ "type": "write", "data": { "data": "reviewed-value", "source": "settings" } }`입니다.
+
+`type`을 일반 payload 필드로 선언하지 마세요. envelope 정규화가 이 key를 소유합니다.
+
+선택적인 `incoming.default` Struct는 그 외에 선언되지 않은 메시지 type을 처리합니다. 없으면 알 수 없는 type을 버립니다.
+
+## 시작 튜플
+
+```typescript
+const [error, session, startupConnection] = await client.execute(chat())
+```
+
+WebSocket은 다음 값을 반환합니다.
+
+```typescript
+type SocketAwaitResult<TIncoming, TOutgoing> =
+  | [error: null, session: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
+  | [error: RequestError<unknown>, session: undefined, connection: WebSocketConnectionInfo | undefined]
+```
+
+성공할 때 세 번째 요소는 시작 시점 connection 스냅샷입니다. 첫 번째 물리 socket이 열릴 때 캡처한 `url`, `protocol`, `extensions`를 포함할 수 있습니다.
+
+`session.connection`은 라이브 getter입니다. 재연결은 기반 물리 socket을 교체하며 이 값을 갱신할 수 있습니다. 시작 스냅샷이 중요하면 튜플의 세 번째 요소를 보관하세요.
+
+connection URL은 로그에 남기지 마세요. path identifier, 애플리케이션 query 데이터, telemetry propagation 필드가 포함될 수 있습니다.
+
+## 라이브 세션
+
+`WebSocketSession` 하나는 여러 물리 연결 시도에 걸쳐 유지되는 논리 세션입니다.
+
+| Member                     | 동작                                                           |
+| -------------------------- | -------------------------------------------------------------- |
+| `connection`               | 현재의 최신 connection 정보입니다.                             |
+| `state`                    | 현재의 논리 세션 state입니다.                                  |
+| `receive`                  | 검증된 incoming 메시지의 공유 비동기 작업 큐입니다.            |
+| `send(message)`            | outgoing 메시지를 검증·직렬화한 뒤 전송하거나 큐에 넣습니다.   |
+| `close(code?, reason?)`    | 최종 종료를 요청합니다.                                        |
+| `closed`                   | 관찰된 최종 종료 정보에 대한 promise입니다.                    |
+| `onStateChange(listener)`  | state observer를 추가하고 unsubscribe 함수를 반환합니다.       |
+| `onRuntimeError(listener)` | 런타임 오류 observer를 추가하고 unsubscribe 함수를 반환합니다. |
+
+클라이언트는 세션을 반환한 뒤 이를 추적하지 않습니다. 호출자가 메시지 소비, observer, 취소, 종료를 소유합니다.
+
+## 메시지 수신
+
+text, ArrayBuffer, typed-array, Blob 메시지는 UTF-8 JSON으로 디코딩합니다. 다음 입력은 조용히 버립니다.
+
+- 유효하지 않은 JSON
+- 객체가 아닌 envelope
+- 누락됐거나 빈 string인 `type`
+- `incoming.default` Struct가 없고 알 수 없는 type
+
+Struct를 선택한 뒤 디코딩에 실패하면 `onRuntimeError`로 보내고 해당 메시지는 버립니다.
+
+```typescript
+const unsubscribeError = session.onRuntimeError(() => {
+  recordSocketFailure({ operation: 'chat-receive' })
+})
+
+try {
+  for await (const message of session.receive) {
+    if (message.type === 'message') {
+      renderMessage(message.userId, message.text)
+    }
   }
-}
-
-// 또는 비동기 이터레이터를 직접 사용
-const iterator = socket.receive[Symbol.asyncIterator]()
-const next = await iterator.next()
-if (!next.done) {
-  console.log(next.value)
+} finally {
+  unsubscribeError()
+  session.close(1000, 'consumer-finished')
+  await session.closed
 }
 ```
 
-## `WebSocketSession` API
+incoming iterable은 무제한인 공유 작업 큐 하나입니다. iterator가 여러 개면 서로 메시지를 차지하며 독립적인 subscription이 아닙니다. 큐가 늘어나도 트랜스포트는 서버의 전송 속도를 늦추지 않습니다. incoming 메시지를 항상 소비하거나 세션을 즉시 닫으세요.
 
-| 멤버                       | 타입                                       | 설명                                                             |
-| -------------------------- | ------------------------------------------ | ---------------------------------------------------------------- |
-| `connection`               | `WebSocketConnectionInfo`                  | 기본 소켓의 `{ url?, protocol?, extensions? }`.                  |
-| `state`                    | `WebSocketState`                           | 현재 생명주기 상태(아래 참조).                                   |
-| `receive`                  | `AsyncIterable<TIncoming>`                 | 검증된 수신 메시지의 비동기 이터레이터.                          |
-| `closed`                   | `Promise<WebSocketCloseInfo>`              | 소켓이 닫히면 `{ code?, reason?, wasClean?, cause? }`로 resolve. |
-| `send(message)`            | `(message: TOutgoing) => void`             | 송신 메시지 전송. 아직 열리지 않았으면 큐에 들어감.              |
-| `close(code?, reason?)`    | `(code?: number, reason?: string) => void` | 우아하게 연결을 닫음.                                            |
-| `onStateChange(listener)`  | `(state: WebSocketState) => void`          | 구독 해제 함수 반환.                                             |
-| `onRuntimeError(listener)` | `(error: unknown) => void`                 | 구독 해제 함수 반환.                                             |
+## 메시지 전송
 
-```typescript
-// 상태 모니터링
-const unsubscribe = socket.onStateChange((state) => {
-  console.log('Socket state:', state)
-})
+`send(...)`는 동기 함수입니다. 다음 경우 동기적으로 throw할 수 있습니다.
 
-// 런타임 오류(스키마 실패, 하트비트 타임아웃 등)
-socket.onRuntimeError((error) => {
-  console.error('Runtime error:', error)
-})
-
-// 우아한 닫기
-socket.close(1000, 'done')
-await socket.closed
-```
-
-## 연결 생명주기 상태 머신
-
-```
-idle → connecting → open → closing → closed
-            ↓           ↓
-         reconnecting   error
-            ↓           ↓
-         (retry)      aborted
-```
-
-| 상태           | 의미                                                            |
-| -------------- | --------------------------------------------------------------- |
-| `idle`         | `execute()` 호출 전.                                            |
-| `connecting`   | 첫 연결 시도 중.                                                |
-| `open`         | 연결 성립, 메시지 흐름 가능.                                    |
-| `closing`      | `close()` 또는 `abort`가 트리거되고 close 이벤트를 기다리는 중. |
-| `closed`       | 깨끗한 종료(오류 없음 또는 수동 종료).                          |
-| `reconnecting` | 연결 끊김, 재시도 전 대기 중.                                   |
-| `error`        | 종료 실패(검증 오류, 트랜스포트 오류, 중단이 아닌 종료 원인).   |
-| `aborted`      | `AbortSignal` 또는 `close()`로 명시적 중단.                     |
-
-상태 전환은 `onStateChange`를 통해 발생해요. `receive` 비동기 이터레이터는 소켓이 종료 상태(`closed`, `error`, `aborted`)에 도달하면 종료돼요.
-
-## 하트비트
-
-주기적인 ping/ack를 설정하여 연결을 유지하거나 죽은 피어를 감지하세요.
+- 엔드포인트에 `outgoing` map이 없는 경우
+- 메시지에 유효한 `type`이 없는 경우
+- type이 선언되지 않은 경우
+- payload 구조 디코딩 또는 인코딩에 실패한 경우
+- 제한된 send queue가 `overflow: 'error'`를 사용하는 경우
+- 즉시 전송 중 native socket이 throw하는 경우
 
 ```typescript
-const [error, socket] = await client.execute(useSocket(), {
-  heartbeat: {
-    intervalMs: 30_000, // 30초마다 전송
-    message: () => ({ type: 'ping' }),
-    timeoutMs: 10_000, // 10초 내에 ack 기대
-    isAck: (message) => message.type === 'pong',
-  },
+try {
+  session.send({ type: 'send', text: 'Hello' })
+} catch (error) {
+  handleSendFailure(error)
+}
+```
+
+open 전이나 재연결 시도 사이에 전송한 메시지는 outgoing send queue에 들어갑니다. 물리 socket이 열리면 큐를 비웁니다.
+
+최종 상태 이후에는 `send`를 호출하지 마세요. 현재 구현은 종료 후 거부 동작을 안정적인 계약으로 제공하지 않으며, 최종 종료 후 큐에 들어간 데이터는 영원히 전송되지 않을 수 있습니다.
+
+## State
+
+`session.state`는 다음 값 중 하나입니다.
+
+| State          | 의미                                                                                                                          |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `idle`         | 실행이 시작되기 전의 초기 내부 상태입니다.                                                                                    |
+| `connecting`   | 첫 물리 연결 시도가 시작됩니다.                                                                                               |
+| `open`         | 물리 socket이 열린 뒤 마지막으로 emit된 논리 상태입니다. 재연결 대기 중에는 물리 socket이 없어도 `open`으로 남을 수 있습니다. |
+| `reconnecting` | delay 후 다음 물리 연결 시도가 시작됩니다.                                                                                    |
+| `closing`      | 취소에 따라 활성 connecting/open socket을 닫고 있습니다.                                                                      |
+| `closed`       | 정규화된 오류가 없는 최종 종료입니다.                                                                                         |
+| `aborted`      | 외부 취소가 `ABORTED`로 정규화된 최종 상태입니다.                                                                             |
+| `error`        | 그 외 최종 실패입니다.                                                                                                        |
+
+`reconnecting`은 delay 중에는 emit되지 않습니다. delay가 끝나 다음 시도가 시작될 때 emit됩니다. `session.state`는 마지막으로 emit된 생명주기 상태일 뿐, 현재 native socket이 존재한다는 증거가 아닙니다. 이 공백 동안 보낸 메시지는 outgoing queue에 들어갑니다.
+
+state listener는 직접 실행됩니다. throw하지 않게 작성하고 소유 범위가 끝나면 구독 해제하세요.
+
+### 각 시도 전 실행
+
+`beforeConnect`는 클라이언트 또는 실행 하나에 설정할 수 있습니다. 첫 시도와 모든 재연결 시도에서 native constructor를 호출하기 전에 실행됩니다.
+
+```typescript
+declare const refreshConnectionState: () => Promise<void>
+
+const [error, session] = await client.execute(chat(), {
+  beforeConnect: refreshConnectionState,
 })
 ```
 
-| 옵션         | 설명                                                                  |
-| ------------ | --------------------------------------------------------------------- |
-| `intervalMs` | 하트비트 전송 간격(필수).                                             |
-| `message`    | 하트비트 메시지를 반환하는 팩토리. `TOutgoing`에 대해 타입화됨.       |
-| `timeoutMs`  | 설정하면 ACK가 시간 내에 도착하지 않으면 코드 `4000`으로 소켓이 닫힘. |
-| `isAck`      | 수신 메시지가 하트비트 ack인지 판정하는 술어.                         |
+커맨드 입력과 요청 프로젝션은 이미 구성된 상태입니다. 이 hook은 `build`를 다시 실행하거나 바인딩된 query 값을 바꾸지 않습니다. 환경의 handshake mechanism이 사용하는 상태를 갱신하는 등 애플리케이션이 소유하는 준비 작업에 사용하세요. throw 또는 rejection은 최종 트랜스포트 실패이며 close 결과를 판단하는 reconnect predicate로 전달되지 않습니다.
 
-하트비트는 클라이언트 레벨(`createClient({ webSocket: { heartbeat: ... } })`)이나 요청 레벨(`execute()` 옵션)으로 설정할 수 있어요. 요청 레벨 설정이 우선해요.
+## 재연결은 명시적으로 켜야 합니다
 
-## 재연결
-
-연결이 예기치 않게 끊어지면 자동 재연결이 트리거돼요.
+reconnect 객체가 없으면 재연결하지 않습니다. 클라이언트별 또는 실행별로 설정하세요.
 
 ```typescript
-const [error, socket] = await client.execute(useSocket(), {
+const [error, session] = await client.execute(chat(), {
   reconnect: {
     attempts: 5,
     delayMs: 1_000,
     factor: 2,
     maxDelayMs: 30_000,
     jitter: 0.2,
-    shouldReconnect: ({ attempt, code, reason, wasClean }) => {
-      return !wasClean && attempt < 3
+    shouldReconnect({ attempt, code, wasClean }) {
+      return !wasClean && code !== 1008 && attempt <= 5
     },
   },
 })
 ```
 
-| 옵션              | 기본값       | 설명                                             |
-| ----------------- | ------------ | ------------------------------------------------ |
-| `attempts`        | `3`          | 최대 재시도 횟수. `<= 0`이면 재연결 비활성화.    |
-| `delayMs`         | `1000`       | 첫 재시도 전 기본 지연.                          |
-| `factor`          | `2`          | 지수 백오프 배율.                                |
-| `maxDelayMs`      | `30000`      | 계산된 지연의 상한.                              |
-| `jitter`          | `0`          | 랜덤화 계수(`0`–`1`).                            |
-| `shouldReconnect` | `() => true` | 주어진 종료가 재시도를 트리거할지 결정하는 술어. |
+`attempts`는 첫 시도 이후의 재시도 횟수입니다. 빈 객체를 전달하면 다음 기본값으로 세 번 재시도합니다.
 
-지연 공식: `min(delayMs * factor^(attempt - 1), maxDelayMs)`, 그런 다음 지터 적용.
+| 필드              | 기본값                           |
+| ----------------- | -------------------------------- |
+| `attempts`        | `3`                              |
+| `delayMs`         | `1000`                           |
+| `factor`          | `2`                              |
+| `maxDelayMs`      | `30000`                          |
+| `jitter`          | `0`                              |
+| `shouldReconnect` | 모든 close outcome에 `true` 반환 |
 
-재연결은 클라이언트 레벨(`createClient({ webSocket: { reconnect: ... } })`)로도 설정 가능해요.
+기본 predicate는 clean과 unclean remote close를 모두 재시도합니다. clean close가 최종 종료여야 한다면 predicate를 설정하세요. 첫 재시도에서 `attempt`는 1입니다.
 
-## 전송 큐
+base delay는 `min(delayMs * factor ** (attempt - 1), maxDelayMs)`입니다. WebSocket jitter는 곱셈 방식입니다. 예를 들어 `0.2`는 `0.8`부터 `1.2` 사이의 임의 factor를 선택합니다. millisecond를 더하는 SSE jitter와 다릅니다.
 
-소켓이 `open`되기 전(또는 일시적 연결 끊김 동안)에 전송된 메시지는 큐에 들어가 연결이 준비되면 플러시돼요.
+`shouldReconnect`는 동기식이고 throw하지 않게 작성하세요. 재연결은 같은 논리 세션 안에서 새 물리 socket을 여는 동작입니다. incoming 및 outgoing 큐는 그 논리 세션에 속합니다.
+
+## Heartbeat
+
+heartbeat도 opt-in입니다.
 
 ```typescript
-const [error, socket] = await client.execute(useSocket(), {
+const [error, session] = await client.execute(chat(), {
+  heartbeat: {
+    intervalMs: 30_000,
+    timeoutMs: 10_000,
+    message: () => ({ type: 'ping' }),
+    isAck: (message) => message.type === 'pong',
+  },
+  reconnect: { attempts: 3 },
+})
+```
+
+`message`는 엔드포인트의 outgoing map에 유효한 값을 만들어야 합니다. `isAck`가 확인한 메시지는 heartbeat timeout을 해제하며 `receive`에 추가되지 않습니다.
+
+양수 `timeoutMs`가 지나면 런타임은 runtime-error listener에 `Error('WebSocket heartbeat timeout')`을 emit하고 native close code `4000`, reason `heartbeat timeout`을 요청합니다. 그래도 재연결하려면 결과 close를 허용하는 별도 reconnect 정책이 필요합니다.
+
+`timeoutMs < intervalMs`로 유지하세요. 현재 구현은 이 관계를 검증하지 않으며 timeout이 interval 이상이면 이후 heartbeat timer와 겹칠 수 있습니다.
+
+## 큐
+
+`queue` 옵션은 outgoing 메시지만 설정합니다.
+
+```typescript
+const [error, session] = await client.execute(chat(), {
   queue: {
     maxSize: 100,
-    overflow: 'drop-oldest', // 'drop-newest' | 'drop-oldest' | 'error'
+    overflow: 'drop-oldest',
   },
 })
 ```
 
-| 옵션       | 설명                                |
-| ---------- | ----------------------------------- |
-| `maxSize`  | 최대 큐 메시지 수. 기본값은 무제한. |
-| `overflow` | `maxSize` 초과 시 동작.             |
+outgoing 큐는 기본적으로 무제한입니다. 제한하면 기본 overflow mode는 `drop-oldest`이고 다른 선택지는 `drop-newest`, `error`입니다. 최종 종료는 이 send queue를 비웁니다.
 
-큐는 종료 종료(`error`, `aborted`, `closed`) 시 지워져요.
+incoming 큐에는 공개된 size 제한이나 overflow 옵션이 없습니다. backpressure를 제공하지 않는 무제한 공유 작업 큐입니다. 리소스 소유자는 계속 소비하거나 세션을 닫아야 합니다.
 
-## 수동 종료와 중단 동작
+## 종료 소유권
 
-### `socket.close(code?, reason?)`
+`session.close(code, reason)`은 현재 native socket의 `close` method를 호출하고 수동 종료 marker로 논리 세션을 abort합니다. 종료를 요청할 뿐 graceful handshake, 관찰 가능한 `closing` 상태 또는 최종 `closed` 값이 요청한 code와 reason을 정확히 반영한다는 보장은 없습니다.
 
-우아한 종료를 수행해요:
-
-1. 네이티브 `WebSocket.close(code, reason)`을 호출해요.
-2. `manual-web-socket-close` 이유로 내부 `AbortController`를 중단해요.
-3. 소켓은 `closing` → `closed`로 전환돼요.
-4. `socket.closed`는 제공된 `code`와 `reason`으로 resolve돼요.
-
-### `AbortSignal` (외부)
-
-`execute()` 옵션을 통해 외부 `AbortSignal`을 전달하세요:
+`session.closed`는 런타임이 관찰한 close 정보로 resolve됩니다.
 
 ```typescript
-const controller = new AbortController()
-const promise = client.execute(useSocket(), { signal: controller.signal })
-
-// 나중에:
-controller.abort() // 즉시 소켓을 닫고 'aborted'로 전환
-```
-
-소켓이 열리기 **전**에 중단하면 `execute()`는 트랜스포트 오류와 함께 `socket`이 `undefined`인 상태로 resolve돼요. 열린 **후**에 중단하면 소켓은 `aborted`로 전환하고 `receive`가 종료돼요.
-
-### `timeout`
-
-요청 레벨 타임아웃은 지원되지만 같은 요청에 `abort`와 함께 사용할 수는 없어요(정의 오류 반환):
-
-```typescript
-// OK
-client.execute(useSocket(), { timeout: 10_000 })
-
-// 오류 — abort와 timeout을 혼합할 수 없음
-client.execute(useSocket(), { abort: signal, timeout: 10_000 })
-```
-
-## 전체 예제
-
-```typescript
-import { createClient, defineWebSocket, struct } from '@defjs/core'
-
-const client = createClient({ endpoint: 'https://api.example.com' })
-
-const useSocket = defineWebSocket({
-  input: struct.request({
-    query: struct.object({ token: struct.string() }),
-  }),
-  build: (request, input) => {
-    request.setQueryParams({ token: input.query.token })
-  },
-  incoming: {
-    status: struct.object({ online: struct.boolean() }),
-    alert: struct.object({ level: struct.string(), message: struct.string() }),
-  },
-  outgoing: {
-    subscribe: struct.object({ channel: struct.string() }),
-    ping: struct.object({}),
-  },
-  path: '/ws/live',
-})
-
-async function run(token: string) {
-  const [error, socket] = await client.execute(useSocket({ query: { token } }), {
-    heartbeat: {
-      intervalMs: 30_000,
-      message: () => ({ type: 'ping' }),
-    },
-    reconnect: {
-      attempts: 5,
-      delayMs: 1_000,
-      factor: 2,
-    },
-  })
-
-  if (error || !socket) {
-    console.error('Failed to connect:', error)
-    return
-  }
-
-  socket.onStateChange((state) => console.log('State:', state))
-  socket.onRuntimeError((err) => console.error('Error:', err))
-
-  socket.send({ type: 'subscribe', channel: 'news' })
-
-  for await (const msg of socket.receive) {
-    if (msg.type === 'status') {
-      console.log('Online:', msg.online)
-    } else if (msg.type === 'alert') {
-      console.warn('Alert:', msg.level, msg.message)
-    }
-  }
-
-  await socket.closed
-  console.log('Socket closed')
+interface WebSocketCloseInfo {
+  cause?: unknown
+  code?: number
+  reason?: string
+  wasClean?: boolean
 }
 ```
 
+native 구현이 close event를 emit하지 않으면 settle이 지연될 수 있습니다. 외부 취소는 정규화된 reason에 따라 `aborted` 또는 `error`로 끝날 수 있고, 세션이 시도 사이에 있으면 `closing`을 건너뛸 수 있습니다.
+
+listener 구독을 해제하고 해당 세션을 연 component, route, job 또는 service 경계에서 닫으세요. provider unmount만으로 이 작업이 수행되지는 않습니다.
+
+## URL과 인증 안전성
+
+HTTP base URL은 WebSocket scheme으로 변환됩니다. `http:`는 `ws:`, `https:`는 `wss:`가 됩니다. path placeholder는 segment encoding되지 않습니다. query 값은 설정된 serializer를 사용합니다.
+
+protocol 우선순위는 실행 옵션, 클라이언트 옵션, 엔드포인트 정의 순서입니다. 명시적인 빈 protocol 배열은 우선순위가 낮은 값을 막습니다.
+
+브라우저 WebSocket API는 임의 handshake header를 설정할 수 없습니다. query parameter를 일반적인 credential channel로 취급하지 마세요. URL은 브라우저 도구, proxy, access log, telemetry 시스템에 기록될 수 있습니다. TLS(`wss:`)와 배포 환경에서 검토한 인증 설계를 사용하세요. 적절한 same-site cookie 흐름이나 수명이 짧은 connection ticket이 그 예입니다.
+
 ## 다음 단계
 
-- [SSE →](/core/sse) — 타입 스키마와 재연결이 있는 Server-Sent Events.
-- [클라이언트 →](/core/client) — 클라이언트 생성과 WebSocket 설정.
-- [커맨드 →](/core/commands) — `defineWebSocket` 입력과 빌드 규칙.
+- [SSE](/ko-KR/core/sse)에서는 stream retry와 queue 동작을 비교합니다.
+- [인터셉터](/ko-KR/core/interceptors)에서는 라이브 session getter를 보존하는 방법을 보여 줍니다.
+- [오류](/ko-KR/core/errors)에서는 시작 튜플 실패를 설명합니다.

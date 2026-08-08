@@ -1,197 +1,101 @@
 ---
-title: Getting Started
-description: Install @defjs/core, use it via CDN, and create your first typed request in three steps.
+title: はじめに
+description: Defjs をインストールし、型付き HTTP エンドポイントを定義して、アプリケーションから呼び出します。
 ---
 
 # はじめに
 
-Defjs は、型付きリクエスト API を定義し、複数のトランスポートと JavaScript ランタイムで実行できる TypeScript ライブラリです。
+Defjs を使うと、アプリケーションが呼び出す API 契約を一度定義し、型付き入力、実行時デコード、明示的なトランスポート結果とともに再利用できます。
 
 ## インストール
 
-お好みのパッケージマネージャーをご利用ください：
+アプリケーションに Core パッケージを追加します。
 
-::: code-group
-
-```sh [npm]
-npm install @defjs/core
-```
-
-```sh [yarn]
-yarn add @defjs/core
-```
-
-```sh [pnpm]
+```sh
 pnpm add @defjs/core
 ```
 
-```sh [bun]
-bun add @defjs/core
-```
+別のパッケージマネージャーを使うプロジェクトでは、npm、Yarn、Bun の同等コマンドを使ってください。`@defjs/core` は ESM です。Node.js で実行する場合、現在のパッケージメタデータは Node 26 以降を要求します。
 
+アプリケーションで必要なアダプターだけを追加します。
+
+| 構成                     | パッケージ                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| React 18+                | `@defjs/core`、`@defjs/react`、`react`                                                    |
+| Vue 3+                   | `@defjs/core`、`@defjs/vue`、`vue`                                                        |
+| サーバー側 OpenTelemetry | `@defjs/core`、`@defjs/opentelemetry-server`、`@opentelemetry/api`、`@opentelemetry/core` |
+
+::: tip インストールしたバージョンに合うドキュメントを使う
+このページは、このドキュメント版の API を説明しています。アプリケーションに入っているバージョンを確認してください。export や option が異なる場合は、別バージョンの例を混ぜず、そのバージョンのドキュメントとリリースノートを使います。
 :::
 
-## CDN 利用
+## 最初のリクエストを定義する
 
-ビルドツールなしで ES モジュールとして直接インポートできます：
-
-```typescript
-import { createClient, defineRequest, struct } from 'https://unpkg.com/@defjs/core/index.min.js'
-```
-
-## 最初のリクエストまでの 3 ステップ
-
-### ステップ 1: クライアントを作成する
-
-クライアントはすべてのリクエスト実行の入り口です。`createClient` を使ってインスタンスを作成し、ベースエンドポイントを設定します：
+API が `GET /users/:id` を提供しているとします。ベース URL とレスポンス Struct は、自分のサービスの実際の契約に置き換えてください。
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-```
-
-### ステップ 2: リクエストを定義する
-
-`defineRequest` を使って型付き HTTP エンドポイントを定義します。入力やレスポンスの形状を `struct` で記述します：
-
-```typescript
-import { defineRequest, struct } from '@defjs/core'
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user/:id',
-  input: struct.object({
-    id: struct.number(),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-    404: struct.object({
-      message: struct.string(),
-    }),
-  },
-})
-```
-
-::: tip
-`output` のキーは HTTP ステータスコードです。Defjs は実行時に一致するスキーマを自動的に選択し、TypeScript 型を適切に導出します。2xx レスポンスは成功データとして型付けされ、2xx 以外はエラーデータとして型付けされます。
-:::
-
-### ステップ 3: 実行する
-
-リクエストコマンドとオプションの設定を `client.execute` に渡して呼び出します：
-
-```typescript
-const [error, user, response] = await client.execute(getUser({ id: 1 }))
-
-if (error) {
-  // error は output に定義された非 2xx スキーマに基づいて型付けされます
-  console.error(error.code, error.message)
-  return
-}
-
-// user は { id: number; name: string } として型付けされます
-console.log(user.name)
-```
-
-## 完全な例
-
-入力検証、出力検証、エラー処理、インターセプターを含むエンドツーエンドの例を示します：
-
-```typescript
-import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
-
-// 1. クライアントを作成
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors([
-    async (request, next) => {
-      request.headers.set('Authorization', 'Bearer token')
-      return next(request)
-    },
-  ]),
-)
-
-// 2. リクエストを定義
-const createPost = defineRequest({
-  method: 'POST',
-  path: '/v1/posts',
-  input: struct.object({
-    title: struct.string(),
-    body: struct.string(),
-    'X-Request-ID': struct.string(),
-  }),
-  build: (input) => ({
-    body: { title: input.title, body: input.body },
-    headers: { 'X-Request-ID': input['X-Request-ID'] },
-  }),
-  output: {
-    201: struct.object({
-      id: struct.number(),
-      title: struct.string(),
-    }),
-    400: struct.object({
-      field: struct.string(),
-      reason: struct.string(),
-    }),
-  },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-// 3. 実行
-async function createPost() {
-  const [error, post, response] = await client.execute(
-    createPost({
-      title: 'Hello',
-      body: 'World',
-      'X-Request-ID': 'uuid-123',
-    }),
-  )
+async function loadUser(id: number) {
+  const [error, user, response] = await client.execute(getUser({ path: { id } }))
 
   if (error) {
-    switch (error.code) {
-      case 'HTTP_STATUS':
-        console.error('Validation failed:', error.data)
-        break
-      case 'REQUEST_VALIDATION_FAILED':
-        console.error('Request validation failed:', error.message)
-        break
-      case 'RESPONSE_VALIDATION_FAILED':
-        console.error('Response validation failed:', error.message)
-        break
-      case 'TRANSPORT_ERROR':
-        console.error('Network error:', error.message)
-        break
-      default:
-        console.error('Unknown error:', error)
-    }
+    console.error(error.kind, error.code)
     return
   }
 
-  console.log('Created post:', post.id, post.title)
+  console.log(user.name, response.status)
+}
+
+void loadUser(7)
+```
+
+`defineRequest(...)` は**コマンドビルダー**を返します。`getUser(...)` を呼び出すと、エンドポイント定義と呼び出し入力を保持する**コマンド**が作られます。続いて `client.execute(...)` が、HTTP 用の 3 要素タプルを返します。
+
+```typescript
+;[error, result, response]
+```
+
+成功時は `error` が `null`、`result` がデコード済みの出力データ、`response` が Defjs の `SettledResponse` ラッパーです。失敗時は `result` が `undefined` になります。レスポンスを受信する前に失敗した場合は、レスポンスラッパーも `undefined` です。
+
+### `as const` が必要な理由
+
+配列形式の `output` は、ステータスリテラルを使って 2xx の成功ボディと 2xx 以外のエラーボディを分けます。`as const` は各ステータス値と、複数ステータスをまとめた配列を `readonly` リテラルのまま保持します。省略すると TypeScript が `number` や `number[]` に型を広げ、成功・エラー分岐の推論が弱くなることがあります。
+
+オブジェクト形式の `output` も使えます。
+
+```typescript
+const output = {
+  '200': struct.object({ id: struct.number() }),
+  '404': struct.object({ message: struct.string() }),
 }
 ```
 
-## コア API クイックリファレンス
+## アプリケーションに組み込む
 
-| API                    | 説明                                 | 代表的な使い方                                                                                          |
-| ---------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `createClient`         | リクエストクライアントを作成         | `createClient(withEndpoint('https://api.example.com'))`                                                 |
-| `defineRequest`        | HTTP エンドポイントを定義            | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | SSE エンドポイントを定義             | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
-| `defineWebSocket`      | WebSocket エンドポイントを定義       | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
-| `struct`               | スキーマビルダー                     | `struct.object({ id: struct.number() })`                                                                |
-| `.alias(name)`         | フィールドの wire 名エイリアス       | `struct.string().alias('user_name')`                                                                    |
-| `withEndpoint`         | ベース URL を設定                    | `withEndpoint('https://api.example.com')`                                                               |
-| `withInterceptors`     | インターセプターを登録               | `withInterceptors([...interceptors])`                                                                   |
-| `withCredentials`      | クロスオリジンクレデンシャルを有効化 | `withCredentials(true)`                                                                                 |
-| `withSSEOptions`       | SSE オプションを設定                 | `withSSEOptions({ method: 'POST' })`                                                                    |
-| `withWebSocketOptions` | WebSocket オプションを設定           | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
+エンドポイント定義は、サービス API を表すモジュールに置きます。そのコマンドビルダーをコンポーネント、route handler、job、store から再利用してください。endpoint、認証情報、インターセプター、ライフサイクルを管理する境界でクライアントを作ります。
+
+- ブラウザーアプリケーションでは、通常 1 つのクライアントを共有できます。
+- サーバーレンダリングでは、ヘッダー、Cookie、ユーザー、テナントがリクエストごとに変わる場合、リクエストスコープのクライアントを作ります。
+- SSE や WebSocket を開くコードは、そのリソースの消費とクローズも担当します。
 
 ## 次に読む
 
-- [Client →](/core/client) — クライアントの作成、コマンドの実行、設定
-- [Commands →](/core/commands) — `defineRequest`、`defineEventStream`、`defineWebSocket`
-- [Errors →](/core/errors) — `RequestError` の構造と分岐パターン
+- [Commands](/ja-JP/core/commands) — リクエストの自動マッピングとカスタムのスキーマに束縛されたプロジェクション
+- [Errors](/ja-JP/core/errors) — 3 種類のトランスポートタプルと `RequestError` ユニオン
+- [HTTP](/ja-JP/core/http) — URL 解決、リクエストボディ、出力デコード、キャンセル、XSRF
+- [Examples](/ja-JP/guide/examples) — 各契約を組み合わせ、アプリケーション側で所有する実用例

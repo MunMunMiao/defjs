@@ -104,36 +104,36 @@ import { createHttpInterceptor } from '@defjs/core'
 import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
 import App from './App.vue'
 
-const authInterceptor = createHttpInterceptor(async (request, next) => {
-  const headers = request.headers ?? new Headers()
-  request.headers = headers
-  headers.set('authorization', 'Bearer token')
-  return next(request)
-})
+declare const getAccessToken: () => string | null
 
-const loggingInterceptor = createHttpInterceptor(async (request, next) => {
-  const target = request.baseEndpoint
-    ? new URL(`${request.endpoint}${request.queryString ? `?${request.queryString}` : ''}`, request.baseEndpoint).toString()
-    : `${request.endpoint}${request.queryString ? `?${request.queryString}` : ''}`
+function authInterceptor() {
+  return createHttpInterceptor((request, next) => {
+    const token = getAccessToken()
+    if (!token) {
+      return next(request)
+    }
 
-  console.log(request.method, target)
-  return next(request)
-})
+    const headers = new Headers(request.headers)
+    headers.set('Authorization', `Bearer ${token}`)
+    return next({ ...request, headers })
+  })
+}
+
+function loggingInterceptor() {
+  return createHttpInterceptor((request, next) => {
+    console.log(request.method, request.endpoint)
+    return next(request)
+  })
+}
 
 const app = createApp(App)
 
-app.use(
-  provideClient(
-    withEndpoint('https://api.example.com'),
-    withInterceptors(
-      () => authInterceptor,
-      () => loggingInterceptor,
-    ),
-  ),
-)
+app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor, loggingInterceptor)))
 
 app.mount('#app')
 ```
+
+The application owns token retrieval and storage. Keep default logs bounded: raw query strings, headers, bodies, and transport errors can contain credentials or sensitive data.
 
 ## Cookbook
 

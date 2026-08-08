@@ -1,0 +1,107 @@
+import type { ClientConfig, Interceptor } from '@defjs/core'
+import { cleanup, render } from '@testing-library/react'
+import { createElement } from 'react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { ClientProvider, useClient, withEndpoint, withInterceptors } from './core'
+
+afterEach(cleanup)
+
+function makeClientConfig(overrides: Partial<ClientConfig> = {}): ClientConfig {
+  return {
+    endpoint: '',
+    http: { handle: fetch },
+    interceptors: [],
+    queryParamsSerializer: (params) => params.toString(),
+    sse: { handle: fetch },
+    webSocket: {},
+    ...overrides,
+  }
+}
+
+describe('withEndpoint', () => {
+  it('should return a ClientOption function', () => {
+    const option = withEndpoint('https://api.example.com')
+    expect(typeof option).toBe('function')
+  })
+
+  it('should set endpoint in config', () => {
+    const config = {} as ClientConfig
+    const option = withEndpoint('https://api.example.com')
+    option(config)
+    expect(config.endpoint).toBe('https://api.example.com')
+  })
+})
+
+describe('withInterceptors', () => {
+  it('should return a ClientOption function', () => {
+    const option = withInterceptors((() => ({})) as unknown as () => Interceptor)
+    expect(typeof option).toBe('function')
+  })
+
+  it('should set interceptors in config', () => {
+    const config = makeClientConfig()
+    const interceptor = (() => ({})) as unknown as () => Interceptor
+    const option = withInterceptors(interceptor)
+    option(config)
+    expect(config.interceptors).toEqual([interceptor()])
+  })
+
+  it('should append interceptors across sequential calls in order', () => {
+    const config = makeClientConfig()
+    const interceptor1 = {} as Interceptor
+    const interceptor2 = {} as Interceptor
+
+    withInterceptors(() => interceptor1)(config)
+    withInterceptors(() => interceptor2)(config)
+
+    expect(config.interceptors).toEqual([interceptor1, interceptor2])
+  })
+
+  it('should initialize interceptors when config starts empty', () => {
+    const config = {} as ClientConfig
+    const interceptor = {} as Interceptor
+
+    withInterceptors(() => interceptor)(config)
+
+    expect(config.interceptors).toEqual([interceptor])
+  })
+})
+
+describe('ClientProvider', () => {
+  it('should provide client to child component', () => {
+    let injectedClient: unknown
+
+    function Child() {
+      injectedClient = useClient()
+      return null
+    }
+
+    render(createElement(ClientProvider, null, createElement(Child)))
+
+    expect(injectedClient).toBeDefined()
+  })
+
+  it('should configure endpoint via withEndpoint', () => {
+    let injectedClient: unknown
+
+    function Child() {
+      injectedClient = useClient()
+      return null
+    }
+
+    render(createElement(ClientProvider, { options: [withEndpoint('https://api.example.com')] }, createElement(Child)))
+
+    expect(injectedClient).toBeDefined()
+  })
+})
+
+describe('useClient', () => {
+  it('should throw when no provider is present', () => {
+    function Child() {
+      useClient()
+      return null
+    }
+
+    expect(() => render(createElement(Child))).toThrow('No HTTP client provided')
+  })
+})

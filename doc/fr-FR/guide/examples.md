@@ -1,449 +1,477 @@
 ---
-title: Examples
-description: Complete, runnable code snippets covering REST CRUD, SSE, WebSocket, interceptor patterns, and Vue integration.
+title: Exemples
+description: Recettes adaptables pour les applications REST, SSE, WebSocket, authentification, Vue et React.
 ---
 
 # Exemples
 
-Cette page fournit des exemples prêts à copier-coller pour les cas d'usage les plus courants.
+Utilisez ces recettes comme point de départ dans votre application. Remplacez les chemins d'endpoint, Structs, identifiants, mises à jour d'état et noms de télémétrie par le contrat et les règles réels de votre service.
 
-## REST CRUD
+Chaque recette forme un module complet ou un fragment de fichier. Les exemples réseau supposent que votre serveur implémente le contrat présenté. Votre application gère les endpoints, identifiants, états de l'interface, logs, annulations et ressources de transport.
 
-### Définir les schémas et les points de terminaison
+## Module CRUD REST
+
+Ce module déclare sa dépendance Core, enveloppe chaque `body` dans une Struct adaptée, gère les erreurs du tuple et accepte le signal d'annulation fourni par son propriétaire.
 
 ```typescript
-import { createClient, defineRequest, struct, withEndpoint, RequestError } from '@defjs/core'
+// users-api.ts
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-// Modèles de données
-const UserStruct = struct.object({
+const User = struct.object({
   id: struct.number(),
   name: struct.string(),
   email: struct.string(),
 })
 
-const UserListStruct = struct.object({
-  items: struct.array(UserStruct),
-  total: struct.number(),
+const ApiError = struct.object({
+  code: struct.string(),
+  message: struct.string(),
 })
 
-const CreateUserInput = struct.object({
-  name: struct.string(),
-  email: struct.string(),
-  role: struct.string().alias('role'),
-})
+const client = createClient(withEndpoint('https://api.example.com/v1'))
 
-// Définitions de requête
-const createUser = defineRequest({
+const createUserRequest = defineRequest({
   method: 'POST',
-  path: '/v1/users',
-  input: CreateUserInput,
-  build: (input) => ({
-    body: input,
+  path: '/users',
+  input: struct.request({
+    body: struct.json(
+      struct.object({
+        name: struct.string(),
+        email: struct.string(),
+      }),
+    ),
   }),
-  output: {
-    201: UserStruct,
-    400: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 201, body: User },
+    { status: [400, 409], body: ApiError },
+  ] as const,
 })
 
-const listUsers = defineRequest({
+export const listUsersRequest = defineRequest({
   method: 'GET',
-  path: '/v1/users',
-  output: {
-    200: UserListStruct,
-  },
+  path: '/users',
+  input: struct.request({
+    query: struct.object({
+      cursor: struct.string().optional(),
+    }),
+  }),
+  output: [
+    {
+      status: 200,
+      body: struct.object({
+        items: struct.array(User),
+        nextCursor: struct.string().optional().alias('next_cursor'),
+      }),
+    },
+  ] as const,
 })
 
-const getUser = defineRequest({
+export const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-  }),
-  output: {
-    200: UserStruct,
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: ApiError },
+  ] as const,
 })
 
-const updateUser = defineRequest({
+const updateUserRequest = defineRequest({
   method: 'PUT',
-  path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
-    name: struct.string(),
-    email: struct.string(),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+    body: struct.json(
+      struct.object({
+        name: struct.string(),
+        email: struct.string(),
+      }),
+    ),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-    body: { name: input.name, email: input.email },
-  }),
-  output: {
-    200: UserStruct,
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: ApiError },
+  ] as const,
 })
 
-const deleteUser = defineRequest({
+const deleteUserRequest = defineRequest({
   method: 'DELETE',
-  path: '/v1/users/:id',
-  input: struct.object({
-    id: struct.number().alias('id'),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  build: (input) => ({
-    params: { id: input.id },
-  }),
-  output: {
-    204: struct.unknown(),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: [
+    { status: 204, body: struct.unknown() },
+    { status: 404, body: ApiError },
+  ] as const,
 })
-```
 
-### Exécuter
+export async function createUser(input: { name: string; email: string }, signal: AbortSignal) {
+  const [error, user] = await client.execute(createUserRequest({ body: input }), { signal })
 
-```typescript
-const client = createClient(withEndpoint('https://api.example.com'))
-
-async function handleCreate() {
-  const [error, user] = await client.execute(createUser({ name: 'Alice', email: 'alice@example.com', role: 'admin' }))
   if (error) {
-    handleError(error)
-    return
+    throw error
   }
-  console.log('Created:', user)
+  return user
 }
 
-async function handleList() {
-  const [error, list] = await client.execute(listUsers())
+export async function listUsers(cursor: string | undefined, signal: AbortSignal) {
+  const [error, page] = await client.execute(listUsersRequest({ query: { cursor } }), { signal })
+
   if (error) {
-    handleError(error)
-    return
+    throw error
   }
-  console.log('Total:', list.total)
+  return page
 }
 
-async function handleGet(id: number) {
-  const [error, user] = await client.execute(getUser({ id }))
+export async function updateUser(id: number, input: { name: string; email: string }, signal: AbortSignal) {
+  const [error, user] = await client.execute(updateUserRequest({ path: { id }, body: input }), { signal })
+
   if (error) {
-    handleError(error)
-    return
+    throw error
   }
-  console.log('User:', user.name)
+  return user
 }
 
-async function handleUpdate(id: number) {
-  const [error, user] = await client.execute(updateUser({ id, name: 'Bob', email: 'bob@example.com' }))
+export async function deleteUser(id: number, signal: AbortSignal): Promise<void> {
+  const [error] = await client.execute(deleteUserRequest({ path: { id } }), { signal })
+
   if (error) {
-    handleError(error)
-    return
-  }
-  console.log('Updated:', user)
-}
-
-async function handleDelete(id: number) {
-  const [error] = await client.execute(deleteUser({ id }))
-  if (error) {
-    handleError(error)
-    return
-  }
-  console.log('Deleted')
-}
-```
-
-### Gestion des erreurs
-
-```typescript
-function handleError(error: RequestError<unknown>) {
-  switch (error.kind) {
-    case 'transport':
-      console.error('Network error:', error.code, error.message)
-      break
-    case 'definition':
-      console.error('Struct error:', error.code, error.message)
-      break
-    case 'http':
-      console.error('HTTP error:', error.status, error.message)
-      console.error('Error data:', error.data)
-      break
+    throw error
   }
 }
 ```
 
-## Notifications SSE en temps réel
+Ces fonctions exportées choisissent de lever les erreurs à leur frontière d'intégration. L'exécution Core, elle, continue de renvoyer des tuples.
+
+## Consommer des notifications SSE
+
+Cette fonction borne les nouvelles tentatives et la file, réduit l'union des événements décodés par les Structs en fonction du nom d'événement, puis ferme le flux qu'elle ouvre.
 
 ```typescript
-import { createClient, defineEventStream, struct, withEndpoint, withSSEReconnect } from '@defjs/core'
+// consume-notifications.ts
+import {
+  createClient,
+  defineEventStream,
+  struct,
+  type Infer,
+  withEndpoint,
+  withSSEOnInvalidEvent,
+  withSSEQueue,
+  withSSEReconnect,
+} from '@defjs/core'
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEReconnect({
-    attempts: 5,
-    delayMs: 1000,
-    factor: 2,
-    maxDelayMs: 30000,
-  }),
-)
+const notificationStruct = struct.object({
+  id: struct.number(),
+  text: struct.string(),
+})
+type Notification = Infer<typeof notificationStruct>
 
-const notificationStream = defineEventStream({
-  path: '/v1/notifications',
+interface NotificationHandlers {
+  onInvalid(event: { eventName: string; reason: string }): void
+  onMessage(notification: Notification): void
+}
+
+const notifications = defineEventStream({
+  path: '/notifications',
   events: {
-    message: struct.object({
-      id: struct.string(),
-      content: struct.string(),
-      timestamp: struct.number(),
-    }),
-    alert: struct.object({
-      level: struct.enum(['info', 'warning', 'critical'] as const),
-      title: struct.string(),
-    }),
-    default: struct.string(),
+    message: struct.json(notificationStruct),
   },
 })
 
-async function listenNotifications() {
-  const [error, stream, open] = await client.execute(notificationStream())
+export async function consumeNotifications(signal: AbortSignal, handlers: NotificationHandlers): Promise<void> {
+  const client = createClient(
+    withEndpoint('https://api.example.com'),
+    withSSEReconnect({ attempts: 5, delayMs: 1_000, maxDelayMs: 10_000 }),
+    withSSEQueue({ maxSize: 100, overflow: 'drop-oldest' }),
+    withSSEOnInvalidEvent(({ reason, message }) => {
+      handlers.onInvalid({ eventName: message.event, reason })
+    }),
+  )
 
+  const [error, stream] = await client.execute(notifications(), { signal })
   if (error) {
-    console.error('Failed to connect:', error.message)
-    return
+    throw error
   }
 
-  console.log('Connected:', open.url, open.response?.status)
-
-  for await (const event of stream) {
-    switch (event.event) {
-      case 'message':
-        console.log('Message:', event.data.content)
-        break
-      case 'alert':
-        console.log('Alert:', event.data.level, event.data.title)
-        break
-      default:
-        console.log('Unknown event:', event.data)
-        break
+  try {
+    for await (const event of stream) {
+      switch (event.event) {
+        case 'message':
+          handlers.onMessage(event.data)
+          break
+      }
     }
+  } finally {
+    stream.close('consumer-finished')
+    await stream.closed
   }
-
-  const closeInfo = await stream.closed
-  console.log('Stream closed:', closeInfo.code, closeInfo.reason)
 }
 ```
 
-## Chat room WebSocket
+Les handlers doivent rester rapides et ne pas lever d'exception. Cette recette ne journalise ni données brutes d'événement, ni ID, ni URL.
+
+## Consommer un salon WebSocket
+
+La reconnexion est explicite. La fonction consomme la file entrante non bornée pendant toute la session logique, borne la file sortante et ferme la session quel que soit le chemin de sortie.
 
 ```typescript
-import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketReconnect, withWebSocketHeartbeat } from '@defjs/core'
+// consume-room.ts
+import {
+  createClient,
+  defineWebSocket,
+  struct,
+  withEndpoint,
+  withWebSocketHeartbeat,
+  withWebSocketQueue,
+  withWebSocketReconnect,
+} from '@defjs/core'
 
-const client = createClient(
-  withEndpoint('wss://chat.example.com'),
-  withWebSocketReconnect({
-    attempts: 10,
-    delayMs: 2000,
-  }),
-  withWebSocketHeartbeat({
-    intervalMs: 30000,
-    message: () => ({ type: 'ping' }),
-    isAck: (msg) => msg.type === 'pong',
-  }),
-)
+interface RoomHandlers {
+  onMessage(message: { text: string; userId: number }): void
+  onRuntimeError(): void
+}
 
-const chatRoom = defineWebSocket({
-  path: '/room/:roomId',
-  input: struct.object({
-    roomId: struct.string().alias('roomId'),
-  }),
-  build: (input) => ({
-    params: { roomId: input.roomId },
+const room = defineWebSocket({
+  path: '/rooms/:roomId',
+  input: struct.request({
+    path: struct.object({ roomId: struct.string() }),
   }),
   incoming: {
-    message: struct.object({
-      userId: struct.string(),
-      text: struct.string(),
-      sentAt: struct.number(),
-    }),
-    userJoined: struct.object({
-      userId: struct.string(),
-      userName: struct.string(),
-    }),
-    userLeft: struct.object({
-      userId: struct.string(),
-    }),
+    message: struct.object({ text: struct.string(), userId: struct.number() }),
+    pong: struct.object({}),
   },
   outgoing: {
-    sendMessage: struct.object({
-      text: struct.string(),
-    }),
+    join: struct.object({}),
+    ping: struct.object({}),
   },
 })
 
-async function joinChat(roomId: string) {
-  const [error, session, connection] = await client.execute(chatRoom({ roomId }))
+export async function consumeRoom(roomId: string, signal: AbortSignal, handlers: RoomHandlers): Promise<void> {
+  const client = createClient(
+    withEndpoint('wss://chat.example.com'),
+    withWebSocketReconnect({
+      attempts: 5,
+      shouldReconnect: ({ wasClean }) => !wasClean,
+    }),
+    withWebSocketHeartbeat({
+      intervalMs: 30_000,
+      timeoutMs: 10_000,
+      message: () => ({ type: 'ping' }),
+      isAck: (message) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'pong',
+    }),
+    withWebSocketQueue({ maxSize: 20, overflow: 'drop-oldest' }),
+  )
+
+  const encodedRoomId = encodeURIComponent(roomId)
+  const [error, session] = await client.execute(room({ path: { roomId: encodedRoomId } }), { signal })
 
   if (error) {
-    console.error('Connection failed:', error.message)
-    return
+    throw error
   }
 
-  console.log('Joined room:', connection.url, connection.protocol)
-
-  session.onStateChange((state) => {
-    console.log('WebSocket state:', state)
+  const unsubscribeError = session.onRuntimeError(() => {
+    handlers.onRuntimeError()
   })
 
-  session.onRuntimeError((err) => {
-    console.error('Runtime error:', err)
-  })
+  try {
+    session.send({ type: 'join' })
 
-  session.send({ type: 'sendMessage', data: { text: 'Hello everyone!' } })
-
-  for await (const msg of session.receive) {
-    switch (msg.type) {
-      case 'message':
-        console.log(`${msg.data.userId}: ${msg.data.text}`)
-        break
-      case 'userJoined':
-        console.log(`${msg.data.userName} joined`)
-        break
-      case 'userLeft':
-        console.log(`${msg.data.userId} left`)
-        break
+    for await (const message of session.receive) {
+      if (message.type === 'message') {
+        handlers.onMessage({ text: message.text, userId: message.userId })
+      }
     }
+  } finally {
+    unsubscribeError()
+    session.close(1000, 'consumer-finished')
+    await session.closed
   }
-
-  const closeInfo = await session.closed
-  console.log('Closed:', closeInfo.code, closeInfo.reason)
 }
 ```
 
-## Composition d'intercepteurs
+Le `path` de l'endpoint n'encode pas ses paramètres. Cette recette encode donc un segment avant de créer la commande. Elle ne journalise ni l'URL produite ni les payloads.
 
-### Authentification
+## Authentification et métriques d'opération
+
+Cette fabrique compose l'authentification HTTP et SSE avec une mesure HTTP aux champs bornés. Le nom d'opération provient d'un token `HttpContext` explicite, jamais de l'URL.
 
 ```typescript
+// observed-client.ts
 import {
   createClient,
   createHttpInterceptor,
   createSSEInterceptor,
-  createWebSocketInterceptor,
-  withInterceptors,
+  makeHttpContext,
+  makeHttpContextToken,
   withEndpoint,
+  withInterceptors,
 } from '@defjs/core'
+import type { HttpRequest } from '@defjs/core'
 
-function authInterceptor(getToken: () => string | null) {
-  const apply = (req: HttpRequest) => {
-    const token = getToken()
-    if (!token) return req
-    const headers = new Headers(req.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return { ...req, headers }
-  }
+export type Operation = 'create-user' | 'delete-user' | 'list-users' | 'update-user'
 
-  return [
-    createHttpInterceptor((req, next) => next(apply(req))),
-    createSSEInterceptor((req, next) => next(apply(req))),
-    createWebSocketInterceptor((req, next) => next(apply(req))),
-  ]
+interface MetricRecorder {
+  record(value: { durationMs: number; operation: Operation | 'unknown'; status: number }): void
 }
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(...authInterceptor(() => localStorage.getItem('token'))),
-)
+const operationToken = makeHttpContextToken<Operation | 'unknown'>(() => 'unknown')
+
+function addBearerToken(request: HttpRequest, token: string) {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${token}`)
+  return { ...request, headers }
+}
+
+export function contextFor(operation: Operation) {
+  return makeHttpContext().set(operationToken, operation)
+}
+
+export function createObservedClient(getToken: () => string | null, metrics: MetricRecorder) {
+  const httpAuth = createHttpInterceptor((request, next) => {
+    const token = getToken()
+    return next(token ? addBearerToken(request, token) : request)
+  })
+
+  const sseAuth = createSSEInterceptor((request, next) => {
+    const token = getToken()
+    return next(token ? addBearerToken(request, token) : request)
+  })
+
+  const timing = createHttpInterceptor(async (request, next) => {
+    const startedAt = performance.now()
+    const response = await next(request)
+
+    metrics.record({
+      durationMs: Math.round(performance.now() - startedAt),
+      operation: request.context?.get(operationToken) ?? 'unknown',
+      status: response.status,
+    })
+
+    return response
+  })
+
+  return createClient(withEndpoint('https://api.example.com'), withInterceptors(timing, httpAuth, sseAuth))
+}
 ```
 
-### Journalisation
+Utilisez le contexte lors de l'exécution :
 
 ```typescript
-function loggingInterceptor() {
-  return createHttpInterceptor(async (req, next) => {
-    const start = performance.now()
-    console.log(`[HTTP] ${req.method} ${req.url}`)
+import { getAccessToken } from './auth'
+import { listUsersRequest } from './users-api'
+import { contextFor, createObservedClient } from './observed-client'
+import { outboundMetrics } from './telemetry'
 
-    try {
-      const response = await next(req)
-      const duration = (performance.now() - start).toFixed(2)
-      console.log(`[HTTP] ${req.method} ${req.url} — ${response.status} (${duration}ms)`)
-      return response
-    } catch (error) {
-      const duration = (performance.now() - start).toFixed(2)
-      console.error(`[HTTP] ${req.method} ${req.url} — ERROR (${duration}ms)`, error)
-      throw error
-    }
-  })
+const client = createObservedClient(getAccessToken, outboundMetrics)
+const [error, users] = await client.execute(listUsersRequest(), {
+  context: contextFor('list-users'),
+})
+
+if (error) {
+  throw error
 }
 ```
 
-## Intégration Vue
+Le fournisseur d'identifiants appartient à l'application. Côté serveur, gardez-le dans la portée de la requête. L'authentification WebSocket dans un navigateur exige un mécanisme distinct, validé pour le déploiement, car les sockets natifs ne peuvent pas ajouter cet en-tête.
+
+## Composition Vue
+
+L'application installe un client pour le navigateur. Le composant observe sa prop et annule la requête HTTP devenue obsolète.
 
 ```typescript
 // main.ts
 import { createApp } from 'vue'
+import { provideClient, withEndpoint } from '@defjs/vue'
 import App from './App.vue'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
-import { authInterceptor } from './interceptors'
 
-const app = createApp(App)
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor)))
-
-app.mount('#app')
+createApp(App)
+  .use(provideClient(withEndpoint('https://api.example.com')))
+  .mount('#app')
 ```
 
 ```vue
-<!-- UserCard.vue -->
+<!-- UserName.vue -->
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import { injectClient } from '@defjs/vue'
-import { defineRequest, struct } from '@defjs/core'
+import { getUser } from './users-api'
 
+const props = defineProps<{ id: number }>()
 const client = injectClient()
+const name = ref('')
 
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ name: struct.string() }),
+watch(
+  () => props.id,
+  (id, _previous, onCleanup) => {
+    const abort = new AbortController()
+    onCleanup(() => abort.abort())
+
+    void client.execute(getUser({ path: { id } }), { signal: abort.signal }).then(([error, user]) => {
+      if (!abort.signal.aborted) {
+        name.value = error ? '' : user.name
+      }
+    })
   },
-})
-
-async function loadUser() {
-  const [error, user] = await client.execute(getUser())
-  if (error) {
-    console.error('Failed:', error.message)
-    return
-  }
-  console.log('User:', user.name)
-}
+  { immediate: true },
+)
 </script>
 
 <template>
-  <button @click="loadUser">Load User</button>
+  <span>{{ name }}</span>
 </template>
 ```
 
-## Aide-mémoire API
+## Composition React
 
-| Export                                                                                      | Usage typique                             |
-| ------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `createClient(...options)`                                                                  | Créer une instance de client              |
-| `withEndpoint(url)`                                                                         | Définir l'URL de base                     |
-| `withInterceptors(...interceptors)`                                                         | Enregistrer des intercepteurs             |
-| `defineRequest({ method, path, input?, build?, output? })`                                  | Définir un point de terminaison HTTP      |
-| `defineEventStream({ path, events, input?, build? })`                                       | Définir un point de terminaison SSE       |
-| `defineWebSocket({ path, incoming, outgoing?, input?, build? })`                            | Définir un point de terminaison WebSocket |
-| `struct.object(shape)`                                                                      | Schéma d'objet                            |
-| `struct.string()` / `struct.number()` / `struct.boolean()`                                  | Schémas primitifs                         |
-| `struct.array(item)`                                                                        | Schéma de tableau                         |
-| `struct.enum(values)`                                                                       | Schéma d'énumération                      |
-| `struct.alias(name)                                                                         | Alias de champs                           |
-| `createHttpInterceptor(fn)` / `createSSEInterceptor(fn)` / `createWebSocketInterceptor(fn)` | Créer des intercepteurs                   |
-| `basicAuthHttpInterceptor(fn)` / `basicAuthSSEInterceptor(fn)`                              | Basic Auth intégré                        |
+Le provider définit la portée du client. Le composant gère l'annulation de son effet.
 
-## Prochaines étapes
+```tsx
+// App.tsx
+import { ClientProvider, withEndpoint } from '@defjs/react'
+import { UserName } from './UserName'
 
-- [Client →](/core/client) — Création de client et usage de `execute`
-- [Commandes →](/core/commands) — Définitions de commandes et règles d'optionnalité des entrées
-- [Intercepteurs →](/core/interceptors) — Types d'intercepteurs et mécanique de la chaîne en oignon
+export function App() {
+  return (
+    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+      <UserName id={7} />
+    </ClientProvider>
+  )
+}
+```
+
+```tsx
+// UserName.tsx
+import { useEffect, useState } from 'react'
+import { useClient } from '@defjs/react'
+import { getUser } from './users-api'
+
+export function UserName({ id }: { id: number }) {
+  const client = useClient()
+  const [name, setName] = useState('')
+
+  useEffect(() => {
+    const abort = new AbortController()
+
+    void client.execute(getUser({ path: { id } }), { signal: abort.signal }).then(([error, user]) => {
+      if (!abort.signal.aborted) {
+        setName(error ? '' : user.name)
+      }
+    })
+
+    return () => abort.abort()
+  }, [client, id])
+
+  return <span>{name}</span>
+}
+```
+
+Le démontage du provider n'annule aucun travail à lui seul. Chaque composant reste responsable de la requête, du flux ou de la session qu'il démarre.
+
+## Étapes suivantes
+
+- [Commandes](/fr-FR/core/commands) explique les définitions utilisées dans ces recettes.
+- [Intercepteurs](/fr-FR/core/interceptors) détaille les politiques de relance et d'authentification.
+- [Vue](/fr-FR/plugins/vue) et [React](/fr-FR/plugins/react) couvrent la portée et les frontières SSR propres aux adaptateurs.

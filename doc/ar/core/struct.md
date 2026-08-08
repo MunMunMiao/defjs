@@ -1,17 +1,13 @@
 ---
 title: Struct
-description: Declarative struct definition, type inference, error mapping, and the field alias support.
+description: صف فك الترميز البنيوي والقيم الصفرية والمدخلات الكائنية الجزئية وaliases والتعامل مع StructError.
 ---
 
 # Struct
 
-يوفر `@defjs/core` واجهة struct خفيفة الوزن لتعريف المخططات والتحقق من المدخلات واستنتاج الأنواع. يتمحور القصد التصميمي حول نموذج `encoding/json` في Go: احتياطي القيمة الصفرية، قبول الإدخال الجزئي، وسلوك وقت التشغيل مستقر ومتوقع.
+تصف Structs فك الترميز البنيوي والترميز إلى wire. بعض سلوكيات القيم الصفرية فيها مستوحاة من Go، لكنها ليست تطبيقًا كاملًا لدلالات `encoding/json` في Go.
 
-## الأنواع الأولية
-
-تُنشأ جميع المخططات عبر نطاق `struct`، ويدعم استدعاءات السلسلة `.optional()` و `.null()` و `.nullish()` و `.alias(name)`.
-
-### القيم الأساسية
+استخدم واجهة `struct` و`Infer<T>` من root entry:
 
 ```typescript
 import { struct, type Infer } from '@defjs/core'
@@ -20,227 +16,191 @@ const User = struct.object({
   id: struct.number(),
   name: struct.string(),
   active: struct.boolean(),
-  role: struct.literal('admin'),
 })
 
 type User = Infer<typeof User>
-// { id: number; name: string; active: boolean; role: 'admin' }
+// { id: number; name: string; active: boolean }
 ```
 
-المتاح:
+## Constructors
 
-| المنشئ                 | نوع الإدخال                             | نوع الإخراج   | القيمة الصفرية       |
-| ---------------------- | --------------------------------------- | ------------- | -------------------- |
-| `struct.string()`      | `string \| undefined`                   | `string`      | `''`                 |
-| `struct.number()`      | `number \| undefined`                   | `number`      | `0`                  |
-| `struct.boolean()`     | `boolean \| undefined`                  | `boolean`     | `false`              |
-| `struct.bigint()`      | `bigint \| string \| undefined`         | `bigint`      | `0n`                 |
-| `struct.date()`        | `Date \| number \| string \| undefined` | `Date`        | `new Date(0)`        |
-| `struct.null()`        | `null`                                  | `null`        | `null`               |
-| `struct.any()`         | `unknown`                               | `any`         | `undefined`          |
-| `struct.unknown()`     | `unknown`                               | `unknown`     | `undefined`          |
-| `struct.blob()`        | `Blob \| undefined`                     | `Blob`        | `new Blob()`         |
-| `struct.file()`        | `File \| undefined`                     | `File`        | `new File([], '')`   |
-| `struct.arrayBuffer()` | `ArrayBuffer \| undefined`              | `ArrayBuffer` | `new ArrayBuffer(0)` |
-
-### اختياري وقابل للإلغاء
+تشمل constructors الشائعة:
 
 ```typescript
-const Profile = struct.object({
-  bio: struct.string().optional(), // نوع الإخراج: string | undefined
-  age: struct.number().null(), // نوع الإخراج: number | null
-  nick: struct.string().nullish(), // نوع الإخراج: string | null | undefined
-})
-```
-
-### التعدادات والقيم الحرفية
-
-```typescript
-const Status = struct.enum(['pending', 'done', 'cancelled'])
-const Priority = struct.objectEnum({ Low: 1, Medium: 2, High: 3 })
-
-const Flag = struct.literal(true)
-```
-
-### المصفوفات والصفوف والسجلات
-
-```typescript
-const Tags = struct.array(struct.string())
-const Pair = struct.tuple([struct.string(), struct.number()])
-const Dict = struct.record(struct.number())
-```
-
-### الاتحادات والتقاطعات
-
-```typescript
-const Id = struct.union([struct.string(), struct.number()])
-const Named = struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
-```
-
-### الاتحادات التمييزية
-
-```typescript
-const Event = struct.discriminatedUnion('kind', [
-  struct.object({ kind: struct.literal('click'), x: struct.number(), y: struct.number() }),
+struct.string()
+struct.number()
+struct.boolean()
+struct.bigint()
+struct.date()
+struct.null()
+struct.literal('ready')
+struct.enum(['pending', 'done'])
+struct.array(struct.string())
+struct.tuple([struct.string(), struct.number()])
+struct.object({ id: struct.number() })
+struct.record(struct.number())
+struct.or(struct.string(), struct.number())
+struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
+struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('click'), x: struct.number() }),
   struct.object({ kind: struct.literal('key'), key: struct.string() }),
 ])
 ```
 
-## مخططات الطلب
+تقبل `struct.any()` و`struct.unknown()` قيمًا بلا قيود. أما binary constructors فهي `struct.blob()` و`struct.file()` و`struct.arrayBuffer()`.
 
-ينظم `struct.request(...)` المسار `path` والاستعلام `query` والرؤوس `headers` والجسم `body` في هيكل إدخال واحد لبناء طلب HTTP تلقائيًا بواسطة نقطة النهاية.
+يدعم كل Struct هذه modifiers:
 
 ```typescript
-const CreateUser = struct.request({
-  path: struct.object({ orgId: struct.number() }),
-  query: struct.object({ dryRun: struct.boolean().optional() }),
-  headers: struct.object({
-    'X-Api-Key': struct.string().alias('X-Api-Key'),
-  }),
+struct.string().optional()
+struct.string().null()
+struct.string().nullish()
+struct.string().alias('wire_name')
+```
+
+## القيم الصفرية
+
+تُفك القيم المفقودة أو `undefined` إلى قيمة صفرية ما لم يكن Struct اختياريًا. ويتبع `null` مع Struct غير nullable مسار القيمة الصفرية نفسه. أما Struct من نوع nullable فيفك missing أو `undefined` أو `null` إلى `null`.
+
+من القيم الصفرية المختارة:
+
+| Struct                        | القيمة الصفرية                   |
+| ----------------------------- | -------------------------------- |
+| `string`                      | `''`                             |
+| `number`                      | `0`                              |
+| `boolean`                     | `false`                          |
+| `bigint`                      | `0n`                             |
+| `date`                        | `new Date(0)`                    |
+| array                         | `[]`                             |
+| object                        | كائن تحتوي حقوله قيمها الصفرية   |
+| tuple                         | tuple تحتوي عناصره قيمها الصفرية |
+| enum                          | أول قيمة معلنة                   |
+| literal                       | القيمة الحرفية المعلنة           |
+| `blob`, `file`, `arrayBuffer` | قيمة فارغة من النوع المقابل      |
+| `any`, `unknown`              | `undefined`                      |
+
+داخل كائن، يُحذف الحقل المفقود الذي يحمل `.optional()` فقط من output بعد فك الترميز. تجمع `.nullish()` بين optional وnullable؛ ولأن معالجة nullable لها الأولوية عند فقدان القيمة، تُفك حاليًا إلى `null`.
+
+```typescript
+const Profile = struct.object({
+  name: struct.string(),
+  nickname: struct.string().optional(),
+  biography: struct.string().null(),
+})
+
+// Decoding {} produces an object equivalent to:
+// { name: '', biography: null }
+```
+
+تُسقط مفاتيح الكائن غير المعروفة. وتستخدم مخرجات object وrecord بعد parse prototype مساويًا لـ null. ينبغي للكود الذي يعتمد على دوال `Object.prototype` استخدام `Object.keys` أو `Object.entries`، أو نسخ القيمة عمدًا إلى كائن عادي.
+
+## المدخلات الجزئية مقصودة
+
+خصائص object input اختيارية عند حد TypeScript، حتى حين تكون خاصية output بعد فك الترميز موجودة. وأقسام الطلب في `struct.request(...)` اختيارية أيضًا.
+
+```typescript
+const Point = struct.object({
+  x: struct.number(),
+  y: struct.number(),
+})
+
+// A command using Point as input accepts {}.
+// Structural decoding produces { x: 0, y: 0 }.
+```
+
+لا تصف هذه الحقول بأنها required. لا توفّر Structs تحققًا على مستوى التطبيق من وجود الحقول أو authorization أو range أو amount أو format أو state transition. ولا توجد DSL عامة لـ refine/range/format.
+
+تقبل `struct.number()` قيمتي `Infinity` الموجبة والسالبة؛ وهي تستبعد `NaN` فقط من أعداد JavaScript. طبّق فحوص finite وrange وdomain في كود التطبيق قبل إنشاء الأمر. لا تضع هذه الفحوص في `build`، لأن `build` تستقبل إسقاطًا مرتبطًا بالـ Struct لا قيم المستدعي وقت التشغيل.
+
+## أجسام الطلب
+
+تجمع `struct.request(...)` أقسام wire المباشرة:
+
+```typescript
+const input = struct.request({
+  path: struct.object({ organizationId: struct.string() }),
+  query: struct.object({ includeDisabled: struct.boolean().optional() }),
+  headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
   body: struct.json(
     struct.object({
-      name: struct.string().alias('user_name'),
+      displayName: struct.string().alias('display_name'),
     }),
   ),
 })
 ```
 
-أغلفة الجسم تحدد ترميز النقل:
+حدود body هي:
 
-| الغلاف                     | الترميز           |
+| Struct                     | الترميز           |
 | -------------------------- | ----------------- |
-| `struct.json(struct)`      | `JSON.stringify`  |
+| `struct.json(inner)`       | JSON              |
+| `struct.text()`            | نص عادي           |
 | `struct.urlencoded(shape)` | `URLSearchParams` |
 | `struct.formData(shape)`   | `FormData`        |
-| `struct.text()`            | نص عادي           |
-| `struct.blob()`            | Blob ثنائي        |
-| `struct.arrayBuffer()`     | ArrayBuffer ثنائي |
+| `struct.blob()`            | `Blob`            |
+| `struct.arrayBuffer()`     | `ArrayBuffer`     |
 
-## استنتاج النوع `Infer<T>`
+راجع [الأوامر](/ar/core/commands) للربط التلقائي للطلب وقيود وسائل النقل.
 
-يستخرج `Infer<T>` نوع إخراج المخطط. هو المساعد الوحيد على المستوى النوعي الذي تحتاج إلى إتقانه.
+## Aliases
+
+تغيّر `.alias(name)` مفتاح wire من دون تغيير مفتاح TypeScript المنطقي.
 
 ```typescript
-const Person = struct.object({
-  name: struct.string(),
-  age: struct.number().optional(),
+const UserBody = struct.object({
+  id: struct.number().alias('user_id'),
+  displayName: struct.string().alias('display_name'),
 })
 
-type Person = Infer<typeof Person>
-// { name: string; age?: number }
+// Caller input uses { id, displayName }.
+// JSON wire data uses { user_id, display_name }.
 ```
 
-يعمل `Infer` أيضًا مع `struct.array(...)` و `struct.union(...)` و `struct.request(...)`:
+تفك aliases مفاتيح JSON وترمّزها. ويستخدمها بناء الطلب التلقائي أيضًا لمفاتيح path وquery وheader وURL-encoded وmultipart الصادرة. يستمر المستدعون في استخدام المفاتيح المنطقية. أما target keys الصريحة في إسقاط `build` مخصص فتبقى صريحة.
+
+## `StructError`
+
+ينتج فشل فك الترميز البنيوي `StructError`، ويظهر غالبًا داخل `RequestError.cause`.
 
 ```typescript
-type Tags = Infer<typeof Tags> // string[]
-type Id = Infer<typeof Id> // string | number
-type Req = Infer<typeof CreateUser> // { path: { orgId: number }; query?: { dryRun?: boolean }; ... }
-```
+import { StructError, type RequestError, type StructIssue } from '@defjs/core'
 
-## StructError وتعيين الأخطاء
-
-عند فشل التحقق، يُرجع وقت التشغيل `StructError` يحتوي على `StructIssue[]` كاملة.
-
-```typescript
-import { struct, StructError } from '@defjs/core'
-
-const [error, value] = struct.parseTuple(User, { id: 42 })
-if (error) {
-  console.log(error.issues)
-  // [{ code: 'missing_key', path: ['name'], expected: 'string', received: undefined, message: '...' }]
+export function structIssues(error: RequestError): readonly StructIssue[] {
+  if (error.kind === 'definition' && error.cause instanceof StructError) {
+    return error.cause.issues
+  }
+  return []
 }
 ```
 
-### تنسيق الأخطاء
+يعرض `StructError` ما يلي:
 
-```typescript
-error.format() // كائن شجري { _errors: [], name: { _errors: ['...'] } }
-error.flatten() // كائن مسطح { formErrors: [], fieldErrors: { name: ['...'] } }
-error.prettify() // سلسلة: "× name: Expected string, received undefined"
-```
+- `issues`، وهي مصفوفة `StructIssue[]` الأصلية؛
+- `format()`، وهي شجرة رسائل متداخلة؛
+- `flatten()`، وهي رسائل form وfields على المستوى الأعلى؛
+- `prettify()`، وهي string متعددة الأسطر ومقروءة.
 
-### تعيين الأخطاء العام
+قد يحتوي `StructIssue.received` على بيانات input أو response. وقد تتضمن الرسائل الافتراضية تمثيلًا لتلك القيمة. كما قد تأتي paths والمفاتيح المنسقة من بيانات غير موثوقة، خصوصًا في records. نقّح أو راجع `issues` والرسائل و`format()` و`flatten()` و`prettify()` قبل تسجيلها أو إعادتها.
 
-استبدل الرسائل الافتراضية عبر `setErrorMap`:
+## رسائل الأخطاء العامة
+
+تستبدل `setErrorMap(...)` توليد الرسائل على مستوى العملية:
 
 ```typescript
 import { setErrorMap } from '@defjs/core'
 
 setErrorMap((issue) => {
-  if (issue.code === 'missing_key') {
-    return `Field ${issue.path.join('.')} is required`
+  if (issue.code === 'invalid_type') {
+    return `Invalid value at ${issue.path.join('.')}`
   }
-  return undefined // القضايا غير المغطاة تستخدم الرسائل الافتراضية
+  return undefined
 })
 ```
 
-## Field Aliases
+هذه الخريطة عامة وليست ضمن نطاق العميل. يؤثر تغييرها على Struct issues اللاحقة في كل عميل داخل JavaScript realm نفسها. تجنب الحالة الخاصة بالطلب داخل callback، ونسّق تثبيتها في التطبيقات التي تشارك عملية واحدة.
 
-`.alias(name)` هي الآلية المدمجة الوحيدة لاسم الحقل على wire. تغيّر المفتاح الخارجي المستخدم في ترميز/فك ترميز JSON و query و headers و path و urlencoded و FormData فقط؛ ولا تغيّر اسم خاصية TypeScript أو نوع الإخراج أو request section أو body codec أو المفاتيح المكتوبة صراحة داخل `build(ctx, input)`. الحقول بلا alias تستخدم مفتاح الحقل في الكائن.
+## التالي
 
-```typescript
-import { struct } from '@defjs/core'
-
-const UserBody = struct.object({
-  id: struct.number().alias('user_id'),
-  name: struct.string().alias('user_name'),
-})
-```
-
-The same alias is used by JSON, query, path params, headers, urlencoded bodies, and multipart bodies. If the same logical value needs different names in different targets, split the struct or write explicit keys in `build(ctx, input)`.
-
-## Field Introspection
-
-`getStructFields` expands an object struct into a readable field list containing field key, alias, and sub-struct.
-
-```typescript
-import { getStructFields } from '@defjs/core'
-
-const fields = getStructFields(UserBody)
-// [
-//   { key: 'id', alias: 'user_id', struct: NumberStruct },
-//   { key: 'name', alias: 'user_name', struct: StringStruct },
-// ]
-```
-
-Combined with `isObjectStruct` for safe type checking before introspection:
-
-```typescript
-import { isObjectStruct, getStructFields } from '@defjs/core'
-
-if (isObjectStruct(struct)) {
-  for (const field of getStructFields(struct)) {
-    console.log(field.key, field.alias)
-  }
-}
-```
-
-## احتياطي القيمة الصفرية والإدخال الجزئي
-
-يتبع محلل struct دلالات `encoding/json` في Go:
-
-1. **الحقول المفقودة** → تُملأ بقيمة الصفر للنوع، بدلاً من رمي `missing_key`.
-2. **الإدخال الجزئي** → يسمح بتمرير بعض الحقول فقط؛ الحقول غير المضبوطة تُملأ تلقائيًا بالقيم الصفرية.
-3. **`undefined` و `null`** → الحقول `optional` تُرجع `undefined`؛ الحقول `nullable` تُرجع `null`؛ البقية تُرجع قيم صفرية.
-
-```typescript
-const Point = struct.object({ x: struct.number(), y: struct.number() })
-
-struct.parseValue(Point, {}) // { x: 0, y: 0 }
-struct.parseValue(Point, { x: 1 }) // { x: 1, y: 0 }
-```
-
-هذا بالتصميم، وليس خطأ. المنافع:
-
-- يمكن لنماذج الواجهة الأمامية إرسال الحقول المُعدّلة فقط؛ الخلفية تستلم بنية كاملة.
-- يتجنب انتشار `undefined` عبر الكائنات؛ الإخراج دائمًا آمن للتنقل.
-- نموذج ذهني متسق مع json unmarshaling في Go، موحّد للتعاون عبر اللغات.
-
-إذا كنت بحاجة إلى تحقق صارم (الحقول المفقودة يجب أن تُظهر خطأ)، تحقق صراحة في دالة `build` للنقطة النهاية، أو استخدم `struct.parseTuple` للتعامل مع النتيجة `[error, value]` بنفسك.
-
-## ما التالي
-
-- [الأوامر →](/core/commands) — استخدام struct مع `defineRequest` و `defineEventStream` و `defineWebSocket`
-- [HTTP →](/core/http) — ترميز جسم الطلب والتحقق من الاستجابة
-- [السياق →](/core/context) — البناء التلقائي وقدرات منشئ الطلب
+- تربط [الأوامر](/ar/core/commands) حقول Struct بالطلبات والرسائل.
+- تشرح [الأخطاء](/ar/core/errors) كيف تظهر إخفاقات Struct في execution tuples.
+- تغطي [HTTP](/ar/core/http) فك ترميز response وقيد JSON غير الصالح الحالي.

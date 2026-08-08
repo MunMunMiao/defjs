@@ -1,5 +1,3 @@
-import { transformerTwoslash } from '@shikijs/vitepress-twoslash'
-import { createFileSystemTypesCache } from '@shikijs/vitepress-twoslash/cache-fs'
 import { defineConfig } from 'vitepress'
 
 const navEn = [
@@ -124,7 +122,7 @@ const sidebarZhTw = {
     {
       text: '指南',
       items: [
-        { text: '快速上手', link: '/zh-Hant-TW/guide/getting-started' },
+        { text: '開始使用', link: '/zh-Hant-TW/guide/getting-started' },
         { text: '範例', link: '/zh-Hant-TW/guide/examples' },
         { text: '設計決策', link: '/zh-Hant-TW/guide/design-decisions' },
       ],
@@ -176,7 +174,7 @@ const sidebarZhHk = {
     {
       text: '指南',
       items: [
-        { text: '快速開始', link: '/zh-Hant-HK/guide/getting-started' },
+        { text: '快速上手', link: '/zh-Hant-HK/guide/getting-started' },
         { text: '範例', link: '/zh-Hant-HK/guide/examples' },
         { text: '設計決策', link: '/zh-Hant-HK/guide/design-decisions' },
       ],
@@ -280,7 +278,7 @@ const sidebarJa = {
     {
       text: 'ガイド',
       items: [
-        { text: 'クイックスタート', link: '/ja-JP/guide/getting-started' },
+        { text: 'はじめに', link: '/ja-JP/guide/getting-started' },
         { text: 'サンプル', link: '/ja-JP/guide/examples' },
         { text: '設計上の決定事項', link: '/ja-JP/guide/design-decisions' },
       ],
@@ -342,12 +340,12 @@ const sidebarKo = {
     {
       text: '코어',
       items: [
-        { text: 'Client', link: '/ko-KR/core/client' },
-        { text: 'Commands', link: '/ko-KR/core/commands' },
-        { text: 'Context', link: '/ko-KR/core/context' },
-        { text: 'Errors', link: '/ko-KR/core/errors' },
+        { text: '클라이언트', link: '/ko-KR/core/client' },
+        { text: '커맨드', link: '/ko-KR/core/commands' },
+        { text: '컨텍스트', link: '/ko-KR/core/context' },
+        { text: '오류', link: '/ko-KR/core/errors' },
         { text: 'HTTP', link: '/ko-KR/core/http' },
-        { text: 'Interceptors', link: '/ko-KR/core/interceptors' },
+        { text: '인터셉터', link: '/ko-KR/core/interceptors' },
         { text: 'SSE', link: '/ko-KR/core/sse' },
         { text: 'Struct', link: '/ko-KR/core/struct' },
         { text: 'WebSocket', link: '/ko-KR/core/web-socket' },
@@ -446,12 +444,12 @@ const sidebarEs = {
     {
       text: 'Núcleo',
       items: [
-        { text: 'Client', link: '/es-ES/core/client' },
-        { text: 'Commands', link: '/es-ES/core/commands' },
-        { text: 'Context', link: '/es-ES/core/context' },
-        { text: 'Errors', link: '/es-ES/core/errors' },
+        { text: 'Cliente', link: '/es-ES/core/client' },
+        { text: 'Comandos', link: '/es-ES/core/commands' },
+        { text: 'Contexto', link: '/es-ES/core/context' },
+        { text: 'Errores', link: '/es-ES/core/errors' },
         { text: 'HTTP', link: '/es-ES/core/http' },
-        { text: 'Interceptors', link: '/es-ES/core/interceptors' },
+        { text: 'Interceptores', link: '/es-ES/core/interceptors' },
         { text: 'SSE', link: '/es-ES/core/sse' },
         { text: 'Struct', link: '/es-ES/core/struct' },
         { text: 'WebSocket', link: '/es-ES/core/web-socket' },
@@ -503,7 +501,7 @@ const sidebarRu = {
         { text: 'Контекст', link: '/ru-RU/core/context' },
         { text: 'Ошибки', link: '/ru-RU/core/errors' },
         { text: 'HTTP', link: '/ru-RU/core/http' },
-        { text: 'Интерцепторы', link: '/ru-RU/core/interceptors' },
+        { text: 'Перехватчики', link: '/ru-RU/core/interceptors' },
         { text: 'SSE', link: '/ru-RU/core/sse' },
         { text: 'Struct', link: '/ru-RU/core/struct' },
         { text: 'WebSocket', link: '/ru-RU/core/web-socket' },
@@ -576,7 +574,7 @@ const sidebarFr = {
 
 export default defineConfig({
   title: 'Defjs',
-  description: 'Typed request APIs across transports and runtimes',
+  description: 'Typed APIs across HTTP, SSE, and WebSocket',
   cleanUrls: true,
 
   vite: {
@@ -591,15 +589,6 @@ export default defineConfig({
         },
       },
     },
-  },
-
-  markdown: {
-    codeTransformers: [
-      transformerTwoslash({
-        typesCache: createFileSystemTypesCache(),
-      }),
-    ],
-    languages: ['js', 'jsx', 'ts', 'tsx'],
   },
 
   locales: {
@@ -625,9 +614,14 @@ export default defineConfig({
     'zh-Hans': {
       label: '简体中文',
       lang: 'zh-Hans',
+      description: '跨 HTTP、SSE 和 WebSocket 的类型化 API',
       themeConfig: {
         nav: navZh,
         sidebar: sidebarZh,
+        footer: {
+          message: '基于 MIT 许可证发布。',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: '在 GitHub 上编辑此页',
@@ -644,9 +638,14 @@ export default defineConfig({
     'zh-Hant-TW': {
       label: '繁體中文（台灣）',
       lang: 'zh-Hant-TW',
+      description: '適用於 HTTP、SSE 與 WebSocket 的型別化 API',
       themeConfig: {
         nav: navZhTw,
         sidebar: sidebarZhTw,
+        footer: {
+          message: '依 MIT 授權條款發布。',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: '在 GitHub 上編輯此頁',
@@ -663,9 +662,14 @@ export default defineConfig({
     'zh-Hant-HK': {
       label: '繁體中文（香港）',
       lang: 'zh-Hant-HK',
+      description: '適用於 HTTP、SSE 與 WebSocket 的類型化 API',
       themeConfig: {
         nav: navZhHk,
         sidebar: sidebarZhHk,
+        footer: {
+          message: '按 MIT 授權條款發布。',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: '在 GitHub 上編輯此頁',
@@ -682,9 +686,14 @@ export default defineConfig({
     'de-DE': {
       label: 'Deutsch',
       lang: 'de-DE',
+      description: 'Typisierte APIs für HTTP, SSE und WebSocket',
       themeConfig: {
         nav: navDe,
         sidebar: sidebarDe,
+        footer: {
+          message: 'Veröffentlicht unter der MIT-Lizenz.',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: 'Diese Seite auf GitHub bearbeiten',
@@ -701,9 +710,14 @@ export default defineConfig({
     'ja-JP': {
       label: '日本語',
       lang: 'ja-JP',
+      description: 'HTTP、SSE、WebSocket 向けの型付き API',
       themeConfig: {
         nav: navJa,
         sidebar: sidebarJa,
+        footer: {
+          message: 'MIT ライセンスで公開しています。',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: 'GitHub でこのページを編集',
@@ -720,9 +734,14 @@ export default defineConfig({
     'ko-KR': {
       label: '한국어',
       lang: 'ko-KR',
+      description: 'HTTP, SSE, WebSocket용 타입 기반 API',
       themeConfig: {
         nav: navKo,
         sidebar: sidebarKo,
+        footer: {
+          message: 'MIT 라이선스로 배포됩니다.',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: 'GitHub에서 이 페이지 편집',
@@ -740,9 +759,14 @@ export default defineConfig({
       label: 'العربية',
       lang: 'ar',
       dir: 'rtl',
+      description: 'واجهات API مضبوطة الأنواع لـ HTTP وSSE وWebSocket',
       themeConfig: {
         nav: navAr,
         sidebar: sidebarAr,
+        footer: {
+          message: 'مُتاح بموجب ترخيص MIT.',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: 'تحرير هذه الصفحة على GitHub',
@@ -759,9 +783,14 @@ export default defineConfig({
     'es-ES': {
       label: 'Español',
       lang: 'es-ES',
+      description: 'API tipadas para HTTP, SSE y WebSocket',
       themeConfig: {
         nav: navEs,
         sidebar: sidebarEs,
+        footer: {
+          message: 'Publicado bajo la licencia MIT.',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: 'Editar esta página en GitHub',
@@ -778,9 +807,14 @@ export default defineConfig({
     'ru-RU': {
       label: 'Русский',
       lang: 'ru-RU',
+      description: 'Типизированные API для HTTP, SSE и WebSocket',
       themeConfig: {
         nav: navRu,
         sidebar: sidebarRu,
+        footer: {
+          message: 'Распространяется по лицензии MIT.',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: 'Редактировать эту страницу на GitHub',
@@ -797,9 +831,14 @@ export default defineConfig({
     'fr-FR': {
       label: 'Français',
       lang: 'fr-FR',
+      description: 'API typées pour HTTP, SSE et WebSocket',
       themeConfig: {
         nav: navFr,
         sidebar: sidebarFr,
+        footer: {
+          message: 'Publié sous licence MIT.',
+          copyright: 'Copyright © 2026 MunMunMiao',
+        },
         editLink: {
           pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
           text: 'Modifier cette page sur GitHub',

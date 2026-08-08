@@ -1,27 +1,22 @@
 ---
 title: Vue
-description: Vue 3 plugin integration — provideClient and injectClient for composable API usage with typed HTTP, SSE, and WebSocket clients.
+description: 透過 Vue injection 共用 Defjs client、按自己的 API 設定、保留 SSR request scope，並清理 transport resource。
 ---
 
-# @defjs/vue
+# `@defjs/vue`
 
-`@defjs/vue` 將 `@defjs/core` 整合為 Vue 3 外掛。它提供 `provideClient` 在應用程式層級註冊 `Client` 實例，以及 `injectClient` 在元件或 Composition API 中存取該實例。
+`@defjs/vue` 是 `@defjs/core` 的輕量 injection adapter，匯出：
 
-兩者共用來自 `@defjs/core` 的相同設定輔助函式 `withEndpoint` 與 `withInterceptors`。
+- `provideClient(...)`：建立並提供 core client 的 Vue plugin；
+- `injectClient()`：回傳 nearest injected client；
+- `HTTP_CLIENT`：用於 override 的 injection key；
+- adapter `withEndpoint(...)` 與 interceptor-factory `withInterceptors(...)` helper。
 
-## 安裝
+它不會加入 transport behavior、cache、state management、retry 或 Nuxt module。請連同 `@defjs/core`、Vue 一起安裝，這些責任則留在應用程式自己的 composable、store 同 framework integration。
 
-```bash
-npm install @defjs/vue @defjs/core
-# or
-pnpm add @defjs/vue @defjs/core
-# or
-bun add @defjs/vue @defjs/core
-```
+## 安裝 Plugin
 
-## 快速開始
-
-### 1. 在應用程式入口提供用戶端
+每次 plugin installation 都會建立一個 client：
 
 ```typescript
 // main.ts
@@ -32,153 +27,191 @@ import App from './App.vue'
 const app = createApp(App)
 
 app.use(provideClient(withEndpoint('https://api.example.com')))
+
 app.mount('#app')
 ```
 
-`provideClient` 回傳標準 Vue 外掛。內部使用 `app.provide()` 將 `Client` 實例注入應用程式上下文。所有子元件皆可透過 `injectClient()` 存取。
-
-### 2. 在元件中注入與使用
+`provideClient(...options)` 接受 `@defjs/core` 的任何 `ClientOption`，不限於 Vue adapter re-export 或重新建立的 option：
 
 ```typescript
-// UserCard.vue
+import { withCredentials, withSSEReconnect } from '@defjs/core'
+import { provideClient, withEndpoint } from '@defjs/vue'
+
+app.use(provideClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEReconnect({ attempts: 3 })))
+```
+
+這些 option 會在 plugin install 並建立 client 時執行。同一 plugin object 安裝至另一 app 時，會建立另一個 client。
+
+## 注入 Nearest Client
+
+請在 component `setup`、`<script setup>`，或 active composable/injection context 內呼叫 `injectClient()`：
+
+```vue
 <script setup lang="ts">
 import { injectClient } from '@defjs/vue'
-import { defineRequest, struct } from '@defjs/core'
 
 const client = injectClient()
-
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-      email: struct.string(),
-    }),
-  },
-})
-
-async function loadUser() {
-  const [error, user] = await client.execute(getUser())
-  if (error) {
-    console.error('Request failed:', error.code, error.message)
-    return
-  }
-  console.log(user.id, user.name, user.email) // fully typed
-}
 </script>
 ```
 
-## 設定攔截器
+沒有可用 `HTTP_CLIENT` 時會拋錯。不要在任意 module scope 呼叫。
 
-使用 `withInterceptors` 註冊工廠函式陣列。每個工廠在外掛安裝時執行，回傳的攔截器實例會註冊到 Client。
+Vue 一般 nearest-provider 規則仍然適用。Component 可以為 descendants 提供 override：
 
-```typescript
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
-import { createHttpInterceptor } from '@defjs/core'
-
-const authInterceptor = createHttpInterceptor((req, next) => {
-  req.headers.set('Authorization', `Bearer ${localStorage.getItem('token')}`)
-  return next(req)
-})
-
-app.use(
-  provideClient(
-    withEndpoint('https://api.example.com'),
-    withInterceptors(() => authInterceptor),
-  ),
-)
-```
-
-> 注意：`withInterceptors` 接受**工廠函式**（`() => Interceptor`），而非攔截器實例。這允許在 Vue provide 階段按需建立實例。
-
-## SSE 與 WebSocket 範例
-
-Client 實例支援 SSE 與 WebSocket，用法與核心套件相同：
-
-```typescript
+```vue
 <script setup lang="ts">
-import { injectClient } from '@defjs/vue'
-import { defineEventStream, defineWebSocket, struct } from '@defjs/core'
-
-const client = injectClient()
-
-// SSE
-const notifications = defineEventStream({
-  path: '/v1/notifications',
-  events: {
-    message: struct.object({ id: struct.number(), text: struct.string() }),
-  },
-})
-
-const [error, stream] = await client.execute(notifications())
-if (!error) {
-  for await (const event of stream) {
-    console.log(event.message) // typed as { id: number, text: string }
-  }
-}
-
-// WebSocket
-const chat = defineWebSocket({
-  path: '/v1/chat',
-  incoming: {
-    message: struct.object({ user: struct.string(), text: struct.string() }),
-  },
-  outgoing: {
-    send: struct.object({ text: struct.string() }),
-  },
-})
-
-const [wsError, ws] = await client.execute(chat())
-if (!wsError) {
-  ws.send({ type: 'send', data: { text: 'Hello' } })
-  for await (const msg of ws.receive) {
-    console.log(msg.message)
-  }
-}
-</script>
-```
-
-更多傳輸細節請見：
-
-- [核心檔案](/core/client) — `defineRequest`、`defineEventStream`、`defineWebSocket` 完整用法
-- [SSE 檔案](/core/sse) — SSE 自動重連、心跳與背壓
-- [WebSocket 檔案](/core/web-socket) — WebSocket 連線與訊息類型
-
-## API 參考
-
-### `provideClient(...feature: ClientOption[]): Plugin`
-
-建立 Vue 外掛。安裝時，透過 `createClient(...)` 建構 `Client` 實例，並以 `HTTP_CLIENT` 作為 Injection Key 提供至應用程式上下文。
-
-### `injectClient(): Client`
-
-在元件 `setup` 或 composables 中呼叫以取得注入的 Client 實例。若未先呼叫 `app.use(provideClient(...))`，會拋出執行階段錯誤：
-
-```
-No HTTP client provided. Did you forget to call app.use(provideClient(...))?
-```
-
-### `withEndpoint(endpoint: string): ClientOption`
-
-設定 HTTP 請求的基礎 URL。若省略，預設以 `document.location.origin` 作為前綴。
-
-### `withInterceptors(...fns: (() => Interceptor)[]): ClientOption`
-
-設定攔截器。每個工廠在外掛安裝時執行，回傳的攔截器依註冊順序形成洋蔥模型呼叫鏈。
-
-### `HTTP_CLIENT`
-
-Vue 的 `InjectionKey<Client>`，作為底層 `provide` / `inject` 的鍵。通常無需直接使用，但可用於自訂注入層級：
-
-```typescript
+import { provide } from 'vue'
+import { createClient, withEndpoint } from '@defjs/core'
 import { HTTP_CLIENT } from '@defjs/vue'
-import { inject } from 'vue'
 
-const client = inject(HTTP_CLIENT)
+const scopedClient = createClient(withEndpoint('https://preview.example.com'))
+provide(HTTP_CLIENT, scopedClient)
+</script>
+
+<template>
+  <slot />
+</template>
 ```
 
-## 接下來
+Descendant 呼叫 `injectClient()` 會得到 `scopedClient`；subtree 以外的 sibling 仍取得 app-level client。
 
-- [核心檔案](/core/client) — `defineRequest`、`defineEventStream`、`defineWebSocket` 完整用法
+## Interceptor Factory
+
+Adapter `withInterceptors(...)` 接受 factory，而不是 interceptor instance。建立 client 時會執行 factory，並按 option order 追加結果。
+
+```typescript
+import { createHttpInterceptor } from '@defjs/core'
+import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
+import { readAccessToken } from './auth'
+
+function createAuthInterceptor() {
+  return createHttpInterceptor((request, next) => {
+    const token = readAccessToken()
+    if (!token) {
+      return next(request)
+    }
+
+    const headers = new Headers(request.headers)
+    headers.set('Authorization', `Bearer ${token}`)
+    return next({ ...request, headers })
+  })
+}
+
+app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)))
+```
+
+這與 core `withInterceptors(...)` 不同；後者接收已建立的 interceptor value。Server 端 credential factory 必須保持 request-scoped。
+
+## 回應 Input 變更
+
+把 HTTP 工作綁定至真正觸發它的 reactive value。單用 `onMounted` 只會讀取初始 prop；`watch` 配合 cleanup 才可取消已被新值取代的工作：
+
+```vue
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { injectClient } from '@defjs/vue'
+import { getUser } from './api'
+
+const props = defineProps<{ id: number }>()
+const client = injectClient()
+const name = ref('')
+const errorMessage = ref('')
+
+watch(
+  () => props.id,
+  (id, _previousId, onCleanup) => {
+    const abort = new AbortController()
+    let current = true
+
+    onCleanup(() => {
+      current = false
+      abort.abort()
+    })
+
+    void client
+      .execute(getUser({ path: { id } }), { signal: abort.signal })
+      .then(([error, user]) => {
+        if (!current) {
+          return
+        }
+
+        if (error) {
+          errorMessage.value = 'Unable to load user.'
+          return
+        }
+
+        errorMessage.value = ''
+        name.value = user.name
+      })
+      .catch(() => {
+        if (current) {
+          errorMessage.value = 'Unable to load user.'
+        }
+      })
+  },
+  { immediate: true },
+)
+</script>
+
+<template>
+  <p v-if="errorMessage">{{ errorMessage }}</p>
+  <p v-else>{{ name }}</p>
+</template>
+```
+
+Imported `getUser` command builder 擁有 endpoint contract；component 則負責在 `id` 改變或 unmount 時取消 request。
+
+## SSR Boundary
+
+設定只包含 browser-safe、request-independent 資料時，瀏覽器應用程式可以安裝一個 plugin client。
+
+SSR 不要讓 request header、cookie、user data 或 tenant data 被 capture 到 cross-request app singleton。請在每個 server request boundary 內建立 core client，並只在該 request 的 render tree 傳遞或 provide。
+
+Adapter 不會在 concurrent SSR request 之間隔離應用程式 closure，亦不會替應用程式決定哪些 inbound header 或 cookie 可以安全 forward。
+
+Nuxt client plugin 可以為 browser consumer 安裝 Vue adapter：
+
+```typescript
+// plugins/defjs.client.ts
+import { provideClient, withEndpoint } from '@defjs/vue'
+
+export default defineNuxtPlugin((nuxtApp) => {
+  nuxtApp.vueApp.use(provideClient(withEndpoint(useRuntimeConfig().public.apiBase)))
+})
+```
+
+`.client.ts` suffix 表示它只在 browser 執行。它不是 server-request client，不能用來 forward SSR credentials。在 Nuxt 應用程式，請連同實際 plugin、route handler 同 hydration setup 測試這個 boundary。
+
+## Resource Ownership
+
+安裝或 unmount Vue provider 不會 abort HTTP 工作，亦不會關閉 SSE 或 WebSocket 資源。Adapter 只建立 client，而 core client 沒有 `dispose()` method。
+
+開始 realtime 工作的 component、composable、route 或 store 必須：
+
+- 在 async startup 前或同時註冊 cleanup；
+- scope 結束時 abort startup；
+- disposal 後才到達的 handle 或 session 要立即關閉；
+- 持續讀取 `stream` 或 `session.receive`；
+- 對 active 資源呼叫 `stream.close(...)` 或 `session.close(...)`；
+- unsubscribe WebSocket observer。
+
+不要只為加入 state listener 就開啟 WebSocket，卻一直不讀取無界 incoming queue。完整 lifecycle 規則見 [SSE](/zh-Hant-HK/core/sse) 與 [WebSocket](/zh-Hant-HK/core/web-socket)。
+
+## API
+
+```typescript
+import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { InjectionKey, Plugin } from 'vue'
+
+declare const HTTP_CLIENT: InjectionKey<Client>
+declare function provideClient(...options: ClientOption[]): Plugin
+declare function injectClient(): Client
+declare function withEndpoint(endpoint: string): ClientOption
+declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
+```
+
+## 下一步
+
+- [Client](/zh-Hant-HK/core/client)：core option composition 與 client scope。
+- [Commands](/zh-Hant-HK/core/commands)：endpoint 定義與 command input。
+- [Interceptors](/zh-Hant-HK/core/interceptors)：core interceptor contract。

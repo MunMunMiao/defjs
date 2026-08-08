@@ -1,197 +1,101 @@
 ---
-title: Getting Started
-description: Install @defjs/core, use it via CDN, and create your first typed request in three steps.
+title: Erste Schritte
+description: Installiere Defjs, definiere einen typisierten HTTP-Endpunkt, erstelle einen Client und nutze ihn in deiner Anwendung.
 ---
 
-# Loslegen
+# Erste Schritte
 
-Defjs ist eine TypeScript-Bibliothek zum Definieren typisierter Request-APIs und zum Ausführen über mehrere Transports und JavaScript-Laufzeiten.
+Mit Defjs beschreibst du einen API-Vertrag einmal und verwendest ihn anschließend mit typisierten Eingaben, Laufzeitdekodierung und klaren Transportergebnissen in deiner Anwendung.
 
 ## Installation
 
-Verwende deinen bevorzugten Paketmanager:
+Füge das Core-Paket zu deiner Anwendung hinzu:
 
-::: code-group
-
-```sh [npm]
-npm install @defjs/core
-```
-
-```sh [yarn]
-yarn add @defjs/core
-```
-
-```sh [pnpm]
+```sh
 pnpm add @defjs/core
 ```
 
-```sh [bun]
-bun add @defjs/core
-```
+Verwende den entsprechenden npm-, Yarn- oder Bun-Befehl, wenn dein Projekt einen anderen Paketmanager nutzt. `@defjs/core` ist ESM. Für die Ausführung unter Node.js verlangt die aktuelle Paketmetadaten Node 26 oder neuer.
 
+Installiere einen Adapter nur, wenn deine Anwendung ihn braucht:
+
+| Anwendungssetup              | Pakete                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------- |
+| React 18+                    | `@defjs/core`, `@defjs/react`, `react`                                                    |
+| Vue 3+                       | `@defjs/core`, `@defjs/vue`, `vue`                                                        |
+| Serverseitiges OpenTelemetry | `@defjs/core`, `@defjs/opentelemetry-server`, `@opentelemetry/api`, `@opentelemetry/core` |
+
+::: tip Dokumentation und installierte Version müssen zusammenpassen
+Diese Seiten beschreiben die API dieser Dokumentationsversion. Prüfe, welche Version deine Anwendung installiert hat. Weicht ein Export oder eine Option ab, verwende die Dokumentation und Release Notes dieser Version, statt Beispiele verschiedener Versionen zu mischen.
 :::
 
-## CDN-Nutzung
+## Erste Anfrage definieren
 
-Importiere direkt als ES-Module ohne Build-Tool:
-
-```typescript
-import { createClient, defineRequest, struct } from 'https://unpkg.com/@defjs/core/index.min.js'
-```
-
-## Drei Schritte zu deiner ersten Anfrage
-
-### Schritt 1: Client erstellen
-
-Der Client ist der Einstiegspunkt für alle Request-Ausführungen. Erstelle eine Instanz mit `createClient` und konfiguriere den Basis-Endpunkt:
+Angenommen, deine API stellt `GET /users/:id` bereit. Ersetze Basis-URL und Response-Structs durch den tatsächlichen Vertrag deines Dienstes.
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-```
-
-### Schritt 2: Anfrage definieren
-
-Verwende `defineRequest`, um einen typisierten HTTP-Endpunkt zu definieren. Verwende `struct`, um die Form von Inputs und Responses zu beschreiben:
-
-```typescript
-import { defineRequest, struct } from '@defjs/core'
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user/:id',
-  input: struct.object({
-    id: struct.number(),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-    404: struct.object({
-      message: struct.string(),
-    }),
-  },
-})
-```
-
-::: tip
-Die Schlüssel in `output` sind HTTP-Statuscodes. Defjs wählt automatisch das passende Struct zur Laufzeit und leitet die TypeScript-Typen dementsprechend ab: 2xx-Responses werden als Success-Daten typisiert, Nicht-2xx als Fehlerdaten.
-:::
-
-### Schritt 3: Ausführen
-
-Rufe `client.execute` mit deinem Request-Command und optionaler Konfiguration auf:
-
-```typescript
-const [error, user, response] = await client.execute(getUser({ id: 1 }))
-
-if (error) {
-  // error ist typisiert basierend auf den non-2xx-Structs in output
-  console.error(error.code, error.message)
-  return
-}
-
-// user ist typisiert als { id: number; name: string }
-console.log(user.name)
-```
-
-## Komplettes Beispiel
-
-Hier ist ein End-to-End-Beispiel mit Input-Validierung, Output-Validierung, Fehlerbehandlung und einem Interceptor:
-
-```typescript
-import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
-
-// 1. Client erstellen
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors([
-    async (request, next) => {
-      request.headers.set('Authorization', 'Bearer token')
-      return next(request)
-    },
-  ]),
-)
-
-// 2. Anfrage definieren
-const createPost = defineRequest({
-  method: 'POST',
-  path: '/v1/posts',
-  input: struct.object({
-    title: struct.string(),
-    body: struct.string(),
-    'X-Request-ID': struct.string(),
-  }),
-  build: (input) => ({
-    body: { title: input.title, body: input.body },
-    headers: { 'X-Request-ID': input['X-Request-ID'] },
-  }),
-  output: {
-    201: struct.object({
-      id: struct.number(),
-      title: struct.string(),
-    }),
-    400: struct.object({
-      field: struct.string(),
-      reason: struct.string(),
-    }),
-  },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-// 3. Ausführen
-async function createPost() {
-  const [error, post, response] = await client.execute(
-    createPost({
-      title: 'Hello',
-      body: 'World',
-      'X-Request-ID': 'uuid-123',
-    }),
-  )
+async function loadUser(id: number) {
+  const [error, user, response] = await client.execute(getUser({ path: { id } }))
 
   if (error) {
-    switch (error.code) {
-      case 'HTTP_STATUS':
-        console.error('Validation failed:', error.data)
-        break
-      case 'REQUEST_VALIDATION_FAILED':
-        console.error('Request validation failed:', error.message)
-        break
-      case 'RESPONSE_VALIDATION_FAILED':
-        console.error('Response validation failed:', error.message)
-        break
-      case 'TRANSPORT_ERROR':
-        console.error('Network error:', error.message)
-        break
-      default:
-        console.error('Unknown error:', error)
-    }
+    console.error(error.kind, error.code)
     return
   }
 
-  console.log('Created post:', post.id, post.title)
+  console.log(user.name, response.status)
+}
+
+void loadUser(7)
+```
+
+`defineRequest(...)` gibt einen **Command-Builder** zurück. Der Aufruf `getUser(...)` erzeugt einen **Command**, der die Endpunktdefinition und die Eingabe dieses Aufrufs hält. `client.execute(...)` liefert anschließend ein HTTP-Drei-Elemente-Tupel:
+
+```typescript
+;[error, result, response]
+```
+
+Bei Erfolg ist `error` gleich `null`, `result` enthält die dekodierten Ausgabedaten und `response` ist ein Defjs-`SettledResponse`-Wrapper. Bei einem Fehler ist `result` gleich `undefined`; auch der Response-Wrapper ist `undefined`, wenn keine Response eingetroffen ist.
+
+### Warum `as const` wichtig ist
+
+Die Array-Form von `output` nutzt Statusliterale, um erfolgreiche 2xx-Bodies von Nicht-2xx-Fehler-Bodies zu trennen. `as const` erhält diese Statuswerte und gruppierte Statusarrays als readonly Literale. Ohne `as const` kann TypeScript sie zu `number` oder `number[]` erweitern. Dadurch werden die abgeleiteten Erfolgs- und Fehlerzweige ungenauer.
+
+Auch die Objektform von `output` wird unterstützt:
+
+```typescript
+const output = {
+  '200': struct.object({ id: struct.number() }),
+  '404': struct.object({ message: struct.string() }),
 }
 ```
 
-## Core-API-Kurzreferenz
+## In deiner Anwendung einsetzen
 
-| API                    | Beschreibung                        | Typische Nutzung                                                                                        |
-| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `createClient`         | Client erstellen                    | `createClient(withEndpoint('https://api.example.com'))`                                                 |
-| `defineRequest`        | HTTP-Endpunkt definieren            | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | SSE-Endpunkt definieren             | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
-| `defineWebSocket`      | WebSocket-Endpunkt definieren       | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
-| `struct`               | Struct-Builder                      | `struct.object({ id: struct.number() })`                                                                |
-| `.alias(name)`         | Wire-Name-Alias für Felder          | `struct.string().alias('user_name')`                                                                    |
-| `withEndpoint`         | Basis-URL setzen                    | `withEndpoint('https://api.example.com')`                                                               |
-| `withInterceptors`     | Interceptors registrieren           | `withInterceptors([...interceptors])`                                                                   |
-| `withCredentials`      | Cross-Origin-Credentials aktivieren | `withCredentials(true)`                                                                                 |
-| `withSSEOptions`       | SSE-Optionen konfigurieren          | `withSSEOptions({ method: 'POST' })`                                                                    |
-| `withWebSocketOptions` | WebSocket-Optionen konfigurieren    | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
+Lege Endpunktdefinitionen in Modulen ab, die deine Service-API beschreiben. Verwende die Command-Builder aus Komponenten, Route-Handlern, Jobs oder Stores. Erstelle den Client an der Grenze, die Endpunkt, Credentials, Interceptors und Lebenszyklus besitzt:
 
-## Wie geht es weiter
+- Eine Browseranwendung kann meist einen Client gemeinsam verwenden.
+- Beim Server-Rendering braucht jede Anfrage einen eigenen Client, wenn Header, Cookies, Benutzer oder Mandanten variieren.
+- Code, der SSE- oder WebSocket-Ressourcen öffnet, muss sie auch konsumieren und schließen.
 
-- [Client →](/core/client) — Clients erstellen, Commands ausführen und konfigurieren
-- [Commands →](/core/commands) — `defineRequest`, `defineEventStream`, `defineWebSocket`
-- [Errors →](/core/errors) — `RequestError`-Struktur und Branching-Patterns
+## Nächste Schritte
+
+- [Commands](/de-DE/core/commands) erklärt automatisches Request-Mapping und eigene schemagebundene Projektionen.
+- [Fehler](/de-DE/core/errors) dokumentiert alle drei Transporttupel und die Union `RequestError`.
+- [HTTP](/de-DE/core/http) behandelt URL-Auflösung, Request-Bodies, Output-Dekodierung, Abbruch und XSRF-Verhalten.
+- [Beispiele](/de-DE/guide/examples) verbindet diese Verträge zu Rezepten, deren Lebenszyklus die Anwendung verwaltet.

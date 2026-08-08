@@ -1,35 +1,41 @@
 ---
 title: Errors
-description: RequestError structure, error classification, built-in constants, and recommended branching patterns.
+description: 处理不同 transport 的结果 tuple，并按普通对象形式的 RequestError discriminated union 分支。
 ---
 
-# 错误
+# Errors
 
-`@defjs/core` 中的所有执行结果都以 `[error, result, response]` 三元组返回。`error` 是 `RequestError`：一个以 `kind` 和 `code` 区分的联合类型。推荐通过 `kind` 和 `code` 进行分支，而非字符串比较。
-
-## RequestError 结构
-
-`RequestError` 是三种错误类型的联合：
+每种受支持的 transport 都返回 error-first 三元素 tuple，但第三项的含义取决于 transport。
 
 ```typescript
-import type { RequestError } from '@defjs/core'
-
-type RequestError<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+const [httpError, data, response] = await client.execute(httpCommand)
+const [sseError, stream, startupOpen] = await client.execute(sseCommand)
+const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-所有错误共享以下公共字段：
+- HTTP 返回解码后的 data 和 Defjs `SettledResponse` wrapper。
+- SSE 返回逻辑 stream handle 和启动 open 快照。
+- WebSocket 返回逻辑 session 和启动 connection 快照。
 
-| 字段       | 类型                                    | 说明                                             |
-| ---------- | --------------------------------------- | ------------------------------------------------ |
-| `kind`     | `'http' \| 'transport' \| 'definition'` | 错误类别，用于顶层分支                           |
-| `code`     | `string`                                | 精确错误码，用于二级分支                         |
-| `message`  | `string`                                | 人类可读的错误描述                               |
-| `data`     | `unknown`                               | 附加数据（仅 `http` 和 `definition` 错误有）     |
-| `response` | `SettledResponseLike`                   | 原始响应对象（仅 `http` 和 `definition` 错误有） |
+失败时，第二项是 `undefined`。如果 transport 在产生对应快照之前就启动失败，第三项也可能是 `undefined`。
 
-### HttpStatusError
+## `RequestError`
 
-当服务器返回非 2xx 状态码且该状态码在 `output` 中定义时产生。
+`RequestError` 是 tuple 中返回的普通 discriminated object，不继承原生 `Error` class。
+
+```typescript
+import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
+
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+```
+
+导出的 union 名称是 `RequestError<TErrorData>`。
+
+先按 `kind` 分支，需要时再按 `code` 分支。
+
+### HTTP Status Error
+
+已声明的非 2xx HTTP response 会产生：
 
 ```typescript
 interface HttpStatusError<TErrorData = unknown> {
@@ -42,24 +48,26 @@ interface HttpStatusError<TErrorData = unknown> {
 }
 ```
 
-`data` 类型从 `output` 中匹配状态码的结构推导。例如，`output: { 404: notFoundStruct }` 会将 `error.data` 窄化为 `notFoundStruct` 的推断类型。
+只有 `HttpStatusError` 有 `data`。它的类型是该 endpoint 所有已声明非 2xx output body 的 union。检查 `error.status` 目前不会缩窄这个 union。不同 status 的 body shape 不同时，请使用应用自己定义的结构检查或 discriminant。
 
-### TransportError
+### Transport Error
 
-当网络或传输层失败时产生，包括中止、超时和一般网络错误。
+网络操作失败、取消或 timeout 会产生：
 
 ```typescript
 interface TransportError {
   kind: 'transport'
-  code: 'ABORTED' | 'TIMEOUT' | 'NETWORK_ERROR'
+  code: 'ABORTED' | 'NETWORK_ERROR' | 'TIMEOUT'
   message: string
   cause?: unknown
 }
 ```
 
-### DefinitionError
+Transport error 没有 `data` 或 `response` 字段。
 
-当请求定义或验证失败时产生。
+### Definition Error
+
+输入解码、请求构建、response 解码或未声明 HTTP status 可能产生：
 
 ```typescript
 interface DefinitionError {
@@ -71,184 +79,89 @@ interface DefinitionError {
 }
 ```
 
-| 错误码                       | 触发场景                                             |
-| ---------------------------- | ---------------------------------------------------- |
-| `REQUEST_VALIDATION_FAILED`  | 输入参数未通过 `input` 结构验证，或 `build` 抛出异常 |
-| `RESPONSE_VALIDATION_FAILED` | 响应体未通过返回状态码对应的 `output` 结构验证       |
-| `UNDECLARED_STATUS`          | 服务器返回了 2xx 状态码，但未在 `output` 中声明      |
+| Code                         | 当前触发条件                                                     |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `REQUEST_VALIDATION_FAILED`  | 输入结构化解码失败、请求构造失败，或 `build` 产生无效 binding。  |
+| `RESPONSE_VALIDATION_FAILED` | 已声明的 response 或 SSE 启动 response 未通过结构/content 校验。 |
+| `UNDECLARED_STATUS`          | 声明了 `output`，但 HTTP 返回的 status 没有对应 Struct。         |
 
-## 错误分类和分支
+`UNDECLARED_STATUS` 同时适用于未匹配的 2xx 和非 2xx status。
 
-**不要**使用字符串比较来判断错误类型：
-
-```typescript
-// 不推荐：脆弱且无类型收窄
-if (error.message.includes('timeout')) { ... }
-```
-
-**推荐**：通过 `kind` 和 `code` 分支，实现精确的类型收窄：
+## 分支处理
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+declare const useUser: (user: unknown) => void
 
-const client = createClient(/* ... */)
+const [error, user, response] = await client.execute(getUser())
 
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ code: struct.string(), message: struct.string() }),
-  },
-})
-
-const [error, user] = await client.execute(getUser())
-
-if (error) {
+if (!error) {
+  useUser(user)
+} else {
   switch (error.kind) {
-    case 'http': {
-      // error 被窄化为 HttpStatusError
-      console.error('HTTP', error.status, error.message)
-      if (error.status === 404) {
-        // error.data 被窄化为 { code: string; message: string }
-        console.error('Not found:', error.data.code)
-      }
+    case 'http':
+      console.error('HTTP request failed', {
+        operation: 'get-user',
+        status: error.status,
+      })
       break
-    }
-    case 'transport': {
-      // error 被窄化为 TransportError
+
+    case 'transport':
       switch (error.code) {
         case 'ABORTED':
-          console.error('Request aborted')
+          console.info('get-user cancelled')
           break
         case 'TIMEOUT':
-          console.error('Request timed out')
+          console.warn('get-user timed out')
           break
         case 'NETWORK_ERROR':
-          console.error('Network error:', error.cause)
+          console.error('get-user transport failed')
           break
       }
       break
-    }
-    case 'definition': {
-      // error 被窄化为 DefinitionError
-      switch (error.code) {
-        case 'REQUEST_VALIDATION_FAILED':
-          console.error('Request validation failed:', error.cause)
-          break
-        case 'RESPONSE_VALIDATION_FAILED':
-          console.error('Response validation failed:', error.cause)
-          break
-        case 'UNDECLARED_STATUS':
-          console.error('Undeclared status:', error.response?.status)
-          break
-      }
+
+    case 'definition':
+      console.error('get-user contract failed', {
+        code: error.code,
+        status: error.response?.status,
+      })
       break
-    }
   }
 }
 ```
 
-## 内置常量
+没有明确的脱敏和保留策略时，不要记录 `cause`、`data`、response headers、body 或 URL。
 
-`@defjs/core` 导出两个常量，用于识别特定的传输错误：
+## Response 可用性
 
-```typescript
-import { ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
+`SettledResponseLike` 和 `SettledResponse` 是 Defjs wrapper，不是原生 `Response`。它们暴露 status、status text、headers、URL、body、可选错误信息；settled wrapper 还提供 `ok`。`ok` 只表示 status 在 2xx 范围内。
 
-// ERR_ABORTED: 请求被主动取消
-// ERR_TIMEOUT: 请求超时
-```
+对于 HTTP：
 
-### 在拦截器中触发取消
+- 已声明的 HTTP status error 有 `error.response`；
+- response output 校验错误和未声明 status 可能有 `error.response`；
+- 请求校验、收到 response 前的取消、interceptor 抛错和 status-0 transport failure 可能没有 tuple response。
 
-```typescript
-import { createHttpInterceptor, ERR_ABORTED } from '@defjs/core'
+SSE 启动失败时，如果 response 已经到达，随后才发生 content 或 status 校验失败，仍可能返回第三项 open 快照。WebSocket 启动失败时，只有已经捕获 connection 快照才可能返回第三项。
 
-const authInterceptor = createHttpInterceptor(async (req, next) => {
-  const token = await getToken()
-  if (!token) {
-    throw ERR_ABORTED
-  }
-  req.setHeader('Authorization', `Bearer ${token}`)
-  return next(req)
-})
-```
+## Error Factory 与常量
 
-### 与 AbortController 配合使用
+Root entry 为集成代码导出以下 factory helper：
 
 ```typescript
-import { ERR_ABORTED } from '@defjs/core'
-
-const controller = new AbortController()
-controller.abort(ERR_ABORTED)
-
-const [error] = await client.execute(getUser(), { signal: controller.signal })
-// error.code === 'ABORTED'
+import { ERR_ABORTED, ERR_TIMEOUT, createDefinitionError, createHttpStatusError, createTransportError } from '@defjs/core'
 ```
 
-### 手动创建传输错误
+- `createTransportError(cause)`：归一化 abort、timeout 和其他 cause。
+- `createDefinitionError(code, cause, response?)`：创建 definition error。
+- `createHttpStatusError(status, message, response, data?)`：创建 HTTP status error。
+- `ERR_ABORTED` 和 `ERR_TIMEOUT`：normalizer 能识别的共享 `Error` 值。
 
-```typescript
-import { createTransportError, ERR_TIMEOUT } from '@defjs/core'
+这些 helper 创建普通 `RequestError` 对象，不会抛出它们。
 
-const error = createTransportError(ERR_TIMEOUT)
-// { kind: 'transport', code: 'TIMEOUT', message: 'Request timed out' }
-```
-
-## 辅助函数
-
-### `createTransportError`
-
-将原始异常规范化为 `TransportError`。
-
-```typescript
-import { createTransportError, ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
-
-createTransportError(ERR_ABORTED)
-// => { kind: 'transport', code: 'ABORTED', message: 'Request was aborted' }
-
-createTransportError(ERR_TIMEOUT)
-// => { kind: 'transport', code: 'TIMEOUT', message: 'Request timed out' }
-
-createTransportError(new Error('offline'))
-// => { kind: 'transport', code: 'NETWORK_ERROR', message: 'offline' }
-```
-
-### `createDefinitionError`
-
-将原始异常规范化为 `DefinitionError`。
-
-```typescript
-import { createDefinitionError } from '@defjs/core'
-
-createDefinitionError('REQUEST_VALIDATION_FAILED', new Error('invalid id'))
-// => { kind: 'definition', code: 'REQUEST_VALIDATION_FAILED', message: 'invalid id' }
-```
-
-### `createHttpStatusError`
-
-将非 2xx 响应规范化为 `HttpStatusError`。
-
-```typescript
-import { createHttpStatusError } from '@defjs/core'
-
-const response = {
-  body: { code: 'NOT_FOUND' },
-  headers: new Headers(),
-  ok: false,
-  status: 404,
-  statusText: 'Not Found',
-  url: 'https://api.example.com/v1/user',
-}
-
-createHttpStatusError(404, 'Not Found', response, { code: 'NOT_FOUND' })
-// => { kind: 'http', code: 'HTTP_STATUS', status: 404, message: 'Not Found', data: { code: 'NOT_FOUND' }, response }
-```
+内置 command 路径会把预期内的启动失败转换成 tuple。Tuple handling 不覆盖任意扩展代码：自定义 interceptor 和应用 callback 仍可能抛错；把不支持的 command 传给宽泛的 runtime implementation 也会 reject。
 
 ## 下一步
 
-- [客户端 →](/core/client) — 创建客户端和执行命令
-- [HTTP 请求 →](/core/http) — `defineRequest` 和输出模式
-- [SSE →](/core/sse) — SSE 错误和重连策略
-- [WebSocket →](/core/web-socket) — WebSocket 连接错误处理
+- [HTTP](/zh-Hans/core/http)：status dispatch 和 response 解码。
+- [SSE](/zh-Hans/core/sse)：启动失败与 open 后错误的区别。
+- [WebSocket](/zh-Hans/core/web-socket)：runtime error 和终止关闭。

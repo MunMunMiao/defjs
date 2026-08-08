@@ -1,197 +1,101 @@
 ---
-title: Getting Started
-description: Install @defjs/core, use it via CDN, and create your first typed request in three steps.
+title: البدء
+description: ثبّت Defjs، وعرّف endpoint HTTP مضبوط النوع، وأنشئ client واستعمله داخل تطبيقك.
 ---
 
-# البدء السريع
+# البدء
 
-Defjs هي مكتبة TypeScript لتعريف واجهات برمجة تطبيقات مكتوبة وتنفيذها عبر وسائل نقل متعددة وبيئات تشغيل JavaScript.
+يتيح Defjs لتطبيقك وصف عقد API مرة واحدة، ثم إعادة استخدامه مع input مضبوط النوع، وفك ترميز وقت التشغيل، ونتائج transport واضحة.
 
 ## التثبيت
 
-استخدم مدير الحزم الذي تفضله:
+أضف الحزمة الأساسية إلى تطبيقك:
 
-::: code-group
-
-```sh [npm]
-npm install @defjs/core
-```
-
-```sh [yarn]
-yarn add @defjs/core
-```
-
-```sh [pnpm]
+```sh
 pnpm add @defjs/core
 ```
 
-```sh [bun]
-bun add @defjs/core
-```
+استخدم أمر npm أو Yarn أو Bun المكافئ إذا كان مشروعك يستعمل مدير حزم آخر. حزمة `@defjs/core` بنمط ESM. وعند تشغيلها على Node.js، تتطلب metadata الحالية Node 26 أو أحدث.
 
+أضف adapter فقط عندما يحتاجه تطبيقك:
+
+| إعداد التطبيق            | الحزم                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| React 18+                | `@defjs/core`، `@defjs/react`، `react`                                                    |
+| Vue 3+                   | `@defjs/core`، `@defjs/vue`، `vue`                                                        |
+| OpenTelemetry على الخادم | `@defjs/core`، `@defjs/opentelemetry-server`، `@opentelemetry/api`، `@opentelemetry/core` |
+
+::: tip استخدم الوثائق المطابقة للإصدار المثبّت
+تشرح هذه الصفحات الـ API الخاص بإصدار الوثائق الحالي. تحقّق من الإصدار المثبّت في تطبيقك. إذا اختلف export أو option، فاستخدم وثائق ذلك الإصدار وملاحظات إصداره بدل خلط أمثلة من إصدارات مختلفة.
 :::
 
-## استخدام CDN
+## عرّف طلبك الأول
 
-استورد مباشرة كوحدة ES دون أداة بناء:
-
-```typescript
-import { createClient, defineRequest, struct } from 'https://unpkg.com/@defjs/core/index.min.js'
-```
-
-## ثلاث خطوات لأول طلب لك
-
-### الخطوة 1: إنشاء عميل
-
-العميل هو نقطة الدخول لتنفيذ جميع الطلبات. أنشئ نسخة بـ `createClient` واضبط نقطة النهاية الأساسية:
+افترض أن API تطبيقك يوفّر `GET /users/:id`. استبدل base URL وresponse Structs بالعقد الفعلي لخدمتك.
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-```
-
-### الخطوة 2: تعريف طلب
-
-استخدم `defineRequest` لتعريف نقطة نهاية HTTP مكتوبة. استخدم `struct` لوصف شكل المدخلات والاستجابات:
-
-```typescript
-import { defineRequest, struct } from '@defjs/core'
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user/:id',
-  input: struct.object({
-    id: struct.number(),
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-    404: struct.object({
-      message: struct.string(),
-    }),
-  },
-})
-```
-
-::: tip
-المفاتيح في `output` هي رموز حالة HTTP. يحدد Defjs تلقائيًا المخطط المطابق وقت التشغيل ويستنتج أنواع TypeScript وفقًا لذلك: تُعتبر استجابات 2xx بيانات نجاح، والاستجابات غير 2xx بيانات خطأ.
-:::
-
-### الخطوة 3: التنفيذ
-
-استدعِ `client.execute` مع أمر طلبك وإعداد اختياري:
-
-```typescript
-const [error, user, response] = await client.execute(getUser({ id: 1 }))
-
-if (error) {
-  // الخطأ مكتوب بناءً على مخططات غير 2xx في output
-  console.error(error.code, error.message)
-  return
-}
-
-// user مكتوب كـ { id: number; name: string }
-console.log(user.name)
-```
-
-## مثال كامل
-
-إليك مثال من النهاية إلى النهاية مع تحقق من المدخلات، تحقق من المخرجات، معالجة الأخطاء، واعتراض:
-
-```typescript
-import { createClient, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
-
-// 1. إنشاء العميل
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors([
-    async (request, next) => {
-      request.headers.set('Authorization', 'Bearer token')
-      return next(request)
-    },
-  ]),
-)
-
-// 2. تعريف الطلب
-const createPost = defineRequest({
-  method: 'POST',
-  path: '/v1/posts',
-  input: struct.object({
-    title: struct.string(),
-    body: struct.string(),
-    'X-Request-ID': struct.string(),
-  }),
-  build: (input) => ({
-    body: { title: input.title, body: input.body },
-    headers: { 'X-Request-ID': input['X-Request-ID'] },
-  }),
-  output: {
-    201: struct.object({
-      id: struct.number(),
-      title: struct.string(),
-    }),
-    400: struct.object({
-      field: struct.string(),
-      reason: struct.string(),
-    }),
-  },
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-// 3. التنفيذ
-async function createPost() {
-  const [error, post, response] = await client.execute(
-    createPost({
-      title: 'Hello',
-      body: 'World',
-      'X-Request-ID': 'uuid-123',
-    }),
-  )
+async function loadUser(id: number) {
+  const [error, user, response] = await client.execute(getUser({ path: { id } }))
 
   if (error) {
-    switch (error.code) {
-      case 'HTTP_STATUS':
-        console.error('Validation failed:', error.data)
-        break
-      case 'REQUEST_VALIDATION_FAILED':
-        console.error('Request validation failed:', error.message)
-        break
-      case 'RESPONSE_VALIDATION_FAILED':
-        console.error('Response validation failed:', error.message)
-        break
-      case 'TRANSPORT_ERROR':
-        console.error('Network error:', error.message)
-        break
-      default:
-        console.error('Unknown error:', error)
-    }
+    console.error(error.kind, error.code)
     return
   }
 
-  console.log('Created post:', post.id, post.title)
+  console.log(user.name, response.status)
+}
+
+void loadUser(7)
+```
+
+تعيد `defineRequest(...)` **منشئ أمر**. وينشئ استدعاء `getUser(...)` **أمرًا** يحمل تعريف نقطة النهاية ومدخلات الاستدعاء. بعد ذلك تعيد `client.execute(...)` tuple خاصًا بـ HTTP من ثلاثة عناصر:
+
+```typescript
+;[error, result, response]
+```
+
+عند النجاح تكون `error` مساوية لـ `null`، وتكون `result` البيانات بعد فك ترميزها، وتكون `response` غلاف `SettledResponse` من Defjs. عند الفشل تكون `result` مساوية لـ `undefined`؛ ويكون غلاف الاستجابة أيضًا `undefined` إذا لم تصل أي استجابة.
+
+### لماذا تهم `as const`؟
+
+يستخدم الشكل المصفوفي لـ `output` قيم status الحرفية للفصل بين أجسام نجاح 2xx وأجسام أخطاء non-2xx. تحافظ `as const` على قيم status هذه، وعلى مصفوفات status المجمّعة، كقيم readonly حرفية. من دونها قد يوسّعها TypeScript إلى `number` أو `number[]`، ما يضعف استنتاج فرعي النجاح والخطأ.
+
+الشكل الكائني لـ output مدعوم أيضًا:
+
+```typescript
+const output = {
+  '200': struct.object({ id: struct.number() }),
+  '404': struct.object({ message: struct.string() }),
 }
 ```
 
-## مرجع سريع لواجهة برمجة التطبيقات الأساسية
+## استخدمه داخل تطبيقك
 
-| API                    | الوصف                              | الاستخدام النموذجي                                                                                      |
-| ---------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `createClient`         | إنشاء عميل طلب                     | `createClient(withEndpoint('https://api.example.com'))`                                                 |
-| `defineRequest`        | تعريف نقطة نهاية HTTP              | `defineRequest({ method: 'GET', path: '/user', output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | تعريف نقطة نهاية SSE               | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                          |
-| `defineWebSocket`      | تعريف نقطة نهاية WebSocket         | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                  |
-| `struct`               | منشئ المخطط                        | `struct.object({ id: struct.number() })`                                                                |
-| `.alias(name)`         | اسم wire بديل للحقول               | `struct.string().alias('user_name')`                                                                    |
-| `withEndpoint`         | تعيين عنوان URL الأساسي            | `withEndpoint('https://api.example.com')`                                                               |
-| `withInterceptors`     | تسجيل الاعتراضات                   | `withInterceptors([...interceptors])`                                                                   |
-| `withCredentials`      | تمكين بيانات الاعتماد عبر النطاقات | `withCredentials(true)`                                                                                 |
-| `withSSEOptions`       | ضبط خيارات SSE                     | `withSSEOptions({ method: 'POST' })`                                                                    |
-| `withWebSocketOptions` | ضبط خيارات WebSocket               | `withWebSocketOptions({ protocols: ['v1'] })`                                                           |
+ضع تعريفات endpoints في modules تصف API خدمتك. أعد استخدام command builders من components أو route handlers أو jobs أو stores. أنشئ client عند الحد الذي يملك endpoint وcredentials وinterceptors ودورة الحياة:
 
-## ما التالي
+- يمكن لتطبيق المتصفح عادةً مشاركة client واحد؛
+- في server rendering، أنشئ client خاصًا بكل request عندما تختلف headers أو cookies أو المستخدم أو tenant؛
+- الكود الذي يفتح SSE أو WebSocket مسؤول أيضًا عن استهلاك المورد وإغلاقه.
 
-- [العميل →](/core/client) — إنشاء العملاء، تنفيذ الأوامر، والإعداد
-- [الأوامر →](/core/commands) — `defineRequest`، `defineEventStream`، `defineWebSocket`
-- [الأخطاء →](/core/errors) — بنية `RequestError` وأنماط التفريع
+## الخطوات التالية
+
+- تشرح [الأوامر](/ar/core/commands) الربط التلقائي للطلب والإسقاطات المخصصة المرتبطة بالـ Struct.
+- توثّق [الأخطاء](/ar/core/errors) tuples الخاصة بوسائل النقل الثلاث واتحاد `RequestError`.
+- تغطي [HTTP](/ar/core/http) حل URL وأجسام الطلب وفك ترميز المخرجات والإلغاء وسلوك XSRF.
+- تجمع [الأمثلة](/ar/guide/examples) هذه العقود في وصفات يملك التطبيق دورة حياتها.

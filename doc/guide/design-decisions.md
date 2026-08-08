@@ -1,232 +1,60 @@
 ---
 title: Design Decisions
-description: API design decisions that may differ from common patterns in other HTTP libraries.
+description: Why Defjs uses explicit clients, transport-specific tuples, execute-time lifecycle options, projection-based builds, and observers.
 ---
 
 # Design Decisions
 
-Defjs intentionally diverges from some common patterns found in other HTTP libraries. This document explains the design rationale behind each decision.
+This page explains the reasoning behind the current API. The reference pages describe the fields and defaults.
 
-## Explicit Client Design
+## Explicit Clients
 
-Defjs requires every client to be explicitly created. You create a `Client` with `createClient` and pass it to where it is needed.
+Defjs has no default process-wide client. `createClient(...)` makes ownership visible at the call site and lets an application create different clients for different endpoints, credentials, tests, or request scopes.
 
-```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+That isolation has limits. Interceptors and option callbacks can close over shared application state, so two client objects are not automatically isolated from everything around them. `setErrorMap(...)` is also process-global. Server code should create request-scoped clients whenever options or closures contain request, user, tenant, cookie, or authorization data.
 
-const client = createClient(withEndpoint('https://api.example.com'))
+An explicit client also makes resource ownership easier to discuss, but the client is not a resource manager. It does not track or dispose active HTTP requests, SSE handles, or WebSocket sessions.
 
-const [error, data] = await client.execute(getUser())
-```
+## Transport-Specific Tuples
 
-Why this design:
-
-- **Test-friendly**: Pass different `Client` instances directly to tests without needing to reset or mock any state.
-- **Multi-environment coexistence**: Multiple clients can run in parallel in the same process (e.g., internal API + public API) without interference.
-- **Dependency transparency**: Callers must explicitly hold a `Client`, making dependencies visible for static analysis and code review.
-
-If you need a shared client in your application, export it from a module:
+All supported commands use an error-first three-item tuple, but the third item keeps its transport meaning:
 
 ```typescript
-// api/client.ts
-import { createClient, withEndpoint } from '@defjs/core'
-
-export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
+const [httpError, data, response] = await client.execute(httpCommand)
+const [sseError, stream, startupOpen] = await client.execute(sseCommand)
+const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-## Framework Integration
+This avoids collapsing an HTTP response wrapper, an SSE startup-open snapshot, and a WebSocket startup-connection snapshot into one vague abstraction. The second item follows the same rule: HTTP returns decoded data, SSE returns a logical stream handle, and WebSocket returns a logical session.
 
-`@defjs/vue` and `@defjs/react` integrate explicit clients with each framework's dependency model. Vue uses `provideClient` / `injectClient`; React uses `ClientProvider` / `useClient`. This allows clients to be registered and retrieved within the component or service tree.
+The tuple makes expected startup failures explicit without forcing exception-based control flow. It is not a promise that arbitrary interceptors, callbacks, listeners, or unsupported values can never reject or throw.
 
-### Vue
+## Lifecycle Options Belong to Execution
 
-```typescript
-import { provideClient, withEndpoint, injectClient } from '@defjs/vue'
+Endpoint definitions describe stable wire contracts. Cancellation, timeout, heartbeat, reconnect, and queue choices belong to the execution that owns the work.
 
-app.use(provideClient(withEndpoint('https://api.example.com')))
+HTTP and SSE accept cancellation options at execution time. WebSocket also accepts per-execution connection, heartbeat, reconnect, protocol, and send-queue options. Client options provide reusable defaults where the transport supports them.
 
-const client = injectClient()
-const [error, user] = await client.execute(getUser())
-```
+This split keeps a command reusable. A background job and an interactive screen can execute the same command with different lifetimes without redefining its path or message schema.
 
-### React
+## `build` Uses Projections
 
-```tsx
-import { ClientProvider, useClient, withEndpoint } from '@defjs/react'
+Custom `build(request, input)` receives a declarative binding view derived from the input Struct. It has no access to caller runtime values.
 
-export function App() {
-  return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
-      <UserProfile />
-    </ClientProvider>
-  )
-}
+The view records how source fields map to path, query, headers, and body targets. That model supports field projection, explicit wire keys, and one-to-one array projection. It deliberately prevents value-dependent branching, arbitrary transforms, and injected literal projection values.
 
-function UserProfile() {
-  const client = useClient()
-  // use client.execute(...) inside component logic
-}
-```
+This restriction keeps request construction tied to declared Struct fields. Application-level normalization and business validation should happen before creating a command. See [Commands](/core/commands) for the supported projection forms.
 
-## Request-Level Options in `execute`, Not Builder
+## Observers Do Not Own Control Flow
 
-Request-level options (`abort`, `timeout`, `heartbeat`, `reconnect`, etc.) are passed via the second argument of `client.execute`, not the command builder.
+SSE `onInvalidEvent` observes dropped events. A thrown or rejected observer result is caught so it does not terminate the stream, although an async observer is awaited and can delay later message processing.
 
-```typescript
-// Correct: request-level options go to execute
-const [error, user] = await client.execute(getUser(), { timeout: 5000 })
-```
+WebSocket state and runtime-error listeners are also observers, but the current implementation invokes them directly. Applications should keep them synchronous, non-throwing, and small. Throwing listeners can disrupt lifecycle work and are not a supported control-flow mechanism.
 
-## Overloaded `execute` by Command Type
+Use the returned handle or session for lifecycle decisions. Use observers for bounded logging, metrics, or state updates, and remove them when their owner is disposed.
 
-`client.execute` is overloaded to return the correct result type based on the `Command` type automatically.
+## Related Reference
 
-```typescript
-// HTTP request — returns HttpAwaitResult
-const [error, user, response] = await client.execute(httpCommand())
-
-// SSE stream — returns StreamAwaitResult
-const [error, stream, open] = await client.execute(sseCommand())
-
-// WebSocket — returns SocketAwaitResult
-const [error, socket, connection] = await client.execute(wsCommand())
-```
-
-## `onInvalidEvent` is an Observer
-
-SSE's `onInvalidEvent` is an observer. Exceptions thrown inside it are silently ignored and do not interrupt the stream.
-
-```typescript
-import { createClient, withEndpoint, withSSEOptions } from '@defjs/core'
-
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEOptions({
-    onInvalidEvent: async ({ reason, message }) => {
-      console.warn(`Skipped invalid event [${reason}]: ${message.event}`)
-      // Even if this throws, the stream continues
-    },
-  }),
-)
-```
-
-## Error Submodule Consolidation
-
-All error symbols are exported from the main `@defjs/core` entry.
-
-| Export                  | Description              | Typical Usage                                               |
-| ----------------------- | ------------------------ | ----------------------------------------------------------- |
-| `RequestError`          | Error union type         | `switch (error.kind)` branching                             |
-| `ERR_ABORTED`           | Abort identifier         | `controller.abort(ERR_ABORTED)`                             |
-| `ERR_TIMEOUT`           | Timeout identifier       | `createTransportError(ERR_TIMEOUT)`                         |
-| `createTransportError`  | Create transport error   | `createTransportError(new Error('offline'))`                |
-| `createDefinitionError` | Create definition error  | `createDefinitionError('REQUEST_VALIDATION_FAILED', cause)` |
-| `createHttpStatusError` | Create HTTP status error | `createHttpStatusError(404, 'Not Found', response, data)`   |
-
-Import from the main entry:
-
-```typescript
-import { RequestError, ERR_ABORTED, ERR_TIMEOUT, createTransportError, createDefinitionError, createHttpStatusError } from '@defjs/core'
-```
-
-## Error Branching by `kind` and `code`
-
-Defjs recommends branching by `kind` and `code` instead of string comparisons.
-
-```typescript
-const [error, user] = await client.execute(getUser())
-
-if (error) {
-  switch (error.kind) {
-    case 'http': {
-      console.error('HTTP', error.status, error.message)
-      if (error.status === 404) {
-        console.error('Not found:', error.data.code)
-      }
-      break
-    }
-    case 'transport': {
-      switch (error.code) {
-        case 'ABORTED':
-          console.error('Request aborted')
-          break
-        case 'TIMEOUT':
-          console.error('Request timed out')
-          break
-        case 'NETWORK_ERROR':
-          console.error('Network error:', error.cause)
-          break
-      }
-      break
-    }
-    case 'definition': {
-      switch (error.code) {
-        case 'REQUEST_VALIDATION_FAILED':
-          console.error('Request validation failed:', error.cause)
-          break
-        case 'RESPONSE_VALIDATION_FAILED':
-          console.error('Response validation failed:', error.cause)
-          break
-        case 'UNDECLARED_STATUS':
-          console.error('Undeclared status:', error.response?.status)
-          break
-      }
-      break
-    }
-  }
-}
-```
-
-## Stricter Endpoint Definition Rules
-
-Defjs enforces a strict rule: **when `build` is provided, `input` must also be provided.**
-
-```typescript
-// Correct: has input and build
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-  },
-  output: [{ status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) }] as const,
-})
-
-// Correct: no input and no build
-const listUsers = defineRequest({
-  method: 'GET',
-  path: '/users',
-  output: [{ status: 200, body: struct.object({ items: struct.array(struct.object({ id: struct.number() })) }) }] as const,
-})
-
-// Error: has build but no input
-const badRequest = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  build(ctx, input) {
-    ctx.setPathParams({ id: input.id }) // TypeScript error: missing input struct
-  },
-  output: [{ status: 200, body: struct.object({ id: struct.number() }) }] as const,
-})
-```
-
-This rule also applies to `defineEventStream` and `defineWebSocket`.
-
-## Dependencies
-
-| Package        | Required Version |
-| -------------- | ---------------- |
-| `@defjs/core`  | `^0.4.0`         |
-| `@defjs/vue`   | `^0.4.0`         |
-| `@defjs/react` | `^0.4.0`         |
-
-React peer dependency range: `>=18.0.0`. Node runtime: `>=26`.
-
-## What's Next
-
-- [Client →](/core/client) — Explicit client design and configuration
-- [Commands →](/core/commands) — Command definitions and input rules
-- [Errors →](/core/errors) — `RequestError` structure and branching
+- [Client](/core/client) documents option composition and client scope.
+- [Errors](/core/errors) documents tuple failures and response availability.
+- [SSE](/core/sse) and [WebSocket](/core/web-socket) document logical handles, physical attempts, and terminal close.

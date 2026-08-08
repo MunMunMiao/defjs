@@ -1,15 +1,10 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["@types/node", "vitest/globals"],
-    "isolatedModules": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noPropertyAccessFromIndexSignature": true,
     "paths": {
       "@defjs/core": ["../core/src"]
     }
   },
-  "include": ["src/**/*", "test/**/*.ts", "e2e.spec.ts", "scripts/**/*.ts"]
+  "include": ["*.ts", "src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist", "coverage"]
 }

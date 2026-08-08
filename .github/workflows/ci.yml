@@ -6,65 +6,20 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      any: ${{ steps.filter.outputs.any }}
-      docs: ${{ steps.filter.outputs.docs }}
-      packages: ${{ steps.filter.outputs.packages }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            any:
-              - '**'
-              - '!**/*.drawio'
-              - '!LICENSE'
-            packages:
-              - 'packages/**'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-              - 'tsconfig.json'
-              - '.github/**'
-            docs:
-              - 'doc/**'
-              - 'docs/**'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-              - '.github/**'
-
   checks:
-    needs: changes
-    if: ${{ needs.changes.outputs.packages == 'true' }}
     uses: ./.github/workflows/_checks.yml
     secrets: inherit
 
-  docs:
-    needs: changes
-    if: ${{ needs.changes.outputs.docs == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-pnpm-deps
-      - name: Typecheck docs
-        run: pnpm --filter doc run typecheck
-      - name: Test docs
-        run: pnpm --filter doc run test
-      - name: Build docs
-        run: pnpm --filter doc run docs:build
-
   dependency-review:
-    needs: changes
-    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.any == 'true' }}
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -74,3 +29,25 @@ jobs:
       - uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
+
+  version-packages:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm-deps
+      - name: Create or update Version Packages PR
+        uses: changesets/action@v1
+        with:
+          commit: 'chore: version packages'
+          title: 'chore: version packages'
+          commitMode: github-api
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

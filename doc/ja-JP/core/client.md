@@ -1,15 +1,11 @@
 ---
 title: Client
-description: Create explicit clients, configure transport options, and execute HTTP, SSE, and WebSocket commands.
+description: 明示的にクライアントを作成し、オプションを合成してトランスポート別のコマンドを実行し、現在の設定を参照します。
 ---
 
-# クライアント
+# Client
 
-`@defjs/core` は**明示的なクライアント**設計を採用しています。すべてのリクエストは、あなたが明示的に作成した `Client` インスタンスを通じて実行されます。これにより、テスト、マルチ環境設定、および依存関係の追跡が簡潔になります。
-
-## クライアントの作成
-
-`createClient` を 1 つ以上の設定関数と組み合わせて使用します。
+`Client` は明示的に作成し、コマンドを実行するコードへ渡します。
 
 ```typescript
 import { createClient, withEndpoint } from '@defjs/core'
@@ -17,207 +13,137 @@ import { createClient, withEndpoint } from '@defjs/core'
 const client = createClient(withEndpoint('https://api.example.com'))
 ```
 
-設定関数は合成されます。後の関数が同じキーに対して先の関数を上書きします。
+クライアントは設定を保持し、HTTP、SSE、WebSocket のコマンドを振り分けます。グローバルレジストリや、バックグラウンドで動くライフサイクル管理機能は持ちません。
+
+## オプションの合成
+
+オプションは左から右へ実行されます。
 
 ```typescript
-import { createClient, withEndpoint, withHTTPHandle, withInterceptors, withCredentials } from '@defjs/core'
-
 const client = createClient(
+  withEndpoint('https://old.example.com'),
   withEndpoint('https://api.example.com'),
-  withHTTPHandle(myCustomFetch),
-  withCredentials(true),
-  withInterceptors(loggingInterceptor, authInterceptor),
+  withInterceptors(operationLogger),
+  withInterceptors(authInterceptor, retryInterceptor),
 )
 ```
 
-### 設定オプション
+最終的なエンドポイントは `https://api.example.com` です。インターセプターの順序は `operationLogger`、`authInterceptor`、`retryInterceptor` になります。
 
-| 関数                                | 説明                                                                  |
-| ----------------------------------- | --------------------------------------------------------------------- |
-| `withEndpoint(url)`                 | ベース API アドレス                                                   |
-| `withHTTPHandle(fetch)`             | HTTP 用のカスタム `fetch` 実装                                        |
-| `withSSEHandle(fetch)`              | SSE 用のカスタム `fetch` 実装                                         |
-| `withWebSocketHandle(WebSocket)`    | カスタム `WebSocket` コンストラクター（例: Node 用）                  |
-| `withInterceptors(...interceptors)` | トランスポート層インターセプターを登録。`kind` により自動配分されます |
-| `withQueryParamsSerializer(fn)`     | カスタムクエリパラメーターのシリアライズ                              |
-| `withCredentials(boolean)`          | クロスオリジンクレデンシャルを含めるかどうか                          |
-| `withXSRF(options)`                 | XSRF トークンの読み取りと注入の動作                                   |
-| `withSSEOptions(options)`           | SSE の再接続、キュー、無効イベント処理など                            |
-| `withWebSocketOptions(options)`     | WebSocket のハートビート、再接続、キュー、サブプロトコルなど          |
+合成規則は 3 つです。
 
-SSE および WebSocket 固有の設定については、[SSE](/core/sse) と [WebSocket](/core/web-socket) を参照してください。
+1. setter ヘルパーは値を置き換えます。`withEndpoint`、各トランスポートハンドル、クエリシリアライザー、認証情報、XSRF 設定、個別の SSE/WebSocket 設定が該当します。
+2. `withInterceptors(...items)` は末尾へ追加します。複数回呼ぶと、登録した順序が保たれます。
+3. `withSSEOptions(...)` と `withWebSocketOptions(...)` は、値が定義されている最上位フィールドごとに浅く置き換えます。内側の再接続、ハートビート、キューオブジェクトを再帰的にマージすることはありません。
 
-## コマンドの実行
-
-`Client.execute` は `Command` タイプに基づいて正しいトランスポート層にディスパッチするオーバーロードメソッドです。
-
-### HTTP リクエスト
-
-`defineRequest` で構築されたコマンドを渡します。トリプレットを返します：
+次の例では、2 番目の再接続オブジェクトが 1 番目を丸ごと置き換えます。`attempts: 5` は残りません。
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+const client = createClient(
+  withWebSocketOptions({
+    reconnect: { attempts: 5, delayMs: 500 },
+  }),
+  withWebSocketOptions({
+    reconnect: { delayMs: 2_000 },
+  }),
+)
+```
 
-const client = createClient(withEndpoint('https://api.example.com'))
+複数項目をまとめて設定するオプションヘルパーは、値が `undefined` のプロパティを無視します。それ以外に指定した最上位プロパティは、現在値を丸ごと置き換えます。
 
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-  },
+### Core オプション
+
+| オプション                       | 動作                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------- |
+| `withEndpoint(url)`              | 全トランスポートが使う絶対ベースエンドポイントを設定します。                 |
+| `withHTTPHandle(fetch)`          | HTTP 用の Fetch 実装を置き換えます。                                         |
+| `withSSEHandle(fetch)`           | SSE 用の Fetch 実装を置き換えます。                                          |
+| `withWebSocketHandle(WebSocket)` | WebSocket コンストラクターを置き換えます。                                   |
+| `withInterceptors(...items)`     | 複数トランスポートのインターセプターを末尾へ追加します。                     |
+| `withQueryParamsSerializer(fn)`  | HTTP、SSE、WebSocket のクエリシリアライズ処理を置き換えます。                |
+| `withCredentials(boolean)`       | `true` の場合、HTTP と SSE で Fetch の `credentials: 'include'` を使います。 |
+| `withXSRF(options?)`             | HTTP の XSRF トークン注入を設定します。                                      |
+| `withSSEOptions(options)`        | 定義済みの SSE フィールドを浅く置き換えます。                                |
+| `withWebSocketOptions(options)`  | 定義済みの WebSocket フィールドを浅く置き換えます。                          |
+
+SSE と WebSocket の個別ヘルパーは、対応する最上位フィールドを 1 つ設定します。デフォルト値とライフサイクルへの影響は各トランスポートのページを参照してください。
+
+## コマンドを実行する
+
+`Client.execute` には 3 つのオーバーロードがあります。どれもエラーを先頭に置く 3 要素タプルを返します。
+
+### HTTP
+
+```typescript
+const [error, data, response] = await client.execute(requestCommand, {
+  signal,
+  timeout: 5_000,
 })
-
-const [error, user, response] = await client.execute(getUser())
-
-if (error) {
-  console.error(error.code, error.message)
-} else {
-  console.log(user.id, user.name)
-}
 ```
 
-返り値の型：
+レスポンスが存在する場合、3 番目の要素は Defjs の `SettledResponse` ラッパーです。HTTP オプションには `abort` または `timeout`、追加の `signal` エイリアス、`context`、アップロード・ダウンロード進捗のオブザーバーがあります。
+
+### SSE
 
 ```typescript
-type HttpAwaitResult<TSuccess, TErrorData> =
-  | [error: null, result: TSuccess, response: SettledResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: SettledResponse<unknown> | undefined]
-```
-
-### SSE イベントストリーム
-
-`defineEventStream` で構築されたコマンドを渡します。ストリームハンドルと接続情報を返します。
-
-```typescript
-import { defineEventStream, struct } from '@defjs/core'
-
-const watchLogs = defineEventStream({
-  path: '/v1/logs/stream',
-  events: {
-    log: struct.object({ level: struct.string(), message: struct.string() }),
-  },
+const [error, stream, startupOpen] = await client.execute(streamCommand, {
+  signal,
 })
-
-const [error, stream, open] = await client.execute(watchLogs())
-
-if (error) {
-  console.error('Stream failed:', error)
-  return
-}
-
-for await (const event of stream) {
-  console.log(event.event, event.data)
-}
 ```
 
-返り値の型：
+3 番目の要素は、検証済みの起動時オープンスナップショットです。`stream.open` は別のライブ getter で、再接続後に変わることがあります。SSE 実行はキャンセルと `HttpContext` を受け取ります。再接続とイベントキューはクライアントオプションで設定します。
+
+### WebSocket
 
 ```typescript
-type StreamAwaitResult<TEvent> =
-  | [error: null, stream: EventStreamHandle<TEvent>, open: StreamOpenInfo]
-  | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
-```
-
-### WebSocket 接続
-
-`defineWebSocket` で構築されたコマンドを渡します。セッションオブジェクトを返します。
-
-```typescript
-import { defineWebSocket, struct } from '@defjs/core'
-
-const chat = defineWebSocket({
-  path: '/v1/chat',
-  incoming: {
-    message: struct.object({ text: struct.string() }),
-  },
-  outgoing: {
-    message: struct.object({ text: struct.string() }),
-  },
+const [error, session, startupConnection] = await client.execute(socketCommand, {
+  signal,
+  reconnect: { attempts: 3 },
 })
-
-const [error, session, connection] = await client.execute(chat())
-
-if (error) {
-  console.error('WebSocket failed:', error)
-  return
-}
-
-session.send({ type: 'message', data: { text: 'hello' } })
-
-for await (const msg of session.receive) {
-  console.log(msg.type, msg.data)
-}
 ```
 
-返り値の型：
+3 番目の要素は、起動時接続スナップショットです。`session.connection` はライブ getter で、後続の物理接続試行を表す値へ変わることがあります。WebSocket 実行はキャンセルのほか、実行ごとの `beforeConnect`、`heartbeat`、`protocols`、`queue`、`reconnect` を受け取ります。`HttpContext` は受け取りません。
+
+失敗時の正確な分岐は [Errors](/ja-JP/core/errors)、各トランスポートのライフサイクルは [HTTP](/ja-JP/core/http)、[SSE](/ja-JP/core/sse)、[WebSocket](/ja-JP/core/web-socket) を参照してください。
+
+## クライアントのスコープ
+
+ブラウザーアプリケーションでは、エンドポイントとクロージャがブラウザーで安全に扱えるリクエスト非依存の状態だけを含む場合、モジュールレベルのクライアントを使えます。
 
 ```typescript
-type SocketAwaitResult<TIncoming, TOutgoing> =
-  | [error: null, socket: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError<unknown>, socket: undefined, connection: WebSocketConnectionInfo | undefined]
+export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
 ```
 
-## ヘルパー関数
+サーバーでは、オプションやインターセプターが認可情報、Cookie、テナントデータ、ユーザーデータ、リクエストコンテキストを取り込む場合、そのクライアントを複数のリクエストで再利用しないでください。サーバーリクエストの境界内でクライアントを作成します。
 
-### `isClient`
+`Client` に `dispose()` メソッドはありません。実行中のリクエスト、ストリーム、セッションも追跡しません。処理を開始したコードが、対応するライフサイクル境界で HTTP リクエストをキャンセルし、SSE ハンドルまたは WebSocket セッションをクローズする必要があります。
 
-値が有効な `Client` インスタンスかどうかを確認します。
+## クライアント設定を確認する
+
+`isClient(value)` は、ランタイム上のクライアントマーカーを確認します。
 
 ```typescript
 import { isClient } from '@defjs/core'
 
-if (isClient(maybeClient)) {
-  const result = await maybeClient.execute(someCommand())
+export function keepClient(value: unknown) {
+  return isClient(value) ? value : undefined
 }
 ```
 
-### `getClientConfig`
-
-デバッグや高次の抽象化を構築するために、内部設定オブジェクトを抽出します。
+`getClientConfig(client)` は、クライアントが保持する現在の可変設定オブジェクトをそのまま返します。スナップショットでも読み取り専用ビューでもありません。
 
 ```typescript
-import { getClientConfig } from '@defjs/core'
+import { getClientConfig, type Client } from '@defjs/core'
 
-const config = getClientConfig(client)
-console.log(config.endpoint, config.interceptors.length)
+export function interceptorCount(client: Client): number {
+  return getClientConfig(client).interceptors.length
+}
 ```
 
-値が `Client` インスタンスでない場合、`getClientConfig` は `TypeError` をスローします。
-
-## 明示的なクライアント設計
-
-Defjs のすべてのクライアントは明示的に作成されます。`createClient` で `Client` を作成し、必要な場所に渡します。
-
-明示的に作成するメリット：
-
-- **テストしやすい**：異なる `Client` インスタンスをテストに直接渡すため、状態をリセットやモック化する必要がありません。
-- **マルチ環境の共存**：同一プロセス内で複数のクライアントを並行して実行できます（例: 内部 API + 公開 API）。
-- **依存関係の透明性**：呼び出し側は明示的に `Client` を保持する必要があり、静的解析やコードレビューで依存関係が可視化されます。
-
-アプリケーションで共有するクライアントが必要な場合は、モジュールからエクスポートしてください：
-
-```typescript
-// api/client.ts
-import { createClient, withEndpoint } from '@defjs/core'
-
-export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
-```
-
-ビジネスコードでインポートして使用します：
-
-```typescript
-import { apiClient } from './api/client'
-
-const [error, data] = await apiClient.execute(getUser())
-```
+このオブジェクトを変更すると後続の実行に影響し、通常のオプション合成規則を迂回します。診断用途か、十分にレビューした統合コードに限定してください。引数が有効なクライアントでなければ、`getClientConfig` は `TypeError` を送出します。
 
 ## 次に読む
 
-- [HTTP Requests →](/core/http) — `defineRequest` と出力パターン
-- [SSE →](/core/sse) — SSE の定義、再接続、イベントキュー
-- [WebSocket →](/core/web-socket) — WebSocket の定義、ハートビート、再接続戦略
-- [Interceptors →](/core/interceptors) — インターセプターの型とオニオンチェーンの仕組み
+- [Commands](/ja-JP/core/commands) — `execute` に渡す値
+- [Interceptors](/ja-JP/core/interceptors) — トランスポート別の選別とオニオン順
+- [Context](/ja-JP/core/context) — HTTP と SSE で使うリクエストスコープのメタデータ

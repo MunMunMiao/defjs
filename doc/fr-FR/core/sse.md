@@ -1,23 +1,17 @@
 ---
 title: SSE
-description: Use defineEventStream to define typed Server-Sent Events endpoints and consume streaming events through the client.
+description: Définissez et décodez des Server-Sent Events, consommez leur file partagée, configurez la reconnexion et fermez les flux ouverts.
 ---
 
 # SSE
 
-Defjs utilise `defineEventStream` pour définir des points de terminaison SSE (Server-Sent Events) typés. Après exécution, un triplet `[error, stream, openInfo]` est retourné, où `stream` est un async iterable pour consommer les événements poussés par le serveur un par un.
-
-## Définir un flux d'événements
-
-Quand tu définis un point de terminaison SSE, déclare le champ `events` mappant les noms d'événements à des structs. Le transport SSE livre chaque payload `data:` sous forme de texte brut ; Defjs sélectionne le struct correspondant et décode le texte selon le type de contenu de ce struct.
+`defineEventStream(...)` crée un constructeur de commande SSE. L'endpoint déclare son `path` et la Struct associée à chaque nom d'événement.
 
 ```typescript
-import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
+import { defineEventStream, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
-
-const useNotifications = defineEventStream({
-  path: '/v1/notifications',
+const notifications = defineEventStream({
+  path: '/notifications',
   events: {
     message: struct.json(
       struct.object({
@@ -30,71 +24,65 @@ const useNotifications = defineEventStream({
 })
 ```
 
-### Schéma d'événement par défaut (secours)
+La méthode par défaut est `GET`. Un endpoint peut en choisir une autre, mais le contexte `build` SSE haut niveau ne prend aucun corps de requête en charge.
 
-Si le serveur peut envoyer des types d'événements non explicitement déclarés dans `events`, fournis un struct `default` comme secours. Sans `default`, les événements inconnus sont silencieusement ignorés.
+## Décodage des événements
+
+L'analyseur SSE sélectionne `events[eventName]`, puis `events.default` s'il existe. Sans correspondance, il écarte l'événement et transmet `missing-struct` à l'observateur facultatif des événements invalides.
+
+Le champ SSE `data:` arrive sous forme de texte :
+
+- `struct.string()`, `struct.text()`, `struct.any()` et `struct.unknown()` reçoivent du texte ;
+- `struct.number()` retire les espaces autour du texte et accepte un nombre fini ;
+- `struct.boolean()` retire les espaces et n'accepte que `true` ou `false` ;
+- `struct.json(inner)` analyse le texte JSON, puis applique le décodage structurel avec `inner`.
+
+Un simple `struct.object(...)` n'analyse pas un texte d'événement qui ressemble à du JSON. Entourez-le de `struct.json(...)`.
+
+Une Struct `default` gère les noms qui ne sont pas déclarés autrement :
 
 ```typescript
-const useMixedStream = defineEventStream({
-  path: '/v1/events',
+const events = defineEventStream({
+  path: '/events',
   events: {
-    userconnect: struct.json(struct.object({ uid: struct.number() })),
-    default: struct.json(struct.object({ note: struct.string() })),
+    update: struct.json(struct.object({ version: struct.number() })),
+    default: struct.string(),
   },
 })
 ```
 
-### Décodage du contenu des données d'événement
+Sans Struct `default`, `EventStreamData<TEvents>` est une union discriminée des noms d'événement déclarés. Un branchement sur `event.event` réduit `event.data` à la sortie de la Struct correspondante. Lorsque la Struct `default` est présente, sa branche conserve le nom réellement reçu sur le réseau sous la forme `event: string` ; les flux qui combinent des événements connus avec `default` conservent donc cette branche de repli générique.
 
-Le transport SSE livre chaque payload `data:` sous forme de texte. Defjs sélectionne d'abord le struct d'événement dans `events[eventName] ?? events.default`, puis décode le texte selon le struct sélectionné.
+## Entrée et construction de la requête
 
-Utilise `struct.json(inner)` lorsque le serveur envoie du texte JSON pour un événement. `struct.json(inner)` exécute d'abord `JSON.parse` sur le texte SSE brut, puis analyse la valeur résultante avec `inner` :
-
-```typescript
-const useProfileStream = defineEventStream({
-  path: '/v1/profile-events',
-  events: {
-    profile: struct.json(
-      struct.object({
-        displayName: struct.string().alias('display_name'),
-      }),
-    ),
-  },
-})
-```
-
-Pour les payloads texte primitifs :
-
-- `struct.string()` et `struct.text()` lisent le texte de l'événement brut.
-- `struct.number()` supprime les espaces et n'accepte que les valeurs numériques finies.
-- `struct.boolean()` supprime les espaces et n'accepte que les valeurs exactes `true` ou `false`.
-
-Les `struct.object(...)`, `struct.array(...)` et `struct.record(...)` bruts ne parsent pas eux-mêmes le texte ressemblant à du JSON. Enveloppe-les dans `struct.json(...)` pour des données d'événement JSON.
-
-### Flux d'événements avec entrée
-
-Quand un flux a besoin de paramètres de chemin, de paramètres de requête ou de corps de requête, fournis un struct `input` et une fonction `build`. La signature `build` est la même que pour `defineRequest`, supportant params, query et headers.
+Utilisez `struct.request(...)` pour les sections `path`, `query` et `headers` :
 
 ```typescript
-const useRoomStream = defineEventStream({
-  path: '/v1/room/:roomId',
+const roomEvents = defineEventStream({
+  path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
+    query: struct.object({ after: struct.string().optional() }),
   }),
-  build(ctx, input) {
-    ctx.setPathParams(input.path)
-  },
   events: {
-    chat: struct.json(struct.object({ user: struct.string(), text: struct.string() })),
+    message: struct.json(struct.object({ text: struct.string() })),
   },
 })
-
-const [error, stream, open] = await client.execute(useRoomStream({ path: { roomId: '42' } }))
 ```
 
-## Résultat d'exécution
+Un `build` SSE personnalisé peut définir les paramètres de chemin, la query et les en-têtes. Il reçoit une projection liée au schéma. Il ne peut définir ni corps ni mode `credentials`. Configurez ce dernier avec `withCredentials(...)` sur le client.
 
-`client.execute()` retourne un triplet pour les commandes SSE :
+## Tuple de démarrage
+
+```typescript
+const [error, stream, startupOpen] = await client.execute(
+  roomEvents({
+    path: { roomId: 'general' },
+  }),
+)
+```
+
+SSE renvoie :
 
 ```typescript
 type StreamAwaitResult<TEvent> =
@@ -102,181 +90,171 @@ type StreamAwaitResult<TEvent> =
   | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
 ```
 
-- **`error`** — Non-null en cas d'échec de connexion ou de validation ; `null` en cas de succès.
-- **`stream`** — En cas de succès, un `EventStreamHandle` consommable via `for await...of` ; `undefined` en cas d'échec.
-- **`open`** — Contient les infos de réponse de la première connexion (`response` et `url`). Peut être `undefined` en cas d'échec de connexion.
+En cas de succès, le troisième élément est l'instantané d'ouverture validé au démarrage. Sa réponse a passé les contrôles du statut HTTP et du `Content-Type` `text/event-stream`.
+
+`stream.open` est un getter dynamique. Il reflète la dernière réponse vue par le flux logique, y compris celle d'une reconnexion ultérieure qui échoue ensuite à la validation du statut ou du type de contenu. Conservez `startupOpen` séparément si l'instantané initial vous importe.
+
+Par défaut, ne journalisez ni `startupOpen.url`, ni `stream.open.url`, ni les URL de réponse. Elles peuvent contenir des données sensibles dans le chemin ou la query.
+
+## Consommer les événements
+
+Le propriétaire doit démarrer l'itération et organiser la fermeture dans le même cycle de vie :
 
 ```typescript
-const [error, stream, open] = await client.execute(useNotifications())
+import type { Client } from '@defjs/core'
 
-if (error) {
-  console.error('Connection failed:', error)
-  return
-}
+declare const client: Client
+declare const showNotification: (message: { id: number; text: string }) => void
 
-console.log('Connected', open?.url)
-
-for await (const event of stream) {
-  if (event.event === 'message' && typeof event.data === 'object' && event.data !== null) {
-    console.log('Message:', event.data.text)
-  }
-  if (event.event === 'heartbeat') {
-    console.log('Heartbeat:', event.data)
-  }
-}
-```
-
-## EventStreamHandle et stream.closed
-
-`EventStreamHandle` implémente `AsyncIterable`, donc il peut être directement utilisé avec `for await...of`. Il fournit aussi ces propriétés :
-
-| Propriété / Méthode        | Description                                                                      |
-| -------------------------- | -------------------------------------------------------------------------------- |
-| `open`                     | Infos de première connexion `EventStreamOpenInfo` (contient `response` et `url`) |
-| `closed`                   | `Promise<EventStreamCloseInfo>`, se résout quand le flux est complètement fermé  |
-| `close(reason?)`           | Fermer activement le flux, en passant optionnellement une raison                 |
-| `[Symbol.asyncIterator]()` | Retourne un async iterator consommant la file d'événements                       |
-
-`closed` se résout quand :
-
-- Fin normale du serveur (`code: 'eof'`)
-- Fermeture active via `stream.close()` (`code: 'aborted'`)
-- Erreur de connexion ou épuisement des reconnexions (`code: 'error'`)
-
-```typescript
-// Fermeture active
-stream.close('user-navigated-away')
-await stream.closed // { code: 'aborted', reason: 'user-navigated-away' }
-```
-
-## Gestion des événements invalides : onInvalidEvent
-
-Quand le serveur envoie un événement qui ne correspond à aucun struct dans `events` (ou `default`), ou que la validation du struct échoue, l'observer `onInvalidEvent` est déclenché. C'est une configuration au niveau client passée via `sse.onInvalidEvent` au moment de `createClient`.
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEOptions({
-    onInvalidEvent: async (context) => {
-      console.warn('Invalid event:', context.reason, context.message)
-      // context.reason: 'missing-struct' | 'validation-failed'
-      // context.message: { id, event, data, retry? }
-      // context.cause: Erreur originale quand la validation échoue
-    },
-  }),
-)
-```
-
-`onInvalidEvent` est un **observer** :
-
-Un échec de validation courant consiste à déclarer `struct.object(...)` pour un événement dont le champ `data:` est du texte JSON. Déclare plutôt `struct.json(struct.object(...))`. Un JSON invalide sous `struct.json(...)` est signalé comme `validation-failed` et n'est pas réessayé en tant que texte brut.
-
-- Même s'il lève une exception en interne, l'exception est silencieusement ignorée et le flux continue.
-- Il ne bloque pas les événements suivants d'être consommés.
-
-## Configuration de reconnexion et de file
-
-Le transport SSE a une reconnexion automatique intégrée, configurable via `sse.reconnect` et `sse.queue` au niveau client.
-
-### Configuration de reconnexion
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEOptions({
-    reconnect: {
-      attempts: 5, // Nombre max de tentatives
-      delayMs: 1000, // Intervalle de réessai initial
-      factor: 2, // Multiplicateur de backoff exponentiel
-      maxDelayMs: 30000, // Intervalle max de réessai
-      jitter: 1000, // Plage de jitter aléatoire (ms)
-      shouldReconnect: async ({ attempt, cause, lastEventId }) => {
-        return attempt <= 3
-      },
-    },
-  }),
-)
-```
-
-Priorité de reconnexion :
-
-1. Si `onerror` retourne `null`, arrêter de reconnecter.
-2. Si `shouldReconnect` retourne `false`, arrêter de reconnecter.
-3. Si la limite `attempts` est dépassée, arrêter de reconnecter.
-4. Sinon, calculer le prochain intervalle de réessai avec `delayMs` + backoff exponentiel `factor` + `jitter`.
-
-> La reconnexion transporte automatiquement l'en-tête `Last-Event-ID` pour que le serveur puisse reprendre depuis le point d'arrêt.
-
-### Configuration de file
-
-Les événements entrent dans une file async interne après arrivée, puis sont consommés par l'itérateur. Tu peux limiter la taille de la file et le comportement de débordement :
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEOptions({
-    queue: {
-      maxSize: 100,
-      overflow: 'drop-oldest', // 'drop-newest' | 'drop-oldest' | 'error'
-    },
-  }),
-)
-```
-
-| `overflow`    | Comportement                                                                 |
-| ------------- | ---------------------------------------------------------------------------- |
-| `drop-newest` | Ignorer les événements arrivant récemment, garder les anciens dans la file   |
-| `drop-oldest` | Ignorer les événements les plus anciens, faire de la place pour les nouveaux |
-| `error`       | File pleine lève une erreur, causant la fermeture du flux                    |
-
-## Exemple complet
-
-```typescript
-import { createClient, defineEventStream, struct, withEndpoint, withSSEOptions } from '@defjs/core'
-
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEOptions({
-    reconnect: { attempts: 5, delayMs: 1000, factor: 2, maxDelayMs: 30000 },
-    queue: { maxSize: 100, overflow: 'drop-oldest' },
-    onInvalidEvent: async ({ reason, message }) => {
-      console.warn(`Skipped invalid event [${reason}]: ${message.event}`)
-    },
-  }),
-)
-
-const useLogStream = defineEventStream({
-  path: '/v1/logs',
-  events: {
-    log: struct.json(struct.object({ level: struct.string(), msg: struct.string() })),
-  },
-})
-
-async function tailLogs() {
-  const [error, stream, open] = await client.execute(useLogStream())
+async function consumeNotifications(signal: AbortSignal) {
+  const [error, stream, startupOpen] = await client.execute(notifications(), { signal })
 
   if (error) {
-    console.error('Connection failed:', error)
+    console.error('notification stream startup failed', { kind: error.kind, code: error.code })
     return
   }
 
-  console.log('Connected', open.url)
+  console.info('notification stream connected', {
+    status: startupOpen.response?.status,
+  })
 
-  for await (const event of stream) {
-    if (typeof event.data === 'object' && event.data !== null) {
-      console.log(`[${event.data.level}] ${event.data.msg}`)
+  try {
+    for await (const event of stream) {
+      switch (event.event) {
+        case 'message':
+          showNotification(event.data)
+          break
+        case 'heartbeat':
+          break
+        default: {
+          const exhaustive: never = event
+          void exhaustive
+        }
+      }
     }
+  } finally {
+    stream.close('consumer-finished')
+    await stream.closed
   }
-
-  const closeInfo = await stream.closed
-  console.log('Stream closed:', closeInfo.code)
 }
-
-tailLogs()
 ```
 
-## Prochaines étapes
+Un `execute` réussi signifie que le démarrage est terminé. Les erreurs ultérieures rejettent l'itérateur et se retrouvent dans `stream.closed` ; elles ne modifient pas l'élément `error` du tuple initial.
 
-- [Client →](/core/client) — `createClient` et options `sse`
-- [Commandes →](/core/commands) — Définitions de commandes et règles d'entrée
-- [WebSocket →](/core/web-socket) — Connexion WebSocket et gestion d'état
+## Événements invalides
+
+Configurez `onInvalidEvent` avec `withSSEOnInvalidEvent(...)` ou `withSSEOptions(...)` :
+
+```typescript
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOnInvalidEvent(({ reason, message }) => {
+    recordInvalidEvent({ eventName: message.event, reason })
+  }),
+)
+```
+
+L'observateur reçoit :
+
+- `reason: 'missing-struct' | 'validation-failed'` ;
+- l'`id`, le nom, le texte `data` et l'éventuelle valeur `retry` de l'événement brut ;
+- `cause` en cas d'échec de validation.
+
+L'événement est écarté, mais un événement valide ultérieur peut toujours être transmis. Les exceptions et promesses rejetées par l'observateur sont interceptées. En revanche, un observateur asynchrone est attendu avant de poursuivre le traitement. Gardez-le rapide et masquez les valeurs brutes `id`, `data` et `cause` avant de les enregistrer.
+
+## Reconnexion
+
+SSE sait réessayer après un échec réseau ou de lecture du flux. Une fin de fichier normale ferme le flux avec `code: 'eof'` et ne déclenche aucune reconnexion.
+
+Par défaut, les nouvelles tentatives commencent après 1 seconde et leur nombre n'est pas limité. Définissez `attempts` pour les borner :
+
+```typescript
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEReconnect({
+    attempts: 5,
+    delayMs: 1_000,
+    factor: 2,
+    maxDelayMs: 30_000,
+    jitter: 250,
+  }),
+)
+```
+
+`attempts` désigne le nombre de nouvelles tentatives après la tentative initiale. `attempts: 0` les désactive. La valeur `attempt` transmise à `shouldReconnect` commence à 1 et reste cumulative pendant toute la vie du flux logique ; une connexion physique réussie ne la remet pas à zéro.
+
+Le délai part de l'intervalle courant. Le serveur peut le modifier avec un champ SSE `retry:`. `factor` applique une croissance exponentielle, puis `maxDelayMs` borne cette base. `jitter` ajoute ensuite un nombre aléatoire de millisecondes compris entre zéro et la valeur configurée. Comme cet ajout intervient après la borne, le délai final peut dépasser `maxDelayMs` de moins de `jitter`.
+
+```typescript
+withSSEReconnect({
+  attempts: 5,
+  shouldReconnect({ attempt, lastEventId, cause, open }) {
+    return shouldRetryStream({ attempt, lastEventId, cause, status: open?.response.status })
+  },
+})
+```
+
+Le transport envoie le dernier ID d'événement dans `Last-Event-ID` lors des tentatives suivantes. Gardez `shouldReconnect` sans exception. Si ce prédicat lève une exception ou rejette une promesse, certains itérateurs en attente ou parcours de `stream.closed` peuvent actuellement ne jamais se terminer.
+
+Les échecs de validation HTTP ou d'ouverture, les erreurs fatales de traitement des messages et une fin de fichier normale ne sont pas des échecs réseau ou de lecture éligibles à une nouvelle tentative. Ne supposez pas que chaque fin de parcours entraîne une reconnexion.
+
+## File de travail partagée
+
+L'itérable asynchrone forme une unique file de travail partagée pour le flux logique. Ce n'est ni une souscription, ni une diffusion, ni un mécanisme de backpressure.
+
+La file n'est pas bornée par défaut. Définissez une limite avec `withSSEQueue(...)` ou `withSSEOptions({ queue })` :
+
+```typescript
+withSSEQueue({
+  maxSize: 100,
+  overflow: 'drop-oldest',
+})
+```
+
+| Overflow      | Comportement à la limite                                            |
+| ------------- | ------------------------------------------------------------------- |
+| `drop-newest` | Écarte l'événement qui arrive.                                      |
+| `drop-oldest` | Retire le plus ancien événement en attente, puis ajoute le nouveau. |
+| `error`       | Lève une erreur de débordement et termine le traitement.            |
+
+Plusieurs itérateurs se disputent les valeurs ; chacun ne reçoit pas sa propre copie. Sortir d'une boucle `for await` ne ferme pas le transport, car l'itérateur n'implémente pas de `return()` lié au cycle de vie. Appelez explicitement `stream.close(...)`.
+
+La fermeture marque la file comme terminée sans supprimer les valeurs déjà en attente. Un consommateur peut encore les vider avant que l'itération suivante ne renvoie `done: true`.
+
+### Limite du tampon d'analyse
+
+La file d'événements et le tampon de l'analyseur sont distincts. Définissez un `maxBufferSize` positif via `withSSEOptions(...)` pour borner les octets conservés pour une ligne SSE incomplète :
+
+```typescript
+withSSEOptions({
+  maxBufferSize: 64 * 1024,
+})
+```
+
+Dépasser cette limite après le démarrage rejette l'itérateur et ferme le flux avec `code: 'error'`. Sans valeur, ce tampon reste non borné.
+
+## Fermeture définitive
+
+`stream.closed` se résout avec :
+
+```typescript
+interface EventStreamCloseInfo {
+  code: 'eof' | 'aborted' | 'error'
+  reason?: string
+  cause?: unknown
+}
+```
+
+- `eof` signifie que le corps de la réponse s'est terminé normalement.
+- `aborted` comprend un appel explicite à `stream.close(...)` ou un parcours d'annulation.
+- `error` signifie que les nouvelles tentatives ont cessé ou qu'une erreur définitive du flux s'est produite.
+
+`stream.close(reason)` est idempotente. Elle annule le travail de transport actif, interdit les nouveaux ajouts dans la file et résout `stream.closed`. Un `break` ne fait rien de tout cela.
+
+La couche applicative qui ouvre le flux est responsable de sa fermeture. Un client ou un provider de framework ne le ferme pas automatiquement.
+
+## Étapes suivantes
+
+- [WebSocket](/fr-FR/core/web-socket) couvre les sessions bidirectionnelles et la reconnexion explicite.
+- [Intercepteurs](/fr-FR/core/interceptors) couvre la modification des en-têtes SSE et l'observation du cycle de vie.
+- [Erreurs](/fr-FR/core/errors) explique la disponibilité de la réponse au démarrage.

@@ -3,129 +3,69 @@ layout: home
 
 hero:
   name: Defjs
-  text: Typed APIs Across Transports
-  tagline: 한 번 정의하면 어디서나 타입 안전합니다. HTTP, SSE, WebSocket에 런타임 검증과 완전한 TypeScript 타입 추론을 제공합니다.
+  text: HTTP, SSE, WebSocket를 위한 타입 기반 커맨드
+  tagline: Struct로 wire 형식을 정의하고 클라이언트를 명시적으로 생성해, 트랜스포트별 결과와 생명주기 의미를 분명하게 드러내세요.
   actions:
     - theme: brand
       text: 시작하기
-      link: /guide/getting-started
+      link: /ko-KR/guide/getting-started
     - theme: alt
       text: GitHub에서 보기
       link: https://github.com/defjs/defjs
 
 features:
-  - icon: 🔒
-    title: 타입 안전성
-    details: struct로 요청 스키마를 정의하면 입력, 출력, 오류 분기까지 엔드투엔드 타입 추론이 제공돼요. 런타임 검증으로 프로덕션에 도달하기 전 불일치를 잡아낼 수 있어요.
-  - icon: 🌐
-    title: 멀티 트랜스포트
-    details: HTTP 요청, Server-Sent Events, WebSocket 연결을 하나의 통일된 API 스타일로 사용하세요. 트랜스포트를 바꿔도 애플리케이션 로직을 다시 작성할 필요가 없어요.
-  - icon: 🧅
-    title: 인터셉터
-    details: 트랜스포트별 어니언 모델 인터셉터로 로깅, 인증, 재시도, 횡단 관심사를 처리하세요. HTTP, SSE, WebSocket 각각의 인터셉터 체인을 가지고 있어요.
-  - icon: 📡
-    title: 스트리밍
-    details: 네이티브 SSE와 WebSocket 지원에 자동 재연결, 하트비트, 메시지 큐잉, 역압력 제어가 내장되어 있어요. 실시간 애플리케이션을 위해 설계되었어요.
-  - icon: ⚡
-    title: 유니버설 런타임
-    details: 브라우저, Node.js, Bun, Deno에서 모두 동작해요. 폴리필이 필요 없고, 코어 패키지는 순수 ESM에 런타임 의존성이 제로예요.
-  - icon: 🧩
-    title: 프레임워크 지원
-    details: Vue, React를 위한 퍼스트클래스 통합으로 provideClient / injectClient / useClient 패턴을 제공해요. 서버 사이드 관측 가능성을 위한 OpenTelemetry 플러그인도 있어요.
+  - title: 엔드포인트 계약
+    details: 엔드포인트 정의, 커맨드 빌더, 커맨드 값을 구분합니다. Struct는 호출자 입력과 트랜스포트 데이터를 런타임에 디코딩합니다.
+  - title: 트랜스포트별 결과
+    details: HTTP, SSE, WebSocket 모두 오류 우선 3요소 튜플을 반환합니다. 세 번째 요소는 각각 응답 래퍼, 시작 시점 open 스냅샷, 시작 시점 connection 스냅샷입니다.
+  - title: 인터셉터 체인
+    details: 클라이언트에 HTTP, SSE, WebSocket 인터셉터를 등록합니다. 각 트랜스포트는 자신에게 맞는 인터셉터만 골라 어니언 순서로 실행합니다.
+  - title: 명시적인 생명주기
+    details: SSE는 네트워크 오류와 읽기 실패를 재시도할 수 있습니다. WebSocket 재연결은 명시적으로 활성화해야 합니다. 순회, 취소, 최종 종료는 애플리케이션이 직접 관리합니다.
+  - title: 런타임 디코딩
+    details: TypeScript 추론에 쓰는 것과 같은 Struct 계약으로 입력, 응답, 스트림 이벤트, WebSocket 메시지를 디코딩합니다.
+  - title: 애플리케이션 통합
+    details: Vue나 React에서 클라이언트를 공유하고 서버 서비스의 outbound 작업에 OpenTelemetry 계측을 추가합니다.
 ---
 
-## 퀵스타트
+## 타입이 지정된 API 클라이언트 만들기
 
-`@defjs/core`를 원하는 패키지 매니저로 설치하세요:
+애플리케이션이 호출할 HTTP, SSE, WebSocket 계약부터 정의하세요. Defjs는 이 정의를 커맨드 빌더로 만들고 런타임에 데이터를 검증하며 트랜스포트 결과를 명확하게 유지합니다.
 
-::: code-group
-
-```bash [npm]
-npm install @defjs/core
-```
-
-```bash [yarn]
-yarn add @defjs/core
-```
-
-```bash [pnpm]
-pnpm add @defjs/core
-```
-
-```bash [bun]
-bun add @defjs/core
-```
-
-:::
-
-타입이 부여된 요청을 정의하고 세 줄로 실행해 보세요:
+HTTP 핵심 흐름은 짧습니다. API용 클라이언트를 만들고 엔드포인트를 정의한 뒤 커맨드 빌더를 호출해 커맨드를 실행합니다.
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient({ endpoint: 'https://api.example.com' })
+const client = createClient(withEndpoint('https://api.example.com'))
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ] as const,
 })
 
-const [error, user] = await client.execute(getUser())
-if (!error) {
-  console.log(user.id, user.name) // fully typed
+const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
+
+if (error) {
+  console.error(error.kind, error.code)
+} else {
+  console.log(user.name, response.status)
 }
 ```
 
-## 프레임워크 통합
+클라이언트를 애플리케이션이 사용하는 서비스로 연결하고 Struct를 실제 응답 계약에 맞추세요. credential, UI 상태, 재시도, 취소, 리소스 정리는 여전히 애플리케이션이 맡습니다.
 
-<div class="framework-grid">
+## 다음 문서
 
-### Vue
-
-`@defjs/vue`는 Vue 플러그인으로 `provideClient`를 제공하고, Composition API를 위한 `injectClient`를 제공해요. 애플리케이션 전체에서 하나의 타입화된 `@defjs/core` 클라이언트를 공유해요.
-
-[자세히 알아보기 →](/plugins/vue)
-
-### React
-
-`@defjs/react`는 `ClientProvider`, `useClient`, option helpers를 제공해 타입이 지정된 `@defjs/core` client 하나를 React 컴포넌트 트리에서 공유하게 해요.
-
-[자세히 알아보기 →](/plugins/react)
-
-</div>
-
-## 다음 단계
-
-- [시작하기 →](/guide/getting-started) — 설치, CDN 사용법, 첫 번째 요청
-- [코어 개념 →](/core/client) — 클라이언트, 커맨드, 컨텍스트, 오류 처리
-- [예제 →](/guide/examples) — REST CRUD, SSE 알림, WebSocket 채팅, 인터셉터 패턴
-
-<style>
-.framework-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-}
-.framework-grid > div,
-.framework-grid > h3 {
-  margin: 0;
-}
-.framework-grid h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-.framework-grid p {
-  margin: 0 0 0.5rem;
-  color: var(--vp-c-text-2);
-}
-.framework-grid a {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--vp-c-brand-1);
-}
-</style>
+- [시작하기](/ko-KR/guide/getting-started)는 패키지 설치부터 첫 타입 요청까지 안내합니다.
+- [클라이언트](/ko-KR/core/client)는 옵션 조합과 세 가지 `execute` 오버로드를 설명합니다.
+- [커맨드](/ko-KR/core/commands)는 엔드포인트 정의, 커맨드 빌더, 커맨드, 스키마 결합 프로젝션을 설명합니다.
+- [HTTP](/ko-KR/core/http), [SSE](/ko-KR/core/sse), [WebSocket](/ko-KR/core/web-socket)은 각 트랜스포트의 동작과 생명주기 책임을 설명합니다.
+- [Vue](/ko-KR/plugins/vue), [React](/ko-KR/plugins/react), [OpenTelemetry Server](/ko-KR/plugins/opentelemetry-server)는 Defjs를 애플리케이션 framework와 telemetry 설정에 연결하는 방법을 보여 줍니다.

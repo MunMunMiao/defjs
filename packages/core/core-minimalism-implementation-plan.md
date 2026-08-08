@@ -87,7 +87,7 @@
 验证：
 
 ```bash
-pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test:type
+pnpm --dir /Users/munmunmiao/Documents/web/zen-kit typecheck
 ```
 
 ### 1.2 合并 command input optional 判定
@@ -117,7 +117,7 @@ pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test:typ
 验证：
 
 ```bash
-pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test:type
+pnpm --dir /Users/munmunmiao/Documents/web/zen-kit typecheck
 ```
 
 重点确认：
@@ -154,7 +154,7 @@ pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test:typ
 
 ```bash
 pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core exec vitest run --config vitest.config.ts src/client/execute.spec.ts src/client/client.spec.ts
-pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test:type
+pnpm --dir /Users/munmunmiao/Documents/web/zen-kit typecheck
 ```
 
 ### 1.4 用 `assignDefined` 压缩 client option setter
@@ -249,7 +249,7 @@ pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core exec vit
 
 ```bash
 pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core exec vitest run --config vitest.config.ts src/web_socket/*.spec.ts
-pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core typecheck
+pnpm --dir /Users/munmunmiao/Documents/web/zen-kit typecheck
 ```
 
 ### 1.7 删除 `createWebSocketUrl()` 测试便利入口
@@ -783,14 +783,14 @@ pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core exec vit
 每个 Wave 完成后，至少运行：
 
 ```bash
-pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test:type
+pnpm --dir /Users/munmunmiao/Documents/web/zen-kit typecheck
 pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test
 ```
 
 如果只改 type-only，可先运行：
 
 ```bash
-pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test:type
+pnpm --dir /Users/munmunmiao/Documents/web/zen-kit typecheck
 ```
 
 如果只改某个 runtime 小模块，可先运行目标 spec，再运行 core 全量测试。
@@ -826,7 +826,7 @@ pnpm --dir /Users/munmunmiao/Documents/web/zen-kit --filter @defjs/core test:typ
 
 1. 实现只覆盖该阶段范围，不顺手扩大。
 2. 对应专项测试通过。
-3. `@defjs/core` 的 `test:type` 通过。
+3. 根 `pnpm typecheck` 通过。
 4. 运行时改动阶段需 `@defjs/core test` 通过。
 5. 人类可读性审查清单全部通过。
 6. 最终说明中明确列出：

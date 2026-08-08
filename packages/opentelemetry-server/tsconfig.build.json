@@ -1,8 +1,16 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": []
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "noEmit": false,
+    "types": [],
+    "paths": {
+      "@defjs/core": ["../core/dist/index.d.ts"]
+    }
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["test", "scripts", "src/**/*.spec.ts", "src/**/*.type.test.ts", "e2e.spec.ts"]
+  "exclude": ["test", "src/**/*.spec.ts", "src/**/*.type.test.ts", "src/test-utils.ts", "e2e.spec.ts"]
 }

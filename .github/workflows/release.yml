@@ -2,34 +2,56 @@ name: Release
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    tags:
+      - 'release-*'
+
+permissions:
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    if: github.ref == 'refs/heads/main'
+  checks:
+    uses: ./.github/workflows/_checks.yml
+    secrets: inherit
+
+  publish:
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: ./.github/actions/setup-pnpm-deps
-
-      - name: Create Release Pull Request or Publish to npm
+      - name: Verify release commit
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          main_sha="$(git rev-parse origin/main)"
+          if [[ "$GITHUB_SHA" != "$main_sha" ]]; then
+            echo "Release tag must point to the current main tip after the Version Packages PR is merged." >&2
+            echo "Tagged SHA: $GITHUB_SHA" >&2
+            echo "Current main SHA: $main_sha" >&2
+            exit 1
+          fi
+      - name: Verify Version Packages PR was consumed
+        shell: bash
+        run: |
+          if find .changeset -maxdepth 1 -type f -name '*.md' ! -name 'README.md' -print -quit | grep -q .; then
+            echo 'Unconsumed changesets remain. Merge the Version Packages PR before creating a release tag.' >&2
+            exit 1
+          fi
+      - name: Publish packages
         uses: changesets/action@v1
         with:
-          publish: pnpm run build && pnpm changeset publish --provenance
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
+          publish: pnpm run release
+          commitMode: github-api
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PNPM_CONFIG_PROVENANCE: 'true'

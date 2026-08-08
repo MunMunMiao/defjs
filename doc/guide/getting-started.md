@@ -1,211 +1,101 @@
 ---
 title: Getting Started
-description: Use the current repository source/workspace API to create your first typed request, with separate notes for published npm/CDN users.
+description: Install Defjs, define a typed HTTP endpoint, create a client, and call it from your application.
 ---
 
 # Getting Started
 
-Defjs is a TypeScript library for defining typed HTTP, SSE, and WebSocket APIs and executing them across JavaScript runtimes.
+Defjs lets your application describe an API contract once, then reuse that contract with typed input, runtime decoding, and explicit transport results.
 
-## Repository source/workspace track
+## Install
 
-This tutorial targets the current repository source/workspace API.
-
-To follow the examples on this page exactly, install workspace dependencies and run them from a workspace package that resolves `@defjs/core` from this repository source:
+Add the core package to your application:
 
 ```sh
-pnpm install
-pnpm --dir doc run typecheck
+pnpm add @defjs/core
 ```
 
-::: info Development baseline
-This repository is developed with Node `>=26`, `pnpm@11.6.0`, and `engine-strict=true`. That baseline is for contributors working in this monorepo. Installing a published defjs package into an application follows the package's published runtime and bundler constraints.
+Use the equivalent `npm`, Yarn, or Bun command if your project uses another package manager. `@defjs/core` is ESM. When you run it in Node.js, the current package metadata requires Node 26 or newer.
+
+Add an adapter only when your application needs it:
+
+| Application setup         | Packages                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------- |
+| React 18+                 | `@defjs/core`, `@defjs/react`, `react`                                                    |
+| Vue 3+                    | `@defjs/core`, `@defjs/vue`, `vue`                                                        |
+| Server-side OpenTelemetry | `@defjs/core`, `@defjs/opentelemetry-server`, `@opentelemetry/api`, `@opentelemetry/core` |
+
+::: tip Match the docs to your installed version
+These pages describe the API shown in this documentation release. Check the version installed in your application. If an export or option differs, use the documentation and release notes for that installed version instead of mixing examples across versions.
 :::
 
-## Published npm/CDN caveat
+## Define Your First Request
 
-If you install `@defjs/core` from npm or import it from a CDN, the published release you use may lag behind this tutorial.
+Assume your API exposes `GET /users/:id`. Replace the base URL and response Structs with the contract used by your own service.
 
-This page does not provide a separate guide for older published APIs. Before copying `withEndpoint(...)` or `struct.request(...)` into an external app, use a published release whose installed package metadata, README, or release notes explicitly include this API.
-
-If you need a CDN import for a published release, follow that release's published README/API reference rather than the source/workspace examples below.
-
-## Three Steps to Your First Request
-
-### Step 1: Create a Client
-
-The Client is the entry point for all request execution. Create an instance with `createClient` and configure the base endpoint:
-
-```typescript twoslash
-import { createClient, withEndpoint } from '@defjs/core'
-
-const client = createClient(withEndpoint('https://api.example.com'))
-```
-
-### Step 2: Define a Request
-
-Use `defineRequest` to define a typed HTTP endpoint. Use `struct.request(...)` when your input maps directly to HTTP path, query, headers, or body sections:
-
-```typescript twoslash
-import { defineRequest, struct } from '@defjs/core'
-
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/users/:id',
-  input: struct.request({
-    path: struct.object({
-      id: struct.number(),
-    }),
-  }),
-  output: [
-    {
-      status: 200,
-      body: struct.object({
-        id: struct.number(),
-        name: struct.string(),
-      }),
-    },
-    {
-      status: 404,
-      body: struct.object({
-        message: struct.string(),
-      }),
-    },
-  ] as const,
-})
-```
-
-::: tip
-The examples in this guide use the array form because it keeps status/body pairs explicit and supports grouping multiple statuses. Object-form `output` is still supported and remains useful for compact reference examples.
-:::
-
-### Step 3: Execute
-
-Call `client.execute` with your request command. HTTP execution returns an error-first tuple: success is `[null, result, response]`, failure is `[error, undefined, response?]`.
-
-```typescript twoslash
+```typescript
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
 
 const getUser = defineRequest({
   method: 'GET',
-  path: '/v1/users/:id',
+  path: '/users/:id',
   input: struct.request({
-    path: struct.object({
-      id: struct.number(),
-    }),
+    path: struct.object({ id: struct.number() }),
   }),
   output: [
-    {
-      status: 200,
-      body: struct.object({
-        id: struct.number(),
-        name: struct.string(),
-      }),
-    },
-    {
-      status: 404,
-      body: struct.object({
-        message: struct.string(),
-      }),
-    },
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
   ] as const,
 })
 
-async function loadUser() {
-  const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
+async function loadUser(id: number) {
+  const [error, user, response] = await client.execute(getUser({ path: { id } }))
 
   if (error) {
-    console.error(error.code, error.message)
+    console.error(error.kind, error.code)
     return
   }
 
-  console.log(user.name)
+  console.log(user.name, response.status)
 }
+
+void loadUser(7)
 ```
 
-## Complete Example
-
-Here is an end-to-end example with automatic request mapping, output validation, error handling, and an interceptor:
+`defineRequest(...)` returns a **command builder**. Calling `getUser(...)` creates a **command** that holds the endpoint definition and call input. `client.execute(...)` then returns an HTTP three-item tuple:
 
 ```typescript
-import { createClient, createHttpInterceptor, defineRequest, struct, withEndpoint, withInterceptors } from '@defjs/core'
+;[error, result, response]
+```
 
-const authInterceptor = createHttpInterceptor(async (request, next) => {
-  const headers = request.headers ?? new Headers()
-  request.headers = headers
-  headers.set('Authorization', 'Bearer token')
-  return next(request)
-})
+On success, `error` is `null`, `result` is decoded output data, and `response` is a Defjs `SettledResponse` wrapper. On failure, `result` is `undefined`; the response wrapper is also `undefined` when no response was received.
 
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(authInterceptor))
+### Why `as const` Matters
 
-const createPostRequest = defineRequest({
-  method: 'POST',
-  path: '/v1/posts',
-  input: struct.request({
-    headers: struct.object({
-      'X-Request-ID': struct.string(),
-    }),
-    body: struct.object({
-      title: struct.string(),
-      body: struct.string(),
-    }),
-  }),
-  output: [
-    {
-      status: 201,
-      body: struct.object({
-        id: struct.number(),
-        title: struct.string(),
-      }),
-    },
-    {
-      status: 400,
-      body: struct.object({
-        field: struct.string(),
-        reason: struct.string(),
-      }),
-    },
-  ] as const,
-})
+Array-form `output` uses status literals to separate 2xx success bodies from non-2xx error bodies. `as const` preserves those status values and any grouped status arrays as readonly literals. Without it, TypeScript can widen them to `number` or `number[]`, which weakens the inferred success and error branches.
 
-async function submitPost() {
-  const [error, post] = await client.execute(
-    createPostRequest({
-      headers: { 'X-Request-ID': 'uuid-123' },
-      body: { title: 'Hello', body: 'World' },
-    }),
-  )
+Object-form output is also supported:
 
-  if (error) {
-    console.error(error)
-    return
-  }
-
-  console.log('Created post:', post.id, post.title)
+```typescript
+const output = {
+  '200': struct.object({ id: struct.number() }),
+  '404': struct.object({ message: struct.string() }),
 }
 ```
 
-## Core API Quick Reference
+## Put It in Your Application
 
-| API                    | Description                     | Typical Usage                                                                                                                                                                        |
-| ---------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `createClient`         | Create a request client         | `createClient(withEndpoint('https://api.example.com'))`                                                                                                                              |
-| `defineRequest`        | Define an HTTP endpoint         | `defineRequest({ method: 'GET', path: '/user/:id', input: struct.request({ path: struct.object({ id: struct.number() }) }), output: [{ status: 200, body: UserStruct }] as const })` |
-| `defineEventStream`    | Define an SSE endpoint          | `defineEventStream({ path: '/events', events: { message: struct.string() } })`                                                                                                       |
-| `defineWebSocket`      | Define a WebSocket endpoint     | `defineWebSocket({ path: '/ws', incoming, outgoing })`                                                                                                                               |
-| `struct`               | Struct builder                  | `struct.object({ id: struct.number() })`                                                                                                                                             |
-| `.alias(name)`         | Field wire-name alias           | `struct.string().alias('user_name')`                                                                                                                                                 |
-| `withEndpoint`         | Set base URL                    | `withEndpoint('https://api.example.com')`                                                                                                                                            |
-| `withInterceptors`     | Register interceptors           | `withInterceptors(loggingInterceptor, authInterceptor)`                                                                                                                              |
-| `withCredentials`      | Enable cross-origin credentials | `withCredentials(true)`                                                                                                                                                              |
-| `withSSEReconnect`     | Configure SSE reconnect policy  | `withSSEReconnect({ attempts: 3, delayMs: 1000 })`                                                                                                                                   |
-| `withWebSocketOptions` | Configure WebSocket options     | `withWebSocketOptions({ protocols: ['v1'] })`                                                                                                                                        |
+Keep endpoint definitions in modules that describe your service API. Reuse their command builders from components, route handlers, jobs, or stores. Create the client at the boundary that owns its endpoint, credentials, interceptors, and lifecycle:
 
-## What's Next
+- a browser application can usually share one client;
+- server rendering should create a request-scoped client when headers, cookies, users, or tenants differ per request;
+- code that opens SSE or WebSocket resources must also consume and close them.
 
-- [Client →](/core/client) — Creating clients, executing commands, and configuration
-- [Commands →](/core/commands) — `defineRequest`, `defineEventStream`, `defineWebSocket`
-- [Errors →](/core/errors) — `RequestError` structure and branching patterns
+## Next Steps
+
+- [Commands](/core/commands) explains automatic request mapping and custom schema-bound projections.
+- [Errors](/core/errors) shows how to handle transport and HTTP failures in application code.
+- [HTTP](/core/http) covers URL resolution, request bodies, output decoding, cancellation, and XSRF behavior.
+- [Examples](/guide/examples) provides complete recipes you can adapt to your own API and application boundaries.

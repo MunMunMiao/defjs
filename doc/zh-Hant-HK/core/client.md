@@ -1,15 +1,11 @@
 ---
 title: Client
-description: Create explicit clients, configure transport options, and execute HTTP, SSE, and WebSocket commands.
+description: 明確建立 client、組合 option、執行不同 transport 的 command，並檢視 live configuration。
 ---
 
-# 用戶端
+# Client
 
-`@defjs/core` 採用**顯式用戶端**設計。每個請求都透過你顯式建立的 `Client` 實例執行。這讓測試、多環境設定與相依追蹤變得簡單明瞭。
-
-## 建立用戶端
-
-使用 `createClient` 搭配一或多個設定函式。
+明確建立 `Client`，再把它傳給需要執行 command 的程式碼。
 
 ```typescript
 import { createClient, withEndpoint } from '@defjs/core'
@@ -17,207 +13,137 @@ import { createClient, withEndpoint } from '@defjs/core'
 const client = createClient(withEndpoint('https://api.example.com'))
 ```
 
-設定函式可組合。對同一個鍵，後面的函式會覆寫前面的函式。
+Client 保存設定，並分派 HTTP、SSE 與 WebSocket command。它不管理 global registry，也不是背景 lifecycle manager。
+
+## Option 組合
+
+Option 會由左至右執行。
 
 ```typescript
-import { createClient, withEndpoint, withHTTPHandle, withInterceptors, withCredentials } from '@defjs/core'
-
 const client = createClient(
+  withEndpoint('https://old.example.com'),
   withEndpoint('https://api.example.com'),
-  withHTTPHandle(myCustomFetch),
-  withCredentials(true),
-  withInterceptors(loggingInterceptor, authInterceptor),
+  withInterceptors(operationLogger),
+  withInterceptors(authInterceptor, retryInterceptor),
 )
 ```
 
-### 設定選項
+最後的 endpoint 是 `https://api.example.com`。Interceptor 順序為 `operationLogger`、`authInterceptor`、`retryInterceptor`。
 
-| 函式                                | 說明                                         |
-| ----------------------------------- | -------------------------------------------- |
-| `withEndpoint(url)`                 | 基礎 API 位址。                              |
-| `withHTTPHandle(fetch)`             | HTTP 的自訂 `fetch` 實作。                   |
-| `withSSEHandle(fetch)`              | SSE 的自訂 `fetch` 實作。                    |
-| `withWebSocketHandle(WebSocket)`    | 自訂 `WebSocket` 建構函式（例如用於 Node）。 |
-| `withInterceptors(...interceptors)` | 註冊傳輸層攔截器。依 `kind` 自動分派。       |
-| `withQueryParamsSerializer(fn)`     | 自訂查詢參數序列化。                         |
-| `withCredentials(boolean)`          | 是否套件含跨域憑證。                         |
-| `withXSRF(options)`                 | XSRF 權杖讀取與注入行為。                    |
-| `withSSEOptions(options)`           | SSE 重連、隊列、無效事件處理等。             |
-| `withWebSocketOptions(options)`     | WebSocket 心跳、重連、隊列、子協定等。       |
+組合規則只有三項：
 
-SSE 與 WebSocket 專屬設定請見 [SSE](/core/sse) 與 [WebSocket](/core/web-socket)。
+1. Setter helper 會取代原值，包括 `withEndpoint`、transport handle、query serializer、credentials、XSRF 設定，以及個別 SSE 或 WebSocket 設定。
+2. `withInterceptors(...items)` 會追加。多次呼叫仍會保留 interceptor 的加入次序。
+3. `withSSEOptions(...)` 與 `withWebSocketOptions(...)` 會淺層取代每個有定義的 top-level 欄位，不會 deep merge 內層 reconnect、heartbeat 或 queue object。
 
-## 執行指令
-
-`Client.execute` 是多載方法，會依 `Command` 類型分派至正確的傳輸層。
-
-### HTTP 請求
-
-傳入以 `defineRequest` 建立的指令。回傳三元組：
+例如，以下第二個 reconnect object 會整個取代第一個，不會保留 `attempts: 5`：
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
+const client = createClient(
+  withWebSocketOptions({
+    reconnect: { attempts: 5, delayMs: 500 },
+  }),
+  withWebSocketOptions({
+    reconnect: { delayMs: 2_000 },
+  }),
+)
+```
 
-const client = createClient(withEndpoint('https://api.example.com'))
+分組 option helper 會忽略值為 `undefined` 的 property；其餘有提供的 top-level property 都會整個取代現值。
 
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-  },
+### Core Option
+
+| Option                           | 效果                                                            |
+| -------------------------------- | --------------------------------------------------------------- |
+| `withEndpoint(url)`              | 設定所有 transport 使用的 absolute base endpoint。              |
+| `withHTTPHandle(fetch)`          | 取代 HTTP 的 Fetch 實作。                                       |
+| `withSSEHandle(fetch)`           | 取代 SSE 的 Fetch 實作。                                        |
+| `withWebSocketHandle(WebSocket)` | 取代 WebSocket constructor。                                    |
+| `withInterceptors(...items)`     | 追加混合 transport interceptor。                                |
+| `withQueryParamsSerializer(fn)`  | 取代 HTTP、SSE 與 WebSocket 的 query serializer。               |
+| `withCredentials(boolean)`       | 值為 true 時，HTTP 與 SSE 使用 Fetch `credentials: 'include'`。 |
+| `withXSRF(options?)`             | 設定 HTTP XSRF token 注入。                                     |
+| `withSSEOptions(options)`        | 淺層取代有定義的 SSE 欄位。                                     |
+| `withWebSocketOptions(options)`  | 淺層取代有定義的 WebSocket 欄位。                               |
+
+個別 SSE 與 WebSocket helper 只會設定對應的 top-level 欄位。各 transport 頁列出其預設值及 lifecycle 影響。
+
+## 執行 Command
+
+`Client.execute` 有三個 overload，每個都回傳 error-first 三項 tuple。
+
+### HTTP
+
+```typescript
+const [error, data, response] = await client.execute(requestCommand, {
+  signal,
+  timeout: 5_000,
 })
-
-const [error, user, response] = await client.execute(getUser())
-
-if (error) {
-  console.error(error.code, error.message)
-} else {
-  console.log(user.id, user.name)
-}
 ```
 
-回傳類型：
+有 response 時，第三項是 Defjs `SettledResponse` wrapper。HTTP option 包括 `abort` 或 `timeout`、額外的 `signal` alias、`context`，以及 upload/download progress observer。
+
+### SSE
 
 ```typescript
-type HttpAwaitResult<TSuccess, TErrorData> =
-  | [error: null, result: TSuccess, response: SettledResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: SettledResponse<unknown> | undefined]
-```
-
-### SSE 事件串流
-
-傳入以 `defineEventStream` 建立的指令。回傳串流控制代碼與開啟資訊。
-
-```typescript
-import { defineEventStream, struct } from '@defjs/core'
-
-const watchLogs = defineEventStream({
-  path: '/v1/logs/stream',
-  events: {
-    log: struct.object({ level: struct.string(), message: struct.string() }),
-  },
+const [error, stream, startupOpen] = await client.execute(streamCommand, {
+  signal,
 })
-
-const [error, stream, open] = await client.execute(watchLogs())
-
-if (error) {
-  console.error('Stream failed:', error)
-  return
-}
-
-for await (const event of stream) {
-  console.log(event.event, event.data)
-}
 ```
 
-回傳類型：
+第三項是已驗證的 startup-open snapshot。`stream.open` 是另一個 live getter，可能在 reconnect 後改變。SSE execution 接受 cancellation 與 `HttpContext`；reconnect 和 event queue 則在 client option 設定。
+
+### WebSocket
 
 ```typescript
-type StreamAwaitResult<TEvent> =
-  | [error: null, stream: EventStreamHandle<TEvent>, open: StreamOpenInfo]
-  | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
-```
-
-### WebSocket 連線
-
-傳入以 `defineWebSocket` 建立的指令。回傳工作階段物件。
-
-```typescript
-import { defineWebSocket, struct } from '@defjs/core'
-
-const chat = defineWebSocket({
-  path: '/v1/chat',
-  incoming: {
-    message: struct.object({ text: struct.string() }),
-  },
-  outgoing: {
-    message: struct.object({ text: struct.string() }),
-  },
+const [error, session, startupConnection] = await client.execute(socketCommand, {
+  signal,
+  reconnect: { attempts: 3 },
 })
-
-const [error, session, connection] = await client.execute(chat())
-
-if (error) {
-  console.error('WebSocket failed:', error)
-  return
-}
-
-session.send({ type: 'message', data: { text: 'hello' } })
-
-for await (const msg of session.receive) {
-  console.log(msg.type, msg.data)
-}
 ```
 
-回傳類型：
+第三項是 startup-connection snapshot。`session.connection` 是 live getter，可能描述之後的實體連線嘗試。WebSocket execution 接受 cancellation，以及單次 execution 的 `beforeConnect`、`heartbeat`、`protocols`、`queue` 與 `reconnect`，但不接受 `HttpContext`。
+
+準確的 failure branch 見 [Errors](/zh-Hant-HK/core/errors)；transport lifecycle 見 [HTTP](/zh-Hant-HK/core/http)、[SSE](/zh-Hant-HK/core/sse) 與 [WebSocket](/zh-Hant-HK/core/web-socket)。
+
+## Client Scope
+
+如果 endpoint 與 closure 只包含可安全留在瀏覽器、並且與 request 無關的 state，瀏覽器應用程式可以保留 module-level client。
 
 ```typescript
-type SocketAwaitResult<TIncoming, TOutgoing> =
-  | [error: null, socket: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError<unknown>, socket: undefined, connection: WebSocketConnectionInfo | undefined]
+export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
 ```
 
-## 輔助函式
+伺服器端 client 的 option 或 interceptor 一旦捕捉 authorization、cookie、tenant 資料、user 資料或 request context，就不要跨 request 重用。請在 server request boundary 內建立 client。
 
-### `isClient`
+`Client` 沒有 `dispose()` method，亦不追蹤 active request、stream 或 session。開始工作的程式碼必須在相應 lifecycle boundary 取消 HTTP request、關閉 SSE handle 或關閉 WebSocket session。
 
-檢查一個值是否為有效的 `Client` 實例。
+## 進階檢視
+
+用 `isClient(value)` 檢查 runtime client marker。
 
 ```typescript
 import { isClient } from '@defjs/core'
 
-if (isClient(maybeClient)) {
-  const result = await maybeClient.execute(someCommand())
+export function keepClient(value: unknown) {
+  return isClient(value) ? value : undefined
 }
 ```
 
-### `getClientConfig`
-
-提取內部設定物件以供除錯，或建構更高層級的抽象。
+`getClientConfig(client)` 回傳 client 實際持有的 live mutable configuration object，不是 snapshot，亦不是 readonly view。
 
 ```typescript
-import { getClientConfig } from '@defjs/core'
+import { getClientConfig, type Client } from '@defjs/core'
 
-const config = getClientConfig(client)
-console.log(config.endpoint, config.interceptors.length)
+export function interceptorCount(client: Client): number {
+  return getClientConfig(client).interceptors.length
+}
 ```
 
-若傳入的值不是 `Client` 實例，`getClientConfig` 會拋出 `TypeError`。
+修改這個 object 會影響之後的 execution，並繞過正常 option composition。只應用於診斷或經仔細審查的 integration code。參數不是有效 client 時，`getClientConfig` 會拋出 `TypeError`。
 
-## 顯式用戶端設計
+## 下一步
 
-Defjs 的每個用戶端都是顯式建立的。你可以使用 `createClient` 建立 `Client`，並將它傳遞到需要的地方。
-
-顯式建立的優點：
-
-- **測試友好**：直接將不同的 `Client` 實例傳入測試，無需重置或模擬任何狀態。
-- **多環境並存**：多個用戶端可以在同一行程中並行執行（例如內部 API + 公開 API）。
-- **相依透明**：呼叫方必須顯式持有 `Client`，讓相依關係在靜態分析與程式碼審查中一目了然。
-
-若你在應用中需要共享用戶端，請從模組匯出：
-
-```typescript
-// api/client.ts
-import { createClient, withEndpoint } from '@defjs/core'
-
-export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
-```
-
-然後在業務程式碼中匯入使用：
-
-```typescript
-import { apiClient } from './api/client'
-
-const [error, data] = await apiClient.execute(getUser())
-```
-
-## 接下來
-
-- [HTTP 請求 →](/core/http) — `defineRequest` 與輸出模式
-- [SSE →](/core/sse) — SSE 定義、重連與事件隊列
-- [WebSocket →](/core/web-socket) — WebSocket 定義、心跳與重連策略
-- [攔截器 →](/core/interceptors) — 攔截器類型與洋蔥鏈機制
+- [Commands](/zh-Hant-HK/core/commands)：定義傳給 `execute` 的值。
+- [Interceptors](/zh-Hant-HK/core/interceptors)：transport filtering 與洋蔥順序。
+- [Context](/zh-Hant-HK/core/context)：HTTP 與 SSE 的 request-scoped metadata。

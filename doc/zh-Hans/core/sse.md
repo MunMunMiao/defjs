@@ -1,23 +1,17 @@
 ---
 title: SSE
-description: 使用 defineEventStream 定义类型化的服务器推送事件端点，并通过客户端消费流式事件。
+description: 定义并解码 Server-Sent Events，处理启动流程，消费共享 event queue，配置重连，并关闭自己拥有的 stream。
 ---
 
 # SSE
 
-Defjs 使用 `defineEventStream` 定义类型化的 SSE（Server-Sent Events）端点。执行后返回三元组 `[error, stream, openInfo]`，其中 `stream` 是异步可迭代对象，用于逐个消费服务器推送的事件。
-
-## 定义事件流
-
-定义 SSE 端点时，声明 `events` 字段，将事件名称映射到结构。SSE 传输层将每个 `data:` 负载作为原始文本投递；Defjs 选择匹配的结构，并按照该结构的内容 kind 解码文本。
+`defineEventStream(...)` 创建 SSE command builder。Endpoint 声明 path，以及每个 event name 对应的 Struct。
 
 ```typescript
-import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
+import { defineEventStream, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
-
-const useNotifications = defineEventStream({
-  path: '/v1/notifications',
+const notifications = defineEventStream({
+  path: '/notifications',
   events: {
     message: struct.json(
       struct.object({
@@ -30,70 +24,65 @@ const useNotifications = defineEventStream({
 })
 ```
 
-### 默认事件结构
+Method 默认是 `GET`。Endpoint 可以指定其他 method，但高层 SSE build context 不支持 request body。
 
-如果服务器可能发送 `events` 中未显式声明的事件类型，提供 `default` 结构。没有 `default` 时，未知事件会从流中被丢弃；如果配置了 `onInvalidEvent`，仍可在那里通过 `missing-struct` 原因观察到它们。
+## Event 解码
+
+SSE parser 先选择 `events[eventName]`，没有时再选择 `events.default`。两者都不匹配时，它会丢弃 event，并向可选 invalid-event observer 报告 `missing-struct`。
+
+SSE `data:` 以 text 到达：
+
+- `struct.string()`、`struct.text()`、`struct.any()` 和 `struct.unknown()` 接收 text；
+- `struct.number()` 会 trim text，并接受 finite number；
+- `struct.boolean()` 会 trim text，并且只接受 `true` 或 `false`；
+- `struct.json(inner)` 先解析 JSON text，再用 `inner` 做结构化解码。
+
+裸 `struct.object(...)` 不会解析看起来像 JSON 的 event text。必须用 `struct.json(...)` 包裹。
+
+`default` Struct 处理其他未声明名称：
 
 ```typescript
-const useMixedStream = defineEventStream({
-  path: '/v1/events',
+const events = defineEventStream({
+  path: '/events',
   events: {
-    userconnect: struct.json(struct.object({ uid: struct.number() })),
-    default: struct.json(struct.object({ note: struct.string() })),
+    update: struct.json(struct.object({ version: struct.number() })),
+    default: struct.string(),
   },
 })
 ```
 
-### 事件数据内容解码
+没有 `default` Struct 时，`EventStreamData<TEvents>` 是由已声明的 event name 组成的 discriminated union。按 `event.event` 分支会将 `event.data` 缩窄为对应 Struct 的 output 类型。存在 `default` 时，它的分支会将实际 wire name 保留为 `event: string`；因此，混合已知 event 与 `default` 的 stream 仍会保留这一宽泛的 fallback 分支。
 
-SSE 传输层将每个 `data:` 负载作为原始文本投递。Defjs 首先从 `events[eventName] ?? events.default` 中选择事件结构，然后按照所选结构解码该文本。
+## Input 与 Request 映射
 
-当服务器为事件发送 JSON 文本时，使用 `struct.json(inner)`。`struct.json(inner)` 会先在原始 SSE 文本上执行 `JSON.parse`，再用 `inner` 解析结果值：
-
-```typescript
-const useProfileStream = defineEventStream({
-  path: '/v1/profile-events',
-  events: {
-    profile: struct.json(
-      struct.object({
-        displayName: struct.string().alias('display_name'),
-      }),
-    ),
-  },
-})
-```
-
-对于原始文本负载：
-
-- `struct.string()` 与 `struct.text()` 直接读取原始事件文本。
-- `struct.number()` 会去除空白，并只接受有限数值。
-- `struct.boolean()` 会去除空白，并只接受精确的 `true` 或 `false`。
-
-普通 `struct.object(...)`、`struct.array(...)`、`struct.record(...)` 不会自行解析看起来像 JSON 的文本。对于 JSON 事件数据，请将它们包裹在 `struct.json(...)` 中。
-
-### 带输入的事件流
-
-当流需要路径参数、查询参数或请求头时，提供 `input` 结构。如果该输入使用 `struct.request({ path, query, headers })`，Defjs 会自动映射这些区段。仅当公开输入形状与实际传输形状不同时，才添加 `build`。
+Path、query 和 header section 使用 `struct.request(...)`：
 
 ```typescript
-const useRoomStream = defineEventStream({
-  path: '/v1/room/:roomId',
+const roomEvents = defineEventStream({
+  path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
+    query: struct.object({ after: struct.string().optional() }),
   }),
   events: {
-    chat: struct.json(struct.object({ user: struct.string(), text: struct.string() })),
+    message: struct.json(struct.object({ text: struct.string() })),
   },
 })
-
-const [error, stream, open] = await client.execute(useRoomStream({ path: { roomId: '42' } }))
 ```
 
-SSE 的 `build` 只支持映射 path、query 和 headers 这些请求部分。凭证应在客户端级别通过 `withCredentials(...)` 配置；`build(ctx, input)` 不暴露公开的凭证设置方法。SSE 也不支持通过 `build` 公开设置请求体。
+自定义 SSE `build` 可以设置 path parameter、query parameter 和 header。它接收 schema-bound projection，不能设置 body 或 credentials。Credentials 要在 client 上用 `withCredentials(...)` 配置。
 
-## 执行结果
+## 启动 Tuple
 
-`client.execute()` 为 SSE 命令返回三元组：
+```typescript
+const [error, stream, startupOpen] = await client.execute(
+  roomEvents({
+    path: { roomId: 'general' },
+  }),
+)
+```
+
+SSE 返回：
 
 ```typescript
 type StreamAwaitResult<TEvent> =
@@ -101,183 +90,171 @@ type StreamAwaitResult<TEvent> =
   | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
 ```
 
-- **`error`** — 仅在连接或启动失败，或 `client.execute()` 启动阶段的请求输入校验失败时非空；成功打开流时为 `null`。事件级的 `validation-failed` / `missing-struct` 不会填充这里的 `error`，而是交给 `onInvalidEvent`，问题事件可被丢弃且流继续运行。
-- **`stream`** — 成功时，为可通过 `for await...of` 消费的 `EventStreamHandle`；启动失败时为 `undefined`。
-- **`open`** — `client.execute()` 启动成功时返回的启动打开快照，包含当次启动连接通过校验后的响应信息（`response` 和 `url`）。如果后续发生重连，请读取 `stream.open` 获取句柄上记录的最新 open 响应/最新连接尝试响应快照；它会在收到响应后立刻更新，因此不保证该响应已经通过后续校验或代表成功连接，HTTP 4xx/5xx 或无效 `content-type` 的重连响应也可能覆盖它。如果你需要保留启动时的打开快照，请单独保存这里的三元组第三项。连接失败或启动前校验失败时可能为 `undefined`。
+成功时，第三项是已通过校验的启动 open 快照。它的 response 已通过 HTTP status 和 `text/event-stream` content-type 检查。
+
+`stream.open` 是 live getter，保存逻辑 stream 最近看到的 response。这也可能是后续重连中，最终没有通过 status 或 content-type 校验的 response。需要初次快照时，请单独保存 `startupOpen`。
+
+默认不要记录 `startupOpen.url`、`stream.open.url` 或 response URL。它们可能包含敏感 path 或 query 数据。
+
+## 消费 Event
+
+所有者应在同一个生命周期内开始迭代并安排关闭：
 
 ```typescript
-const [error, stream, open] = await client.execute(useNotifications())
+import type { Client } from '@defjs/core'
 
-if (error) {
-  console.error('Connection failed:', error)
-  return
-}
+declare const client: Client
+declare const showNotification: (message: { id: number; text: string }) => void
 
-console.log('Connected', open?.url)
-
-for await (const event of stream) {
-  if (event.event === 'message' && typeof event.data === 'object' && event.data !== null) {
-    console.log('Message:', event.data.text)
-  }
-  if (event.event === 'heartbeat') {
-    console.log('Heartbeat:', event.data)
-  }
-}
-```
-
-## EventStreamHandle 和 stream.closed
-
-`EventStreamHandle` 实现 `AsyncIterable`，因此可以直接与 `for await...of` 一起使用。它还提供以下属性。注意：这里的 `stream.open` 是句柄上的活动状态，会在每次收到新的 open 响应后更新；它表示最新 open 响应/最新连接尝试响应快照，不保证该响应已经通过校验或代表成功连接。`const [error, stream, open] = await client.execute(...)` 中的第三项 `open` 则只是启动完成时拿到的打开快照；如果你需要保留它，请单独保存。
-
-| 属性 / 方法                | 说明                                                                                                                                                  |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `open`                     | 最新 open 响应/最新连接尝试响应的 `EventStreamOpenInfo`（包含 `response` 和 `url`）；每次收到新的 open 响应后都会更新，可能来自尚未通过校验的重连响应 |
-| `closed`                   | `Promise<EventStreamCloseInfo>`，流完全关闭时解析                                                                                                     |
-| `close(reason?)`           | 主动关闭流，可选传入原因                                                                                                                              |
-| `[Symbol.asyncIterator]()` | 返回消费事件队列的异步迭代器                                                                                                                          |
-
-`closed` 在以下情况下解析：
-
-- 服务器正常结束（`code: 'eof'`）
-- 通过 `stream.close()` 主动关闭（`code: 'aborted'`）
-- 连接错误或重连耗尽（`code: 'error'`）
-
-```typescript
-// 主动关闭
-stream.close('user-navigated-away')
-await stream.closed // { code: 'aborted', reason: 'user-navigated-away' }
-```
-
-## 无效事件处理：onInvalidEvent
-
-当服务器发送的事件无法匹配 `events` 中的任何结构（或 `default`），或结构验证失败时，触发 `onInvalidEvent` 观察者。它是客户端级配置，在 `createClient` 时通过 `withSSEOptions({ onInvalidEvent })` 或 `withSSEOnInvalidEvent(...)` 传入。
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEOptions({
-    onInvalidEvent: async (context) => {
-      console.warn('Invalid event:', context.reason, context.message)
-      // context.reason: 'missing-struct' | 'validation-failed'
-      // context.message: { id, event, data, retry? }
-      // context.cause: 验证失败时的原始错误
-    },
-  }),
-)
-```
-
-`onInvalidEvent` 是一个**观察者**：
-
-- 它接收 `reason: 'missing-struct' | 'validation-failed'` 与原始 `message` 上下文，可用于记录、告警或埋点。
-- 问题事件会被丢弃，不会产出到 `stream`；后续合法事件仍可继续消费。
-- 即使内部抛出异常，异常也会被静默忽略，不会中断整个流。
-- 但如果 `onInvalidEvent` 是异步函数，运行时会在处理该条无效事件时等待它完成，然后再继续后续消息处理；慢处理器会拖慢后续事件到达消费端的速度。
-- 因此应让处理器保持轻量；若需要慢日志、上报或其他耗时工作，请在处理器内部自行 fire-and-forget。
-
-将 `struct.object(...)` 直接声明给 `data:` 为 JSON 文本的事件，是常见的验证失败来源。这里应改用 `struct.json(struct.object(...))`。如果 `struct.json(...)` 下的 JSON 本身无效，会按 `validation-failed` 上报，不会退回按原始文本重试。
-
-## 重连和队列配置
-
-SSE 传输内置自动重连，可通过客户端级别的 `withSSEReconnect(...)`、`withSSEQueue(...)` 或 `withSSEOptions(...)` 配置 `reconnect` 和 `queue`。
-
-### 重连配置
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEOptions({
-    reconnect: {
-      attempts: 5, // 最大重试次数
-      delayMs: 1000, // 初始重试间隔
-      factor: 2, // 指数退避乘数
-      maxDelayMs: 30000, // 最大重试间隔
-      jitter: 1000, // 随机抖动范围（毫秒）
-      shouldReconnect: async ({ attempt, cause, lastEventId }) => {
-        return attempt <= 3
-      },
-    },
-  }),
-)
-```
-
-重连决策流程：
-
-1. 如果 `shouldReconnect` 返回 `false`，停止重连。
-2. 如果超出 `attempts` 限制，停止重连。
-3. 否则，使用 `delayMs` + `factor` 指数退避 + `jitter` 计算下一次重试间隔。
-
-> 重连会自动携带 `Last-Event-ID` 请求头，使服务器可以从断点恢复。
-
-### 队列配置
-
-事件到达后进入内部异步队列，然后由迭代器消费。你可以限制队列大小和溢出行为：
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEOptions({
-    queue: {
-      maxSize: 100,
-      overflow: 'drop-oldest', // 'drop-newest' | 'drop-oldest' | 'error'
-    },
-  }),
-)
-```
-
-| `overflow`    | 行为                                 |
-| ------------- | ------------------------------------ |
-| `drop-newest` | 丢弃新到达的事件，保留队列中的旧事件 |
-| `drop-oldest` | 丢弃最旧的事件，为新事件腾出空间     |
-| `error`       | 队列满时抛出错误，导致流关闭         |
-
-## 完整示例
-
-```typescript
-import { createClient, defineEventStream, struct, withEndpoint, withSSEOptions } from '@defjs/core'
-
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withSSEOptions({
-    reconnect: { attempts: 5, delayMs: 1000, factor: 2, maxDelayMs: 30000 },
-    queue: { maxSize: 100, overflow: 'drop-oldest' },
-    onInvalidEvent: async ({ reason, message }) => {
-      console.warn(`Skipped invalid event [${reason}]: ${message.event}`)
-    },
-  }),
-)
-
-const useLogStream = defineEventStream({
-  path: '/v1/logs',
-  events: {
-    log: struct.json(struct.object({ level: struct.string(), msg: struct.string() })),
-  },
-})
-
-async function tailLogs() {
-  const [error, stream, open] = await client.execute(useLogStream())
+async function consumeNotifications(signal: AbortSignal) {
+  const [error, stream, startupOpen] = await client.execute(notifications(), { signal })
 
   if (error) {
-    console.error('Connection failed:', error)
+    console.error('notification stream startup failed', { kind: error.kind, code: error.code })
     return
   }
 
-  console.log('Connected', open.url)
+  console.info('notification stream connected', {
+    status: startupOpen.response?.status,
+  })
 
-  for await (const event of stream) {
-    if (typeof event.data === 'object' && event.data !== null) {
-      console.log(`[${event.data.level}] ${event.data.msg}`)
+  try {
+    for await (const event of stream) {
+      switch (event.event) {
+        case 'message':
+          showNotification(event.data)
+          break
+        case 'heartbeat':
+          break
+        default: {
+          const exhaustive: never = event
+          void exhaustive
+        }
+      }
     }
+  } finally {
+    stream.close('consumer-finished')
+    await stream.closed
   }
-
-  const closeInfo = await stream.closed
-  console.log('Stream closed:', closeInfo.code)
 }
-
-tailLogs()
 ```
+
+`execute` 成功只表示启动完成。启动后的错误会通过 iterator rejection 和 `stream.closed` 出现，不会回头修改原始 tuple 的 `error` 项。
+
+## 无效 Event
+
+用 `withSSEOnInvalidEvent(...)` 或 `withSSEOptions(...)` 配置 `onInvalidEvent`：
+
+```typescript
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEOnInvalidEvent(({ reason, message }) => {
+    recordInvalidEvent({ eventName: message.event, reason })
+  }),
+)
+```
+
+Observer 会收到：
+
+- `reason: 'missing-struct' | 'validation-failed'`；
+- 原始 event 的 `id`、name、data text 和可选 retry value；
+- validation failure 的 `cause`。
+
+该 event 会被丢弃，后续合法 event 仍可正常投递。Observer 抛错和 rejected promise 会被捕获，但 async observer 会在继续处理后续消息前被等待。请保持它足够快。记录原始 `id`、`data` 或 `cause` 前要先审查并脱敏。
+
+## 重连
+
+SSE 内置了针对网络错误和 stream read failure 的重试。正常 EOF 会以 `code: 'eof'` 关闭 stream，不会重连。
+
+默认从 1 秒开始重试，而且没有次数上限。设置 `attempts` 来限制次数：
+
+```typescript
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withSSEReconnect({
+    attempts: 5,
+    delayMs: 1_000,
+    factor: 2,
+    maxDelayMs: 30_000,
+    jitter: 250,
+  }),
+)
+```
+
+`attempts` 表示初次尝试之后的重试次数。`attempts: 0` 禁用重试。传给 `shouldReconnect` 的 `attempt` 从第一次重试的 1 开始，并在整个逻辑 stream 中持续累计；物理连接成功不会把它清零。
+
+Delay 从当前 retry interval 开始。服务端可用 SSE `retry:` 字段更新该 interval。`factor` 应用指数增长，`maxDelayMs` 限制 base delay。`jitter` 最后再加上从 0 到配置值之间的随机毫秒数。由于 jitter 在 cap 之后相加，最终 delay 可能超过 `maxDelayMs`，但超出部分小于 `jitter`。
+
+```typescript
+withSSEReconnect({
+  attempts: 5,
+  shouldReconnect({ attempt, lastEventId, cause, open }) {
+    return shouldRetryStream({ attempt, lastEventId, cause, status: open?.response.status })
+  },
+})
+```
+
+Transport 会在后续尝试中把最近的 event ID 作为 `Last-Event-ID` 发送。确保 `shouldReconnect` 不抛错。Predicate 抛错或 reject 时，目前不能保证所有 pending iterator 或 `stream.closed` path 都会 settle。
+
+HTTP/open validation failure、消息处理 fatal error 和正常 EOF 都不同于可重试的网络/read failure。不要假定每条终止路径都会重连。
+
+## 共享工作队列
+
+Async iterable 是逻辑 stream 上的一个共享工作队列（shared work queue），不是 subscription、broadcast 或 backpressure 机制。
+
+Queue 默认无界。用 `withSSEQueue(...)` 或 `withSSEOptions({ queue })` 设置上限：
+
+```typescript
+withSSEQueue({
+  maxSize: 100,
+  overflow: 'drop-oldest',
+})
+```
+
+| Overflow      | 达到上限时的行为                                 |
+| ------------- | ------------------------------------------------ |
+| `drop-newest` | 丢弃刚到达的 event。                             |
+| `drop-oldest` | 移除最旧的 buffered event，再 enqueue 新 event。 |
+| `error`       | 抛出 queue overflow error 并终止处理。           |
+
+多个 iterator 会竞争 value，不会各自收到副本。退出某个 `for await` loop 不会关闭 transport，因为 iterator 没有 lifecycle-aware `return()` implementation。必须显式调用 `stream.close(...)`。
+
+关闭只会把 queue 标记为 done，不会丢弃已 buffer 的 value。Consumer 可以先 drain 这些 value，下一次迭代才会得到 `done: true`。
+
+### Parser Buffer 上限
+
+Event queue 和 parser buffer 是两回事。通过 `withSSEOptions(...)` 设置正数 `maxBufferSize`，可以限制不完整 SSE line 占用的 byte：
+
+```typescript
+withSSEOptions({
+  maxBufferSize: 64 * 1024,
+})
+```
+
+启动后超过上限会 reject iterator，并以 `code: 'error'` 关闭 stream。省略该值时，parser buffer 无界。
+
+## 终止关闭
+
+`stream.closed` resolve 为：
+
+```typescript
+interface EventStreamCloseInfo {
+  code: 'eof' | 'aborted' | 'error'
+  reason?: string
+  cause?: unknown
+}
+```
+
+- `eof` 表示 response body 正常结束；
+- `aborted` 包括显式 `stream.close(...)` 或取消路径；
+- `error` 表示停止重试或出现终止 stream error。
+
+`stream.close(reason)` 是幂等的。它会 abort 活动 transport 工作、禁止向 queue 继续 push，并 settle `stream.closed`。`break` 不会做这些事。
+
+打开 stream 的应用边界负责关闭它。Client 或框架 provider 不会自动关闭。
 
 ## 下一步
 
-- [客户端 →](/zh-Hans/core/client) — `createClient` 和 `sse` 选项
-- [命令 →](/zh-Hans/core/commands) — 命令定义和输入规则
-- [WebSocket →](/zh-Hans/core/web-socket) — WebSocket 连接和状态管理
+- [WebSocket](/zh-Hans/core/web-socket)：双向 session 和 opt-in reconnect。
+- [Interceptors](/zh-Hans/core/interceptors)：SSE header 修改和生命周期观察。
+- [Errors](/zh-Hans/core/errors)：启动 response 的可用性。

@@ -1,349 +1,266 @@
 ---
-title: Interceptors
-description: Per-transport HTTP, SSE, and WebSocket interceptors, onion-chain execution model, and common interceptor examples.
+title: Перехватчики
+description: Фильтруйте перехватчики по транспорту, выполняйте их в луковичном порядке, безопасно клонируйте запросы, прерывайте цепочку и реализуйте ограниченные политики аутентификации и повторов.
 ---
 
 # Перехватчики
 
-Перехватчики `@defjs/core` делятся по транспортному слою: HTTP, SSE и WebSocket. Они разделяют одну и ту же модель луковичной цепочки, но работают с разными формами запроса/ответа: HTTP возвращает `Promise<HttpResponse>`, SSE — `Promise<EventStreamHandle>`, а WebSocket — `Promise<WebSocketSessionLike>`.
+Перехватчики оборачивают границу транспорта. У HTTP, SSE и WebSocket разные виды перехватчиков и разные типы результата.
 
-Перехватчики регистрируются на уровне `Client` через `withInterceptors(...)`. Клиент автоматически фильтрует и диспатчит на правильную цепочку перехватчиков на основе типа команды.
+| Фабрика                      | Запрос        | Результат `next`                      |
+| ---------------------------- | ------------- | ------------------------------------- |
+| `createHttpInterceptor`      | `HttpRequest` | `Promise<HttpResponse<unknown>>`      |
+| `createSSEInterceptor`       | `HttpRequest` | `Promise<EventStreamHandle<unknown>>` |
+| `createWebSocketInterceptor` | `HttpRequest` | `Promise<WebSocketSessionLike>`       |
 
-## Три типа перехватчиков
-
-### HTTP-перехватчики
-
-HTTP-перехватчики работают с `HttpRequest` и возвращают `Promise<HttpResponse>`. Типичное использование: инъекция auth-заголовков, логирование, retry, трансформация ошибок.
+Регистрируйте смешанный набор через `withInterceptors(...)`. Клиент отбирает элементы по `kind` и сохраняет порядок регистрации внутри каждого транспорта.
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpResponse, HttpInterceptorNext } from '@defjs/core'
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(httpLogger, sseAuth, socketObserver))
+```
 
-const loggingInterceptor = createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-  console.log(`[HTTP] ${req.method} ${req.endpoint}`)
-  const response = await next(req)
-  console.log(`[HTTP] ${req.method} ${req.endpoint} -> ${response.status}`)
+## Луковичный порядок
+
+Запрос проходит перехватчики в порядке регистрации. Результат возвращается в обратном порядке:
+
+```typescript
+const first = createHttpInterceptor(async (request, next) => {
+  order.push('first:before')
+  const response = await next(request)
+  order.push('first:after')
   return response
 })
+
+const second = createHttpInterceptor(async (request, next) => {
+  order.push('second:before')
+  const response = await next(request)
+  order.push('second:after')
+  return response
+})
+
+// first:before -> second:before -> transport
+//               <- second:after <- first:after
 ```
 
-### SSE-перехватчики
-
-SSE-перехватчики работают с `HttpRequest` (HTTP-запрос перед соединением) и возвращают `Promise<EventStreamHandle>`. Типичное использование: инъекция auth-заголовков перед SSE-соединением, мониторинг состояния соединения.
+Несколько вызовов `withInterceptors(...)` добавляют элементы в конец:
 
 ```typescript
-import { createSSEInterceptor } from '@defjs/core'
-import type { HttpRequest, SSEHandler } from '@defjs/core'
-
-const sseAuthInterceptor = createSSEInterceptor(async (req: HttpRequest, next: SSEHandler) => {
-  const headers = new Headers(req.headers)
-  headers.set('Authorization', `Bearer ${getToken()}`)
-  const stream = await next({ ...req, headers })
-  return stream
-})
+createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
-### WebSocket-перехватчики
+## Безопасное клонирование запросов
 
-WebSocket-перехватчики работают с `HttpRequest` (HTTP-запрос перед handshake) и возвращают `Promise<WebSocketSessionLike>`. Типичное использование: модификация URL или инъекция заголовков субпротокола перед WebSocket-handshake.
-
-```typescript
-import { createWebSocketInterceptor } from '@defjs/core'
-import type { HttpRequest, WebSocketHandler } from '@defjs/core'
-
-const wsProtocolInterceptor = createWebSocketInterceptor(async (req: HttpRequest, next: WebSocketHandler) => {
-  const headers = new Headers(req.headers)
-  headers.set('Sec-WebSocket-Protocol', 'v1')
-  const session = await next({ ...req, headers })
-  return session
-})
-```
-
-## Модель луковичной цепочки
-
-Все три цепочки перехватчиков используют **луковичную модель**: фаза запроса входит в порядке регистрации, фаза ответа возвращается в обратном порядке.
+Считайте входящий запрос принадлежащим цепочке. Перед изменением заголовков создайте новый объект `Headers`:
 
 ```typescript
-import { createHttpInterceptor, makeInterceptorChain } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext, HttpResponse } from '@defjs/core'
-
-const order: number[] = []
-
-const a = createHttpInterceptor(async (req, next) => {
-  order.push(1) // Фаза запроса: первый входит
-  const res = await next(req)
-  order.push(1.1) // Фаза ответа: последний выходит
-  return res
-})
-
-const b = createHttpInterceptor(async (req, next) => {
-  order.push(2)
-  const res = await next(req)
-  order.push(2.1)
-  return res
-})
-
-const c = createHttpInterceptor(async (req, next) => {
-  order.push(3) // Фаза запроса: последний входит
-  const res = await next(req)
-  order.push(3.1) // Фаза ответа: первый выходит
-  return res
-})
-
-// Порядок регистрации: a -> b -> c
-// Порядок выполнения: 1 -> 2 -> 3 -> 3.1 -> 2.1 -> 1.1
-```
-
-### Модификация запросов и ответов
-
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext } from '@defjs/core'
-
-const addHeaderInterceptor = createHttpInterceptor(async (req, next) => {
-  const headers = new Headers(req.headers)
-  headers.set('X-Request-Id', crypto.randomUUID())
-  return next({ ...req, headers })
-})
-
-const wrapErrorInterceptor = createHttpInterceptor(async (req, next) => {
-  try {
-    return await next(req)
-  } catch (error) {
-    throw new Error(`Request failed: ${error}`)
+const auth = createHttpInterceptor((request, next) => {
+  const token = getAccessToken()
+  if (!token) {
+    return next(request)
   }
+
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${token}`)
+  return next({ ...request, headers })
 })
 ```
 
-### Оборачивание возвращаемых результатов
+Тот же приём подходит для заголовков SSE. Браузерный конструктор WebSocket не умеет отправлять произвольные заголовки handshake, поэтому изменение `request.headers` в WebSocket-перехватчике не аутентифицирует браузерное подключение.
+
+При замене HTTP-тела скопируйте запрос через spread и замените `body`. Граница Fetch распознаёт, что метаданные Content-Type старого тела больше не относятся к новому. Не переиспользуйте уже прочитанный `ReadableStream`.
+
+## Короткое замыкание
+
+Перехватчик может не вызывать `next`, но обязан вернуть тип результата своего транспорта. Для HTTP обёртку Defjs можно создать через `makeResponse(...)`:
+
+```typescript
+import { createHttpInterceptor, makeResponse } from '@defjs/core'
+
+declare const isMaintenanceWindow: () => boolean
+
+const maintenanceGate = createHttpInterceptor(async (request, next) => {
+  if (isMaintenanceWindow()) {
+    return makeResponse({
+      status: 503,
+      statusText: 'Service Unavailable',
+      body: { message: 'Temporarily unavailable' },
+    })
+  }
+
+  return next(request)
+})
+```
+
+Обычный слой команд всё равно выберет Struct по статусу и `output`. Если статус является частью контракта эндпоинта, объявите его.
+
+Для короткого замыкания SSE или WebSocket понадобится полностью совместимый хендл или сеанс, включая семантику закрытия. Обычно это сложнее, чем вернуть синтетический HTTP-ответ.
+
+## Сохраняйте актуальные геттеры сеанса
+
+Не оборачивайте сеанс WebSocket через `{ ...session }`. Spread прочитает `state` и `connection` один раз и превратит актуальные геттеры в устаревшие значения. Делегируйте каждый член явно:
 
 ```typescript
 import { createWebSocketInterceptor } from '@defjs/core'
-import type { WebSocketInterceptorFn } from '@defjs/core'
 
-const wrapSessionInterceptor: WebSocketInterceptorFn = async (req, next) => {
-  const session = await next(req)
+const wrappedSession = createWebSocketInterceptor(async (request, next) => {
+  const session = await next(request)
+
   return {
-    ...session,
-    send(message: unknown) {
-      console.log('[WS] send:', message)
+    get connection() {
+      return session.connection
+    },
+    get state() {
+      return session.state
+    },
+    closed: session.closed,
+    receive: session.receive,
+    close(code, reason) {
+      session.close(code, reason)
+    },
+    onRuntimeError(listener) {
+      return session.onRuntimeError(listener)
+    },
+    onStateChange(listener) {
+      return session.onStateChange(listener)
+    },
+    send(message) {
       session.send(message)
     },
   }
-}
-```
-
-## Примеры распространённых перехватчиков
-
-### Auth-перехватчик
-
-Инжектирует Bearer Token в заголовки. HTTP и SSE разделяют одну логику.
-
-```typescript
-import { createHttpInterceptor, createSSEInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext } from '@defjs/core'
-
-function getToken(): string {
-  return localStorage.getItem('token') ?? ''
-}
-
-const authHttpInterceptor = createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-  const headers = new Headers(req.headers)
-  headers.set('Authorization', `Bearer ${getToken()}`)
-  return next({ ...req, headers })
-})
-
-const authSSEInterceptor = createSSEInterceptor(async (req, next) => {
-  const headers = new Headers(req.headers)
-  headers.set('Authorization', `Bearer ${getToken()}`)
-  return next({ ...req, headers })
 })
 ```
 
-### Логирующий перехватчик
+Обёртка должна сохранять и владение ресурсом. Не заменяйте `closed`, не подавляйте `close` и не отсоединяйте входной iterable, если приложение не выбрало и не описало такое поведение намеренно.
 
-Записывает длительность запроса и код состояния.
+## Ограниченное логирование
 
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext } from '@defjs/core'
-
-const timingInterceptor = createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-  const start = performance.now()
-  const response = await next(req)
-  const duration = (performance.now() - start).toFixed(2)
-  console.log(`[${duration}ms] ${req.method} ${req.endpoint} ${response.status}`)
-  return response
-})
-```
-
-### Retry-перехватчик
-
-Повторяет запросы при определённых кодах состояния. Retry-перехватчик следует регистрировать ближе к низу цепочки, после логирования, но перед фактическим запросом.
+Предпочитайте фиксированные имена операций и небольшой проверенный набор полей:
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpInterceptorNext, HttpResponse } from '@defjs/core'
+function timingInterceptor(operation: string) {
+  return createHttpInterceptor(async (request, next) => {
+    const startedAt = performance.now()
+    const response = await next(request)
 
-function retryInterceptor(maxRetries = 3, delayMs = 1000) {
-  return createHttpInterceptor(async (req: HttpRequest, next: HttpInterceptorNext) => {
-    let lastError: unknown
+    console.info('outbound request completed', {
+      durationMs: Math.round(performance.now() - startedAt),
+      operation,
+      status: response.status,
+    })
 
-    for (let i = 0; i <= maxRetries; i++) {
-      try {
-        const response = await next(req)
-        if (response.status >= 500) {
-          lastError = new Error(`Server error: ${response.status}`)
-          if (i < maxRetries) {
-            await new Promise((r) => setTimeout(r, delayMs * (i + 1)))
-            continue
-          }
-        }
-        return response
-      } catch (error) {
-        lastError = error
-        if (i < maxRetries) {
-          await new Promise((r) => setTimeout(r, delayMs * (i + 1)))
-          continue
-        }
-      }
-    }
-
-    throw lastError
+    return response
   })
 }
 ```
 
-### Basic Auth-перехватчик (встроенный)
+По умолчанию не записывайте в журнал URL эндпоинтов, query-строки, заголовки, тела, исходные причины, идентификаторы SSE-событий и payload WebSocket.
 
-`@defjs/core` предоставляет встроенные Basic Auth-перехватчики для HTTP и SSE.
+## Осторожные повторы HTTP
+
+Повторы меняют поведение приложения. Пример ниже ограничен методами `GET`, `HEAD` и `OPTIONS`; повторяет только статусы `0`, `502`, `503` и `504`; учитывает `Retry-After`; быстро останавливается при отмене и отказывается от потокового тела.
 
 ```typescript
-import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from '@defjs/core'
+import { createHttpInterceptor } from '@defjs/core'
+import type { HttpRequest, HttpResponse } from '@defjs/core'
 
-const credential = () => ({ username: 'admin', password: 'secret' })
+const RETRYABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+const RETRYABLE_STATUSES = new Set([0, 502, 503, 504])
 
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(basicAuthHttpInterceptor(credential), basicAuthSSEInterceptor(credential)),
-)
+function isReplayable(request: HttpRequest): boolean {
+  return !(typeof ReadableStream !== 'undefined' && request.body instanceof ReadableStream)
+}
+
+function retryAfterMs(response: HttpResponse<unknown>): number | undefined {
+  const value = response.headers.get('retry-after')
+  if (!value) {
+    return undefined
+  }
+
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1_000
+  }
+
+  const at = Date.parse(value)
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
+}
+
+async function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    throw signal.reason
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(finish, ms)
+
+    function finish() {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }
+
+    function abort() {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+      reject(signal?.reason)
+    }
+
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+    }
+  })
+}
+
+function retrySafeHttp(maxRetries = 2) {
+  return createHttpInterceptor(async (request, next) => {
+    if (!RETRYABLE_METHODS.has(request.method.toUpperCase()) || !isReplayable(request)) {
+      return next(request)
+    }
+
+    for (let retry = 0; ; retry += 1) {
+      const response = await next(request)
+      if (!RETRYABLE_STATUSES.has(response.status) || retry >= maxRetries) {
+        return response
+      }
+
+      const fallback = Math.min(250 * 2 ** retry, 5_000)
+      const delay = Math.min(retryAfterMs(response) ?? fallback, 30_000)
+      await abortableWait(delay, request.abort)
+    }
+  })
+}
 ```
 
-Кодировка по умолчанию использует `globalThis.btoa`. Для сред без `btoa` (например, Node) можно кастомизировать через `options.encode`:
+Этот перехватчик не повторяет ошибки, выброшенные другими перехватчиками: надёжно классифицировать их нельзя. Статус `0` — обёртка транспортной ошибки на границе Defjs Fetch.
+
+Не добавляйте записывающие методы по привычке. Для повторов `POST`, `PUT`, `PATCH` или `DELETE` нужны контракт идемпотентности на уровне приложения, повторно читаемые тела, поддержка сервера и проверенная политика статусов.
+
+## Basic Authentication
+
+Корневая точка входа экспортирует `basicAuthHttpInterceptor(...)` и `basicAuthSSEInterceptor(...)`.
 
 ```typescript
-import { basicAuthHttpInterceptor } from '@defjs/core'
-
-const interceptor = basicAuthHttpInterceptor(() => ({ username: 'user', password: 'pass' }), {
-  encode: (cred) => Buffer.from(`${cred.username}:${cred.password}`).toString('base64'),
-})
-```
-
-## Регистрация и фильтрация
-
-### Регистрация через `withInterceptors`
-
-Перехватчики регистрируются при `createClient` через `withInterceptors(...)`. Один массив может смешивать все три типа перехватчиков; клиент фильтрует по типу команды автоматически.
-
-```typescript
-import { createClient, withEndpoint, withInterceptors } from '@defjs/core'
-import { createHttpInterceptor, createSSEInterceptor, createWebSocketInterceptor } from '@defjs/core'
-
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withInterceptors(
-    createHttpInterceptor(async (req, next) => {
-      console.log('HTTP:', req.endpoint)
-      return next(req)
-    }),
-    createSSEInterceptor(async (req, next) => {
-      console.log('SSE:', req.endpoint)
-      return next(req)
-    }),
-    createWebSocketInterceptor(async (req, next) => {
-      console.log('WS:', req.endpoint)
-      return next(req)
-    }),
+    basicAuthHttpInterceptor(() => credentials),
+    basicAuthSSEInterceptor(() => credentials),
   ),
 )
 ```
 
-### Правила фильтрации
+Учётные данные Basic только кодируются в base64, легко декодируются обратно и не шифруются. Используйте TLS. Стандартный кодировщик вызывает `globalThis.btoa`, который может отсутствовать и принимает ограниченный набор символов. Передайте `options.encode`, если в среде нет `btoa` или для учётных данных нужна проверенная реализация UTF-8/base64.
 
-Клиент фильтрует перехватчики по типу команды:
+Провайдер учётных данных вызывается при прохождении запроса через перехватчик. На сервере держите учётные данные в области запроса и не записывайте итоговый заголовок в журнал.
 
-| Тип команды                   | Условие фильтрации      | Внутренняя функция             |
-| ----------------------------- | ----------------------- | ------------------------------ |
-| HTTP (`defineRequest`)        | `kind === 'http'`       | `resolveHttpInterceptors`      |
-| SSE (`defineEventStream`)     | `kind === 'sse'`        | `resolveSSEInterceptors`       |
-| WebSocket (`defineWebSocket`) | `kind === 'web-socket'` | `resolveWebSocketInterceptors` |
+## Безопасность наблюдателей и колбэков
 
-Отфильтрованные перехватчики сохраняют свой исходный порядок регистрации, затем формируют луковичную цепочку.
+Перехватчики SSE и WebSocket могут подключать наблюдателей жизненного цикла к возвращённым хендлам. Удаляйте слушатели WebSocket, когда завершается их владелец. Слушатели и предикаты не должны выбрасывать ошибки: текущие реализации транспорта реального времени изолируют не все сбои слушателей и предикатов переподключения.
 
-```typescript
-// Упрощённая внутренняя логика выполнения
-const httpInterceptors = resolveHttpInterceptors(clientConfig.interceptors)
-const chain = makeInterceptorChain(httpInterceptors)
-const response = await chain(request, (req) => fetchHandler(req, clientConfig.http.fetch))
-```
-
-### Порядок перехватчиков и композиция
-
-Несколько вызовов `withInterceptors` дописывают перехватчики по порядку.
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(loggingInterceptor), // Первый
-  withInterceptors(authInterceptor, retryInterceptor), // Второй
-)
-// Итоговый порядок: logging -> auth -> retry
-```
-
-## Примечания о метаданных тела
-
-Когда перехватчик заменяет `body`, старые метаданные `bodyContentType` автоматически инвалидируются, чтобы предотвратить отправку некорректного `Content-Type` на сервер.
-
-```typescript
-// Сохранение оригинального тела: метаданные Content-Type остаются валидными
-const keepBody = createHttpInterceptor((req, next) => next({ ...req, headers: new Headers(req.headers) }))
-
-// Замена тела: старый Content-Type очищается, новый тип тела определяет его
-const replaceBody = createHttpInterceptor((req, next) => next({ ...req, body: new FormData() }))
-```
-
-## Справка по API
-
-### Функции создания
-
-| Функция                          | Описание                      |
-| -------------------------------- | ----------------------------- |
-| `createHttpInterceptor(fn)`      | Создать HTTP-перехватчик      |
-| `createSSEInterceptor(fn)`       | Создать SSE-перехватчик       |
-| `createWebSocketInterceptor(fn)` | Создать WebSocket-перехватчик |
-
-### Типы
-
-| Тип                    | Описание                                                                          |
-| ---------------------- | --------------------------------------------------------------------------------- |
-| `HttpInterceptor`      | HTTP-перехватчик объект `{ kind: 'http', fn: InterceptorFn }`                     |
-| `SSEInterceptor`       | SSE-перехватчик объект `{ kind: 'sse', fn: SSEInterceptorFn }`                    |
-| `WebSocketInterceptor` | WebSocket-перехватчик объект `{ kind: 'web-socket', fn: WebSocketInterceptorFn }` |
-| `Interceptor`          | Объединение всех трёх типов перехватчиков                                         |
-| `HttpInterceptorNext`  | HTTP next handler `(req: HttpRequest) => Promise<HttpResponse>`                   |
-| `SSEHandler`           | SSE next handler `(req: HttpRequest) => Promise<EventStreamHandle>`               |
-| `WebSocketHandler`     | WebSocket next handler `(req: HttpRequest) => Promise<WebSocketSessionLike>`      |
-
-### Встроенные перехватчики
-
-| Функция                                          | Описание                    |
-| ------------------------------------------------ | --------------------------- |
-| `basicAuthHttpInterceptor(credential, options?)` | HTTP Basic Auth-перехватчик |
-| `basicAuthSSEInterceptor(credential, options?)`  | SSE Basic Auth-перехватчик  |
+Перехватчик может выбросить ошибку или отклонить Promise. Высокоуровневый транспорт нормализует часть сбоев в `RequestError`, но код перехватчика не должен рассчитывать на общее обещание «Promise никогда не отклоняется».
 
 ## Что дальше
 
-- [Клиент →](/core/client) — Создание клиентов и конфигурация перехватчиков
-- [HTTP-запросы →](/core/http) — `defineRequest` и паттерны output
-- [SSE →](/core/sse) — Определение SSE и потоковая передача
-- [WebSocket →](/core/web-socket) — Определение WebSocket и жизненный цикл
+- [Клиент](/ru-RU/core/client) — регистрация и композиция опций.
+- [HTTP](/ru-RU/core/http) — обёртка Fetch и поведение статуса 0.
+- [SSE](/ru-RU/core/sse) и [WebSocket](/ru-RU/core/web-socket) — жизненный цикл соответствующих транспортов.

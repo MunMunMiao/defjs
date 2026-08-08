@@ -1,24 +1,54 @@
-import { defineConfig } from 'tsdown'
-import { rewritePackageJson } from '../../scripts/rewrite-package-json.ts'
+import { readFile, writeFile } from 'node:fs/promises'
+import { defineConfig, type UserConfig } from 'tsdown'
+
+async function writeDistPackageJson(): Promise<void> {
+  const packageJson = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8')) as Record<string, unknown>
+
+  packageJson['main'] = './index.js'
+  packageJson['module'] = './index.js'
+  packageJson['types'] = './index.d.ts'
+  packageJson['typings'] = './index.d.ts'
+  packageJson['exports'] = {
+    './package.json': './package.json',
+    '.': {
+      types: './index.d.ts',
+      default: './index.js',
+    },
+  }
+  delete packageJson['scripts']
+  delete packageJson['devDependencies']
+  delete packageJson['private']
+  delete packageJson['publishConfig']
+
+  await writeFile(new URL('./dist/package.json', import.meta.url), `${JSON.stringify(packageJson, undefined, 2)}\n`)
+}
 
 export default defineConfig({
-  entry: ['./src/index.ts'],
-  outDir: './dist',
   format: 'esm',
-  platform: 'browser',
-  target: 'esnext',
-  dts: true,
+  outDir: 'dist',
+  platform: 'neutral',
+  target: false,
+  tsconfig: 'tsconfig.build.json',
   clean: true,
-  minify: false,
-  sourcemap: false,
-  tsconfig: './tsconfig.build.json',
+  dts: true,
+  entry: {
+    index: 'src/public_api.ts',
+  },
+  banner: {
+    js: "'use client';",
+  },
+  inputOptions: {
+    resolve: {
+      mainFields: ['module', 'main'],
+    },
+  },
   deps: {
     neverBundle: ['react', 'react-dom', '@defjs/core'],
   },
   copy: ['../../LICENSE', './README.md'],
   hooks: {
-    async 'build:done'({ options }) {
-      await rewritePackageJson(import.meta.dirname, options.outDir)
+    async 'build:done'() {
+      await writeDistPackageJson()
     },
   },
-})
+} satisfies UserConfig)

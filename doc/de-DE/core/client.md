@@ -1,15 +1,11 @@
 ---
 title: Client
-description: Create explicit clients, configure transport options, and execute HTTP, SSE, and WebSocket commands.
+description: Erstelle explizite Clients, kombiniere Optionen, führe transportspezifische Commands aus und untersuche die Live-Konfiguration.
 ---
 
 # Client
 
-`@defjs/core` verwendet ein **explizites Client-Design**. Jede Anfrage wird über eine von dir explizit erstellte `Client`-Instanz ausgeführt. Das macht Testing, Multi-Environment-Konfiguration und Abhängigkeitsverfolgung unkompliziert.
-
-## Client erstellen
-
-Verwende `createClient` mit einer oder mehreren Konfigurationsfunktionen.
+Erstelle einen `Client` explizit und übergib ihn an den Code, der Commands ausführt.
 
 ```typescript
 import { createClient, withEndpoint } from '@defjs/core'
@@ -17,207 +13,137 @@ import { createClient, withEndpoint } from '@defjs/core'
 const client = createClient(withEndpoint('https://api.example.com'))
 ```
 
-Konfigurationsfunktionen komponieren. Spätere Funktionen überschreiben frühere für denselben Schlüssel.
+Der Client speichert die Konfiguration und verteilt HTTP-, SSE- und WebSocket-Commands. Er verwaltet weder eine globale Registry noch einen Lebenszyklus im Hintergrund.
+
+## Optionskomposition
+
+Optionen werden von links nach rechts ausgeführt.
 
 ```typescript
-import { createClient, withEndpoint, withHTTPHandle, withInterceptors, withCredentials } from '@defjs/core'
-
 const client = createClient(
+  withEndpoint('https://old.example.com'),
   withEndpoint('https://api.example.com'),
-  withHTTPHandle(myCustomFetch),
-  withCredentials(true),
-  withInterceptors(loggingInterceptor, authInterceptor),
+  withInterceptors(operationLogger),
+  withInterceptors(authInterceptor, retryInterceptor),
 )
 ```
 
-### Konfigurationsoptionen
+Der endgültige Endpunkt ist `https://api.example.com`. Die Reihenfolge der Interceptors lautet `operationLogger`, `authInterceptor`, dann `retryInterceptor`.
 
-| Funktion                            | Beschreibung                                                                 |
-| ----------------------------------- | ---------------------------------------------------------------------------- |
-| `withEndpoint(url)`                 | Basis-API-Adresse.                                                           |
-| `withHTTPHandle(fetch)`             | Eigene `fetch`-Implementierung für HTTP.                                     |
-| `withSSEHandle(fetch)`              | Eigene `fetch`-Implementierung für SSE.                                      |
-| `withWebSocketHandle(WebSocket)`    | Eigener `WebSocket`-Konstruktor (z. B. für Node).                            |
-| `withInterceptors(...interceptors)` | Transport-Layer-Interceptors registrieren. Automatisch nach `kind` verteilt. |
-| `withQueryParamsSerializer(fn)`     | Eigene Query-Parameter-Serialisierung.                                       |
-| `withCredentials(boolean)`          | Ob Cross-Origin-Credentials mitgesendet werden.                              |
-| `withXSRF(options)`                 | XSRF-Token-Lese- und Injektionsverhalten.                                    |
-| `withSSEOptions(options)`           | SSE-Wiederverbindung, Warteschlange, Invalid-Event-Handling etc.             |
-| `withWebSocketOptions(options)`     | WebSocket-Heartbeat, Wiederverbindung, Warteschlange, Subprotokolle etc.     |
+Für die Komposition gelten drei Regeln:
 
-Für SSE- und WebSocket-spezifische Konfiguration siehe [SSE](/core/sse) und [WebSocket](/core/web-socket).
+1. Setter-Helper ersetzen ihren Wert. Dazu gehören `withEndpoint`, Transport-Handles, der Query-Serializer, Credentials, die XSRF-Konfiguration und einzelne SSE- oder WebSocket-Einstellungen.
+2. `withInterceptors(...items)` hängt Einträge an. Mehrere Aufrufe bewahren die Reihenfolge, in der Interceptors hinzugefügt wurden.
+3. `withSSEOptions(...)` und `withWebSocketOptions(...)` ersetzen jedes definierte Feld auf oberster Ebene flach. Verschachtelte Reconnect-, Heartbeat- oder Queue-Objekte werden nicht tief zusammengeführt.
+
+Im folgenden Beispiel ersetzt das zweite Reconnect-Objekt das erste vollständig. `attempts: 5` bleibt nicht erhalten.
+
+```typescript
+const client = createClient(
+  withWebSocketOptions({
+    reconnect: { attempts: 5, delayMs: 500 },
+  }),
+  withWebSocketOptions({
+    reconnect: { delayMs: 2_000 },
+  }),
+)
+```
+
+Die gruppierten Options-Helper ignorieren Eigenschaften mit dem Wert `undefined`. Jede andere angegebene Eigenschaft auf oberster Ebene ersetzt den bisherigen Wert als Ganzes.
+
+### Core-Optionen
+
+| Option                           | Wirkung                                                                          |
+| -------------------------------- | -------------------------------------------------------------------------------- |
+| `withEndpoint(url)`              | Setzt den absoluten Basisendpunkt für alle Transports.                           |
+| `withHTTPHandle(fetch)`          | Ersetzt die Fetch-Implementierung für HTTP.                                      |
+| `withSSEHandle(fetch)`           | Ersetzt die Fetch-Implementierung für SSE.                                       |
+| `withWebSocketHandle(WebSocket)` | Ersetzt den WebSocket-Konstruktor.                                               |
+| `withInterceptors(...items)`     | Hängt gemischte Transport-Interceptors an.                                       |
+| `withQueryParamsSerializer(fn)`  | Ersetzt die Serialisierung von Query-Parametern für HTTP, SSE und WebSocket.     |
+| `withCredentials(boolean)`       | Verwendet bei `true` für HTTP und SSE die Fetch-Option `credentials: 'include'`. |
+| `withXSRF(options?)`             | Konfiguriert die HTTP-XSRF-Token-Injektion.                                      |
+| `withSSEOptions(options)`        | Ersetzt definierte SSE-Felder flach.                                             |
+| `withWebSocketOptions(options)`  | Ersetzt definierte WebSocket-Felder flach.                                       |
+
+Einzelne SSE- und WebSocket-Helper setzen jeweils ein zugehöriges Feld auf oberster Ebene. Die Transportseiten nennen Standardwerte und Auswirkungen auf den Lebenszyklus.
 
 ## Commands ausführen
 
-`Client.execute` ist eine überladene Methode, die basierend auf dem `Command`-Typ an die korrekte Transport-Layer verteilt.
+`Client.execute` hat drei Overloads. Jeder liefert ein fehlerorientiertes Drei-Elemente-Tupel.
 
-### HTTP-Requests
-
-Übergib einen Command, der mit `defineRequest` gebaut wurde. Gibt ein Triplet zurück:
+### HTTP
 
 ```typescript
-import { createClient, defineRequest, struct } from '@defjs/core'
-
-const client = createClient(withEndpoint('https://api.example.com'))
-
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/v1/user',
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-  },
+const [error, data, response] = await client.execute(requestCommand, {
+  signal,
+  timeout: 5_000,
 })
-
-const [error, user, response] = await client.execute(getUser())
-
-if (error) {
-  console.error(error.code, error.message)
-} else {
-  console.log(user.id, user.name)
-}
 ```
 
-Rückgabetyp:
+Das dritte Element ist ein Defjs-`SettledResponse`-Wrapper, sofern eine Response verfügbar ist. Zu den HTTP-Optionen gehören `abort` oder `timeout`, der zusätzliche Alias `signal`, `context` sowie Beobachter für Upload- und Download-Fortschritt.
+
+### SSE
 
 ```typescript
-type HttpAwaitResult<TSuccess, TErrorData> =
-  | [error: null, result: TSuccess, response: SettledResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: SettledResponse<unknown> | undefined]
-```
-
-### SSE-Event-Streams
-
-Übergib einen Command, der mit `defineEventStream` gebaut wurde. Gibt einen Stream-Handle und Open-Info zurück.
-
-```typescript
-import { defineEventStream, struct } from '@defjs/core'
-
-const watchLogs = defineEventStream({
-  path: '/v1/logs/stream',
-  events: {
-    log: struct.object({ level: struct.string(), message: struct.string() }),
-  },
+const [error, stream, startupOpen] = await client.execute(streamCommand, {
+  signal,
 })
-
-const [error, stream, open] = await client.execute(watchLogs())
-
-if (error) {
-  console.error('Stream failed:', error)
-  return
-}
-
-for await (const event of stream) {
-  console.log(event.event, event.data)
-}
 ```
 
-Rückgabetyp:
+Das dritte Element ist der validierte Snapshot der beim Start geöffneten Verbindung. `stream.open` ist ein separater Live-Getter und kann sich nach Reconnect-Versuchen ändern. Die SSE-Ausführung akzeptiert Abbruch und `HttpContext`; Reconnect und Eventwarteschlange sind Clientoptionen.
+
+### WebSocket
 
 ```typescript
-type StreamAwaitResult<TEvent> =
-  | [error: null, stream: EventStreamHandle<TEvent>, open: StreamOpenInfo]
-  | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
-```
-
-### WebSocket-Verbindungen
-
-Übergib einen Command, der mit `defineWebSocket` gebaut wurde. Gibt ein Session-Objekt zurück.
-
-```typescript
-import { defineWebSocket, struct } from '@defjs/core'
-
-const chat = defineWebSocket({
-  path: '/v1/chat',
-  incoming: {
-    message: struct.object({ text: struct.string() }),
-  },
-  outgoing: {
-    message: struct.object({ text: struct.string() }),
-  },
+const [error, session, startupConnection] = await client.execute(socketCommand, {
+  signal,
+  reconnect: { attempts: 3 },
 })
-
-const [error, session, connection] = await client.execute(chat())
-
-if (error) {
-  console.error('WebSocket failed:', error)
-  return
-}
-
-session.send({ type: 'message', data: { text: 'hello' } })
-
-for await (const msg of session.receive) {
-  console.log(msg.type, msg.data)
-}
 ```
 
-Rückgabetyp:
+Das dritte Element ist der Verbindungs-Snapshot vom Start. `session.connection` ist ein Live-Getter und kann einen späteren physischen Verbindungsversuch beschreiben. Die WebSocket-Ausführung akzeptiert Abbruch sowie `beforeConnect`, `heartbeat`, `protocols`, `queue` und `reconnect` pro Ausführung. Sie akzeptiert keinen `HttpContext`.
+
+Die genauen Fehlerzweige stehen unter [Fehler](/de-DE/core/errors). [HTTP](/de-DE/core/http), [SSE](/de-DE/core/sse) und [WebSocket](/de-DE/core/web-socket) erklären die Lebenszyklen der Transports.
+
+## Client-Scope
+
+Eine Browseranwendung kann einen Client auf Modulebene behalten, wenn Endpunkt und Closures nur browsersicheren, Request-unabhängigen Zustand enthalten.
 
 ```typescript
-type SocketAwaitResult<TIncoming, TOutgoing> =
-  | [error: null, socket: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError<unknown>, socket: undefined, connection: WebSocketConnectionInfo | undefined]
+export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
 ```
 
-## Hilfsfunktionen
+Verwende einen Server-Client nicht für mehrere Requests, wenn Optionen oder Interceptors Autorisierung, Cookies, Mandanten-, Benutzer- oder Requestdaten in Closures halten. Erzeuge ihn innerhalb der jeweiligen Server-Request-Grenze.
 
-### `isClient`
+Ein `Client` hat keine Methode `dispose()`. Er verfolgt keine aktiven Requests, Streams oder Sessions. Der Code, der Arbeit startet, muss den HTTP-Request abbrechen, den SSE-Handle schließen oder die WebSocket-Session an der passenden Lebenszyklusgrenze beenden.
 
-Prüft, ob ein Wert eine gültige `Client`-Instanz ist.
+## Client-Konfiguration prüfen
+
+Mit `isClient(value)` prüfst du zur Laufzeit den Client-Marker.
 
 ```typescript
 import { isClient } from '@defjs/core'
 
-if (isClient(maybeClient)) {
-  const result = await maybeClient.execute(someCommand())
+export function keepClient(value: unknown) {
+  return isClient(value) ? value : undefined
 }
 ```
 
-### `getClientConfig`
-
-Extrahiert das interne Konfigurationsobjekt zum Debuggen oder zum Bauen höherer Abstraktionen.
+`getClientConfig(client)` gibt das live verwendete, veränderbare Konfigurationsobjekt des Clients zurück. Es ist weder ein Snapshot noch eine readonly Ansicht.
 
 ```typescript
-import { getClientConfig } from '@defjs/core'
+import { getClientConfig, type Client } from '@defjs/core'
 
-const config = getClientConfig(client)
-console.log(config.endpoint, config.interceptors.length)
+export function interceptorCount(client: Client): number {
+  return getClientConfig(client).interceptors.length
+}
 ```
 
-Falls der Wert keine `Client`-Instanz ist, wirft `getClientConfig` einen `TypeError`.
+Eine Mutation dieses Objekts beeinflusst spätere Ausführungen und umgeht die normale Optionskomposition. Verwende es vorzugsweise für Diagnosen oder sorgfältig geprüften Integrationscode. `getClientConfig` wirft einen `TypeError`, wenn das Argument kein gültiger Client ist.
 
-## Explizites Client-Design
+## Weiter
 
-Jeder Client in Defjs wird explizit erstellt. Du erstellst einen `Client` mit `createClient` und übergibst ihn dort, wo er gebraucht wird.
-
-Vorteile expliziter Erstellung:
-
-- **Testfreundlich**: Übergib verschiedene `Client`-Instanzen direkt an Tests, ohne irgendeinen Zustand zurücksetzen oder mocken zu müssen.
-- **Multi-Environment-Koexistenz**: Mehrere Clients können parallel im selben Prozess laufen (z. B. interne API + öffentliche API).
-- **Abhängigkeitstransparenz**: Aufrufer müssen explizit einen `Client` halten, was Abhängigkeiten für statische Analyse und Code-Review sichtbar macht.
-
-Falls du einen gemeinsamen Client in deiner Anwendung brauchst, exportiere ihn aus einem Modul:
-
-```typescript
-// api/client.ts
-import { createClient, withEndpoint } from '@defjs/core'
-
-export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
-```
-
-Dann importieren und verwenden in Business-Code:
-
-```typescript
-import { apiClient } from './api/client'
-
-const [error, data] = await apiClient.execute(getUser())
-```
-
-## Wie geht es weiter
-
-- [HTTP Requests →](/core/http) — `defineRequest` und Output-Patterns
-- [SSE →](/core/sse) — SSE-Definition, Wiederverbindung und Event-Warteschlangen
-- [WebSocket →](/core/web-socket) — WebSocket-Definition, Heartbeat und Wiederverbindungsstrategien
-- [Interceptors →](/core/interceptors) — Interceptor-Typen und Zwiebelketten-Mechanik
+- [Commands](/de-DE/core/commands) erklärt die Werte, die an `execute` übergeben werden.
+- [Interceptors](/de-DE/core/interceptors) beschreibt Filterung und Onion-Reihenfolge.
+- [Context](/de-DE/core/context) behandelt Request-bezogene Metadaten für HTTP und SSE.

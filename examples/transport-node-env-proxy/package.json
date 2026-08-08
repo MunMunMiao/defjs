@@ -1,0 +1,15 @@
+{
+  "name": "@defjs/example-transport-node-env-proxy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@defjs/core": "workspace:*",
+    "undici": "8.9.0"
+  },
+  "devDependencies": {
+    "tsx": "catalog:"
+  }
+}
