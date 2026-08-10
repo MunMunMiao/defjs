@@ -1,11 +1,11 @@
 ---
 title: Struct
-description: 說明結構解碼、零值、partial object input、alias 與 StructError 處理。
+description: 說明嚴格結構解碼、必填與可選輸入、alias 與 StructError 處理。
 ---
 
 # Struct
 
-Struct 用來描述結構解碼與 wire encoding。部分零值行為受到 Go 啟發，但並不是 Go `encoding/json` 語意的完整實作。
+Struct 用來描述嚴格結構解碼與 wire encoding。必填值遺漏或值無效時會失敗，不會產生預設值。
 
 從 root entry 使用 `struct` facade 與 `Infer<T>`：
 
@@ -47,7 +47,7 @@ struct.discriminatedUnion('kind', [
 ])
 ```
 
-`struct.any()` 與 `struct.unknown()` 接受不受限制的值。Binary constructor 包括 `struct.blob()`、`struct.file()` 與 `struct.arrayBuffer()`。
+`struct.any()` 與 `struct.unknown()` 接受 `null`、`undefined` 以外的任何值；需要接受兩者時仍使用相同的 modifier。Binary constructor 包括 `struct.blob()`、`struct.file()` 與 `struct.arrayBuffer()`。
 
 每個 Struct 都支援以下 modifier：
 
@@ -58,57 +58,54 @@ struct.string().nullish()
 struct.string().alias('wire_name')
 ```
 
-## 零值
+## 嚴格解析
 
-除非 Struct 是 optional，否則遺漏或 `undefined` 的值都會解碼成零值。不可為 null 的 Struct 收到 `null` 時，也會走相同的零值路徑。Nullable Struct 則會把遺漏、`undefined` 或 `null` 解碼成 `null`。
-
-部分零值如下：
-
-| Struct                        | 零值                       |
-| ----------------------------- | -------------------------- |
-| `string`                      | `''`                       |
-| `number`                      | `0`                        |
-| `boolean`                     | `false`                    |
-| `bigint`                      | `0n`                       |
-| `date`                        | `new Date(0)`              |
-| array                         | `[]`                       |
-| object                        | 各欄位都填入其零值的物件   |
-| tuple                         | 各項目都填入其零值的 tuple |
-| enum                          | 第一個宣告值               |
-| literal                       | 宣告的 literal             |
-| `blob`, `file`, `arrayBuffer` | 對應型別的空值             |
-| `any`, `unknown`              | `undefined`                |
-
-在 object 裡，只有加上 `.optional()` 的遺漏欄位不會出現在解碼後輸出。`.nullish()` 同時是 optional 與 nullable；對遺漏值而言 nullable 處理優先，所以目前會解碼成 `null`。
+在指令以外解碼時使用 `struct.parse(schema, input)`。它回傳固定的 error-first 二元組：
 
 ```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
   biography: struct.string().null(),
+  note: struct.string().nullish(),
 })
 
-// Decoding {} produces an object equivalent to:
-// { name: '', biography: null }
+const [error, profile] = struct.parse(Profile, input)
+
+if (error) {
+  // profile is undefined
+  return
+}
 ```
-
-未知 object key 會被丟棄。解析後的 object 與 record 輸出使用 null prototype。依賴 `Object.prototype` method 的程式碼應改用 `Object.keys`、`Object.entries`，或明確複製成一般物件。
-
-## Partial Input 是刻意設計
-
-Object input property 在 TypeScript 邊界都可以省略，即使解碼後輸出一定會有該 property。`struct.request(...)` 裡的 request section 也可以省略。
 
 ```typescript
-const Point = struct.object({
-  x: struct.number(),
-  y: struct.number(),
-})
-
-// A command using Point as input accepts {}.
-// Structural decoding produces { x: 0, y: 0 }.
+type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
 ```
 
-不要把這些欄位描述成必填。Struct 不提供應用程式層級的必填欄位、authorization、range、amount、format 或 state transition 驗證，也沒有公開的 refine/range/format DSL。
+所有 modifier 使用同一套規則：遺漏值與 `undefined` 只有在 `.optional()` 或 `.nullish()` 下才接受；明確 `null` 只有在 `.null()` 或 `.nullish()` 下才接受。`.null()` 不會讓值變成 optional。
+
+遺漏的 optional 與 nullish object field 會從輸出省略；在頂層則解碼為 `undefined`。未知 key 會被丟棄，解碼後的 object 與 record 使用 null prototype。
+
+## 必填 Object 與 Request 輸入
+
+除非欄位 Struct 是 optional 或 nullish，否則 object property 在 TypeScript 與執行階段都必填。`struct.request(...)` 中每個已宣告 section 也必填；未宣告的 section 不會出現在輸入型別中。
+
+```typescript
+const Input = struct.request({
+  path: struct.object({ id: struct.string() }),
+  query: struct.object({ page: struct.number().optional() }),
+})
+
+// { path: { id: string }; query: { page?: number } }
+```
+
+省略 `query` 會報錯，`query: {}` 合法。遺漏必填欄位、明確 `undefined`、禁止的 `null` 或錯誤執行階段型別都會讓整次解析失敗，而且不回傳部分值。
+
+複合 Struct 在第一個確定的 issue 停止。Tuple 輸入長度必須與宣告完全一致。`struct.or(...)` 仍按順序嘗試 alternative，`struct.discriminatedUnion(...)` 仍選擇已宣告分支。
+
+Discriminator 欄位使用 alias 時，`struct.discriminatedUnion(...)` 會依 option 宣告順序讀取第一個實際存在的 wire discriminator。選中分支後，不再讀取後續 option 的 alias。
+
+Struct 強制執行已宣告結構，不負責應用程式層級 authorization、range、amount、format 或 state transition 規則，也沒有公開 refine/range/format DSL。
 
 `struct.number()` 接受正負 `Infinity`；在 JavaScript number 中只排除 `NaN`。請在建立指令前，於應用程式程式碼中完成 finite、範圍與 domain 檢查。不要把這些檢查放進 `build`，因為 `build` 收到的是結構描述綁定投影，不是呼叫端執行階段值。
 
@@ -203,4 +200,4 @@ setErrorMap((issue) => {
 
 - [指令](/zh-Hant-TW/core/commands)把 Struct 欄位對應到 request 與 message。
 - [錯誤](/zh-Hant-TW/core/errors)說明 Struct failure 如何出現在執行 tuple。
-- [HTTP](/zh-Hant-TW/core/http)涵蓋回應解碼與目前 malformed JSON 限制。
+- [HTTP](/zh-Hant-TW/core/http)涵蓋回應解碼與 representation error。

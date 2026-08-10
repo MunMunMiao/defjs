@@ -34,6 +34,24 @@ describe('http browser runtime', () => {
     expect(response?.ok).toBe(true)
   })
 
+  test('should preserve malformed declared responses in the fixed error tuple', async () => {
+    const useMalformedResponse = defineRequest({
+      method: 'GET',
+      output: {
+        200: struct.object({ id: struct.number() }),
+      },
+      path: '/text',
+    })
+
+    const [error, result, response] = await baseClient.execute(useMalformedResponse())
+
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('RESPONSE_VALIDATION_FAILED')
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(200)
+    expect(response?.error).toBeInstanceOf(SyntaxError)
+  })
+
   test('should support fetch download progress hooks in real browsers', async () => {
     const downloadLoaded: number[] = []
 
@@ -43,7 +61,9 @@ describe('http browser runtime', () => {
       },
       input: struct.request({ body: struct.arrayBuffer() }),
       method: 'POST',
+      output: { 200: struct.arrayBuffer() },
       path: '/',
+      responseType: 'arraybuffer',
     })
 
     const [error, result, response] = await baseClient.execute(useCreateAccount({ body: new Uint8Array(32 * 1024).buffer }), {
@@ -53,7 +73,10 @@ describe('http browser runtime', () => {
     })
 
     expect(error).toBeNull()
-    expect(result).toBeUndefined()
+    if (!(result instanceof ArrayBuffer)) {
+      throw new Error('Expected an ArrayBuffer response')
+    }
+    expect(result.byteLength).toBe(32 * 1024)
     expect(response?.ok).toBe(true)
     expect(downloadLoaded.length).toBeGreaterThan(0)
   })

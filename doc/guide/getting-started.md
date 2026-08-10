@@ -15,7 +15,7 @@ Add the core package to your application:
 pnpm add @defjs/core
 ```
 
-Use the equivalent `npm`, Yarn, or Bun command if your project uses another package manager. `@defjs/core` is ESM. When you run it in Node.js, the current package metadata requires Node 26 or newer.
+Use the equivalent `npm`, Yarn, or Bun command if your project uses another package manager. `@defjs/core` is ESM. When you run it in Node.js, the current package metadata requires Node 22 or newer.
 
 Add an adapter only when your application needs it:
 
@@ -70,7 +70,7 @@ void loadUser(7)
 ;[error, result, response]
 ```
 
-On success, `error` is `null`, `result` is decoded output data, and `response` is a Defjs `SettledResponse` wrapper. On failure, `result` is `undefined`; the response wrapper is also `undefined` when no response was received.
+On success, `error` is `null`, `result` is decoded output data, and `response` is a Defjs `HttpResponse` wrapper. On failure, `result` is `undefined`; the response wrapper is also `undefined` when no response was received.
 
 ### Why `as const` Matters
 

@@ -195,7 +195,7 @@ El componente, composable, ruta o store que inicia trabajo en tiempo real debe:
 - llamar a `stream.close(...)` o `session.close(...)` cuando el recurso esté activo;
 - dar de baja los observadores WebSocket.
 
-No abras un WebSocket solo para añadir un listener de estado y dejar sin leer su cola de entrada ilimitada. Consulta [SSE](/es-ES/core/sse) y [WebSocket](/es-ES/core/web-socket) para ver las reglas completas del ciclo de vida.
+No abras un WebSocket solo para añadir un listener de estado y dejar sin leer su cola de entrada finita; el desbordamiento termina la sesión de forma fatal. Consulta [SSE](/es-ES/core/sse) y [WebSocket](/es-ES/core/web-socket) para ver las reglas completas del ciclo de vida.
 
 ## API
 

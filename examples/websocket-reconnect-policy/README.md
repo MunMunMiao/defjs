@@ -41,6 +41,7 @@ Two attempts are the initial socket and its one approved replacement; the availa
 
 - Attempt limits and close-code eligibility both have to approve a reconnect.
 - A logical Defjs session can span more than one physical WebSocket.
+- `session.connection.generation` increments on each successful physical open and lets owners restore only active replayable subscriptions.
 - Transport reconnect does not make business mutations replay-safe or idempotent.
 
 ## Production notes

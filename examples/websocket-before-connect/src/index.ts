@@ -12,6 +12,7 @@ import { createPreparationFixture } from './fixture'
 
 // Step 1: Type the readiness generation delivered by the logical dispatch-board session.
 export const dispatchBoard = defineWebSocket({
+  maxIncomingQueueSize: 8,
   path: '/v1/dispatch/boards/north',
   incoming: { ready: struct.object({ sessionGeneration: struct.number() }) },
 })
@@ -44,9 +45,10 @@ export async function main(): Promise<void> {
   const client = createClient(
     withEndpoint('https://dispatch.invalid'),
     withWebSocketHandle(WebSocketImpl),
-    withWebSocketBeforeConnect(async () => {
+    withWebSocketBeforeConnect(async ({ attempt, signal }) => {
+      signal.throwIfAborted()
       await Promise.resolve()
-      preparations += 1
+      preparations = attempt + 1
     }),
     withWebSocketReconnect({ attempts: 1, delayMs: 0 }),
   )

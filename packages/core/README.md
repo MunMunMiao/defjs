@@ -51,6 +51,6 @@ if (error) {
 - **Build** lets you manually map parsed input to request parts via `build(ctx, input)` when the public input shape differs from the wire shape.
 - **Client** executes commands and dispatches to the right transport.
 
-Repository browser tests cover HTTP, SSE, and WebSocket flows. The current workspace toolchain and package manifest require Node.js 26 or newer; other runtimes require separate compatibility verification. The current core manifest declares no runtime dependencies.
+Repository browser tests cover HTTP, SSE, and WebSocket flows. Repository development requires Node.js 26 or newer, while packed `@defjs/core` consumers are checked on Node.js 22, 24, and 26. Other runtimes require separate compatibility verification. The current core manifest declares no runtime dependencies.
 
 See `packages/core/design.md` for the full implementation boundary.

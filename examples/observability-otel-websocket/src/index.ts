@@ -5,6 +5,7 @@ import { createTelemetryFixture } from './telemetry'
 
 // Step 1: Admit only typed stock messages from the warehouse inventory session.
 export const inventoryUpdates = defineWebSocket({
+  maxIncomingQueueSize: 16,
   path: '/v1/warehouses/sea-1/inventory',
   incoming: {
     stock: struct.object({ available: struct.number(), sku: struct.string() }),

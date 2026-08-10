@@ -30,14 +30,14 @@ Here, the object passed to `defineRequest` is the endpoint definition, `getUser`
 
 `defineRequest(...)` accepts these fields:
 
-| Field          | Meaning                                                                       |
-| -------------- | ----------------------------------------------------------------------------- |
-| `method`       | HTTP method string.                                                           |
-| `path`         | Relative endpoint path, with optional `:name` placeholders.                   |
-| `input`        | Struct used for structural decoding of command input.                         |
-| `build`        | Schema-bound projection from input fields to request parts. Requires `input`. |
-| `output`       | Status-to-Struct mapping for response decoding and result inference.          |
-| `responseType` | Optional `json`, `text`, `blob`, or `arraybuffer` response mode.              |
+| Field          | Meaning                                                                                                     |
+| -------------- | ----------------------------------------------------------------------------------------------------------- |
+| `method`       | HTTP method string.                                                                                         |
+| `path`         | Relative endpoint path, with optional `:name` placeholders.                                                 |
+| `input`        | Struct used for structural decoding of command input.                                                       |
+| `build`        | Schema-bound projection from input fields to request parts. Requires `input`.                               |
+| `output`       | Status-to-Struct mapping for response decoding and result inference.                                        |
+| `responseType` | Optional `json`, `text`, `blob`, or `arraybuffer` mode only when `output` is declared; otherwise forbidden. |
 
 Use `struct.request(...)` when command fields map directly to wire sections:
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-Object Struct inputs are partial at the type level. Every object property is optional for the caller. Request sections are also optional. Structural decoding fills non-optional output fields with zero values, so neither shape makes the builder argument required.
+When `input` is declared, required object fields and every declared request section must be supplied. Only fields marked optional or nullish can be omitted. Sections that the endpoint does not use should not be declared.
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-Use a primitive or array input when the builder must receive an argument. This example uses a primitive and projects it into a path parameter:
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-This is argument optionality, not business validation. A caller can still pass values accepted by the Struct's input type, and missing object fields receive zero values.
+This is structural presence and type validation, not application authorization, range, amount, format, or state-transition validation.
 
 ## Automatic Request Building
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 The HTTP success type is the union of declared 2xx bodies. `error.data` is the union of declared non-2xx bodies. Array form needs `as const` to preserve status literals and grouped readonly arrays.
 
-When `output` is declared, every returned status must have a matching Struct. An unmatched 2xx or non-2xx status produces `UNDECLARED_STATUS`. When `output` is omitted, the response body is ignored and the result is `undefined`.
+When `output` is declared, every returned status must have a matching Struct. An unmatched 2xx or non-2xx status produces `UNDECLARED_STATUS`. When `output` is omitted, the response body is not read or decoded and is cancelled best-effort; the result is `undefined`.
 
 ## SSE and WebSocket Definitions
 
@@ -224,6 +209,8 @@ When `output` is declared, every returned status must have a matching Struct. An
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ The root entry currently exports transport command interfaces and low-level exec
 
 - [Client](/core/client) covers execution overloads and option composition.
 - [HTTP](/core/http) owns URL, encoding, response, and cancellation behavior.
-- [Struct](/core/struct) explains structural decoding and zero values.
+- [Struct](/core/struct) explains strict structural decoding.

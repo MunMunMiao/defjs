@@ -5,11 +5,13 @@ import { DEFINITION } from './symbols'
 import type {
   ArrayStruct,
   DiscriminatedUnionStruct,
+  IntersectionInput,
   IntersectionOutput,
   LiteralValue,
   NumberStruct,
   ObjectStruct,
   ObjectShape,
+  PresentValue,
   RecordStruct,
   RequestBodyCodec,
   RequestBodyDescriptor,
@@ -22,6 +24,7 @@ import type {
   StringStruct,
   TupleStruct,
   UnionStruct,
+  UnknownStruct,
 } from './types'
 import { describeValue, failure, isPlainObject, success } from './utils'
 
@@ -31,7 +34,6 @@ export function createStringStruct(): StringStruct {
       expected: 'string',
       is: (value): value is string => typeof value === 'string',
       kind: 'string',
-      zero: () => '',
     }),
   )
 }
@@ -42,17 +44,15 @@ export function createNumberStruct(): NumberStruct {
       expected: 'number',
       is: (value): value is number => typeof value === 'number' && !Number.isNaN(value),
       kind: 'number',
-      zero: () => 0,
     }),
   )
 }
 
-export function createBooleanStruct(): Struct<boolean | undefined, boolean> {
+export function createBooleanStruct(): Struct<boolean, boolean> {
   return createPrimitiveStruct({
     expected: 'boolean',
     is: (value): value is boolean => typeof value === 'boolean',
     kind: 'boolean',
-    zero: () => false,
   })
 }
 
@@ -62,17 +62,16 @@ export function createNullStruct(): Struct<null, null> {
       expected: 'null',
       is: (value): value is null => value === null,
       kind: 'null',
-      zero: () => null,
     }),
   )
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any
-export function createAnyStruct(): Struct<unknown, any> {
+export function createAnyStruct(): Struct<PresentValue, any> {
   // Type boundary: struct.any() intentionally models an unconstrained decoded value; any is the correct
   // representation of "no static type information" at the output boundary.
   // oxlint-disable-next-line typescript/no-explicit-any
-  return castStruct<Struct<unknown, any>>(
+  return castStruct<Struct<PresentValue, any>>(
     makeStruct({
       flags: DEFAULT_FLAGS,
       kind: 'any',
@@ -80,8 +79,8 @@ export function createAnyStruct(): Struct<unknown, any> {
   )
 }
 
-export function createUnknownStruct(): Struct<unknown, unknown> {
-  return castStruct<Struct<unknown, unknown>>(
+export function createUnknownStruct(): UnknownStruct {
+  return castStruct<UnknownStruct>(
     makeStruct({
       flags: DEFAULT_FLAGS,
       kind: 'unknown',
@@ -89,8 +88,8 @@ export function createUnknownStruct(): Struct<unknown, unknown> {
   )
 }
 
-export function createLiteralStruct<const T extends LiteralValue>(value: T): Struct<T | undefined, T> {
-  return castStruct<Struct<T | undefined, T>>(
+export function createLiteralStruct<const T extends LiteralValue>(value: T): Struct<T, T> {
+  return castStruct<Struct<T, T>>(
     makeStruct({
       expected: describeValue(value),
       flags: DEFAULT_FLAGS,
@@ -100,9 +99,9 @@ export function createLiteralStruct<const T extends LiteralValue>(value: T): Str
   )
 }
 
-export function createEnumStruct<const T extends readonly [string, ...string[]]>(values: T): Struct<T[number] | undefined, T[number]> {
+export function createEnumStruct<const T extends readonly [string, ...string[]]>(values: T): Struct<T[number], T[number]> {
   const enumValues = [...values] as unknown as T
-  return castStruct<Struct<T[number] | undefined, T[number]>>(
+  return castStruct<Struct<T[number], T[number]>>(
     makeStruct({
       expected: enumValues.map((item) => JSON.stringify(item)).join(' | '),
       flags: DEFAULT_FLAGS,
@@ -112,16 +111,14 @@ export function createEnumStruct<const T extends readonly [string, ...string[]]>
   )
 }
 
-export function createObjectEnumStruct<const T extends { [key: string]: number | string }>(
-  value: T,
-): Struct<T[keyof T] | undefined, T[keyof T]> {
+export function createObjectEnumStruct<const T extends { [key: string]: number | string }>(value: T): Struct<T[keyof T], T[keyof T]> {
   const values = Object.values(value).filter((item): item is T[keyof T] => typeof item === 'number' || typeof item === 'string')
 
   if (values.length === 0) {
     throw new TypeError('enum struct requires at least one string or number value')
   }
 
-  return castStruct<Struct<T[keyof T] | undefined, T[keyof T]>>(
+  return castStruct<Struct<T[keyof T], T[keyof T]>>(
     makeStruct({
       expected: values.map((item) => JSON.stringify(item)).join(' | '),
       flags: DEFAULT_FLAGS,
@@ -293,10 +290,32 @@ export function createUnionStruct<
   )
 }
 
+type RequiredDiscriminatorOption<TDiscriminator extends string, TOption extends ObjectStruct<ObjectShape>> =
+  TOption extends ObjectStruct<infer TShape>
+    ? TDiscriminator extends keyof TShape
+      ? TShape[TDiscriminator] extends StructLike<infer TInput, unknown, false>
+        ? undefined extends TInput
+          ? never
+          : null extends TInput
+            ? [TInput] extends [null]
+              ? TOption
+              : never
+            : TOption
+        : never
+      : never
+    : never
+
+type RequiredDiscriminatorOptions<TDiscriminator extends string, TOptions extends readonly ObjectStruct<ObjectShape>[]> = {
+  [K in keyof TOptions]: TOptions[K] extends ObjectStruct<ObjectShape> ? RequiredDiscriminatorOption<TDiscriminator, TOptions[K]> : never
+}
+
 export function createDiscriminatedUnionStruct<
   const TDiscriminator extends string,
   const TOptions extends readonly [ObjectStruct<ObjectShape>, ...ObjectStruct<ObjectShape>[]],
->(discriminator: TDiscriminator, options: TOptions): DiscriminatedUnionStruct<TOptions> {
+>(
+  discriminator: TDiscriminator,
+  options: TOptions & RequiredDiscriminatorOptions<TDiscriminator, TOptions>,
+): DiscriminatedUnionStruct<TOptions> {
   const unionOptions = [...options] as unknown as TOptions
   const map = new Map<unknown, StructLike<unknown, unknown, boolean>>()
   const values: unknown[] = []
@@ -316,6 +335,9 @@ export function createDiscriminatedUnionStruct<
     /* istanbul ignore next -- type-safe: discriminator is checked at compile time */
     if (fieldDef.kind !== 'literal') {
       throw new TypeError(`discriminatedUnion option discriminator "${discriminator}" must be a literal struct`)
+    }
+    if (fieldDef.flags.optional || (fieldDef.flags.nullable && fieldDef.value !== null)) {
+      throw new TypeError(`discriminatedUnion option discriminator "${discriminator}" must be a required literal struct`)
     }
     if (map.has(fieldDef.value)) {
       throw new TypeError(`discriminatedUnion duplicate discriminator value: ${JSON.stringify(fieldDef.value)}`)
@@ -342,17 +364,16 @@ function snapshotObjectShape<T extends ObjectShape>(shape: T): T {
   return snapshot as T
 }
 
-export function createBlobStruct(): Struct<Blob | undefined, Blob> {
+export function createBlobStruct(): Struct<Blob, Blob> {
   return createPrimitiveStruct({
     expected: 'Blob',
     is: (value): value is Blob => value instanceof Blob,
     kind: 'blob',
     runtimeIs: (value): value is Blob => typeof Blob !== 'undefined' && value instanceof Blob,
-    zero: () => new Blob(),
   })
 }
 
-export function createBigIntStruct(): Struct<bigint | string | undefined, bigint> {
+export function createBigIntStruct(): Struct<bigint | string, bigint> {
   return createPrimitiveStruct({
     decode: (input, path) => {
       if (typeof input === 'bigint') {
@@ -369,11 +390,10 @@ export function createBigIntStruct(): Struct<bigint | string | undefined, bigint
     is: (value): value is bigint | string => typeof value === 'bigint' || typeof value === 'string',
     kind: 'bigint',
     runtimeIs: (value): value is bigint => typeof value === 'bigint',
-    zero: () => 0n,
-  }) as Struct<bigint | string | undefined, bigint>
+  }) as Struct<bigint | string, bigint>
 }
 
-export function createDateStruct(): Struct<Date | number | string | undefined, Date> {
+export function createDateStruct(): Struct<Date | number | string, Date> {
   return createPrimitiveStruct({
     decode: (input, path) => {
       const date = input instanceof Date ? input : new Date(input as never)
@@ -387,13 +407,12 @@ export function createDateStruct(): Struct<Date | number | string | undefined, D
     is: (value): value is Date | number | string => value instanceof Date || typeof value === 'string' || typeof value === 'number',
     kind: 'date',
     runtimeIs: (value): value is Date => value instanceof Date && !Number.isNaN(value.getTime()),
-    zero: () => new Date(0),
-  }) as Struct<Date | number | string | undefined, Date>
+  }) as Struct<Date | number | string, Date>
 }
 
 export function createIntersectionStruct<
   const T extends readonly [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]],
->(...structs: T): Struct<unknown, IntersectionOutput<T>> {
+>(...structs: T): Struct<IntersectionInput<T>, IntersectionOutput<T>> {
   if (structs.length === 0) {
     throw new TypeError('intersection requires at least one struct')
   }
@@ -413,26 +432,24 @@ export function createIntersectionStruct<
     })
   }
 
-  return castStruct<Struct<unknown, IntersectionOutput<T>>>(current)
+  return castStruct<Struct<IntersectionInput<T>, IntersectionOutput<T>>>(current)
 }
 
-export function createFileStruct(): Struct<File | undefined, File> {
+export function createFileStruct(): Struct<File, File> {
   return createPrimitiveStruct({
     expected: 'File',
     is: (value): value is File => value instanceof File,
     kind: 'file',
     runtimeIs: (value): value is File => typeof File !== 'undefined' && value instanceof File,
-    zero: () => new File([], ''),
   })
 }
 
-export function createArrayBufferStruct(): Struct<ArrayBuffer | undefined, ArrayBuffer> {
+export function createArrayBufferStruct(): Struct<ArrayBuffer, ArrayBuffer> {
   return createPrimitiveStruct({
     expected: 'ArrayBuffer',
     is: (value): value is ArrayBuffer => value instanceof ArrayBuffer,
     kind: 'arrayBuffer',
     runtimeIs: (value): value is ArrayBuffer => typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer,
-    zero: () => new ArrayBuffer(0),
   })
 }
 

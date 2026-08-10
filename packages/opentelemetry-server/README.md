@@ -5,17 +5,19 @@ Server-side outbound OpenTelemetry integration for `@defjs/core` HTTP, SSE, and 
 **Core Positioning**:
 
 - **Outbound-only client instrumentation** — This package wraps defjs clients that make outbound requests. It is not inbound server instrumentation.
-- **Server environment** — Designed for Node.js, Bun, and Deno usage, not browser-only telemetry setup.
+- **Server environment** — Designed for server-side Node.js usage, not browser-only telemetry setup.
 - **Does not initialize the SDK** — This package does not initialize an OpenTelemetry SDK. Initialize the SDK in your application, then pass the tracer and optional meter into `withOpenTelemetryServer(...)`.
 - **Per-transport separation** — HTTP, SSE, and WebSocket each have independent interceptors, span lifecycles, and metric dimensions.
 
-## Repository workspace setup
+## Installation
 
-This guide currently documents source/workspace usage from this repository. `@defjs/opentelemetry-server` lives at `packages/opentelemetry-server`, and its peer dependency expects the matching `@defjs/core` workspace version from `packages/core`.
+Install `@defjs/opentelemetry-server` with the matching `@defjs/core` release line and its OpenTelemetry peers:
 
-The import specifiers shown below use package names, but in this repository they resolve to workspace source packages rather than a registry-published package pair. Keep installing and initializing your application's OpenTelemetry SDK packages separately.
+```sh
+npm install @defjs/core @defjs/opentelemetry-server @opentelemetry/api @opentelemetry/core
+```
 
-Public npm does not currently provide `@defjs/opentelemetry-server`, and the latest standalone `@defjs/core` release available there is not a compatible peer for this workspace package. If you later publish both `@defjs/opentelemetry-server` and a compatible `@defjs/core` release to a registry you control or another registry that carries both versions, install those published versions together in that environment instead of mixing this package with an incompatible standalone `@defjs/core` release.
+Initialize your application's OpenTelemetry SDK separately. The package provides interceptors and consumes the tracer and optional meter you pass to `withOpenTelemetryServer(...)`.
 
 ## Basic Usage
 
@@ -34,9 +36,6 @@ const client = createClient(
   withEndpoint('https://api.example.com'),
   withOpenTelemetryServer({
     tracer,
-    webSocket: {
-      queryPropagation: false,
-    },
   }),
 )
 ```
@@ -65,30 +64,30 @@ const client = createClient(
     },
     webSocket: {
       enabled: true,
-      queryPropagation: false,
+      queryPropagation: false, // Safe default; set true only after reviewing URL propagation
     },
   }),
 )
 ```
 
-## Production baseline for WebSocket propagation
+## WebSocket propagation safety
 
-Browser WebSocket clients usually cannot set arbitrary headers, so `webSocket.queryPropagation` defaults to `true` for compatibility. That default injects trace context into the WebSocket URL query string.
+`webSocket.queryPropagation` defaults to `false`. Omitting it leaves the WebSocket query string unchanged and does not inject trace context or baggage into the URL.
 
-For security-sensitive production traffic, use this recommended production baseline unless you have reviewed URL-based propagation for your environment:
+Browser WebSocket clients usually cannot set arbitrary headers. If you have reviewed URL-based propagation for your environment and accept its exposure boundary, enable it explicitly:
 
 ```ts
 withOpenTelemetryServer({
   tracer,
   webSocket: {
-    queryPropagation: false,
+    queryPropagation: true,
   },
 })
 ```
 
 Query strings can be recorded by proxies, browsers, APM tooling, access logs, and network debugging tools. They may also contain tokens or other high-cardinality user input. If your propagator includes `baggage`, baggage values can also be written into the URL and may contain sensitive data.
 
-After disabling query propagation, trace context no longer rides on the WebSocket URL. Use another reviewed correlation mechanism at the application layer if your server still needs to link the connection to a trace.
+With the safe default, trace context does not ride on the WebSocket URL. Use another reviewed correlation mechanism at the application layer, such as a protocol-reviewed first frame or a short-lived connection ticket, if your server still needs to link the connection to a trace.
 
 ### Configuration Options
 
@@ -104,30 +103,30 @@ After disabling query propagation, trace context no longer rides on the WebSocke
 
 ### HTTP Options
 
-| Option         | Type                  | Default     | Description                                                          |
-| -------------- | --------------------- | ----------- | -------------------------------------------------------------------- |
-| `enabled`      | `boolean`             | `true`      | Enable HTTP tracing                                                  |
-| `requestHook`  | `(span, req) => void` | `undefined` | Customize HTTP span before request, `req` is `HttpRequest`           |
-| `responseHook` | `(span, res) => void` | `undefined` | Customize HTTP span after response, `res` is `HttpResponse<unknown>` |
+| Option         | Type                                   | Default     | Description                                                          |
+| -------------- | -------------------------------------- | ----------- | -------------------------------------------------------------------- |
+| `enabled`      | `boolean`                              | `true`      | Enable HTTP tracing                                                  |
+| `requestHook`  | `(span, req) => void \| Promise<void>` | `undefined` | Customize HTTP span before request, `req` is `HttpRequest`           |
+| `responseHook` | `(span, res) => void \| Promise<void>` | `undefined` | Customize HTTP span after response, `res` is `HttpResponse<unknown>` |
 
 ### SSE Options
 
-| Option         | Type                     | Default     | Description                                                                               |
-| -------------- | ------------------------ | ----------- | ----------------------------------------------------------------------------------------- |
-| `enabled`      | `boolean`                | `true`      | Enable SSE tracing                                                                        |
-| `requestHook`  | `(span, req) => void`    | `undefined` | Customize SSE span before stream request                                                  |
-| `responseHook` | `(span, stream) => void` | `undefined` | Customize SSE span after stream handle returned, `stream` is `EventStreamHandle<unknown>` |
+| Option         | Type                                      | Default     | Description                                                                               |
+| -------------- | ----------------------------------------- | ----------- | ----------------------------------------------------------------------------------------- |
+| `enabled`      | `boolean`                                 | `true`      | Enable SSE tracing                                                                        |
+| `requestHook`  | `(span, req) => void \| Promise<void>`    | `undefined` | Customize SSE span before stream request                                                  |
+| `responseHook` | `(span, stream) => void \| Promise<void>` | `undefined` | Customize SSE span after stream handle returned, `stream` is `EventStreamHandle<unknown>` |
 
 ### WebSocket Options
 
-| Option             | Type                      | Default     | Description                                                                                                                                                            |
-| ------------------ | ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                 | `true`      | Enable WebSocket tracing                                                                                                                                               |
-| `queryPropagation` | `boolean`                 | `true`      | Inject trace context into the WebSocket URL query string for browser compatibility. Use `false` as the recommended production baseline for security-sensitive traffic. |
-| `requestHook`      | `(span, req) => void`     | `undefined` | Customize WebSocket span before connection request                                                                                                                     |
-| `responseHook`     | `(span, session) => void` | `undefined` | Customize WebSocket span after session returned, `session` is `WebSocketSessionLike`                                                                                   |
+| Option             | Type                                       | Default     | Description                                                                                                                         |
+| ------------------ | ------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                                  | `true`      | Enable WebSocket tracing                                                                                                            |
+| `queryPropagation` | `boolean`                                  | `false`     | Inject trace context and baggage into the WebSocket URL query string. Enable only after reviewing URL logging and disclosure risks. |
+| `requestHook`      | `(span, req) => void \| Promise<void>`     | `undefined` | Customize WebSocket span before connection request                                                                                  |
+| `responseHook`     | `(span, session) => void \| Promise<void>` | `undefined` | Customize WebSocket span after session returned, `session` is `WebSocketSessionLike`                                                |
 
-> **Hook Exception Handling**: If `requestHook` or `responseHook` throws, the error is recorded on the span's `defjs.otel.hook.error` event, but the client request/stream/session **continues normally**.
+> **Hook Exception Handling**: Hooks may return `void` or `Promise<void>`. If `requestHook` or `responseHook` throws or rejects, the error is recorded on the span's `defjs.otel.hook.error` event without blocking the hook caller, and the client request/stream/session **continues normally**.
 >
 > **Attribute hygiene**: Prefer explicit allowlists, redaction, and stable low-cardinality attributes in `requestHook` / `responseHook`. Do not attach raw query strings, request or response bodies, full headers, baggage values, or message payloads unless your application has already reviewed privacy, cardinality, retention, and redaction requirements.
 
@@ -159,7 +158,7 @@ SSE is a long-lived HTTP response. Normal HTTP request duration ends at stream e
 
 ### Span Lifecycle
 
-After startup succeeds, the SSE interceptor attaches to `stream.closed` and keeps the span open until that promise settles. If the core stream reaches an exceptional callback path that never settles `stream.closed`, this instrumentation cannot finish that span from the close promise alone. On settled lifecycle paths it records:
+After startup succeeds, the SSE interceptor attaches to `stream.closed` and keeps the span open until the stream reaches its normal, fatal, or aborted terminal state. It records:
 
 - `sse.connected` — Stream successfully established
 - `sse.closed` — Stream normal end (server EOF)

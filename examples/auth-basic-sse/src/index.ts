@@ -11,6 +11,8 @@ import {
 
 // Step 1: Admit only validated inventory-low events from the authenticated inventory feed.
 export const inventoryAlerts = defineEventStream({
+  maxBufferSize: 1024,
+  maxQueueSize: 8,
   path: '/v1/inventory/alerts',
   events: {
     'inventory-low': struct.json(struct.object({ available: struct.number(), sku: struct.string() })),

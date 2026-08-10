@@ -3,7 +3,7 @@ import type { EndpointInput } from './endpoint_input'
 
 export type IsEndpointInputOptional<TInput extends AnyStruct | undefined> = [TInput] extends [undefined]
   ? true
-  : {} extends EndpointInput<TInput>
+  : undefined extends EndpointInput<TInput>
     ? true
     : false
 

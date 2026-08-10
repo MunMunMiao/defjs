@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: Define y decodifica Server-Sent Events, gestiona el arranque, consume la cola de eventos compartida, configura la reconexión y cierra los streams que abras.
+description: Define y decodifica Server-Sent Events con límites, configura la reconexión y cierra los streams que abras.
 ---
 
 # SSE
@@ -11,6 +11,8 @@ description: Define y decodifica Server-Sent Events, gestiona el arranque, consu
 import { defineEventStream, struct } from '@defjs/core'
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(
@@ -43,6 +45,8 @@ Un Struct `default` gestiona cualquier otro nombre no declarado:
 
 ```typescript
 const events = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/events',
   events: {
     update: struct.json(struct.object({ version: struct.number() })),
@@ -59,6 +63,8 @@ Usa `struct.request(...)` para las secciones de ruta, query y cabeceras:
 
 ```typescript
 const roomEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -81,6 +87,8 @@ const [error, stream, startupOpen] = await client.execute(
   }),
 )
 ```
+
+Para la ejecución HTTP, SSE y WebSocket, `timeout` debe ser un entero seguro positivo dentro de `1..2_147_483_647`; `0`, los valores negativos o fraccionarios, `NaN`, `Infinity` y los valores superiores al límite devuelven `REQUEST_VALIDATION_FAILED` antes de crear cualquier recurso de request, stream o socket.
 
 SSE devuelve:
 
@@ -148,7 +156,8 @@ Configura `onInvalidEvent` mediante `withSSEOnInvalidEvent(...)` o `withSSEOptio
 ```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message }) => {
+  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+    if (signal.aborted) return
     recordInvalidEvent({ eventName: message.event, reason })
   }),
 )
@@ -157,10 +166,11 @@ const client = createClient(
 El observador recibe:
 
 - `reason: 'missing-struct' | 'validation-failed'`;
-- el `id` sin procesar, el nombre, el texto de datos y el valor de retry opcional del evento;
+- el `id` sin procesar, el nombre y el texto de datos del evento;
 - `cause` cuando falla la validación.
+- el `signal` del intento activo.
 
-El evento se descarta, pero un evento válido posterior aún puede entregarse. Se capturan las excepciones y promesas rechazadas del observador; sin embargo, un observador asíncrono se espera antes de continuar con mensajes posteriores. Hazlo rápido. Revisa y enmascara los valores sin procesar de `id`, `data` y `cause` antes de registrarlos.
+El evento se descarta, pero uno válido posterior aún puede entregarse. Las excepciones y promesas rechazadas del observador quedan aisladas, mientras que abort interrumpe un observador pendiente mediante `signal`. Hazlo rápido y enmascara `id`, `data` y `cause` antes de registrarlos.
 
 ## Reconexión
 
@@ -194,44 +204,26 @@ withSSEReconnect({
 })
 ```
 
-En los intentos posteriores, el transporte envía el último ID de evento como `Last-Event-ID`. `shouldReconnect` no debe lanzar. Si el predicado lanza o devuelve una promesa rechazada, actualmente no se garantiza que se resuelvan todos los iteradores pendientes ni todas las rutas de `stream.closed`.
+En los intentos posteriores, el transporte envía el último ID de evento como `Last-Event-ID`. Si `shouldReconnect` lanza o rechaza, se detiene el retry y el arranque o stream pendiente termina con ese error de política. Abort interrumpe un predicado pendiente mediante la señal del intento activo.
 
 Los fallos de validación de HTTP o de apertura, los errores fatales al procesar mensajes y un EOF normal no equivalen a un fallo de red o lectura que se pueda reintentar. No des por hecho que todos los finales provocan reconexión.
 
-## Cola de trabajo compartida
+## Límites propiedad del endpoint
 
-El iterable asíncrono es una única cola de trabajo compartida por el stream lógico. No es una suscripción, un broadcast ni un mecanismo de backpressure.
+Un stream admite exactamente un consumidor del iterador asíncrono. Crear un segundo iterador lanza; salir del bucle sigue requiriendo `stream.close(...)` de forma explícita.
 
-Por defecto, la cola no tiene límite. Puedes acotarla con `withSSEQueue(...)` o `withSSEOptions({ queue })`:
-
-```typescript
-withSSEQueue({
-  maxSize: 100,
-  overflow: 'drop-oldest',
-})
-```
-
-| Desbordamiento | Comportamiento al alcanzar el límite                                 |
-| -------------- | -------------------------------------------------------------------- |
-| `drop-newest`  | Descarta el evento que acaba de llegar.                              |
-| `drop-oldest`  | Elimina el evento almacenado más antiguo y encola el nuevo.          |
-| `error`        | Lanza un error de desbordamiento de cola y termina el procesamiento. |
-
-Si hay varios iteradores, compiten por los valores; cada uno no recibe una copia. Salir de un bucle `for await` no cierra el transporte porque el iterador no implementa un `return()` que controle el ciclo de vida. Llama expresamente a `stream.close(...)`.
-
-El cierre marca la cola como terminada para nuevos valores, pero no descarta los que ya estaban almacenados. Un consumidor puede vaciarlos antes de que la siguiente iteración devuelva `done: true`.
-
-### Límite del buffer del parser
-
-La cola de eventos y el buffer del parser son recursos distintos. Proporciona un `maxBufferSize` positivo mediante `withSSEOptions(...)` para limitar los bytes retenidos por una línea SSE incompleta:
+Cada definición exige `maxBufferSize` y `maxQueueSize` como enteros seguros positivos. El primero limita cada línea SSE y los datos del evento actual; el segundo limita los eventos parseados en espera. El desbordamiento es fatal y nunca descarta eventos silenciosamente.
 
 ```typescript
-withSSEOptions({
+const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.json(notificationStruct) },
 })
 ```
 
-Si se supera el límite después del arranque, el iterador se rechaza y el stream se cierra con `code: 'error'`. Si omites el valor, el buffer del parser no tiene límite.
+Un EOF normal permite vaciar los eventos almacenados. Un error fatal de parser, transformación o desbordamiento borra el buffer, cancela el body activo, rechaza la iteración y resuelve `stream.closed` con `code: 'error'`.
 
 ## Cierre definitivo
 

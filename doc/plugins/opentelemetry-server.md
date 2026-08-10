@@ -75,7 +75,7 @@ Old boolean transport fields, top-level hooks, and `webSocketQueryPropagation` a
 
 When `propagator` is omitted, the package creates its own `CompositePropagator` containing W3C Trace Context and W3C Baggage propagators. It does not read the global propagator configuration.
 
-HTTP and SSE inject every field produced by that propagator into request headers. When `req.headers` is already a `Headers` instance, the current implementation reuses and mutates that instance. Otherwise it creates a new `Headers` object. WebSocket query propagation defaults to `true` because browser sockets cannot add arbitrary handshake headers. It appends every field produced by the propagator to the connection query string.
+HTTP and SSE inject every field produced by that propagator into request headers. When `req.headers` is already a `Headers` instance, the current implementation reuses and mutates that instance. Otherwise it creates a new `Headers` object. WebSocket query propagation defaults to `false`. Only `queryPropagation: true` opts in; because browser sockets cannot add arbitrary handshake headers, it appends every field produced by the propagator to the connection query string.
 
 Before it creates a span, each interceptor also calls `propagator.extract(...)` on the request headers. Treat that carrier as trusted, application-owned input. Do not let an untrusted caller supply `traceparent`, `tracestate`, or `baggage`: those fields can replace the active parent context. Remove or normalize untrusted propagation fields before the request reaches this interceptor.
 
@@ -83,12 +83,12 @@ Before it creates a span, each interceptor also calls `propagator.extract(...)` 
 withOpenTelemetryServer({
   tracer,
   webSocket: {
-    queryPropagation: false,
+    queryPropagation: true,
   },
 })
 ```
 
-Disable query propagation unless URL propagation has been reviewed for the deployment. Trace context and baggage can be recorded by browsers, proxies, access logs, and telemetry systems. A custom propagator can add more fields than `traceparent`.
+Review URL propagation before enabling it. Trace context and baggage can be recorded by browsers, proxies, access logs, and telemetry systems. A custom propagator can add more fields than `traceparent`. Prefer a protocol-reviewed first message or a short-lived, single-use connection ticket when the server supports either.
 
 `requireParentSpan: true` checks for an active parent span before the interceptor does any instrumentation. When no active span exists, it skips span creation, propagation, hooks, and metrics, then calls the next handler unchanged.
 
@@ -110,7 +110,7 @@ withOpenTelemetryServer({
 })
 ```
 
-Hooks are synchronous. A synchronous throw is caught, recorded as `defjs.otel.hook.error`, and does not stop the client operation. If JavaScript bypasses the type and returns a rejected promise, that asynchronous rejection is not awaited or caught by the hook wrapper.
+Hooks may return `void` or `Promise<void>` and remain non-blocking. Synchronous throws and asynchronous rejections are caught and recorded as `defjs.otel.hook.error` without stopping the client operation; failures while recording that telemetry are also isolated.
 
 Use allowlisted, low-cardinality attributes. Do not attach raw headers, query strings, bodies, baggage, event IDs, message payloads, or credentials.
 
@@ -149,8 +149,6 @@ Meter-backed SSE instruments:
 | `defjs.client.sse.active_streams`      | Number of logical handles whose `closed` promise has not settled. |
 
 These are Defjs custom metrics. The active counter includes time spent between physical reconnect attempts. It does not count currently open HTTP connections.
-
-If a core callback path leaves `stream.closed` unsettled, the span and counter cannot finish through that promise. Keep reconnect callbacks non-throwing.
 
 ## WebSocket Semantics
 

@@ -13,6 +13,8 @@ import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core
 const client = createClient(withEndpoint('wss://api.example.com'))
 
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   path: '/chat',
   incoming: {
     message: struct.object({ userId: struct.number(), text: struct.string() }),
@@ -45,6 +47,7 @@ const chat = defineWebSocket({
 
 ```typescript
 const audit = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/audit',
   incoming: {
     entry: struct.object({ data: struct.string(), source: struct.string() }),
@@ -75,6 +78,8 @@ if (!auditError) {
 const [error, session, startupConnection] = await client.execute(chat())
 ```
 
+HTTP、SSE、WebSocket 実行の `timeout` は `1..2_147_483_647` の範囲にある正の安全な整数でなければならず、`0`、負数、小数、`NaN`、`Infinity`、上限を超える値を指定すると、request、stream、socket のリソースを作成する前に `REQUEST_VALIDATION_FAILED` になります。
+
 WebSocket は次の形を返します。
 
 ```typescript
@@ -83,9 +88,9 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
   | [error: RequestError<unknown>, session: undefined, connection: WebSocketConnectionInfo | undefined]
 ```
 
-成功時の 3 番目の要素は、起動時接続スナップショットです。最初の物理ソケットがオープンした時点で取得した `url`、`protocol`、`extensions` を含むことがあります。
+成功時の 3 番目の要素は `generation: 1` の起動時接続スナップショットです。最初の物理ソケットの `url`、`protocol`、`extensions` を含むことがあります。
 
-`session.connection` はライブ getter です。再接続では内部の物理ソケットが置き換わり、この値も更新されることがあります。起動時スナップショットが必要なら、タプルの 3 番目の要素を保持してください。
+`session.connection` はライブ getter です。物理ソケットが正常に開くたびに `generation` が増えます。起動時スナップショットが必要なら、タプルの 3 番目の要素を保持してください。
 
 接続 URL はログへ出さないでください。パス識別子、アプリケーションのクエリデータ、テレメトリー伝播フィールドを含む可能性があります。
 
@@ -96,9 +101,10 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
 | メンバー                   | 動作                                                                 |
 | -------------------------- | -------------------------------------------------------------------- |
 | `connection`               | 最新の接続情報を返すライブ getter。                                  |
+| `bufferedAmount`           | ネイティブソケットの未送信バイト数。ソケットがなければ `0`。         |
 | `state`                    | 論理セッションの現在状態を返すライブ getter。                        |
 | `receive`                  | 検証済み受信メッセージの共有非同期ワークキュー。                     |
-| `send(message)`            | 送信メッセージを検証・シリアライズし、送信またはキューへ追加します。 |
+| `send(message)`            | 書き込み可否を確認後、検証・シリアライズし、送信またはキューへ追加。 |
 | `close(code?, reason?)`    | 終端クローズを要求します。                                           |
 | `closed`                   | 観測された終端クローズ情報を返す Promise。                           |
 | `onStateChange(listener)`  | 状態オブザーバーを追加し、購読解除関数を返します。                   |
@@ -108,14 +114,13 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
 
 ## メッセージを受信する
 
-テキスト、ArrayBuffer、型付き配列、Blob のメッセージは UTF-8 JSON としてデコードされます。次の入力は通知なしで破棄されます。
+テキスト、ArrayBuffer、型付き配列、Blob は到着順に UTF-8 JSON としてデコードされます。次の入力は通知なしで破棄されます。
 
-- 不正な JSON
 - オブジェクトでないエンベロープ
 - `type` がない、または空文字列
 - `incoming.default` Struct のない未知のタイプ
 
-Struct が選ばれた後のデコード失敗は `onRuntimeError` へ通知され、そのメッセージは破棄されます。
+不正な JSON と選択済み Struct の検証失敗は `onRuntimeError` へ通知されます。フレームは破棄され、セッションは継続します。
 
 ```typescript
 const unsubscribeError = session.onRuntimeError(() => {
@@ -135,7 +140,7 @@ try {
 }
 ```
 
-受信イテラブルは、上限のない共有ワークキューです。複数のイテレーターはメッセージを奪い合い、独立した購読にはなりません。キューが増えてもトランスポートはサーバーの送信を遅くしません。受信メッセージを必ず継続して消費するか、セッションを速やかにクローズしてください。
+`receive` が許可するイテレーターは 1 つだけです。`maxIncomingQueueSize` は必須の正の要素上限です。オーバーフローはバッファを破棄し、イテレーターを失敗させ、セッションを `error` で終了します。
 
 ## メッセージを送信する
 
@@ -145,7 +150,7 @@ try {
 - メッセージに有効な `type` がない
 - タイプが未宣言
 - ペイロードの構造デコードまたはエンコーディングに失敗した
-- 上限付き送信キューが `overflow: 'error'` を使っている
+- 再接続中にエンドポイント所有の送信キューが無効または満杯である
 - 即時送信中にネイティブソケットが例外を送出した
 
 ```typescript
@@ -156,42 +161,42 @@ try {
 }
 ```
 
-オープン前または再接続試行の間に送ったメッセージは送信キューに入ります。物理ソケットがオープンするとキューの内容が送信されます。
+ペイロードの検証・シリアライズより先に、論理的に送信可能かを確認します。論理状態と現在の物理ソケットがともに `open` の場合だけ直接送信します。`reconnecting` かつエンドポイントの `maxOutgoingQueueSize` が正の場合だけキューへ入れます。保持した FIFO は、置換ソケットが `open` を通知する前にフラッシュします。
 
-終端状態の後に `send` を呼ばないでください。現在の実装にはクローズ後の安定した拒否契約がなく、終端クローズ後にキューへ入ったデータは送信されない可能性があります。
+手動クローズ中、終端状態、リモートクローズ後に再接続述語の結果が未確定な間は、`send` が `InvalidStateError` を送出します。トランスポートは、以前の物理ソケットへ送信済みのフレームを再送しません。
 
 ## 状態
 
 `session.state` は次のいずれかです。
 
-| State          | 意味                                                                                                                                 |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `idle`         | 実行開始前の初期内部状態。                                                                                                           |
-| `connecting`   | 最初の物理接続試行を開始中。                                                                                                         |
-| `open`         | 物理ソケットが開いた後、最後に通知された論理状態。再接続の待機中は、物理ソケットが存在しなくても `open` のままになることがあります。 |
-| `reconnecting` | 遅延後に次の物理接続試行を開始中。                                                                                                   |
-| `closing`      | キャンセルにより、接続中またはオープン中のソケットをクローズ中。                                                                     |
-| `closed`       | 正規化されたエラーのない終端クローズ。                                                                                               |
-| `aborted`      | 外部キャンセルが `ABORTED` に正規化された終端状態。                                                                                  |
-| `error`        | その他の終端失敗。                                                                                                                   |
+| State          | 意味                                                |
+| -------------- | --------------------------------------------------- |
+| `idle`         | 実行開始前の初期内部状態。                          |
+| `connecting`   | 最初の物理接続試行を開始中。                        |
+| `open`         | 現在の物理ソケットが開いている。                    |
+| `reconnecting` | 次の物理接続試行を準備中または遅延中。              |
+| `closing`      | 所有者が手動クローズを要求した。                    |
+| `closed`       | 正規化されたエラーのない終端クローズ。              |
+| `aborted`      | 外部キャンセルが `ABORTED` に正規化された終端状態。 |
+| `error`        | その他の終端失敗。                                  |
 
-`reconnecting` は遅延中には通知されません。遅延後、次の試行を開始するときに通知されます。`session.state` は最後に通知されたライフサイクル状態であり、現在ネイティブソケットが存在する証明ではありません。この間に送ったメッセージは送信キューへ入ります。
+`session.state` は論理ライフサイクルであり、現在ネイティブソケットが存在する証明ではありません。`reconnecting` 中の `send` は、エンドポイント所有の送信容量を使います。
 
-状態リスナーは直接実行されます。例外を送出しないようにし、所有者の終了時に購読を解除してください。
+オブザーバーの失敗は分離されます。状態リスナーの失敗はランタイムエラーリスナーへ通知され、そのリスナーの失敗は利用可能な `globalThis.reportError` へ転送されます。終端時にオブザーバーは解放されますが、所有者が先に終了する場合は購読を解除してください。
 
 ### 各試行の前処理
 
 `beforeConnect` はクライアントまたは 1 回の実行に設定できます。最初の試行と各再接続試行で、ネイティブコンストラクターより前に実行されます。
 
 ```typescript
-declare const refreshConnectionState: () => Promise<void>
+declare const refreshConnectionState: (signal: AbortSignal) => Promise<void>
 
 const [error, session] = await client.execute(chat(), {
-  beforeConnect: refreshConnectionState,
+  beforeConnect: ({ signal }) => refreshConnectionState(signal),
 })
 ```
 
-コマンド入力とリクエストプロジェクションは、すでに構築済みです。このフックは `build` を再実行せず、束縛済みクエリ値も変更しません。実行環境のハンドシェイク処理が使う状態の更新など、アプリケーションが所有する準備処理に使います。例外の送出または Promise の reject は終端トランスポート失敗になり、クローズ結果の再接続述語には渡りません。
+フックは `{ attempt, signal }` を受け取ります。最初の `attempt` は `0` で、再接続ごとに増えます。所有する非同期処理へ `signal` を渡してください。中断とタイムアウトはフックと競合し、遅い reject を消費して、遅い結果からのソケット生成を防ぎます。例外または reject は終端トランスポート失敗です。
 
 ## 再接続は明示設定
 
@@ -227,7 +232,7 @@ const [error, session] = await client.execute(chat(), {
 
 基準遅延は `min(delayMs * factor ** (attempt - 1), maxDelayMs)` です。WebSocket の jitter は乗算です。たとえば `0.2` なら `0.8` 以上 `1.2` 以下のランダムな係数を選びます。ミリ秒を加算する SSE の jitter とは異なります。
 
-`shouldReconnect` は同期かつ例外を送出しない処理にしてください。再接続は、同じ論理セッション内で新しい物理ソケットを開きます。受信/送信キューもその論理セッションに属します。
+`shouldReconnect` は同期処理です。例外はセッションを `error` で終了し、明示的な `false` は `closed` で終了します。再接続は同じ論理セッション内に新しい物理ソケットを作るだけで、以前の送信を再生しません。`session.connection.generation` が増えたとき、まだ有効で安全に再生できるサブスクリプションだけを復元し、mutation は再生しないでください。
 
 ## ハートビート
 
@@ -247,49 +252,36 @@ const [error, session] = await client.execute(chat(), {
 
 `message` はエンドポイントの送信マップに対して有効な値を返す必要があります。`isAck` が認識したメッセージはハートビートタイムアウトを解除し、`receive` には追加されません。
 
-正の `timeoutMs` を超えると、ランタイムはランタイムエラーリスナーに `Error('WebSocket heartbeat timeout')` を通知し、ネイティブクローズコード `4000` と理由 `heartbeat timeout` でクローズを要求します。その後に再接続するには、クローズを許可する再接続ポリシーが別途必要です。
+ハートビートのシリアライズ、送信、ack 述語、タイムアウトの失敗はすべて致命的です。ランタイムエラーリスナーへ通知し、`receive` を失敗させ、再接続ポリシーを参照せずセッションを `error` で終了します。
 
-`timeoutMs < intervalMs` にしてください。現在の実装はこの関係を検証しません。タイムアウトが間隔以上だと、後続のハートビートタイマーと重なる可能性があります。
+`intervalMs` と、指定する `timeoutMs` は、それぞれ正の有限値で `2_147_483_647` 以下でなければなりません。ack の期限が有効な間、後続の interval は別の ping を送らず期限もリセットしません。ack またはセッション停止で期限を解除します。
 
 ## キュー
 
-`queue` オプションが設定するのは送信メッセージだけです。
+キュー上限はエンドポイント定義に属します。`maxIncomingQueueSize` は必須の正の安全な整数で、オーバーフローは致命的エラーとなり、バッファ済みの値を破棄します。`maxOutgoingQueueSize` は省略可能な非負の安全な整数で、デフォルトは `0` です。正の値では試行間のフレームを FIFO で保持し、古いフレームを削除せずにオーバーフローを拒否します。
 
-```typescript
-const [error, session] = await client.execute(chat(), {
-  queue: {
-    maxSize: 100,
-    overflow: 'drop-oldest',
-  },
-})
-```
-
-送信キューはデフォルトで無制限です。上限を設定した場合、デフォルトのオーバーフロー方式は `drop-oldest` です。ほかに `drop-newest` と `error` があります。終端クローズ時には送信キューが空になります。
-
-受信キューには公開された上限・オーバーフローオプションがありません。上限のない共有ワークキューで、バックプレッシャーも提供しません。リソース所有者は継続して消費するか、セッションをクローズする必要があります。
+どちらもバイト数ではなく要素数を数えます。`session.bufferedAmount` はネイティブソケットの未送信バイト数を別に公開します。`receive` が許可するイテレーターは 1 つだけです。
 
 ## クローズの所有権
 
-`session.close(code, reason)` は現在のネイティブソケットの `close` メソッドを呼び、手動クローズのマーカーで論理セッションを中断します。クローズを要求するだけで、正常なハンドシェイク、目に見える `closing` 状態、最終的な `closed` 値が要求したコードや理由と完全一致することは保証しません。
+`session.close(code, reason)` は、コードが `1000` または `3000..4999`、理由が UTF-8 で最大 123 バイトであることを先に検証します。有効な入力は `closing` へ移り、ネイティブクローズを要求して実際の `CloseEvent` を待ちます。観測したコードと理由が要求値より優先されます。
 
 `session.closed` はランタイムが観測したクローズ情報で解決されます。
 
 ```typescript
-interface WebSocketCloseInfo {
-  cause?: unknown
-  code?: number
-  reason?: string
-  wasClean?: boolean
-}
+type WebSocketCloseInfo =
+  | { kind: 'closed'; code?: number; reason?: string; wasClean?: boolean }
+  | { kind: 'aborted'; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }
+  | { kind: 'error'; cause: unknown; code?: number; reason?: string; wasClean?: boolean }
 ```
 
-ネイティブ実装がクローズイベントを通知しない場合、確定が遅れることがあります。外部キャンセルは、正規化された理由に応じて `aborted` または `error` で終了します。セッションが試行間にある場合は `closing` を経由しないこともあります。
+手動クローズ、原因のないリモートクローズ、明示的に拒否した再接続は `closed` になります。外部中断は `aborted`、タイムアウトとランタイム失敗は `error` です。ネイティブクローズが例外を送出した場合は引数なしで 1 回だけ再試行し、両方失敗すれば 3 回目を呼ばず `error` で確定します。
 
 セッションを開いたコンポーネント、ルート、ジョブ、サービスの境界でリスナーの購読を解除し、クローズしてください。プロバイダーのアンマウントだけでは実行されません。
 
 ## URL と認証の安全性
 
-HTTP ベース URL は WebSocket スキームへ変換されます。`http:` は `ws:`、`https:` は `wss:` です。パスプレースホルダーはセグメントとしてエンコードされません。クエリ値は設定済みのシリアライザーを使います。
+HTTP ベース URL は WebSocket スキームへ変換されます。`http:` は `ws:`、`https:` は `wss:` です。パスプレースホルダーには生の値を渡してください。Core は各セグメントを正確に 1 回エンコードし、`%` を `%25` にし、空文字、`.`、`..` を拒否します。クエリ値は設定済みのシリアライザーを使います。
 
 プロトコルの優先順位は、実行オプション、クライアントオプション、エンドポイント定義の順です。明示的な空のプロトコル配列は、優先順位の低い値を抑止します。
 

@@ -1,39 +1,32 @@
-import { createClient, defineEventStream, struct, withEndpoint, withSSEHandle, withSSEQueue } from '@defjs/core'
+import { createClient, defineEventStream, struct, withEndpoint, withSSEHandle } from '@defjs/core'
 
 // Step 1: Admit only numeric cold-room readings into the bounded stream queue.
 const QUEUE_CAPACITY = 2
 export const temperatureEvents = defineEventStream({
+  maxBufferSize: 256,
+  maxQueueSize: QUEUE_CAPACITY,
   path: '/v1/cold-rooms/CR-7/temperature',
   events: { 'temperature-celsius': struct.number() },
 })
 
-// Step 2: Own a two-entry drop-oldest policy for current-state catch-up.
+// Step 2: Keep connection-wide transport wiring separate from endpoint-owned resource limits.
 function createTemperatureClient(handle: typeof fetch) {
-  return createClient(
-    withEndpoint('https://warehouse.invalid'),
-    withSSEHandle(handle),
-    withSSEQueue({ maxSize: QUEUE_CAPACITY, overflow: 'drop-oldest' }),
-  )
+  return createClient(withEndpoint('https://warehouse.invalid'), withSSEHandle(handle))
 }
 
-// Step 3: Drain the settled queue in source order and always close its stream handle.
-export async function readLatestTemperatures(client: ReturnType<typeof createTemperatureClient>): Promise<number[]> {
+// Step 3: Observe overflow as a terminal error instead of silently dropping a temperature.
+export async function observeTemperatureOverflow(client: ReturnType<typeof createTemperatureClient>): Promise<string> {
   const [error, stream] = await client.execute(temperatureEvents())
   if (error) throw error
 
   try {
-    await stream.closed
-    const readings: number[] = []
-    for await (const event of stream) {
-      switch (event.event) {
-        case 'temperature-celsius':
-          readings.push(event.data)
-          break
-      }
+    const close = await stream.closed
+    if (close.code !== 'error') {
+      throw new Error(`Expected queue overflow, received ${close.code}`)
     }
-    return readings
+    return close.code
   } finally {
-    stream.close('temperature catch-up complete')
+    stream.close('temperature overflow observed')
     await stream.closed
   }
 }
@@ -46,11 +39,11 @@ export async function main(): Promise<void> {
       { headers: { 'content-type': 'text/event-stream' } },
     )
 
-  // Step 5: Drain the stream through the bounded temperature client.
-  const readings = await readLatestTemperatures(createTemperatureClient(fixtureFetch))
+  // Step 5: Observe the endpoint-owned queue overflowing at the third event.
+  const terminal = await observeTemperatureOverflow(createTemperatureClient(fixtureFetch))
 
-  // Step 6: Emit the two freshest validated readings in source order.
-  console.log(JSON.stringify({ readings }))
+  // Step 6: Emit the deterministic terminal state; no reading was silently discarded.
+  console.log(JSON.stringify({ terminal }))
 }
 
 if (import.meta.main) {

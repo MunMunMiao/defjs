@@ -8,7 +8,7 @@ The session should accept only a typed pong for its active `monitorId` and close
 
 ## Scenario
 
-Two local sessions monitor `dock-monitor-9`. The acknowledged fixture answers the first typed ping with a matching pong, allowing a second ping before it closes cleanly. The silent fixture sends no pong, so Defjs reports `WebSocket heartbeat timeout` and closes it with code `4000`.
+Two local sessions monitor `dock-monitor-9`. The acknowledged fixture answers the first typed ping with a matching pong, allowing a second ping before it closes cleanly. The silent fixture sends no pong, so Defjs reports `WebSocket heartbeat timeout` and settles the logical session as an error.
 
 The runner uses a 10 ms interval and 2 ms timeout so both paths finish locally without external traffic.
 
@@ -34,7 +34,7 @@ Execution is local and offline. Both sessions await terminal close, which dispos
 ## Expected result
 
 ```text
-{"acknowledged":{"closeCode":1000,"pings":2},"silent":{"closeCode":4000,"runtimeError":"WebSocket heartbeat timeout"}}
+{"acknowledged":{"closeCode":1000,"pings":2},"silent":{"runtimeError":"WebSocket heartbeat timeout"}}
 ```
 
 The matching pong clears the first deadline and permits another interval. The silent peer reaches the configured timeout and terminal close code.
@@ -43,6 +43,7 @@ The matching pong clears the first deadline and permits another interval. The si
 
 - Browser code sends heartbeat JSON data messages, not native WebSocket Ping control frames.
 - `isAck` decides which typed incoming message clears the active deadline.
+- Heartbeat failures are fatal and do not consult reconnect policy.
 - Runtime-error observation and awaiting `session.closed` are separate lifecycle responsibilities.
 
 ## Production notes

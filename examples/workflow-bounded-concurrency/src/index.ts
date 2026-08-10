@@ -31,7 +31,7 @@ export async function readFulfillments(client: Client, orderIds: readonly string
       const orderId = orderIds[index]
       if (orderId === undefined) return
 
-      const [error, fulfillment, response] = await client.execute(readOrderFulfillment({ path: { orderId: encodeURIComponent(orderId) } }))
+      const [error, fulfillment, response] = await client.execute(readOrderFulfillment({ path: { orderId } }))
       if (error) throw error
       if (response.error) throw response.error
       results[index] = fulfillment

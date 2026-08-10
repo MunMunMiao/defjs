@@ -8,9 +8,9 @@ export function success<T>(value: T): ParseSuccess<T> {
   }
 }
 
-export function failure(...issues: StructIssue[]): ParseFailure {
+export function failure(issue: StructIssue): ParseFailure {
   return {
-    issues,
+    issue,
     ok: false,
   }
 }

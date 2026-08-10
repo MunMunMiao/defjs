@@ -13,7 +13,7 @@ const [sseError, stream, startupOpen] = await client.execute(sseCommand)
 const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-- HTTP devuelve los datos decodificados y un wrapper `SettledResponse` de Defjs.
+- HTTP devuelve los datos decodificados y un wrapper `HttpResponse` de Defjs.
 - SSE devuelve un manejador lógico del stream y una instantánea de la apertura inicial.
 - WebSocket devuelve una sesión lógica y una instantánea de la conexión inicial.
 
@@ -44,7 +44,7 @@ interface HttpStatusError<TErrorData = unknown> {
   status: number
   message: string
   data: TErrorData
-  response: SettledResponseLike<unknown>
+  response: HttpResponse<unknown>
 }
 ```
 
@@ -75,7 +75,7 @@ interface DefinitionError {
   code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'UNDECLARED_STATUS'
   message: string
   cause?: unknown
-  response?: SettledResponseLike<unknown>
+  response?: HttpResponse<unknown>
 }
 ```
 
@@ -133,7 +133,9 @@ No registres `cause`, `data`, las cabeceras o el cuerpo de la respuesta ni URLs 
 
 ## Cuándo está disponible la respuesta
 
-`SettledResponseLike` y `SettledResponse` son wrappers de Defjs, no objetos `Response` nativos. Exponen el estado y su texto, cabeceras, URL, cuerpo, información de error opcional y, en los wrappers ya resueltos, un indicador `ok`. `ok` solo significa que el estado está en el rango 2xx.
+`HttpResponse` es un wrapper de Defjs, no un objeto `Response` nativo. Expone el estado y su texto, cabeceras, URL, cuerpo, `error` y `ok`. `ok` solo indica que el estado está en el rango 2xx. `error` se reserva para fallos de transporte o representación del cuerpo; una respuesta no 2xx ordinaria lo deja vacío.
+
+Un cuerpo no 2xx válido y declarado se decodifica con su Struct y se conserva tipado en `HttpStatusError.data`. Una representación malformada produce `RESPONSE_VALIDATION_FAILED` con la excepción original del codec como `cause`, una respuesta si se recibió y sin `data`.
 
 En HTTP:
 

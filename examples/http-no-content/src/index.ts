@@ -13,7 +13,7 @@ export const deleteExportJob = defineRequest({
 
 // Step 2: Normalize both successful branches without decoding content from 204.
 export async function removeExportJob(client: Client, id: string) {
-  const [error, result, response] = await client.execute(deleteExportJob({ path: { id: encodeURIComponent(id) } }))
+  const [error, result, response] = await client.execute(deleteExportJob({ path: { id } }))
   if (error) throw error
   if (response.status === 204) return { deleted: true as const, source: 'no-content' as const }
   if (!result?.deleted) throw new Error('export job deletion was not confirmed')

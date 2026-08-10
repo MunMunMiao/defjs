@@ -195,7 +195,7 @@ export default defineNuxtPlugin((nuxtApp) => {
 - 對 active resource 呼叫 `stream.close(...)` 或 `session.close(...)`；
 - unsubscribe WebSocket observer。
 
-不要只為了掛 state listener 就開啟 WebSocket，卻完全不讀它的無界 incoming queue。完整生命週期規則請見 [SSE](/zh-Hant-TW/core/sse)與 [WebSocket](/zh-Hant-TW/core/web-socket)。
+不要只為了掛 state listener 就開啟 WebSocket，卻完全不讀有限 incoming queue；overflow 會 fatal 終止 session。完整生命週期規則請見 [SSE](/zh-Hant-TW/core/sse)與 [WebSocket](/zh-Hant-TW/core/web-socket)。
 
 ## API
 

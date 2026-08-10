@@ -249,7 +249,7 @@ export function LiveNotifications() {
 }
 ```
 
-Este fragmento da por hecho que `recordRealtimeFailure` es una función de telemetría de la aplicación. Consume `session.receive` de forma intencionada; dejar sin leer esa cola de entrada ilimitada no es una gestión válida del recurso. Aplica la misma disciplina de arranque y limpieza a los manejadores SSE.
+Este fragmento da por hecho que `recordRealtimeFailure` es una función de telemetría de la aplicación. Consume `session.receive` de forma intencionada; si la cola de entrada finita queda sin lector, su desbordamiento termina la sesión de forma fatal. Aplica la misma disciplina de arranque y limpieza a los manejadores SSE.
 
 Desmontar y volver a montar el provider cambia el ámbito del cliente. No llama a `dispose`, no cancela peticiones y no cierra manejadores ni sesiones, porque `Client` de Core no tiene una API de ciclo de vida de ese tipo.
 

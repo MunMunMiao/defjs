@@ -1,5 +1,6 @@
 import { resolveObjectShape } from './shape'
 import { DEFINITION } from './symbols'
+import { REQUEST_SECTION_KEYS } from './types'
 import type { RuntimeStruct, StructDefinition, StructLike } from './types'
 import { hasOwnKey, isPlainObject } from './utils'
 
@@ -24,7 +25,17 @@ export function selectUnionOption(options: readonly StructLike<unknown, unknown,
 
 export function matchesDefinition(definition: StructDefinition, value: unknown, struct: RuntimeStruct): boolean {
   if (value === null) {
-    return definition.kind === 'null' || definition.flags.nullable
+    if (definition.kind === 'null' || definition.flags.nullable) {
+      return true
+    }
+    if (
+      (definition.kind !== 'literal' || definition.value !== null) &&
+      definition.kind !== 'intersection' &&
+      definition.kind !== 'or' &&
+      definition.kind !== 'requestBody'
+    ) {
+      return false
+    }
   }
   if (typeof value === 'undefined') {
     return definition.flags.optional
@@ -59,18 +70,32 @@ export function matchesDefinition(definition: StructDefinition, value: unknown, 
     case 'object':
       return isPlainObject(value) && matchesObjectValue(struct, value)
     case 'request':
-      return isPlainObject(value)
+      if (!isPlainObject(value)) {
+        return false
+      }
+      for (const key of REQUEST_SECTION_KEYS) {
+        const section = definition[key] as RuntimeStruct | undefined
+        if (section && (!hasOwnKey(value, key) || !matchesRuntimeValue(section, value[key]))) {
+          return false
+        }
+      }
+      return true
     case 'requestBody':
       return matchesRuntimeValue(definition.struct as unknown as RuntimeStruct, value)
     case 'record':
       return (
         isPlainObject(value) &&
-        Object.values(value).every((entry) => matchesRuntimeValue(definition.value as unknown as RuntimeStruct, entry))
+        Object.keys(value).every((key) => matchesRuntimeValue(definition.value as unknown as RuntimeStruct, value[key]))
       )
     case 'or':
       return definition.options.some((option) => matchesRuntimeValue(option as unknown as RuntimeStruct, value))
-    case 'discriminatedUnion':
-      return isPlainObject(value) && definition.map.has(value[definition.discriminator])
+    case 'discriminatedUnion': {
+      if (!isPlainObject(value) || !hasOwnKey(value, definition.discriminator)) {
+        return false
+      }
+      const target = definition.map.get(value[definition.discriminator]) as RuntimeStruct | undefined
+      return target ? matchesRuntimeValue(target, value) : false
+    }
     case 'intersection': {
       const left = definition.left as RuntimeStruct
       const right = definition.right as RuntimeStruct
@@ -105,5 +130,5 @@ function matchesObjectValue(struct: RuntimeStruct, value: { [key: string]: unkno
 }
 
 function isRequiredField(definition: StructDefinition): boolean {
-  return !definition.flags.optional && !definition.flags.nullable
+  return !definition.flags.optional
 }

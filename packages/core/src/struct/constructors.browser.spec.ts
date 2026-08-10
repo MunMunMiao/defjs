@@ -36,24 +36,17 @@ describe('constructors.ts browser primitives', () => {
     expect(badAb).toBeInstanceOf(StructError)
   })
 
-  test('blob and file zero values are constructible in browser', () => {
-    const [blobErr, zeroBlob] = parse(struct.blob(), undefined)
-    if (blobErr) {
-      throw blobErr
-    }
-    const [fileErr, zeroFile] = parse(struct.file(), undefined)
-    if (fileErr) {
-      throw fileErr
-    }
-    const [bufferErr, zeroBuffer] = parse(struct.arrayBuffer(), undefined)
-    if (bufferErr) {
-      throw bufferErr
-    }
+  test('blob, file, and arrayBuffer require explicit values', () => {
+    const [blobErr, blob] = parse(struct.blob(), undefined)
+    const [fileErr, file] = parse(struct.file(), undefined)
+    const [bufferErr, buffer] = parse(struct.arrayBuffer(), undefined)
 
-    expect(zeroBlob).toBeInstanceOf(Blob)
-    expect(zeroFile).toBeInstanceOf(File)
-    expect(zeroBuffer).toBeInstanceOf(ArrayBuffer)
-    expect((zeroBuffer as ArrayBuffer).byteLength).toBe(0)
+    expect(blobErr).toBeInstanceOf(StructError)
+    expect(fileErr).toBeInstanceOf(StructError)
+    expect(bufferErr).toBeInstanceOf(StructError)
+    expect(blob).toBeUndefined()
+    expect(file).toBeUndefined()
+    expect(buffer).toBeUndefined()
   })
 
   test('upload object struct integrates web types end-to-end', async () => {

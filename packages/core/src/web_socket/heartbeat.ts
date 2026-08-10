@@ -1,7 +1,8 @@
 import type { FnReturn } from '../internal/utility_types'
 import { serializeOutgoingWebSocketMessage } from './codec'
-import type { SendQueue } from './queue'
 import type { SocketStructs, WebSocketHeartbeatConfig, WebSocketOutgoingData } from './web_socket'
+
+const MAX_TIMER_DELAY_MS = 2_147_483_647
 
 export type HeartbeatRuntime<TIncoming> = {
   isAck?: (message: TIncoming) => boolean
@@ -19,47 +20,18 @@ export function startHeartbeat<TIncoming, TOutgoing extends SocketStructs | unde
   sessionController: HeartbeatSession<TIncoming>,
   config: WebSocketHeartbeatConfig<TIncoming, WebSocketOutgoingData<TOutgoing>> | undefined,
   outgoing: TOutgoing,
-  sendQueue: SendQueue,
-  onError: (error: unknown) => void,
+  onFatal: (error: unknown) => void,
+  openState: number,
 ): void {
   stopHeartbeat(sessionController)
+  validateHeartbeatConfig(config)
   if (!config) {
     return
   }
 
   let ackTimer: FnReturn<typeof setTimeout> | undefined
-  const interval = setInterval(() => {
-    if (socket.readyState !== WebSocket.OPEN) {
-      return
-    }
-
-    const nextMessage = resolveHeartbeatMessage(config.message)
-    if (typeof nextMessage === 'undefined') {
-      return
-    }
-
-    try {
-      const serialized = serializeOutgoingWebSocketMessage(outgoing, nextMessage as WebSocketOutgoingData<TOutgoing>)
-      socket.send(serialized)
-    } catch (error) {
-      onError(error)
-      return
-    }
-
-    if (typeof config.timeoutMs === 'number' && config.timeoutMs > 0) {
-      clearTimeout(ackTimer)
-      ackTimer = setTimeout(() => {
-        onError(new Error('WebSocket heartbeat timeout'))
-        try {
-          socket.close(4000, 'heartbeat timeout')
-        } catch {
-          sendQueue.clear()
-        }
-      }, config.timeoutMs)
-    }
-  }, config.intervalMs)
-
-  sessionController.heartbeat = {
+  let interval: FnReturn<typeof setInterval> | undefined
+  const runtime: HeartbeatRuntime<TIncoming> = {
     isAck: config.isAck,
     markAck() {
       clearTimeout(ackTimer)
@@ -70,6 +42,61 @@ export function startHeartbeat<TIncoming, TOutgoing extends SocketStructs | unde
       clearTimeout(ackTimer)
       ackTimer = undefined
     },
+  }
+  const isActive = () =>
+    sessionController.heartbeat === runtime && sessionController.currentSocket === socket && socket.readyState === openState
+
+  sessionController.heartbeat = runtime
+  interval = setInterval(() => {
+    if (!isActive()) {
+      return
+    }
+    if (typeof ackTimer !== 'undefined') {
+      return
+    }
+
+    try {
+      const nextMessage = resolveHeartbeatMessage(config.message)
+      if (!isActive() || typeof nextMessage === 'undefined') {
+        return
+      }
+      const serialized = serializeOutgoingWebSocketMessage(outgoing, nextMessage as WebSocketOutgoingData<TOutgoing>)
+      if (!isActive()) {
+        return
+      }
+      socket.send(serialized)
+      if (!isActive()) {
+        return
+      }
+    } catch (error) {
+      fail(error)
+      return
+    }
+
+    if (typeof config.timeoutMs === 'number' && config.timeoutMs > 0) {
+      ackTimer = setTimeout(() => {
+        fail(new Error('WebSocket heartbeat timeout'))
+      }, config.timeoutMs)
+    }
+  }, config.intervalMs)
+
+  function fail(error: unknown): void {
+    /* istanbul ignore if -- @preserve defensive: a cleared platform timeout callback may already be queued when the runtime stops */
+    if (!isActive()) {
+      return
+    }
+    stopHeartbeat(sessionController)
+    onFatal(error)
+  }
+}
+
+export function validateHeartbeatConfig(config: { intervalMs: number; timeoutMs?: number } | undefined): void {
+  if (!config) {
+    return
+  }
+  assertTimerDelay('intervalMs', config.intervalMs)
+  if (typeof config.timeoutMs !== 'undefined') {
+    assertTimerDelay('timeoutMs', config.timeoutMs)
   }
 }
 
@@ -84,4 +111,10 @@ function resolveHeartbeatMessage<T>(message?: <R = T>() => R | unknown): T | und
   }
 
   return message() as T
+}
+
+function assertTimerDelay(field: string, value: number): void {
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_TIMER_DELAY_MS) {
+    throw new RangeError(`WebSocket heartbeat ${field} must be between 0 and ${MAX_TIMER_DELAY_MS}`)
+  }
 }

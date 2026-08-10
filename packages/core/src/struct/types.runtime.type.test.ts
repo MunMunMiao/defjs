@@ -48,6 +48,7 @@ const User = struct.object({
 
 type UserOutput = Infer<typeof User>
 expectTypeOf<UserOutput>().toEqualTypeOf<{ id: string; name?: string }>()
+expectTypeOf<(typeof User)['_struct']['input']>().toEqualTypeOf<{ id: string; name?: string }>()
 
 const profile = struct.object({
   id: struct.string(),
@@ -73,10 +74,33 @@ const matrix = struct.array(struct.array(struct.object({ name: struct.string() }
 
 type MatrixCase = Expect<StrictEqual<Infer<typeof matrix>, { name: string }[][]>>
 
+const tupleInputOutput = struct.tuple([struct.date(), struct.bigint(), struct.string().optional()])
+expectTypeOf<(typeof tupleInputOutput)['_struct']['input']>().toEqualTypeOf<[Date | number | string, bigint | string, string | undefined]>()
+expectTypeOf<Infer<typeof tupleInputOutput>>().toEqualTypeOf<[Date, bigint, string | undefined]>()
+
 const result = struct.or(struct.string(), struct.number())
 
 type UnionCase = Expect<StrictEqual<Infer<typeof result>, string | number>>
+expectTypeOf<(typeof result)['_struct']['input']>().toEqualTypeOf<string | number>()
+
+const modifierUnion = struct.or(struct.string().optional(), struct.number().null())
+expectTypeOf<(typeof modifierUnion)['_struct']['input']>().toEqualTypeOf<string | number | null>()
+expectTypeOf<Infer<typeof modifierUnion>>().toEqualTypeOf<string | number | null>()
 type AnyGuard = Expect<StrictEqual<IsAny<Infer<typeof profile>>, false>>
+
+const callable = () => 'value'
+const AnyValue = struct.any()
+const UnknownValue = struct.unknown()
+const anyInput: (typeof AnyValue)['_struct']['input'] = callable
+const unknownInput: (typeof UnknownValue)['_struct']['input'] = callable
+// @ts-expect-error required any input excludes undefined.
+const missingAnyInput: (typeof AnyValue)['_struct']['input'] = undefined
+// @ts-expect-error required unknown input excludes null.
+const nullUnknownInput: (typeof UnknownValue)['_struct']['input'] = null
+void anyInput
+void unknownInput
+void missingAnyInput
+void nullUnknownInput
 
 const aliasedProfile = struct.object({
   displayName: struct.string().alias('display_name'),
@@ -92,6 +116,21 @@ const singleIntersection = struct.intersection(struct.object({ id: struct.string
 
 type IntersectionCase = Expect<StrictEqual<Infer<typeof merged>, { id: string } & { name: string } & { active: boolean }>>
 type SingleIntersectionCase = Expect<StrictEqual<Infer<typeof singleIntersection>, { id: string }>>
+expectTypeOf<(typeof merged)['_struct']['input']>().toEqualTypeOf<{ id: string } & { name: string } & { active: boolean }>()
+
+const Event = struct.discriminatedUnion('type', [
+  struct.object({ payload: struct.string(), type: struct.literal('message') }),
+  struct.object({ count: struct.number(), type: struct.literal('count') }),
+])
+expectTypeOf<(typeof Event)['_struct']['input']>().toEqualTypeOf<{ payload: string; type: 'message' } | { count: number; type: 'count' }>()
+
+// @ts-expect-error discriminated-union tags must be required.
+struct.discriminatedUnion('type', [struct.object({ type: struct.literal('message').optional() })])
+// @ts-expect-error discriminated-union tags cannot be nullable.
+struct.discriminatedUnion('type', [struct.object({ type: struct.literal('message').null() })])
+
+const NullEvent = struct.discriminatedUnion('type', [struct.object({ type: struct.literal(null), value: struct.string() })])
+expectTypeOf<(typeof NullEvent)['_struct']['input']>().toEqualTypeOf<{ type: null; value: string }>()
 
 // @ts-expect-error intersection requires at least one struct.
 struct.intersection()
@@ -147,15 +186,24 @@ const JsonBody = struct.json(
   }),
 )
 type JsonBodyCase = Expect<StrictEqual<Infer<typeof JsonBody>, { displayName: string; score: number }>>
-expectTypeOf<(typeof JsonBody)['_struct']['input']>().toEqualTypeOf<{ displayName?: string | undefined; score?: number | undefined }>()
+expectTypeOf<(typeof JsonBody)['_struct']['input']>().toEqualTypeOf<{ displayName: string; score: number }>()
 expectTypeOf<(typeof JsonBody)['_struct']['output']>().toEqualTypeOf<{ displayName: string; score: number }>()
+
+const OptionalInnerJsonBody = struct.json(struct.string().optional())
+expectTypeOf<(typeof OptionalInnerJsonBody)['_struct']['input']>().toEqualTypeOf<string>()
+expectTypeOf<(typeof OptionalInnerJsonBody)['_struct']['output']>().toEqualTypeOf<string>()
+const OptionalJsonBody = OptionalInnerJsonBody.optional()
+expectTypeOf<(typeof OptionalJsonBody)['_struct']['input']>().toEqualTypeOf<string | undefined>()
+
+const RequestWithOptionalInnerBody = struct.request({ body: OptionalInnerJsonBody })
+expectTypeOf<(typeof RequestWithOptionalInnerBody)['_struct']['input']>().toEqualTypeOf<{ body: string }>()
 
 const FormDataBody = struct.formData({
   file: struct.blob(),
   title: struct.string(),
 })
 type FormDataBodyCase = Expect<StrictEqual<Infer<typeof FormDataBody>, { file: Blob; title: string }>>
-expectTypeOf<(typeof FormDataBody)['_struct']['input']>().toEqualTypeOf<{ file?: Blob | undefined; title?: string | undefined }>()
+expectTypeOf<(typeof FormDataBody)['_struct']['input']>().toEqualTypeOf<{ file: Blob; title: string }>()
 expectTypeOf<(typeof FormDataBody)['_struct']['output']>().toEqualTypeOf<{ file: Blob; title: string }>()
 
 const UrlencodedBody = struct.urlencoded({
@@ -163,17 +211,17 @@ const UrlencodedBody = struct.urlencoded({
   q: struct.string(),
 })
 type UrlencodedBodyCase = Expect<StrictEqual<Infer<typeof UrlencodedBody>, { page: number; q: string }>>
-expectTypeOf<(typeof UrlencodedBody)['_struct']['input']>().toEqualTypeOf<{ page?: number | undefined; q?: string | undefined }>()
+expectTypeOf<(typeof UrlencodedBody)['_struct']['input']>().toEqualTypeOf<{ page: number; q: string }>()
 expectTypeOf<(typeof UrlencodedBody)['_struct']['output']>().toEqualTypeOf<{ page: number; q: string }>()
 
 const TextBody = struct.text()
 type TextBodyCase = Expect<StrictEqual<Infer<typeof TextBody>, string>>
-expectTypeOf<(typeof TextBody)['_struct']['input']>().toEqualTypeOf<string | undefined>()
+expectTypeOf<(typeof TextBody)['_struct']['input']>().toEqualTypeOf<string>()
 expectTypeOf<(typeof TextBody)['_struct']['output']>().toEqualTypeOf<string>()
 
 const RequestWithJsonBody = struct.request({ body: JsonBody })
 expectTypeOf<(typeof RequestWithJsonBody)['_struct']['input']>().toEqualTypeOf<{
-  body?: { displayName?: string | undefined; score?: number | undefined } | undefined
+  body: { displayName: string; score: number }
 }>()
 expectTypeOf<(typeof RequestWithJsonBody)['_struct']['output']>().toEqualTypeOf<{
   body: { displayName: string; score: number }

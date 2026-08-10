@@ -2,13 +2,13 @@
 
 ## Problem
 
-A warehouse reader receives HTTP `200` before using an inventory snapshot. Status alone cannot prevent a provider response such as `{ "location": { "aisle": 7 } }` from reaching code that expects an aisle string.
+A warehouse reader receives HTTP `200` before using an inventory snapshot. Status alone cannot prevent a provider response that omits the required `location.aisle` field from reaching code that expects an aisle string.
 
 The operation must return only a fully validated snapshot. A malformed `200` is instead exposed as `RESPONSE_VALIDATION_FAILED` with a `StructError` that identifies the invalid field.
 
 ## Scenario
 
-The runner loads `sku-2048` from a local fixture. Its response has status `200`, but `location.aisle` is numeric. Defjs rejects the body, and the runner prints only the error code, issue path, and message.
+The runner loads `sku-2048` from a local fixture. Its response has status `200`, but the required `location.aisle` field is missing. Defjs rejects the whole body instead of filling a zero value, and the runner prints only the error code, issue path, and message.
 
 ## Approach
 
@@ -31,7 +31,7 @@ The request uses the injected local Fetch function; no server or external traffi
 ## Expected result
 
 ```text
-{"code":"RESPONSE_VALIDATION_FAILED","path":"location.aisle","message":"Expected string at location.aisle, received 7"}
+{"code":"RESPONSE_VALIDATION_FAILED","path":"location.aisle","message":"Expected string at location.aisle, received undefined"}
 ```
 
 The three fields identify the rejected response without turning every `StructError` view into runner output.
@@ -39,6 +39,7 @@ The three fields identify the rejected response without turning every `StructErr
 ## Key points
 
 - HTTP success and response-schema success are separate facts.
+- A missing required response field fails the whole response; no partial value is returned.
 - The first Struct issue supplies a stable path and readable validation message.
 - Struct diagnostics can include received values; production logging needs an explicit data policy.
 

@@ -48,6 +48,8 @@ Mehrere Aufrufe von `withInterceptors(...)` hängen Einträge an:
 createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
+Ein WebSocket-Interceptor darf `next` höchstens einmal aufrufen. Scheitert die Chain nach dem Erzeugen einer Session, erfüllt Core diese nicht ausgelieferte Session, bevor der ursprüngliche Interceptorfehler zurückkehrt. Liefert die Chain erfolgreich eine andere Short-Circuit-Session, schließt Core die erzeugte Session; ein Wrapper bleibt durch Delegation der ursprünglichen `closed`-Promise zugeordnet.
+
 ## Requests sicher kopieren
 
 Behandle den eingehenden Request als Eigentum der Kette. Erzeuge ein neues `Headers`-Objekt, bevor du Header änderst:
@@ -106,6 +108,9 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
+    get bufferedAmount() {
+      return session.bufferedAmount
+    },
     get connection() {
       return session.connection
     },
@@ -255,7 +260,7 @@ Credential-Provider laufen, sobald ein Request den Interceptor durchläuft. Halt
 
 ## Sicherheit von Beobachtern und Callbacks
 
-SSE- und WebSocket-Interceptors können Lebenszyklusbeobachter an zurückgegebene Handles hängen. Entferne WebSocket-Listener, wenn ihr Besitzer endet. Halte Listener und Prädikate frei von Exceptions; die aktuellen Echtzeitimplementierungen isolieren nicht jeden Fehler eines Listeners oder Reconnect-Prädikats.
+SSE- und WebSocket-Interceptors können Lebenszyklusbeobachter an zurückgegebene Handles hängen. Entferne WebSocket-Listener, wenn ihr Besitzer endet. WebSocket leitet den Fehler eines Zustandslisteners an Laufzeitfehlerbeobachter weiter, meldet einen fehlerhaften Laufzeitfehlerbeobachter über `reportError` und behandelt ein werfendes Reconnect-Prädikat als terminalen Sessionfehler.
 
 Ein Interceptor kann werfen oder eine Promise ablehnen. Der High-Level-Transport normalisiert manche Fehler zu einem `RequestError`, Interceptor-Code sollte sich aber nicht auf eine pauschale Garantie verlassen, dass nie eine Promise abgelehnt wird.
 

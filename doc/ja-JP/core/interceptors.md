@@ -48,6 +48,8 @@ const second = createHttpInterceptor(async (request, next) => {
 createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
+WebSocket インターセプターが `next` を呼べるのは 1 回だけです。セッション作成後にチェーンが失敗した場合、Core は未返却のセッションを終了してから元のインターセプターエラーを返します。別の short-circuit セッションを返して成功した場合は作成済みセッションを閉じます。ラッパーは元の `closed` Promise を委譲して関連付けを維持します。
+
 ## リクエストを安全に複製する
 
 受け取ったリクエストはチェーンが所有するものとして扱います。ヘッダーを変更する前に、新しい `Headers` オブジェクトを作ってください。
@@ -106,6 +108,9 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
+    get bufferedAmount() {
+      return session.bufferedAmount
+    },
     get connection() {
       return session.connection
     },
@@ -255,7 +260,7 @@ Basic 認証情報は base64 エンコードされるだけで、暗号化はさ
 
 ## オブザーバーとコールバックの安全性
 
-SSE と WebSocket のインターセプターは、返されたハンドルにライフサイクルオブザーバーを付けられます。WebSocket リスナーは所有者の終了時に解除してください。リスナーと述語は例外を送出しないようにします。現在のリアルタイム実装は、すべてのリスナーや述語の失敗を隔離していません。
+SSE と WebSocket のインターセプターは、返されたハンドルにライフサイクルオブザーバーを付けられます。WebSocket リスナーは所有者の終了時に解除してください。WebSocket は状態リスナーの失敗をランタイムエラーオブザーバーへ通知し、そのオブザーバーの失敗は `reportError` へ転送します。再接続述語の例外はセッションの終端エラーです。
 
 インターセプター自体は例外を送出したり、Promise を reject したりできます。高レベルのトランスポートが一部の失敗を `RequestError` へ正規化する場合はありますが、インターセプターコードで「絶対に reject しない」という保証に依存しないでください。
 

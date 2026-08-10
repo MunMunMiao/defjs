@@ -15,6 +15,7 @@ const caseStatusMessages = {
 }
 export type CaseStatus = WebSocketIncomingData<typeof caseStatusMessages>
 export const caseStatusUpdates = defineWebSocket({
+  maxIncomingQueueSize: 16,
   path: '/v1/support/case-status',
   incoming: caseStatusMessages,
 })
@@ -26,6 +27,8 @@ export async function consumeCaseStatus(client: Client, signal: AbortSignal, con
 
   try {
     for await (const status of session.receive) await consume(status)
+  } catch (cause) {
+    if (!signal.aborted || cause !== signal.reason) throw cause
   } finally {
     session.close(1000, 'case-status owner disposed')
     await session.closed

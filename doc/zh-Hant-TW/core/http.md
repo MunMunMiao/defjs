@@ -42,7 +42,7 @@ const getUser = defineRequest({
 })
 ```
 
-Placeholder value 插入時不會做 path segment encoding。請限制 identifier 的格式，或在建立指令前，對單一不受信任的 segment 呼叫 `encodeURIComponent`。未編碼的 slash 或 dot segment 可能改變解析結果；插入 `?` 或 `#` 則會讓 endpoint path 驗證拒絕請求。
+請直接傳入原始 placeholder value。Defjs 會先將 scalar 序列化為字串，拒絕空值及完整值 `.`、`..`，再於替換前精確呼叫一次 `encodeURIComponent`。`/`、`?`、`#`、`%`、空格與 Unicode 都會保留在單一 path segment 內。請勿預先編碼；`%` 會視為原始輸入並編碼為 `%25`。
 
 ## 請求編碼
 
@@ -108,15 +108,15 @@ const getUser = defineRequest({
 
 `response.ok` 只代表 `status >= 200 && status < 300`，不代表輸出解碼、應用程式驗證或授權成功。
 
-已宣告 `output` 且省略 `responseType` 時，回應預設解析成 `json`。可明確指定的模式是 `json`、`text`、`blob` 與 `arraybuffer`，再由選中的 Struct 做結構解碼。省略 `output` 時，result data 是 `undefined`，回傳 response wrapper 的 `body` 則是 `null`。
+已宣告 `output` 且省略 `responseType` 時，回應預設解析成 `json`。可明確指定的模式是 `json`、`text`、`blob` 與 `arraybuffer`，再由選中的 Struct 做結構解碼。省略 `output` 時不允許指定 `responseType`，result data 是 `undefined`，回傳 response wrapper 的 `body` 則是 `null`。Runtime 不會讀取或解碼 response body，只會盡力取消它。
 
-### 目前的 Malformed JSON 缺陷
+指令結果依固定優先順序分類：status 0 transport failure → 無 `output` → exact status match 或 `UNDECLARED_STATUS` → `response.error` → Struct 解碼。因此，body representation error 只可能在已宣告 `output` 時出現；如果 Fetch 記錄這類錯誤，未宣告 status 分支仍優先。
 
-::: danger Malformed JSON 可能看起來成功
-目前 Fetch 邊界會把 JSON parse failure 放進 `HttpResponse.error`，並讓 body 保持 `null`。HTTP 指令執行在套用 output Struct 前沒有檢查這個 parse error。不可為 null 的 `null` 又可能解碼成 Struct 零值，因此 malformed 2xx JSON body 目前可能產生 `[null, zeroValue, response]`。
+### Representation Error
 
-不要把零值成功結果當成伺服器確實傳回有效 JSON 的證明。這需要修正實作並加入 regression test，文件只能先提出警告。
-:::
+對 status 精確匹配的已宣告 output，JSON 或其他 body codec 失敗時，Fetch 會把原始例外保存在 `HttpResponse.error`。指令執行會在套用 output Struct 前停止，並回傳 `[RESPONSE_VALIDATION_FAILED, undefined, response]`；原始例外保留為 `cause`，且不會產生 typed `error.data`。
+
+一般非 2xx 回應不會填入 `response.error`，其狀態由 `status` 與 `ok` 表示。非 2xx status 與 body 已宣告且 body 有效時，Struct 會正常解碼，最終 `HTTP_STATUS` error 會把 typed body 保留在 `error.data`。
 
 ## HTTP 結果
 
@@ -124,7 +124,7 @@ const getUser = defineRequest({
 const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
 ```
 
-成功時，`response` 是 Defjs `SettledResponse` wrapper，body 與 `data` 相符。失敗時能否取得 response，取決於執行已走到哪個階段。完整分類請見[錯誤](/zh-Hant-TW/core/errors)。
+成功時，`response` 是 Defjs `HttpResponse` wrapper，body 與 `data` 相符。失敗時能否取得 response，取決於執行已走到哪個階段。完整分類請見[錯誤](/zh-Hant-TW/core/errors)。
 
 ## 取消與 Timeout
 
@@ -140,6 +140,8 @@ const [error] = await client.execute(command, {
 ```
 
 `signal` 會與 client 內部 signal，以及正數 timeout 合併。獨立的 `abort` 欄位是目前 API 保留的另一個取消 signal。`abort` 與 `timeout` 不能同時提供，否則會回傳 `REQUEST_VALIDATION_FAILED`；`signal` 則可以和其中任一項一起使用。
+
+HTTP、SSE 與 WebSocket 執行的 `timeout` 必須是 `1..2_147_483_647` 範圍內的正安全整數；`0`、負數、小數、`NaN`、`Infinity` 或超過上限的值會在建立 request、stream 或 socket 資源前回傳 `REQUEST_VALIDATION_FAILED`。
 
 可識別的取消會產生 `ABORTED`。`AbortSignal.timeout(...)` reason 或 execution timeout 會產生 `TIMEOUT`，其他 Fetch failure 則產生 `NETWORK_ERROR`。
 
@@ -205,4 +207,4 @@ Progress callback 直接在傳輸讀寫路徑執行。請確保它不會 throw�
 
 - [攔截器](/zh-Hant-TW/core/interceptors)說明 request cloning、short-circuit 與 retry。
 - [錯誤](/zh-Hant-TW/core/errors)說明 HTTP status、transport 與 definition failure。
-- [Struct](/zh-Hant-TW/core/struct)說明零值結構解碼。
+- [Struct](/zh-Hant-TW/core/struct)說明嚴格結構解碼。

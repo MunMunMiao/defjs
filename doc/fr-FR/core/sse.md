@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: Définissez et décodez des Server-Sent Events, consommez leur file partagée, configurez la reconnexion et fermez les flux ouverts.
+description: Définissez et décodez des Server-Sent Events bornés, configurez la reconnexion et fermez les flux ouverts.
 ---
 
 # SSE
@@ -11,6 +11,8 @@ description: Définissez et décodez des Server-Sent Events, consommez leur file
 import { defineEventStream, struct } from '@defjs/core'
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(
@@ -43,6 +45,8 @@ Une Struct `default` gère les noms qui ne sont pas déclarés autrement :
 
 ```typescript
 const events = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/events',
   events: {
     update: struct.json(struct.object({ version: struct.number() })),
@@ -59,6 +63,8 @@ Utilisez `struct.request(...)` pour les sections `path`, `query` et `headers` :
 
 ```typescript
 const roomEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -81,6 +87,8 @@ const [error, stream, startupOpen] = await client.execute(
   }),
 )
 ```
+
+Pour l'exécution HTTP, SSE et WebSocket, `timeout` doit être un entier sûr positif compris entre `1` et `2_147_483_647` ; `0`, les valeurs négatives ou fractionnaires, `NaN`, `Infinity` et les valeurs supérieures à cette limite renvoient `REQUEST_VALIDATION_FAILED` avant la création de toute ressource de requête, de flux ou de socket.
 
 SSE renvoie :
 
@@ -148,7 +156,8 @@ Configurez `onInvalidEvent` avec `withSSEOnInvalidEvent(...)` ou `withSSEOptions
 ```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message }) => {
+  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+    if (signal.aborted) return
     recordInvalidEvent({ eventName: message.event, reason })
   }),
 )
@@ -157,10 +166,11 @@ const client = createClient(
 L'observateur reçoit :
 
 - `reason: 'missing-struct' | 'validation-failed'` ;
-- l'`id`, le nom, le texte `data` et l'éventuelle valeur `retry` de l'événement brut ;
+- l'`id`, le nom et le texte `data` de l'événement brut ;
 - `cause` en cas d'échec de validation.
+- le `signal` de la tentative active.
 
-L'événement est écarté, mais un événement valide ultérieur peut toujours être transmis. Les exceptions et promesses rejetées par l'observateur sont interceptées. En revanche, un observateur asynchrone est attendu avant de poursuivre le traitement. Gardez-le rapide et masquez les valeurs brutes `id`, `data` et `cause` avant de les enregistrer.
+L'événement est écarté, mais un événement valide ultérieur peut toujours être transmis. Les erreurs de l'observateur sont isolées, tandis qu'un abort interrompt un observateur en attente via `signal`. Gardez-le rapide et masquez les valeurs brutes `id`, `data` et `cause`.
 
 ## Reconnexion
 
@@ -194,44 +204,26 @@ withSSEReconnect({
 })
 ```
 
-Le transport envoie le dernier ID d'événement dans `Last-Event-ID` lors des tentatives suivantes. Gardez `shouldReconnect` sans exception. Si ce prédicat lève une exception ou rejette une promesse, certains itérateurs en attente ou parcours de `stream.closed` peuvent actuellement ne jamais se terminer.
+Le transport envoie le dernier ID d'événement dans `Last-Event-ID` lors des tentatives suivantes. Si `shouldReconnect` lève ou rejette, les nouvelles tentatives cessent et le démarrage ou flux en attente se termine avec cette erreur de politique. Abort interrompt un prédicat en attente via le signal de la tentative active.
 
 Les échecs de validation HTTP ou d'ouverture, les erreurs fatales de traitement des messages et une fin de fichier normale ne sont pas des échecs réseau ou de lecture éligibles à une nouvelle tentative. Ne supposez pas que chaque fin de parcours entraîne une reconnexion.
 
-## File de travail partagée
+## Limites propres à l'endpoint
 
-L'itérable asynchrone forme une unique file de travail partagée pour le flux logique. Ce n'est ni une souscription, ni une diffusion, ni un mécanisme de backpressure.
+Un flux n'accepte qu'un seul consommateur d'itérateur asynchrone. Créer un second itérateur lève une erreur ; quitter la boucle exige toujours un appel explicite à `stream.close(...)`.
 
-La file n'est pas bornée par défaut. Définissez une limite avec `withSSEQueue(...)` ou `withSSEOptions({ queue })` :
-
-```typescript
-withSSEQueue({
-  maxSize: 100,
-  overflow: 'drop-oldest',
-})
-```
-
-| Overflow      | Comportement à la limite                                            |
-| ------------- | ------------------------------------------------------------------- |
-| `drop-newest` | Écarte l'événement qui arrive.                                      |
-| `drop-oldest` | Retire le plus ancien événement en attente, puis ajoute le nouveau. |
-| `error`       | Lève une erreur de débordement et termine le traitement.            |
-
-Plusieurs itérateurs se disputent les valeurs ; chacun ne reçoit pas sa propre copie. Sortir d'une boucle `for await` ne ferme pas le transport, car l'itérateur n'implémente pas de `return()` lié au cycle de vie. Appelez explicitement `stream.close(...)`.
-
-La fermeture marque la file comme terminée sans supprimer les valeurs déjà en attente. Un consommateur peut encore les vider avant que l'itération suivante ne renvoie `done: true`.
-
-### Limite du tampon d'analyse
-
-La file d'événements et le tampon de l'analyseur sont distincts. Définissez un `maxBufferSize` positif via `withSSEOptions(...)` pour borner les octets conservés pour une ligne SSE incomplète :
+Chaque définition exige des entiers sûrs positifs `maxBufferSize` et `maxQueueSize`. Le premier limite chaque ligne SSE et les données de l'événement courant ; le second limite les événements analysés en attente. Un débordement est fatal et ne supprime jamais silencieusement un événement.
 
 ```typescript
-withSSEOptions({
+const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.json(notificationStruct) },
 })
 ```
 
-Dépasser cette limite après le démarrage rejette l'itérateur et ferme le flux avec `code: 'error'`. Sans valeur, ce tampon reste non borné.
+Une fin de fichier normale permet de vider les événements en attente. Une erreur fatale de parsing, de transformation ou de débordement efface le tampon, annule le body actif, rejette l'itération et résout `stream.closed` avec `code: 'error'`.
 
 ## Fermeture définitive
 

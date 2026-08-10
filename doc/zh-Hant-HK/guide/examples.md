@@ -152,16 +152,7 @@ export async function deleteUser(id: number, signal: AbortSignal): Promise<void>
 
 ```typescript
 // consume-notifications.ts
-import {
-  createClient,
-  defineEventStream,
-  struct,
-  type Infer,
-  withEndpoint,
-  withSSEOnInvalidEvent,
-  withSSEQueue,
-  withSSEReconnect,
-} from '@defjs/core'
+import { createClient, defineEventStream, struct, type Infer, withEndpoint, withSSEOnInvalidEvent, withSSEReconnect } from '@defjs/core'
 
 const notificationStruct = struct.object({
   id: struct.number(),
@@ -175,6 +166,8 @@ interface NotificationHandlers {
 }
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(notificationStruct),
@@ -185,7 +178,6 @@ export async function consumeNotifications(signal: AbortSignal, handlers: Notifi
   const client = createClient(
     withEndpoint('https://api.example.com'),
     withSSEReconnect({ attempts: 5, delayMs: 1_000, maxDelayMs: 10_000 }),
-    withSSEQueue({ maxSize: 100, overflow: 'drop-oldest' }),
     withSSEOnInvalidEvent(({ reason, message }) => {
       handlers.onInvalid({ eventName: message.event, reason })
     }),
@@ -215,19 +207,11 @@ Handler 應保持快速且不拋錯。這個 recipe 不會記錄 raw event data�
 
 ## WebSocket Room Consumer
 
-Reconnect 要明確設定。函式會在整個 logical session lifecycle 讀取無界 incoming queue、限制 outgoing queue，並在每條 exit path 關閉資源。
+Reconnect 要明確設定。Endpoint 會限制 incoming/outgoing 容量，由單一 iterator 讀取 logical session，並在每條 exit path 關閉它。
 
 ```typescript
 // consume-room.ts
-import {
-  createClient,
-  defineWebSocket,
-  struct,
-  withEndpoint,
-  withWebSocketHeartbeat,
-  withWebSocketQueue,
-  withWebSocketReconnect,
-} from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketHeartbeat, withWebSocketReconnect } from '@defjs/core'
 
 interface RoomHandlers {
   onMessage(message: { text: string; userId: number }): void
@@ -235,6 +219,8 @@ interface RoomHandlers {
 }
 
 const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   path: '/rooms/:roomId',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -262,11 +248,9 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
       message: () => ({ type: 'ping' }),
       isAck: (message) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'pong',
     }),
-    withWebSocketQueue({ maxSize: 20, overflow: 'drop-oldest' }),
   )
 
-  const encodedRoomId = encodeURIComponent(roomId)
-  const [error, session] = await client.execute(room({ path: { roomId: encodedRoomId } }), { signal })
+  const [error, session] = await client.execute(room({ path: { roomId } }), { signal })
 
   if (error) {
     throw error
@@ -292,7 +276,7 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
 }
 ```
 
-Endpoint path 不會 encode placeholder，所以這個 recipe 在建立 command 前先 encode 單一 segment，亦不會記錄最後產生的 URL 或 payload。
+請傳入原始 placeholder 值。Core 在替換 path 時會對每個值剛好 encode 一次；不要預先 encode，否則 `%` 會被再次 encode。這個 recipe 亦不會記錄最後產生的 URL 或 payload。
 
 ## Authentication 與 Operation Metric
 

@@ -3,6 +3,7 @@ import { createReconnectFixture } from './fixture'
 
 // Step 1: Type inventory readiness for one fulfillment-center logical session.
 export const inventoryAvailability = defineWebSocket({
+  maxIncomingQueueSize: 8,
   path: '/v1/fulfillment-centers/:centerId/inventory',
   input: struct.request({ path: struct.object({ centerId: struct.string() }) }),
   incoming: {
@@ -12,7 +13,7 @@ export const inventoryAvailability = defineWebSocket({
 
 // Step 2: Consume across reviewed replacement attempts and close after the first validated result.
 export async function readInventoryAvailability(client: Client, centerId: string) {
-  const [error, session] = await client.execute(inventoryAvailability({ path: { centerId: encodeURIComponent(centerId) } }))
+  const [error, session] = await client.execute(inventoryAvailability({ path: { centerId } }))
   if (error) throw error
 
   try {

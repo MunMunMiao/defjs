@@ -13,7 +13,7 @@ const [sseError, stream, startupOpen] = await client.execute(sseCommand)
 const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-- HTTP renvoie les données décodées et un wrapper Defjs `SettledResponse`.
+- HTTP renvoie les données décodées et un wrapper Defjs `HttpResponse`.
 - SSE renvoie un handle logique de flux et un instantané d'ouverture au démarrage.
 - WebSocket renvoie une session logique et un instantané de connexion au démarrage.
 
@@ -44,7 +44,7 @@ interface HttpStatusError<TErrorData = unknown> {
   status: number
   message: string
   data: TErrorData
-  response: SettledResponseLike<unknown>
+  response: HttpResponse<unknown>
 }
 ```
 
@@ -75,7 +75,7 @@ interface DefinitionError {
   code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'UNDECLARED_STATUS'
   message: string
   cause?: unknown
-  response?: SettledResponseLike<unknown>
+  response?: HttpResponse<unknown>
 }
 ```
 
@@ -133,7 +133,9 @@ Ne journalisez pas `cause`, `data`, les en-têtes ou corps de réponse, ni les U
 
 ## Disponibilité de la réponse
 
-`SettledResponseLike` et `SettledResponse` sont des wrappers Defjs, pas des objets `Response` natifs. Ils exposent le statut, son libellé, les en-têtes, l'URL, le corps, d'éventuelles informations d'erreur et, pour les wrappers finalisés, l'indicateur `ok`. Celui-ci signifie seulement que le statut appartient à la plage 2xx.
+`HttpResponse` est un wrapper Defjs, pas un objet `Response` natif. Il expose le statut, son libellé, les en-têtes, l'URL, le corps, `error` et `ok`. `ok` signifie seulement que le statut appartient à la plage 2xx. `error` est réservé aux échecs de transport ou de représentation du corps ; une réponse non-2xx ordinaire le laisse vide.
+
+Un corps non-2xx valide et déclaré est décodé par sa Struct et conservé avec son type dans `HttpStatusError.data`. Une représentation malformée produit plutôt `RESPONSE_VALIDATION_FAILED`, avec l'exception du codec dans `cause`, une réponse si elle a été reçue et sans `data`.
 
 Pour HTTP :
 

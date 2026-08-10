@@ -34,7 +34,7 @@ Composition follows three rules:
 
 1. Setter helpers replace their value. This includes `withEndpoint`, transport handles, the query serializer, credentials, XSRF configuration, and individual SSE or WebSocket settings.
 2. `withInterceptors(...items)` appends. Multiple calls preserve the order in which interceptors were added.
-3. `withSSEOptions(...)` and `withWebSocketOptions(...)` shallow-replace each defined top-level field. They do not deep-merge nested reconnect, heartbeat, or queue objects.
+3. `withSSEOptions(...)` and `withWebSocketOptions(...)` shallow-replace each defined top-level field. They do not deep-merge nested reconnect or heartbeat objects.
 
 For example, the second reconnect object below replaces the first one. It does not retain `attempts: 5`.
 
@@ -72,6 +72,8 @@ Individual SSE and WebSocket helpers set one corresponding top-level field. The 
 
 `Client.execute` has three overloads. Each returns an error-first three-item tuple.
 
+For HTTP, SSE, and WebSocket execution, `timeout` must be a positive safe integer in `1..2_147_483_647`; `0`, negative or fractional values, `NaN`, `Infinity`, and values above the limit return `REQUEST_VALIDATION_FAILED` before any request, stream, or socket resource is created.
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-The third item is a Defjs `SettledResponse` wrapper when a response is available. HTTP options include `abort` or `timeout`, the additional `signal` alias, `context`, and upload/download progress observers.
+The third item is a Defjs `HttpResponse` wrapper when a response is available. HTTP options include `abort` or `timeout`, the additional `signal` alias, `context`, and upload/download progress observers.
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-The third item is the validated startup-open snapshot. `stream.open` is a separate live getter that can change after reconnect attempts. SSE execution accepts cancellation and `HttpContext`; reconnect and event-queue configuration are client options.
+The third item is the validated startup-open snapshot. `stream.open` is a separate live getter that can change after reconnect attempts. SSE execution accepts cancellation and `HttpContext`; reconnect is a client option. The required `maxBufferSize` and `maxQueueSize` limits belong to each event-stream definition.
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-The third item is the startup-connection snapshot. `session.connection` is a live getter and can describe a later physical connection attempt. WebSocket execution accepts cancellation plus per-execution `beforeConnect`, `heartbeat`, `protocols`, `queue`, and `reconnect`. It does not accept `HttpContext`.
+The third item is the startup-connection snapshot. `session.connection` is a live getter and can describe a later physical connection attempt. WebSocket execution accepts cancellation plus per-execution `beforeConnect`, `heartbeat`, `protocols`, and `reconnect`. The required `maxIncomingQueueSize` and optional `maxOutgoingQueueSize` limits belong to each WebSocket definition. WebSocket execution does not accept `HttpContext`.
 
 See [Errors](/core/errors) for exact failure branches and [HTTP](/core/http), [SSE](/core/sse), and [WebSocket](/core/web-socket) for transport lifecycle details.
 

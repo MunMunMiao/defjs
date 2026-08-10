@@ -1,18 +1,18 @@
-# Struct Zero Values for an Unopened Store Day
+# Explicit Struct Values for an Unopened Store Day
 
 ## Problem
 
-A retail dashboard requests a daily summary before a store has accepted its first order. The summary service represents that unopened day with a sparse `{}` response. Casting the body leaves fields `undefined`, while truthy fallbacks also replace valid `0`, `false`, and empty-string values.
+A retail dashboard requests a daily summary before a store has accepted its first order. The response must distinguish valid `0`, `false`, `[]`, `''`, and `null` values from omitted optional fields.
 
-For this endpoint, omitted summary fields deliberately mean their Defjs zero values. An optional promotion code remains absent, while nullable explanations decode to `null`.
+Required fields are sent explicitly. An optional promotion code and a nullish suspension reason remain absent, while the required nullable manager note is sent as `null`.
 
 ## Scenario
 
-The runner requests `GET /stores/store-1042/daily-summaries/2026-06-01`. A local Fetch fixture returns HTTP `200` with `{}`. Defjs decodes the response into zero orders, `false` order acceptance, an empty adjustment list and operator message, and `null` explanations without adding `promotionCode`.
+The runner requests `GET /stores/store-1042/daily-summaries/2026-06-01`. A local Fetch fixture returns HTTP `200` with every required field present. Defjs preserves zero orders, `false` order acceptance, an empty adjustment list and operator message, and a `null` manager note without adding the optional or nullish fields.
 
 ## Approach
 
-Declare defaults, optional, nullable, and nullish fields explicitly in the response Struct, then decode the sparse `{}` body once to demonstrate each resulting value.
+Declare required, optional, nullable, and nullish fields in the response Struct, then decode an explicit body once to demonstrate each resulting value.
 
 ## Source map
 
@@ -31,22 +31,22 @@ Execution is local and offline through the injected Fetch function.
 ## Expected result
 
 ```text
-{"orders":0,"acceptingOrders":false,"adjustmentIds":[],"operatorMessage":"","managerNote":null,"suspensionReason":null}
+{"orders":0,"acceptingOrders":false,"adjustmentIds":[],"operatorMessage":"","managerNote":null}
 ```
 
-The required fields receive their number, boolean, array, and string zero values. `promotionCode` is absent because it is optional; the nullable and nullish fields are present as `null`.
+The required number, boolean, array, and string values are preserved exactly. `managerNote` is explicitly `null`; `promotionCode` and `suspensionReason` are absent because they are optional and nullish.
 
 ## Key points
 
-- Zero-value decoding is an endpoint contract, not a substitute for business-required fields.
-- Optional omission remains observably different from nullable and nullish output.
-- If omission means "unknown," model that state as optional or nullable instead of a business zero.
+- Missing required fields fail response validation instead of producing defaults.
+- Optional and nullish omission remains observably different from an explicit nullable `null`.
+- Valid `0`, `false`, `[]`, and `''` values do not need fallback logic.
 
 ## Production notes
 
-Use this contract only after agreeing on sparse-response semantics with the producing service. Add application-level range checks for counts and money where needed.
+Agree on required and optional fields with the producing service. Add application-level range checks for counts and money where needed.
 
 ## Inspiration
 
-- [Defjs zero-value tests](https://github.com/defjs/defjs/blob/598c218144bc3e5c4844bc8746e08d31010a5309/packages/core/src/struct/parse.spec.ts#L35-L74) define the library behavior used by this response Struct.
-- [Go `encoding/json.Unmarshal`](https://pkg.go.dev/encoding/json#Unmarshal) documents the zero-initialized decoding model that informs this behavior.
+- [Defjs Struct parser tests](https://github.com/defjs/defjs/blob/main/packages/core/src/struct/parse.spec.ts) define the strict decoding behavior used by this response Struct.
+- [Go `encoding/json.Unmarshal`](https://pkg.go.dev/encoding/json#Unmarshal) documents the separate Go model; this example supplies every required value instead of relying on a zero-initialized destination.

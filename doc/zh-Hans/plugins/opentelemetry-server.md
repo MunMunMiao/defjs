@@ -75,7 +75,7 @@ withOpenTelemetryServer({
 
 省略 `propagator` 时，package 会创建自己的 `CompositePropagator`，其中包含 W3C Trace Context 和 W3C Baggage propagator。它不会读取 global propagator 配置。
 
-HTTP 和 SSE 会把 propagator 产生的每个字段注入 request header。如果 `req.headers` 已经是 `Headers` 实例，当前实现会复用并原地修改这个实例；否则才会新建 `Headers` 对象。WebSocket query propagation 默认是 `true`，因为浏览器 socket 不能添加任意 handshake header。它会把 propagator 产生的每个字段追加到连接 query string。
+HTTP 和 SSE 会把 propagator 产生的每个字段注入 request header。如果 `req.headers` 已经是 `Headers` 实例，当前实现会复用并原地修改这个实例；否则才会新建 `Headers` 对象。WebSocket query propagation 默认是 `false`，只有显式设置 `queryPropagation: true` 才会启用。由于浏览器 socket 不能添加任意 handshake header，启用后会把 propagator 产生的每个字段追加到连接 query string。
 
 每个 interceptor 创建 span 前，还会对 request header 调用 `propagator.extract(...)`。请只把这个 carrier 当作应用自己控制的可信 input。不要让不可信调用方传入 `traceparent`、`tracestate` 或 `baggage`，这些字段可能替换当前 active parent context。请求到达这个 interceptor 前，应删除或归一化不可信的 propagation field。
 
@@ -83,12 +83,12 @@ HTTP 和 SSE 会把 propagator 产生的每个字段注入 request header。如�
 withOpenTelemetryServer({
   tracer,
   webSocket: {
-    queryPropagation: false,
+    queryPropagation: true,
   },
 })
 ```
 
-除非部署环境已经审查 URL propagation，否则应关闭 query propagation。Trace context 和 baggage 可能被 browser、proxy、access log 和 telemetry system 记录。Custom propagator 还可能加入 `traceparent` 之外的更多字段。
+启用前必须审查部署环境的 URL propagation。Trace context 和 baggage 可能被 browser、proxy、access log 和 telemetry system 记录，custom propagator 还可能加入 `traceparent` 之外的更多字段。服务端支持时，优先使用经过协议审查的首帧或短期一次性 connection ticket。
 
 `requireParentSpan: true` 会在 interceptor 执行任何 instrumentation 前检查 active parent span。没有 active span 时，它会跳过 span creation、propagation、hook 和 metric，然后原样调用下一个 handler。
 
@@ -110,7 +110,7 @@ withOpenTelemetryServer({
 })
 ```
 
-Hook 是同步的。同步 throw 会被捕获并记录为 `defjs.otel.hook.error`，不会中断 client operation。如果 JavaScript 绕过类型并返回 rejected promise，hook wrapper 不会 await 或捕获这个异步 rejection。
+Hook 可以返回 `void` 或 `Promise<void>`，但保持非阻塞 observer 语义。同步 throw 和异步 rejection 都会被捕获并记录为 `defjs.otel.hook.error`，不会中断 client operation；记录 telemetry 本身的失败也会被隔离。
 
 只使用 allowlist 中的低基数 attribute。不要附加原始 header、query string、body、baggage、event ID、message payload 或 credential。
 
@@ -149,8 +149,6 @@ SSE 启动成功后，span 会保持打开，直到 `stream.closed` settle。它
 | `defjs.client.sse.active_streams`      | `closed` promise 尚未 settle 的逻辑 handle 数量。 |
 
 这些是 Defjs 自定义 metric。Active counter 包含物理重连尝试之间的时间，不表示当前打开的 HTTP connection 数量。
-
-如果 core callback path 让 `stream.closed` 一直无法 settle，span 和 counter 也无法通过该 promise 结束。Reconnect callback 应保持不抛错。
 
 ## WebSocket 语义
 

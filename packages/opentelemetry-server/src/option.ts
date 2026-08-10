@@ -10,29 +10,29 @@ export interface OpenTelemetryServerHttpOptions {
   /** Enable HTTP tracing, default true */
   enabled?: boolean
   /** Hook to customize HTTP span before request */
-  requestHook?: (span: Span, req: HttpRequest) => void
+  requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
   /** Hook to customize HTTP span after response */
-  responseHook?: (span: Span, res: HttpResponse<unknown>) => void
+  responseHook?: (span: Span, res: HttpResponse<unknown>) => Promise<void> | void
 }
 
 export interface OpenTelemetryServerSSEOptions {
   /** Enable SSE tracing, default true */
   enabled?: boolean
   /** Hook to customize SSE span before request */
-  requestHook?: (span: Span, req: HttpRequest) => void
+  requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
   /** Hook to customize SSE span after stream is returned */
-  responseHook?: (span: Span, stream: EventStreamHandle<unknown>) => void
+  responseHook?: (span: Span, stream: EventStreamHandle<unknown>) => Promise<void> | void
 }
 
 export interface OpenTelemetryServerWebSocketOptions {
   /** Enable WebSocket tracing, default true */
   enabled?: boolean
-  /** WebSocket query string propagation, default true */
+  /** WebSocket query string propagation, default false */
   queryPropagation?: boolean
   /** Hook to customize WebSocket span before connect */
-  requestHook?: (span: Span, req: HttpRequest) => void
+  requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
   /** Hook to customize WebSocket span after session is returned */
-  responseHook?: (span: Span, session: WebSocketSessionLike) => void
+  responseHook?: (span: Span, session: WebSocketSessionLike) => Promise<void> | void
 }
 
 export interface OpenTelemetryServerOptions {

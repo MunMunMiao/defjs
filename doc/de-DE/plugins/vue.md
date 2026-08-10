@@ -195,7 +195,7 @@ Die Komponente, das Composable, die Route oder der Store, die Echtzeitarbeit sta
 - für eine aktive Ressource `stream.close(...)` oder `session.close(...)` aufrufen;
 - WebSocket-Beobachter entfernen.
 
-Öffne keinen WebSocket nur für einen Zustandslistener, während die unbegrenzte eingehende Warteschlange ungelesen bleibt. [SSE](/de-DE/core/sse) und [WebSocket](/de-DE/core/web-socket) beschreiben die vollständigen Lebenszyklusregeln.
+Öffne keinen WebSocket nur für einen Zustandslistener, während die begrenzte eingehende Warteschlange ungelesen bleibt; Overflow beendet die Session fatal. [SSE](/de-DE/core/sse) und [WebSocket](/de-DE/core/web-socket) beschreiben die vollständigen Lebenszyklusregeln.
 
 ## API
 

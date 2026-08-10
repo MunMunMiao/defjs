@@ -6,7 +6,6 @@ import {
   type WebSocketSession,
   withEndpoint,
   withWebSocketHandle,
-  withWebSocketQueue,
   withWebSocketReconnect,
 } from '@defjs/core'
 import { createQueueFixture } from './fixture'
@@ -17,6 +16,8 @@ const pickConfirmationMessages = {
 }
 export type PickConfirmation = WebSocketOutgoingData<typeof pickConfirmationMessages>
 export const pickConfirmations = defineWebSocket({
+  maxIncomingQueueSize: 16,
+  maxOutgoingQueueSize: 2,
   path: '/v1/warehouses/wh-7/picks',
   incoming: { acknowledged: struct.object({ pickId: struct.string(), sequence: struct.number() }) },
   outgoing: pickConfirmationMessages,
@@ -37,7 +38,6 @@ export async function main(): Promise<void> {
   const client = createClient(
     withEndpoint('https://warehouse.invalid'),
     withWebSocketHandle(fixture.WebSocket),
-    withWebSocketQueue({ maxSize: 2, overflow: 'error' }),
     withWebSocketReconnect({ attempts: 1, delayMs: 0 }),
   )
   const [error, session] = await client.execute(pickConfirmations())

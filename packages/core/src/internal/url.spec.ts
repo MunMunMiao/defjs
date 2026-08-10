@@ -23,6 +23,13 @@ describe('url helpers', () => {
   })
 
   test('should fill urls and create search params from request values', () => {
+    expect(fillUrl('/users/:id', { id: 'a/b ?#%猫' })).toBe('/users/a%2Fb%20%3F%23%25%E7%8C%AB')
+    expect(fillUrl('/:id/:id', { id: 'a/b' })).toBe('/a%2Fb/a%2Fb')
+    expect(fillUrl('/users/:id', { id: '%2F' })).toBe('/users/%252F')
+    expect(() => fillUrl('/users/:id', { id: '' })).toThrow('path value for "id" must be a non-empty path segment')
+    expect(() => fillUrl('/users/:id', { id: '.' })).toThrow('path value for "id" must not be a dot segment')
+    expect(() => fillUrl('/users/:id', { id: '..' })).toThrow('path value for "id" must not be a dot segment')
+
     expect(
       fillUrl('/user/:id/:name', {
         id: [1, 2],

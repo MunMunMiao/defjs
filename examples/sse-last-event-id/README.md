@@ -40,6 +40,7 @@ The states preserve event order across the physical request carrying the parsed 
 
 - Reconnect uses Defjs's latest parsed non-empty `id:` field; it may advance before payload validation or business commit.
 - The first request has no cursor; Defjs adds `Last-Event-ID` only after parsing one.
+- Pass the raw shipment ID to the path input; Defjs encodes each path segment exactly once.
 - A cursor supports replay continuity but does not by itself guarantee exactly-once processing.
 
 ## Production notes

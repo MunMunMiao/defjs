@@ -4,7 +4,7 @@
 
 A broken or hostile risk-alert upstream can start an SSE line and never send a line terminator. A parser without a retained-buffer bound can keep accumulating bytes before any complete event reaches payload validation.
 
-This example caps the unfinished parser buffer at 32 bytes and disables reconnect for that deterministic protocol failure.
+This example caps the unfinished parser buffer at 32 bytes and proves that the deterministic protocol failure remains fatal with two retries enabled.
 
 ## Scenario
 
@@ -12,7 +12,7 @@ The local response for `GET https://risk.invalid/v1/payments/risk-alerts` contai
 
 ## Approach
 
-Set `maxBufferSize` independently from queue policy, feed one unterminated line beyond that retained-byte limit, and surface the parser failure while the stream helper closes its handle.
+Declare `maxBufferSize` and `maxQueueSize` on the event-stream definition, enable two bounded retries, feed one unterminated line beyond the byte limit, and assert that the fatal parser failure uses one request while the stream helper closes its handle.
 
 ## Source map
 
@@ -26,25 +26,25 @@ From the repository root, with workspace dependencies installed:
 pnpm --silent --filter @defjs/example-sse-parser-buffer-limit start
 ```
 
-The command is local and offline. The acquired stream is closed and awaited after the parser error.
+The command is local and offline. The acquired stream is closed and awaited after the parser error; reconnect remains enabled for eligible failures.
 
 ## Expected result
 
 ```text
-{"error":"SSE parser buffer exceeded maxBufferSize","parserLimitBytes":32}
+{"error":"SSE parser buffer exceeded maxBufferSize","parserLimitBytes":32,"requests":1}
 ```
 
-The error occurs before a complete event is dispatched, so there are no payment IDs to report.
+The error occurs before a complete event is dispatched, so there are no payment IDs to report. One request proves the fatal parser failure was not retried.
 
 ## Key points
 
-- `maxBufferSize` bounds retained bytes for an unfinished parser line.
+- `maxBufferSize` bounds one line and the current event's cumulative data bytes.
 - A decoded `risk-alert` branch exposes its typed payment fields directly; parser bytes and queue capacity remain separate limits.
-- Deterministic framing failures should not reconnect indefinitely.
+- Fatal framing failures do not reconnect even when bounded retry is enabled.
 
 ## Production notes
 
-Choose the limit from documented field lengths, encoding, and proxy chunking. Add independent bounds for event payloads, queues, reconnect delay, response duration, and the owner deadline.
+Choose the limit from documented field lengths and UTF-8 encoding, then choose `maxQueueSize` from event rate and consumer latency. Bound reconnect delay, response duration, and the owner deadline independently.
 
 ## Inspiration
 

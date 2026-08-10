@@ -3,6 +3,8 @@ import { createClient, defineEventStream, struct, withEndpoint, withSSEHandle } 
 // Step 1: Assign a distinct Struct to each storefront catalog event before projection.
 export type CatalogChange = { kind: 'price-updated'; priceCents: number; sku: string } | { kind: 'product-retired'; sku: string }
 export const catalogChanges = defineEventStream({
+  maxBufferSize: 1024,
+  maxQueueSize: 8,
   path: '/v1/catalog/changes',
   events: {
     'price-updated': struct.json(struct.object({ priceCents: struct.number(), sku: struct.string() })),

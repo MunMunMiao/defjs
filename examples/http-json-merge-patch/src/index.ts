@@ -33,7 +33,7 @@ export const patchCustomerContact = defineRequest({
 
 // Step 2: Expose only the validated contact after the merge-patch media type is honored.
 export async function updateCustomerContact(client: Client, customerId: string, patch: CustomerContactPatch) {
-  const [error, contact, response] = await client.execute(patchCustomerContact({ id: encodeURIComponent(customerId), patch }))
+  const [error, contact, response] = await client.execute(patchCustomerContact({ id: customerId, patch }))
   if (error) throw error
   if (response.error) throw response.error
   return contact

@@ -13,7 +13,7 @@ import { struct } from './index'
 import { resolveStructFields } from './fields'
 import { getStructFields, parseStructTuple as parse, parseStructValue } from './introspection'
 import { matchesRuntimeValue } from './match'
-import { buildZeroValue, isFieldRequired, parseValue, safeZeroValue } from './parse'
+import { parseValue } from './parse'
 import { DEFAULT_FLAGS, makeStruct } from './runtime'
 import { assertStruct, resolveObjectShape } from './shape'
 import { DEFINITION, OMIT } from './symbols'
@@ -149,74 +149,48 @@ describe('struct coverage boundary cases', () => {
     expect(() => struct.string().alias(null as never)).toThrow('alias() requires a string name')
   })
 
-  test('zero value helpers cover optional, nullable, any, unknown, and composite structs', () => {
-    expect(isFieldRequired(definition(struct.string()))).toBe(true)
-    expect(isFieldRequired(definition(struct.string().optional()))).toBe(false)
-    expect(isFieldRequired(definition(struct.string().null()))).toBe(false)
-
-    expect(safeZeroValue(runtime(struct.any()))).toBeUndefined()
-    expect(safeZeroValue(runtime(struct.unknown()))).toBeUndefined()
-    expect(safeZeroValue(runtime(struct.string().optional()))).toBeUndefined()
-    expect(safeZeroValue(runtime(struct.string().null()))).toBeNull()
-    expect(safeZeroValue(runtime(struct.string().nullish()))).toBeNull()
-    expect(
-      safeZeroValue(
-        runtime(
-          struct.object({
-            optional: struct.string().optional(),
-            nullable: struct.string().null(),
-            nullish: struct.string().nullish(),
-          }),
-        ),
-      ),
-    ).toEqual({
-      nullable: null,
-      nullish: null,
-    })
-    expect(buildZeroValue(runtime(struct.or(struct.string().optional(), struct.number())), [])).toBeUndefined()
-    expect(
-      buildZeroValue(
-        runtime(
-          struct.discriminatedUnion('type', [
-            struct.object({
-              payload: struct.string().optional(),
-              type: struct.literal('message'),
-            }),
-          ]),
-        ),
-        [],
-      ),
-    ).toEqual({ type: 'message' })
-
-    const request = struct.request({
-      body: struct.json(struct.object({ name: struct.string() })),
-      headers: struct.object({ token: struct.string().optional() }),
-      path: struct.object({ id: struct.number() }),
-      query: struct.object({ include: struct.boolean().optional() }),
-    })
-    expect(buildZeroValue(runtime(request), [])).toEqual({
-      body: { name: '' },
-      headers: {},
-      path: { id: 0 },
-      query: {},
-    })
-    expect(buildZeroValue(runtime(struct.json(struct.string())), [])).toBe('')
-
-    // intersection zero value: both sides are plain objects → merged
-    expect(
-      buildZeroValue(runtime(struct.intersection(struct.object({ a: struct.string() }), struct.object({ b: struct.number() }))), []),
-    ).toEqual({
-      a: '',
-      b: 0,
-    })
-    // intersection zero value: one side is not plain object → right side wins
-    expect(buildZeroValue(runtime(struct.intersection(struct.string(), struct.number())), [])).toBe(0)
+  test('strict parsing keeps no zero-value construction path', () => {
+    expect(parseValue(runtime(struct.string()), undefined, [], 'value').ok).toBe(false)
+    expect(parseValue(runtime(struct.string().optional()), undefined, [], 'value')).toEqual({ ok: true, value: undefined })
+    expect(parseValue(runtime(struct.string().null()), undefined, [], 'value').ok).toBe(false)
+    expect(parseValue(runtime(struct.string().nullish()), undefined, [], 'value')).toEqual({ ok: true, value: undefined })
 
     const [err, value] = parse(struct.intersection(struct.any(), struct.string()), 'plain')
     if (err) {
       throw err
     }
     expect(value).toBe('plain')
+  })
+
+  test('alias-aware parsing stays on the single fail-fast parser', () => {
+    const User = struct.object({
+      profile: struct.object({ displayName: struct.string().alias('display_name') }).alias('user_profile'),
+    })
+    expect(parseStructValue(User, { user_profile: { display_name: 'Miao' } }, { useAliases: true })).toEqual({
+      profile: { displayName: 'Miao' },
+    })
+
+    const input = {
+      first_wire: 1,
+      get second_wire(): string {
+        throw new Error('alias parser continued')
+      },
+    }
+    expect(() =>
+      parseStructValue(struct.object({ first: struct.string().alias('first_wire'), second: struct.string().alias('second_wire') }), input, {
+        useAliases: true,
+      }),
+    ).toThrow(StructError)
+
+    const Event = struct.discriminatedUnion('type', [
+      struct.object({ payload: struct.string().alias('body'), type: struct.literal('a').alias('kind_a') }),
+      struct.object({ count: struct.number(), type: struct.literal('b').alias('kind_b') }),
+    ])
+    expect(parseStructValue(Event, { body: 'hello', kind_a: 'a' }, { useAliases: true })).toEqual({ payload: 'hello', type: 'a' })
+    expect(parseStructValue(Event, { body: 'hello', kind_a: 'a', kind_b: 'b' }, { useAliases: true })).toEqual({
+      payload: 'hello',
+      type: 'a',
+    })
   })
 
   test('request parsing covers section and body branches', () => {
@@ -227,7 +201,7 @@ describe('struct coverage boundary cases', () => {
       query: struct.object({ include: struct.boolean().optional() }),
     })
 
-    expect(parseValue(runtime(struct.string()), null, [], 'value')).toEqual({ ok: true, value: '' })
+    expect(parseValue(runtime(struct.string()), null, [], 'value').ok).toBe(false)
     expect(parseValue(runtime(struct.enum(['draft', 'published'])), 'draft', [], 'value')).toEqual({ ok: true, value: 'draft' })
     expect(parseValue(runtime(struct.enum(['draft', 'published'])), 'archived', [], 'value').ok).toBe(false)
     expect(parseValue(runtime(request), 'bad', [], 'value').ok).toBe(false)
@@ -240,7 +214,9 @@ describe('struct coverage boundary cases', () => {
         runtime(request),
         {
           body: { name: 'Miao' },
+          headers: {},
           path: { id: 1 },
+          query: {},
         },
         [],
         'value',
@@ -267,10 +243,8 @@ describe('struct coverage boundary cases', () => {
     const optionalSectionRequest = struct.request({
       query: struct.object({ include: struct.boolean() }).optional() as never,
     })
-    expect(parseValue(runtime(optionalSectionRequest), {}, [], 'value')).toEqual({ ok: true, value: {} })
-    expect(buildZeroValue(runtime(optionalSectionRequest), [])).toEqual({})
+    expect(parseValue(runtime(optionalSectionRequest), {}, [], 'value').ok).toBe(false)
     expect(parseValue(runtime(struct.request({})), {}, [], 'value')).toEqual({ ok: true, value: {} })
-    expect(buildZeroValue(runtime(struct.request({})), [])).toEqual({})
     expect(parseValue(runtime(struct.json(struct.string())), 'hello', [], 'value')).toEqual({ ok: true, value: 'hello' })
   })
 
@@ -321,9 +295,9 @@ describe('struct coverage boundary cases', () => {
 
   test('aliased object codec covers skip, non-object, primitive, and nested paths', () => {
     const profile = struct.object({
-      internal: struct.string(),
+      internal: struct.string().optional(),
       name: struct.string().alias('full_name'),
-      omitted: struct.string().alias('omitted'),
+      omitted: struct.string().optional().alias('omitted'),
     })
 
     expect(encodeObjectByAlias(struct.string(), 'x')).toBe('x')
@@ -335,17 +309,14 @@ describe('struct coverage boundary cases', () => {
 
     expect(decodeObjectByAlias(struct.string(), 'x')).toBe('x')
     expect(decodeObjectByAlias(profile, { full_name: 'Miao' })).toEqual({
-      internal: '',
       name: 'Miao',
-      omitted: '',
     })
-    expect(() => decodeObjectByAlias(profile, 'bad')).toThrow('json decode expects object value')
+    expect(() => decodeObjectByAlias(profile, 'bad')).toThrow(StructError)
 
     expect(() => decodeObjectByAlias(struct.array(profile), 'bad')).toThrow(StructError)
     expect(() => decodeObjectByAlias(struct.tuple([profile]), 'bad')).toThrow(StructError)
-    expect(decodeObjectByAlias(struct.tuple([profile]), [{ full_name: 'Miao' }, { untouched: true }])).toEqual([
-      { internal: '', name: 'Miao', omitted: '' },
-    ])
+    expect(decodeObjectByAlias(struct.tuple([profile]), [{ full_name: 'Miao' }])).toEqual([{ name: 'Miao' }])
+    expect(() => decodeObjectByAlias(struct.tuple([profile]), [{ full_name: 'Miao' }, { untouched: true }])).toThrow(StructError)
     expect(() => decodeObjectByAlias(struct.record(profile), 'bad')).toThrow(StructError)
 
     const event = struct.or(
@@ -470,7 +441,7 @@ describe('struct coverage boundary cases', () => {
       struct.object({ type: struct.literal('a').alias('kind_a') }),
       struct.object({ type: struct.literal('b').alias('kind_b') }),
     ])
-    expect(() => decodeObjectByAlias(ambiguous, { kind_a: 'a', kind_b: 'b' })).toThrow('ambiguous discriminated union discriminator')
+    expect(decodeObjectByAlias(ambiguous, { kind_a: 'a', kind_b: 'b' })).toEqual({ type: 'a' })
   })
 
   test('coverage guards cover defensive branches without changing public semantics', () => {
@@ -492,9 +463,13 @@ describe('struct coverage boundary cases', () => {
       flags: DEFAULT_FLAGS,
       is: (value): value is Date => value instanceof Date,
       kind: 'date',
-      zero: () => new Date(0),
     })
     expect(matchesRuntimeValue(dateWithoutRuntimeGuard, new Date(0))).toBe(true)
+    expect(matchesRuntimeValue(runtime(struct.request({ query: struct.object({}) })), 'not-a-request')).toBe(false)
+
+    const missingDiscriminator = struct.discriminatedUnion('type', [struct.object({ type: struct.literal('text') })])
+    expect(matchesRuntimeValue(runtime(missingDiscriminator), {})).toBe(false)
+    expect(matchesRuntimeValue(runtime(missingDiscriminator), { type: 'other' })).toBe(false)
 
     expect(() => mapAliasedObjectFields(runtime(struct.string()), {}, () => undefined)).toThrow('json encode expects object struct')
 
@@ -506,7 +481,7 @@ describe('struct coverage boundary cases', () => {
       map: new Map([['text', struct.object({ type: struct.literal('text') })]]),
       options: [struct.string() as never],
     })
-    expect(decodeObjectByAlias(nonObjectDiscriminator, { type: 'text' })).toEqual({ type: 'text' })
+    expect(() => decodeObjectByAlias(nonObjectDiscriminator, { type: 'text' })).toThrow(StructError)
 
     const bodyAliasOption = struct.object({ payload: struct.string().alias('body') })
     const rawDiscriminator = makeStruct({
@@ -521,6 +496,7 @@ describe('struct coverage boundary cases', () => {
 
     const missingWireDiscriminator = struct.discriminatedUnion('type', [struct.object({ type: struct.literal('text').alias('kind') })])
     expect(() => decodeObjectByAlias(missingWireDiscriminator, { other: 'text' })).toThrow(StructError)
+    expect(() => decodeObjectByAlias(missingWireDiscriminator, { kind: undefined })).toThrow(StructError)
     expect(() => decodeObjectByAlias(missingWireDiscriminator, 'not-object')).toThrow(StructError)
 
     let reads = 0
@@ -534,7 +510,7 @@ describe('struct coverage boundary cases', () => {
         }
       },
     }
-    expect(() => decodeObjectByAlias(unstableObjectStruct as never, {})).toThrow('json decode expects object struct')
+    expect(() => decodeObjectByAlias(unstableObjectStruct as never, {})).toThrow()
 
     const undefinedEncodingString = makeStruct({
       encode: () => undefined,
@@ -542,7 +518,6 @@ describe('struct coverage boundary cases', () => {
       flags: DEFAULT_FLAGS,
       is: (value): value is string => typeof value === 'string',
       kind: 'string',
-      zero: () => '',
     })
     const encodedUndefinedFields: Array<{ key: string; value: unknown }> = []
     forEachEncodedWireField(struct.object({ value: undefinedEncodingString }), { value: 'drops after child encode' }, 'query', (field) =>

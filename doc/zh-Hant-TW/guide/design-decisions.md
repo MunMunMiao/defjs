@@ -31,9 +31,9 @@ Tuple 讓預期內的啟動失敗可以明確處理，不必強迫使用例外�
 
 ## 生命週期選項屬於每次執行
 
-端點定義描述穩定的 wire 契約。取消、timeout、heartbeat、reconnect 與 queue 選擇，則屬於實際擁有該工作的執行操作。
+端點定義描述穩定的 wire 契約，並擁有 transport queue 上限。取消、timeout、heartbeat 與 reconnect，則屬於實際擁有該工作的執行操作。
 
-HTTP 與 SSE 在執行時接受取消選項。WebSocket 也接受每次執行的 connection、heartbeat、reconnect、protocol 與 send queue 選項。若傳輸支援，用戶端選項可以提供可重複使用的預設值。
+HTTP 與 SSE 在執行時接受取消選項。WebSocket 也接受每次執行的 `beforeConnect`、heartbeat、reconnect 與 protocol 選項。若傳輸支援，用戶端選項可以提供可重複使用的預設值；WebSocket incoming/outgoing 容量仍由端點定義。
 
 這樣拆分後，同一個指令可以重複使用。背景工作與互動式畫面能用不同生命週期執行同一個指令，不必重新定義路徑或訊息 schema。
 
@@ -47,9 +47,9 @@ HTTP 與 SSE 在執行時接受取消選項。WebSocket 也接受每次執行的
 
 ## 觀察器不負責控制流程
 
-SSE `onInvalidEvent` 只觀察被丟棄的事件。觀察器若 throw 或回傳 rejected promise，錯誤會被接住，不會終止 stream；但 async 觀察器會被 await，因此可能延後後續訊息處理。
+SSE `onInvalidEvent` 只觀察被丟棄的事件。觀察器 throw 的錯誤與回傳的 rejected promise 會和 stream 控制流隔離，後續處理仍會繼續；但 async 觀察器依然會被 await，因此可能延後後續訊息。
 
-WebSocket 狀態與 runtime error 監聽器也是觀察器，但目前實作會直接呼叫它們。應用程式應讓這些監聽器保持同步、不 throw，而且工作量要小。會 throw 的監聽器可能中斷生命週期工作，不能拿來當成受支援的控制流程。
+WebSocket 狀態與 runtime error 監聽器也是觀察器。它們 throw 的錯誤與 rejected promise 會被隔離：狀態監聽器失敗會轉交 runtime error 監聽器，runtime error 監聽器失敗會在可用時交給全域 `reportError`，其餘監聽器與生命週期工作仍會繼續。
 
 生命週期決策請使用回傳的 handle 或 session。觀察器適合做範圍明確的記錄、metrics 或狀態更新，擁有者釋放時也要移除它們。
 

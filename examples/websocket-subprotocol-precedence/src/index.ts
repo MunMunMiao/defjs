@@ -3,6 +3,7 @@ import { createProtocolFixture } from './fixture'
 
 // Step 1: Define the endpoint fallback protocol without weakening the stock message schema.
 export const inventoryUpdates = defineWebSocket({
+  maxIncomingQueueSize: 16,
   path: '/v1/warehouses/wh-7/inventory',
   protocols: ['inventory.v1'],
   incoming: { 'stock-changed': struct.object({ sku: struct.string(), units: struct.number() }) },

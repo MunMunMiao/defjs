@@ -195,7 +195,7 @@ Vue プロバイダーをインストールまたはアンマウントしても�
 - アクティブなリソースに対して `stream.close(...)` または `session.close(...)` を呼ぶ
 - WebSocket オブザーバーの購読を解除する
 
-状態リスナーだけを付けて、上限のない受信キューを読まないまま WebSocket を開かないでください。ライフサイクルの詳細は [SSE](/ja-JP/core/sse) と [WebSocket](/ja-JP/core/web-socket) を参照してください。
+状態リスナーだけを付けて、有限の受信キューを読まないまま WebSocket を開かないでください。オーバーフローはセッションを致命的に終了します。ライフサイクルの詳細は [SSE](/ja-JP/core/sse) と [WebSocket](/ja-JP/core/web-socket) を参照してください。
 
 ## API
 

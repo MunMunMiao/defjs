@@ -249,7 +249,7 @@ export function LiveNotifications() {
 }
 ```
 
-這個 fragment 假設 `recordRealtimeFailure` 是應用程式的 telemetry function。它刻意消費 `session.receive`；讓這個無界 incoming queue 完全沒人讀取，不是有效的資源管理方式。SSE handle 也要套用相同的 startup 與 cleanup 原則。
+這個 fragment 假設 `recordRealtimeFailure` 是應用程式的 telemetry function。它刻意消費 `session.receive`；若有限 incoming queue 完全沒人讀取，最終 overflow 會 fatal 終止 session。SSE handle 也要套用相同的 startup 與 cleanup 原則。
 
 Provider unmount/remount 會改變 client scope，但不會呼叫 `dispose`、abort request 或關閉 handle 與 session，因為 core `Client` 沒有這種 lifecycle API。
 

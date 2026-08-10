@@ -18,7 +18,7 @@ export function fillUrl(path: string, params?: { [key: string]: RequestBuildValu
           if (!isUrlScalarValue(first)) {
             throw new TypeError(`path value for "${key}" requires a scalar value`)
           }
-          paramMap.set(key, serializeRequestScalarValue(first))
+          paramMap.set(key, encodePathSegment(key, serializeRequestScalarValue(first)))
         }
         continue
       }
@@ -27,7 +27,7 @@ export function fillUrl(path: string, params?: { [key: string]: RequestBuildValu
         throw new TypeError(`path value for "${key}" requires a scalar value`)
       }
 
-      paramMap.set(key, serializeRequestScalarValue(value))
+      paramMap.set(key, encodePathSegment(key, serializeRequestScalarValue(value)))
     }
   }
 
@@ -38,6 +38,16 @@ export function fillUrl(path: string, params?: { [key: string]: RequestBuildValu
     }
     return value
   })
+}
+
+function encodePathSegment(key: string, value: string): string {
+  if (value === '') {
+    throw new TypeError(`path value for "${key}" must be a non-empty path segment`)
+  }
+  if (value === '.' || value === '..') {
+    throw new TypeError(`path value for "${key}" must not be a dot segment`)
+  }
+  return encodeURIComponent(value)
 }
 
 export interface SearchParamsOptions {

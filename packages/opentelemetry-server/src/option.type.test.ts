@@ -130,7 +130,16 @@ type SSEResponseArg = Expect<Equal<Parameters<SSEResponseHook>[1], EventStreamHa
 type WebSocketResponseArg = Expect<Equal<Parameters<WebSocketResponseHook>[1], WebSocketSessionLike>>
 
 // Hook parameter types stay transport-specific.
-type HttpRequestArg = Expect<Equal<Parameters<NonNullable<OpenTelemetryServerHttpOptions['requestHook']>>[1], HttpRequest>>
+type HttpRequestHook = NonNullable<OpenTelemetryServerHttpOptions['requestHook']>
+type SSERequestHook = NonNullable<OpenTelemetryServerSSEOptions['requestHook']>
+type WebSocketRequestHook = NonNullable<OpenTelemetryServerWebSocketOptions['requestHook']>
+type HttpRequestArg = Expect<Equal<Parameters<HttpRequestHook>[1], HttpRequest>>
+type HttpRequestHookResult = Expect<Equal<ReturnType<HttpRequestHook>, Promise<void> | void>>
+type HttpResponseHookResult = Expect<Equal<ReturnType<HttpResponseHook>, Promise<void> | void>>
+type SSERequestHookResult = Expect<Equal<ReturnType<SSERequestHook>, Promise<void> | void>>
+type SSEResponseHookResult = Expect<Equal<ReturnType<SSEResponseHook>, Promise<void> | void>>
+type WebSocketRequestHookResult = Expect<Equal<ReturnType<WebSocketRequestHook>, Promise<void> | void>>
+type WebSocketResponseHookResult = Expect<Equal<ReturnType<WebSocketResponseHook>, Promise<void> | void>>
 
 // @ts-expect-error tracer is required
 withOpenTelemetryServer({})
@@ -162,4 +171,16 @@ withOpenTelemetryServer({ tracer: makeTracer(), http: { queryPropagation: true }
 // @ts-expect-error queryPropagation belongs to webSocket options only
 withOpenTelemetryServer({ tracer: makeTracer(), sse: { queryPropagation: true } })
 
-export type Cases = OptionIsCallable | FullOptionType | HttpResponseArg | SSEResponseArg | WebSocketResponseArg | HttpRequestArg
+export type Cases =
+  | OptionIsCallable
+  | FullOptionType
+  | HttpResponseArg
+  | SSEResponseArg
+  | WebSocketResponseArg
+  | HttpRequestArg
+  | HttpRequestHookResult
+  | HttpResponseHookResult
+  | SSERequestHookResult
+  | SSEResponseHookResult
+  | WebSocketRequestHookResult
+  | WebSocketResponseHookResult

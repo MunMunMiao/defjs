@@ -2,10 +2,10 @@ import { encodeValue } from './encode'
 import { StructError } from './errors'
 import { resolveStructFields } from './fields'
 import { isStruct } from './guards'
-import { parseValue, safeZeroValue } from './parse'
+import { parseValue } from './parse'
 import { assertStruct } from './shape'
 import { DEFINITION } from './symbols'
-import type { ObjectStruct, ObjectShape, ParseTuple, RuntimeStruct, StructLike } from './types'
+import type { ObjectStruct, ObjectShape, ParseResult, RuntimeStruct, StructLike } from './types'
 
 export interface StructField {
   readonly alias: string | undefined
@@ -44,21 +44,25 @@ export function encodeStructValue(struct: StructLike<unknown, unknown, boolean>,
 export function parseStructTuple<S extends StructLike<unknown, unknown, boolean>>(
   struct: S,
   value: unknown,
-): ParseTuple<S['_struct']['output']> {
+): ParseResult<S['_struct']['output']> {
   assertStruct(struct, 'struct')
   const runtime = struct as unknown as RuntimeStruct
   const result = parseValue(runtime, value, [], 'value')
   if (result.ok) {
     return [null, result.value as unknown as S['_struct']['output']]
   }
-  return [new StructError(result.issues), safeZeroValue(runtime) as unknown as S['_struct']['output']]
+  return [new StructError([result.issue]), undefined]
 }
 
-export function parseStructValue(struct: StructLike<unknown, unknown, boolean>, value: unknown): unknown {
+export function parseStructValue(
+  struct: StructLike<unknown, unknown, boolean>,
+  value: unknown,
+  options?: { useAliases?: boolean },
+): unknown {
   assertStruct(struct, 'struct')
-  const [error, output] = parseStructTuple(struct, value)
-  if (error) {
-    throw error
+  const result = parseValue(struct as unknown as RuntimeStruct, value, [], 'value', options?.useAliases)
+  if (!result.ok) {
+    throw new StructError([result.issue])
   }
-  return output
+  return result.value
 }

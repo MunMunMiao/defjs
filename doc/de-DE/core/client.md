@@ -34,7 +34,7 @@ Für die Komposition gelten drei Regeln:
 
 1. Setter-Helper ersetzen ihren Wert. Dazu gehören `withEndpoint`, Transport-Handles, der Query-Serializer, Credentials, die XSRF-Konfiguration und einzelne SSE- oder WebSocket-Einstellungen.
 2. `withInterceptors(...items)` hängt Einträge an. Mehrere Aufrufe bewahren die Reihenfolge, in der Interceptors hinzugefügt wurden.
-3. `withSSEOptions(...)` und `withWebSocketOptions(...)` ersetzen jedes definierte Feld auf oberster Ebene flach. Verschachtelte Reconnect-, Heartbeat- oder Queue-Objekte werden nicht tief zusammengeführt.
+3. `withSSEOptions(...)` und `withWebSocketOptions(...)` ersetzen jedes definierte Feld auf oberster Ebene flach. Verschachtelte Reconnect- oder Heartbeat-Objekte werden nicht tief zusammengeführt.
 
 Im folgenden Beispiel ersetzt das zweite Reconnect-Objekt das erste vollständig. `attempts: 5` bleibt nicht erhalten.
 
@@ -72,6 +72,8 @@ Einzelne SSE- und WebSocket-Helper setzen jeweils ein zugehöriges Feld auf ober
 
 `Client.execute` hat drei Overloads. Jeder liefert ein fehlerorientiertes Drei-Elemente-Tupel.
 
+Für die Ausführung von HTTP, SSE und WebSocket muss `timeout` eine positive sichere Ganzzahl im Bereich `1..2_147_483_647` sein; `0`, negative oder gebrochene Werte, `NaN`, `Infinity` und Werte oberhalb der Grenze liefern `REQUEST_VALIDATION_FAILED`, bevor eine Request-, Stream- oder Socket-Ressource erzeugt wird.
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-Das dritte Element ist ein Defjs-`SettledResponse`-Wrapper, sofern eine Response verfügbar ist. Zu den HTTP-Optionen gehören `abort` oder `timeout`, der zusätzliche Alias `signal`, `context` sowie Beobachter für Upload- und Download-Fortschritt.
+Das dritte Element ist ein Defjs-`HttpResponse`-Wrapper, sofern eine Response verfügbar ist. Zu den HTTP-Optionen gehören `abort` oder `timeout`, der zusätzliche Alias `signal`, `context` sowie Beobachter für Upload- und Download-Fortschritt.
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-Das dritte Element ist der validierte Snapshot der beim Start geöffneten Verbindung. `stream.open` ist ein separater Live-Getter und kann sich nach Reconnect-Versuchen ändern. Die SSE-Ausführung akzeptiert Abbruch und `HttpContext`; Reconnect und Eventwarteschlange sind Clientoptionen.
+Das dritte Element ist der validierte Snapshot der beim Start geöffneten Verbindung. `stream.open` ist ein separater Live-Getter und kann sich nach Reconnect-Versuchen ändern. Die SSE-Ausführung akzeptiert Abbruch und `HttpContext`; Reconnect ist eine Clientoption. Die erforderlichen Grenzen `maxBufferSize` und `maxQueueSize` gehören in jede Event-Stream-Definition.
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-Das dritte Element ist der Verbindungs-Snapshot vom Start. `session.connection` ist ein Live-Getter und kann einen späteren physischen Verbindungsversuch beschreiben. Die WebSocket-Ausführung akzeptiert Abbruch sowie `beforeConnect`, `heartbeat`, `protocols`, `queue` und `reconnect` pro Ausführung. Sie akzeptiert keinen `HttpContext`.
+Das dritte Element ist der Verbindungs-Snapshot vom Start. `session.connection` ist ein Live-Getter und kann einen späteren physischen Verbindungsversuch beschreiben. Die WebSocket-Ausführung akzeptiert Abbruch sowie `beforeConnect`, `heartbeat`, `protocols` und `reconnect` pro Ausführung. Die erforderliche Grenze `maxIncomingQueueSize` und die optionale Grenze `maxOutgoingQueueSize` gehören in jede WebSocket-Definition. Die Ausführung akzeptiert keinen `HttpContext`.
 
 Die genauen Fehlerzweige stehen unter [Fehler](/de-DE/core/errors). [HTTP](/de-DE/core/http), [SSE](/de-DE/core/sse) und [WebSocket](/de-DE/core/web-socket) erklären die Lebenszyklen der Transports.
 

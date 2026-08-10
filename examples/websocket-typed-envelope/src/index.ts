@@ -19,6 +19,7 @@ const caseChatOutgoing = {
 }
 export type CaseChatEvent = WebSocketIncomingData<typeof caseChatIncoming>
 export const caseChat = defineWebSocket({
+  maxIncomingQueueSize: 16,
   path: '/v1/support/cases/case-842/chat',
   incoming: caseChatIncoming,
   outgoing: caseChatOutgoing,

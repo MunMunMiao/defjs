@@ -34,7 +34,7 @@ const client = createClient(
 
 1. Setter helper 會取代原本的值，包括 `withEndpoint`、各 transport handle、query serializer、credentials、XSRF 設定，以及個別 SSE 或 WebSocket 設定。
 2. `withInterceptors(...items)` 會附加項目。多次呼叫時，會保留攔截器加入的先後順序。
-3. `withSSEOptions(...)` 與 `withWebSocketOptions(...)` 會淺層取代每個有定義的頂層欄位，不會 deep merge 巢狀的 reconnect、heartbeat 或 queue 物件。
+3. `withSSEOptions(...)` 與 `withWebSocketOptions(...)` 會淺層取代每個有定義的頂層欄位，不會 deep merge 巢狀的 reconnect 或 heartbeat 物件。
 
 例如，下方第二個 reconnect 物件會完整取代第一個，不會保留 `attempts: 5`。
 
@@ -72,6 +72,8 @@ const client = createClient(
 
 `Client.execute` 有三種 overload，每一種都回傳 error-first 三元素 tuple。
 
+HTTP、SSE 與 WebSocket 執行的 `timeout` 必須是 `1..2_147_483_647` 範圍內的正安全整數；`0`、負數、小數、`NaN`、`Infinity` 或超過上限的值會在建立 request、stream 或 socket 資源前回傳 `REQUEST_VALIDATION_FAILED`。
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-有收到回應時，第三個元素是 Defjs `SettledResponse` wrapper。HTTP 選項包含 `abort` 或 `timeout`、額外的 `signal` alias、`context`，以及上傳／下載進度觀察器。
+有收到回應時，第三個元素是 Defjs `HttpResponse` wrapper。HTTP 選項包含 `abort` 或 `timeout`、額外的 `signal` alias、`context`，以及上傳／下載進度觀察器。
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-第三個元素是驗證過的啟動開啟快照。`stream.open` 是另一個即時 getter，可能在重連嘗試後改變。SSE 執行接受取消與 `HttpContext`；重連與事件 queue 則在 client options 設定。
+第三個元素是驗證過的啟動開啟快照。`stream.open` 是另一個即時 getter，可能在重連嘗試後改變。SSE 執行接受取消與 `HttpContext`；重連在 client options 設定。必填的 `maxBufferSize` 與 `maxQueueSize` 限制屬於每個 event stream 定義。
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-第三個元素是啟動連線快照。`session.connection` 是即時 getter，可能描述後續的實體連線嘗試。WebSocket 執行接受取消，也能為每次執行設定 `beforeConnect`、`heartbeat`、`protocols`、`queue` 與 `reconnect`。它不接受 `HttpContext`。
+第三個元素是啟動連線快照。`session.connection` 是即時 getter，可能描述後續的實體連線嘗試。WebSocket 執行接受取消，也能為每次執行設定 `beforeConnect`、`heartbeat`、`protocols` 與 `reconnect`。必填的 `maxIncomingQueueSize` 與可選的 `maxOutgoingQueueSize` 限制屬於每個 WebSocket 定義。WebSocket 執行不接受 `HttpContext`。
 
 完整失敗分支請見[錯誤](/zh-Hant-TW/core/errors)；傳輸生命週期則分別見 [HTTP](/zh-Hant-TW/core/http)、[SSE](/zh-Hant-TW/core/sse)與 [WebSocket](/zh-Hant-TW/core/web-socket)。
 

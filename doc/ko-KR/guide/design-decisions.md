@@ -31,9 +31,9 @@ HTTP 응답 래퍼, SSE 시작 시점 open 스냅샷, WebSocket 시작 시점 co
 
 ## 생명주기 옵션은 실행에 둡니다
 
-엔드포인트 정의는 안정적인 통신 계약을 나타냅니다. 취소, timeout, heartbeat, 재연결, 큐 설정은 해당 작업을 소유하는 실행에 속합니다.
+엔드포인트 정의는 안정적인 통신 계약과 트랜스포트 큐 한도를 나타냅니다. 취소, timeout, heartbeat, 재연결 설정은 해당 작업을 소유하는 실행에 속합니다.
 
-HTTP와 SSE는 실행 시점 취소 옵션을 받습니다. WebSocket은 연결별 `beforeConnect`, heartbeat, 재연결, protocol, 전송 큐 옵션도 받습니다. 클라이언트 옵션은 트랜스포트가 지원하는 재사용 가능한 기본값을 제공합니다.
+HTTP와 SSE는 실행 시점 취소 옵션을 받습니다. WebSocket은 실행별 `beforeConnect`, heartbeat, 재연결, protocol 옵션도 받습니다. 클라이언트 옵션은 트랜스포트가 지원하는 재사용 가능한 기본값을 제공하지만 WebSocket incoming/outgoing 용량은 엔드포인트에 남습니다.
 
 이렇게 나누면 커맨드를 재사용할 수 있습니다. 백그라운드 작업과 대화형 화면이 같은 커맨드를 서로 다른 생명주기로 실행하면서도 path나 메시지 스키마를 다시 정의할 필요가 없습니다.
 
@@ -47,9 +47,9 @@ HTTP와 SSE는 실행 시점 취소 옵션을 받습니다. WebSocket은 연결�
 
 ## Observer는 제어 흐름을 소유하지 않습니다
 
-SSE `onInvalidEvent`는 버려진 이벤트를 관찰합니다. observer가 throw하거나 reject해도 스트림이 종료되지 않도록 잡아서 처리합니다. 다만 비동기 observer는 await되므로 이후 메시지 처리를 지연할 수 있습니다.
+SSE `onInvalidEvent`는 버려진 이벤트를 관찰합니다. throw된 오류와 reject된 promise는 스트림 제어 흐름에서 격리되어 처리가 계속됩니다. 다만 비동기 observer는 계속 await되므로 이후 메시지를 지연할 수 있습니다.
 
-WebSocket 상태 및 런타임 오류 listener도 observer지만, 현재 구현은 이들을 직접 호출합니다. 동기식이고 throw하지 않으며 짧게 끝나도록 작성하세요. throw하는 listener는 생명주기 작업을 방해할 수 있으며 지원되는 제어 흐름 수단이 아닙니다.
+WebSocket 상태 및 런타임 오류 listener도 observer입니다. throw된 오류와 reject된 promise는 격리됩니다. 상태 listener 실패는 런타임 오류 listener로 전달되고, 런타임 오류 listener 실패는 사용 가능한 경우 전역 `reportError`로 전달되며, 나머지 listener와 생명주기 작업은 계속됩니다.
 
 생명주기 결정에는 반환된 핸들이나 세션을 사용하세요. observer는 제한된 로깅, metric, 상태 업데이트에만 사용하고 소유 범위가 끝날 때 제거하세요.
 

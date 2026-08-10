@@ -15,7 +15,7 @@ Defjs 讓應用程式只需定義一次 API contract，之後便可重用同一�
 pnpm add @defjs/core
 ```
 
-如果 project 使用其他 package manager，請改用相應的 npm、Yarn 或 Bun 指令。`@defjs/core` 是 ESM。在 Node.js 執行時，目前 package metadata 要求 Node 26 或以上。
+如果 project 使用其他 package manager，請改用相應的 npm、Yarn 或 Bun 指令。`@defjs/core` 是 ESM。在 Node.js 執行時，目前 package metadata 要求 Node 22 或以上。
 
 只在應用程式真正需要時安裝 adapter：
 
@@ -70,7 +70,7 @@ void loadUser(7)
 ;[error, result, response]
 ```
 
-成功時，`error` 是 `null`，`result` 是解碼後的 output data，`response` 是 Defjs `SettledResponse` wrapper。失敗時，`result` 是 `undefined`；如果未收到 response，response wrapper 亦是 `undefined`。
+成功時，`error` 是 `null`，`result` 是解碼後的 output data，`response` 是 Defjs `HttpResponse` wrapper。失敗時，`result` 是 `undefined`；如果未收到 response，response wrapper 亦是 `undefined`。
 
 ### 為甚麼需要 `as const`
 

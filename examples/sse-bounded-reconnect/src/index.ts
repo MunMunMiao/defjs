@@ -2,6 +2,8 @@ import { createClient, defineEventStream, struct, withEndpoint, withSSEHandle, w
 
 // Step 1: Type the route-status event carried across physical feed attempts.
 export const routeStatusEvents = defineEventStream({
+  maxBufferSize: 1024,
+  maxQueueSize: 8,
   path: '/v1/routes/:routeId/live-status',
   input: struct.request({ path: struct.object({ routeId: struct.string() }) }),
   events: {

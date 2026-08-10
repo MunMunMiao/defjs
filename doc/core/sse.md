@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: Define and decode Server-Sent Events, handle startup, consume the shared event queue, configure reconnect, and close owned streams.
+description: Define and decode bounded Server-Sent Events, configure reconnect, and close owned streams.
 ---
 
 # SSE
@@ -11,6 +11,8 @@ description: Define and decode Server-Sent Events, handle startup, consume the s
 import { defineEventStream, struct } from '@defjs/core'
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(
@@ -43,6 +45,8 @@ A `default` Struct handles otherwise undeclared names:
 
 ```typescript
 const events = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/events',
   events: {
     update: struct.json(struct.object({ version: struct.number() })),
@@ -59,6 +63,8 @@ Use `struct.request(...)` for path, query, and header sections:
 
 ```typescript
 const roomEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -81,6 +87,8 @@ const [error, stream, startupOpen] = await client.execute(
   }),
 )
 ```
+
+For HTTP, SSE, and WebSocket execution, `timeout` must be a positive safe integer in `1..2_147_483_647`; `0`, negative or fractional values, `NaN`, `Infinity`, and values above the limit return `REQUEST_VALIDATION_FAILED` before any request, stream, or socket resource is created.
 
 SSE returns:
 
@@ -148,7 +156,8 @@ Configure `onInvalidEvent` with `withSSEOnInvalidEvent(...)` or `withSSEOptions(
 ```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message }) => {
+  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+    if (signal.aborted) return
     recordInvalidEvent({ eventName: message.event, reason })
   }),
 )
@@ -157,10 +166,11 @@ const client = createClient(
 The observer receives:
 
 - `reason: 'missing-struct' | 'validation-failed'`;
-- the raw event `id`, name, data text, and optional retry value;
+- the raw event `id`, name, and data text;
 - `cause` for validation failures.
+- the active attempt `signal`.
 
-The event is dropped. A later valid event can still be delivered. Observer throws and rejected promises are caught, but an async observer is awaited before later message processing continues. Keep it fast. Review and redact raw `id`, `data`, and `cause` before recording them.
+The event is dropped. A later valid event can still be delivered. Observer throws and rejected promises are isolated, while abort interrupts a pending observer through `signal`. Keep it fast. Review and redact raw `id`, `data`, and `cause` before recording them.
 
 ## Reconnect
 
@@ -194,44 +204,26 @@ withSSEReconnect({
 })
 ```
 
-The transport sends the latest event ID as `Last-Event-ID` on later attempts. Keep `shouldReconnect` non-throwing. A thrown or rejected predicate is not currently guaranteed to settle every pending iterator or `stream.closed` path.
+The transport sends the latest event ID as `Last-Event-ID` on later attempts. If `shouldReconnect` throws or rejects, retry stops and the pending startup or stream settles with that policy error. Abort interrupts a pending predicate through the active attempt signal.
 
 HTTP/open validation failures, message-processing fatal errors, and normal EOF are not the same as a retriable network/read failure. Do not assume every terminal path reconnects.
 
-## The Shared Work Queue
+## Endpoint-Owned Limits
 
-The async iterable is one shared work queue for the logical stream. It is not a subscription, broadcast, or backpressure mechanism.
+A stream has exactly one async-iterator consumer. Creating a second iterator throws; breaking the loop still requires an explicit `stream.close(...)`.
 
-By default the queue is unbounded. Configure a bound with `withSSEQueue(...)` or `withSSEOptions({ queue })`:
-
-```typescript
-withSSEQueue({
-  maxSize: 100,
-  overflow: 'drop-oldest',
-})
-```
-
-| Overflow      | Behavior at the bound                                       |
-| ------------- | ----------------------------------------------------------- |
-| `drop-newest` | Discard the arriving event.                                 |
-| `drop-oldest` | Remove the oldest buffered event, then enqueue the new one. |
-| `error`       | Throw a queue overflow error and terminate processing.      |
-
-Multiple iterators compete for values; they do not each receive a copy. Breaking one `for await` loop does not close the transport because the iterator has no lifecycle-aware `return()` implementation. Call `stream.close(...)` explicitly.
-
-Closing marks the queue done but does not discard values already buffered. A consumer can drain those values before its next iteration reports `done: true`.
-
-### Parser Buffer Limit
-
-The event queue and parser buffer are separate. Set a positive `maxBufferSize` through `withSSEOptions(...)` to bound the bytes retained for an incomplete SSE line:
+Every definition requires positive safe-integer `maxBufferSize` and `maxQueueSize`. The buffer limit applies to each SSE line and the current event data, while the queue limit bounds parsed events waiting for the consumer. Queue overflow is fatal and never silently drops an event.
 
 ```typescript
-withSSEOptions({
+const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.json(notificationStruct) },
 })
 ```
 
-Exceeding that bound after startup rejects the iterator and closes the stream with `code: 'error'`. An omitted value leaves this parser buffer unbounded.
+Normal EOF lets the consumer drain buffered events. A fatal parser, transform, or overflow error clears buffered events, cancels the active body, rejects iteration, and settles `stream.closed` with `code: 'error'`.
 
 ## Terminal Close
 

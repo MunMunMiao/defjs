@@ -6,5 +6,5 @@ export function encodeJson(struct: AnyStructLike, value: unknown): unknown {
 }
 
 export function decodeJson(struct: AnyStructLike, value: unknown): unknown {
-  return decodeObjectByAlias(struct, value, 'json')
+  return decodeObjectByAlias(struct, value)
 }

@@ -75,7 +75,7 @@ withOpenTelemetryServer({
 
 `propagator`를 생략하면 패키지가 W3C Trace Context와 W3C Baggage propagator를 담은 자체 `CompositePropagator`를 만듭니다. 전역 propagator 설정을 읽지 않습니다.
 
-HTTP와 SSE는 propagator가 만든 모든 필드를 request header에 주입합니다. `req.headers`가 이미 `Headers` 인스턴스라면 현재 구현은 그 인스턴스를 재사용해 직접 변경합니다. 그렇지 않으면 새 `Headers` 객체를 만듭니다. 브라우저 socket은 임의 handshake header를 추가할 수 없으므로 WebSocket query propagation의 기본값은 `true`입니다. propagator가 만든 모든 필드를 connection query string 뒤에 추가합니다.
+HTTP와 SSE는 propagator가 만든 모든 필드를 request header에 주입합니다. `req.headers`가 이미 `Headers` 인스턴스라면 현재 구현은 그 인스턴스를 재사용해 직접 변경합니다. 그렇지 않으면 새 `Headers` 객체를 만듭니다. WebSocket query propagation의 기본값은 `false`입니다. `queryPropagation: true`로 설정한 경우에만 활성화되며, 브라우저 socket은 임의 handshake header를 추가할 수 없으므로 propagator가 만든 모든 필드를 connection query string 뒤에 추가합니다.
 
 각 인터셉터는 span을 만들기 전에 request header에 `propagator.extract(...)`도 호출합니다. 이 carrier를 애플리케이션이 관리하는 신뢰할 수 있는 입력으로 취급하세요. 신뢰할 수 없는 호출자가 `traceparent`, `tracestate`, `baggage`를 넣게 두지 마세요. 이 필드가 활성 parent context를 바꿀 수 있습니다. 신뢰할 수 없는 propagation 필드는 요청이 이 인터셉터에 도달하기 전에 제거하거나 정규화하세요.
 
@@ -83,12 +83,12 @@ HTTP와 SSE는 propagator가 만든 모든 필드를 request header에 주입합
 withOpenTelemetryServer({
   tracer,
   webSocket: {
-    queryPropagation: false,
+    queryPropagation: true,
   },
 })
 ```
 
-배포 환경에서 URL propagation을 검토하지 않았다면 query propagation을 끄세요. trace context와 baggage는 브라우저, proxy, access log, telemetry system에 기록될 수 있습니다. 사용자 정의 propagator는 `traceparent`보다 더 많은 필드를 추가할 수 있습니다.
+활성화하기 전에 배포 환경의 URL propagation을 검토하세요. trace context와 baggage는 브라우저, proxy, access log, telemetry system에 기록될 수 있습니다. 사용자 정의 propagator는 `traceparent`보다 더 많은 필드를 추가할 수 있습니다. 서버가 지원한다면 프로토콜 검토를 거친 첫 메시지나 수명이 짧은 일회용 connection ticket을 권장합니다.
 
 `requireParentSpan: true`는 인터셉터가 계측을 시작하기 전에 활성 parent span이 있는지 확인합니다. 활성 span이 없으면 span 생성, propagation, hook, metric을 모두 건너뛰고 다음 handler를 그대로 호출합니다.
 
@@ -110,7 +110,7 @@ withOpenTelemetryServer({
 })
 ```
 
-hook은 동기 함수입니다. 동기 throw는 잡아서 `defjs.otel.hook.error`로 기록하며 클라이언트 작업을 중단하지 않습니다. JavaScript가 타입을 우회해 rejected promise를 반환하면 hook wrapper는 그 비동기 rejection을 await하거나 catch하지 않습니다.
+hook은 `void` 또는 `Promise<void>`를 반환할 수 있으며 클라이언트 작업을 막지 않습니다. 동기 throw와 비동기 rejection은 모두 잡아서 작업을 중단하지 않고 `defjs.otel.hook.error`로 기록하며, 해당 telemetry 기록 자체의 실패도 격리합니다.
 
 allowlist로 관리하는 low-cardinality attribute만 사용하세요. 원본 header, query string, body, baggage, event ID, 메시지 payload, credential을 붙이지 마세요.
 
@@ -149,8 +149,6 @@ Meter를 사용하는 SSE 계측은 다음 metric을 제공합니다.
 | `defjs.client.sse.active_streams`      | `closed` promise가 settle되지 않은 논리 handle 수입니다. |
 
 Defjs 전용 metric입니다. active counter에는 물리 재연결 시도 사이의 시간도 포함됩니다. 현재 열려 있는 HTTP connection 수를 세는 값이 아닙니다.
-
-core callback 경로 때문에 `stream.closed`가 settle되지 않으면 span과 counter도 이 promise를 통해 끝날 수 없습니다. reconnect callback은 throw하지 않게 작성하세요.
 
 ## WebSocket 의미
 

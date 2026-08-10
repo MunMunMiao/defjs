@@ -31,9 +31,9 @@ Tuple 让预期内的启动失败保持显式，不强迫应用使用异常控�
 
 ## 生命周期 Option 属于执行过程
 
-端点定义描述稳定的 wire contract。取消、timeout、heartbeat、reconnect 和 queue 选择属于真正拥有本次工作的 execution。
+端点定义描述稳定的 wire contract，并拥有 transport queue 上限。取消、timeout、heartbeat 和 reconnect 选择属于真正拥有本次工作的 execution。
 
-HTTP 和 SSE 在执行时接受取消 option。WebSocket 还接受单次执行的连接、heartbeat、reconnect、protocol 和发送队列 option。Transport 支持的可复用默认值则放在 client option 中。
+HTTP 和 SSE 在执行时接受取消 option。WebSocket 还接受单次执行的 `beforeConnect`、heartbeat、reconnect 和 protocol option。Transport 支持的可复用默认值放在 client option 中；WebSocket incoming/outgoing 容量仍由 endpoint 定义。
 
 这样 command 可以复用。后台任务和交互页面可以用不同生命周期执行同一个 command，不必重新定义 path 或消息 schema。
 
@@ -47,9 +47,9 @@ HTTP 和 SSE 在执行时接受取消 option。WebSocket 还接受单次执行�
 
 ## Observer 不负责控制流
 
-SSE `onInvalidEvent` 只观察被丢弃的 event。它抛出的错误或返回的 rejected promise 会被捕获，不会终止 stream；不过 async observer 会被等待，因此可能拖慢后续消息处理。
+SSE `onInvalidEvent` 只观察被丢弃的 event。它抛出的错误和返回的 rejected promise 会与 stream 控制流隔离，后续处理仍会继续；不过 async observer 依然会被等待，因此可能拖慢后续消息。
 
-WebSocket state 和 runtime-error listener 也是 observer，但当前实现会直接调用它们。应用应让这些 listener 保持同步、不抛错、足够短小。抛错的 listener 可能中断生命周期工作，不属于受支持的控制流机制。
+WebSocket state 和 runtime-error listener 也是 observer。它们抛出的错误和 rejected promise 会被隔离：state listener 失败会转发给 runtime-error listener，runtime-error listener 失败会在可用时交给全局 `reportError`，其余 listener 和生命周期工作仍会继续。
 
 生命周期决策应使用返回的 handle 或 session。Observer 只适合做有界日志、指标或状态更新；所有者释放时要移除它们。
 

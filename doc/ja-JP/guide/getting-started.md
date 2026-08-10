@@ -15,7 +15,7 @@ Defjs を使うと、アプリケーションが呼び出す API 契約を一度
 pnpm add @defjs/core
 ```
 
-別のパッケージマネージャーを使うプロジェクトでは、npm、Yarn、Bun の同等コマンドを使ってください。`@defjs/core` は ESM です。Node.js で実行する場合、現在のパッケージメタデータは Node 26 以降を要求します。
+別のパッケージマネージャーを使うプロジェクトでは、npm、Yarn、Bun の同等コマンドを使ってください。`@defjs/core` は ESM です。Node.js で実行する場合、現在のパッケージメタデータは Node 22 以降を要求します。
 
 アプリケーションで必要なアダプターだけを追加します。
 
@@ -70,7 +70,7 @@ void loadUser(7)
 ;[error, result, response]
 ```
 
-成功時は `error` が `null`、`result` がデコード済みの出力データ、`response` が Defjs の `SettledResponse` ラッパーです。失敗時は `result` が `undefined` になります。レスポンスを受信する前に失敗した場合は、レスポンスラッパーも `undefined` です。
+成功時は `error` が `null`、`result` がデコード済みの出力データ、`response` が Defjs の `HttpResponse` ラッパーです。失敗時は `result` が `undefined` になります。レスポンスを受信する前に失敗した場合は、レスポンスラッパーも `undefined` です。
 
 ### `as const` が必要な理由
 

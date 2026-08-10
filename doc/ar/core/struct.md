@@ -1,11 +1,11 @@
 ---
 title: Struct
-description: صف فك الترميز البنيوي والقيم الصفرية والمدخلات الكائنية الجزئية وaliases والتعامل مع StructError.
+description: صف فك الترميز البنيوي الصارم والمدخلات المطلوبة والاختيارية وaliases والتعامل مع StructError.
 ---
 
 # Struct
 
-تصف Structs فك الترميز البنيوي والترميز إلى wire. بعض سلوكيات القيم الصفرية فيها مستوحاة من Go، لكنها ليست تطبيقًا كاملًا لدلالات `encoding/json` في Go.
+تصف Structs فك الترميز البنيوي الصارم والترميز إلى wire. تفشل القيم المطلوبة المفقودة والقيم غير الصالحة بدل إنشاء قيم افتراضية.
 
 استخدم واجهة `struct` و`Infer<T>` من root entry:
 
@@ -47,7 +47,7 @@ struct.discriminatedUnion('kind', [
 ])
 ```
 
-تقبل `struct.any()` و`struct.unknown()` قيمًا بلا قيود. أما binary constructors فهي `struct.blob()` و`struct.file()` و`struct.arrayBuffer()`.
+تقبل `struct.any()` و`struct.unknown()` أي قيمة غير `null` أو `undefined`؛ استخدم modifiers نفسها للسماح بهما. أما binary constructors فهي `struct.blob()` و`struct.file()` و`struct.arrayBuffer()`.
 
 يدعم كل Struct هذه modifiers:
 
@@ -58,57 +58,54 @@ struct.string().nullish()
 struct.string().alias('wire_name')
 ```
 
-## القيم الصفرية
+## التحليل الصارم
 
-تُفك القيم المفقودة أو `undefined` إلى قيمة صفرية ما لم يكن Struct اختياريًا. ويتبع `null` مع Struct غير nullable مسار القيمة الصفرية نفسه. أما Struct من نوع nullable فيفك missing أو `undefined` أو `null` إلى `null`.
-
-من القيم الصفرية المختارة:
-
-| Struct                        | القيمة الصفرية                   |
-| ----------------------------- | -------------------------------- |
-| `string`                      | `''`                             |
-| `number`                      | `0`                              |
-| `boolean`                     | `false`                          |
-| `bigint`                      | `0n`                             |
-| `date`                        | `new Date(0)`                    |
-| array                         | `[]`                             |
-| object                        | كائن تحتوي حقوله قيمها الصفرية   |
-| tuple                         | tuple تحتوي عناصره قيمها الصفرية |
-| enum                          | أول قيمة معلنة                   |
-| literal                       | القيمة الحرفية المعلنة           |
-| `blob`, `file`, `arrayBuffer` | قيمة فارغة من النوع المقابل      |
-| `any`, `unknown`              | `undefined`                      |
-
-داخل كائن، يُحذف الحقل المفقود الذي يحمل `.optional()` فقط من output بعد فك الترميز. تجمع `.nullish()` بين optional وnullable؛ ولأن معالجة nullable لها الأولوية عند فقدان القيمة، تُفك حاليًا إلى `null`.
+استخدم `struct.parse(schema, input)` لفك القيمة خارج command. يعيد tuple ثابتًا يبدأ بالخطأ:
 
 ```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
   biography: struct.string().null(),
+  note: struct.string().nullish(),
 })
 
-// Decoding {} produces an object equivalent to:
-// { name: '', biography: null }
+const [error, profile] = struct.parse(Profile, input)
+
+if (error) {
+  // profile is undefined
+  return
+}
 ```
-
-تُسقط مفاتيح الكائن غير المعروفة. وتستخدم مخرجات object وrecord بعد parse prototype مساويًا لـ null. ينبغي للكود الذي يعتمد على دوال `Object.prototype` استخدام `Object.keys` أو `Object.entries`، أو نسخ القيمة عمدًا إلى كائن عادي.
-
-## المدخلات الجزئية مقصودة
-
-خصائص object input اختيارية عند حد TypeScript، حتى حين تكون خاصية output بعد فك الترميز موجودة. وأقسام الطلب في `struct.request(...)` اختيارية أيضًا.
 
 ```typescript
-const Point = struct.object({
-  x: struct.number(),
-  y: struct.number(),
-})
-
-// A command using Point as input accepts {}.
-// Structural decoding produces { x: 0, y: 0 }.
+type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
 ```
 
-لا تصف هذه الحقول بأنها required. لا توفّر Structs تحققًا على مستوى التطبيق من وجود الحقول أو authorization أو range أو amount أو format أو state transition. ولا توجد DSL عامة لـ refine/range/format.
+ينطبق عقد modifier واحد: القيمة المفقودة أو `undefined` لا تُقبل إلا مع `.optional()` أو `.nullish()`؛ ولا يُقبل `null` الصريح إلا مع `.null()` أو `.nullish()`. ولا تجعل `.null()` القيمة اختيارية.
+
+تُحذف حقول object المفقودة من نوع optional أو nullish من output؛ وعلى المستوى الأعلى تُفك إلى `undefined`. تُسقط مفاتيح object غير المعروفة، وتستخدم مخرجات object وrecord prototype مساويًا لـ null.
+
+## مدخلات Object وRequest المطلوبة
+
+تكون خصائص object مطلوبة في TypeScript وruntime ما لم تكن optional أو nullish. وكل section معلن داخل `struct.request(...)` مطلوب أيضًا؛ أما الأقسام غير المعلنة فلا تظهر في input type.
+
+```typescript
+const Input = struct.request({
+  path: struct.object({ id: struct.string() }),
+  query: struct.object({ page: struct.number().optional() }),
+})
+
+// { path: { id: string }; query: { page?: number } }
+```
+
+حذف `query` خطأ، بينما `query: {}` صالح. أي حقل مطلوب مفقود أو `undefined` صريح أو `null` ممنوع أو نوع خاطئ يفشل التحليل كله ولا يعيد قيمة جزئية.
+
+تتوقف Structs المركبة عند أول issue محدد. ويجب أن يطابق طول tuple الطول المعلن تمامًا. يظل `struct.or(...)` يجرب البدائل بالترتيب، ويظل `struct.discriminatedUnion(...)` يختار الفرع المعلن.
+
+عندما تستخدم حقول discriminator أسماء alias، يقرأ `struct.discriminatedUnion(...)` أول wire discriminator موجود فعليًا وفق ترتيب إعلان options. وبعد اختيار الفرع لا يقرأ أي alias تابع لـ option لاحق.
+
+تفرض Structs الشكل المعلن، لا قواعد التطبيق الخاصة بـ authorization أو range أو amount أو format أو state transition. ولا توجد DSL عامة لـ refine/range/format.
 
 تقبل `struct.number()` قيمتي `Infinity` الموجبة والسالبة؛ وهي تستبعد `NaN` فقط من أعداد JavaScript. طبّق فحوص finite وrange وdomain في كود التطبيق قبل إنشاء الأمر. لا تضع هذه الفحوص في `build`، لأن `build` تستقبل إسقاطًا مرتبطًا بالـ Struct لا قيم المستدعي وقت التشغيل.
 
@@ -203,4 +200,4 @@ setErrorMap((issue) => {
 
 - تربط [الأوامر](/ar/core/commands) حقول Struct بالطلبات والرسائل.
 - تشرح [الأخطاء](/ar/core/errors) كيف تظهر إخفاقات Struct في execution tuples.
-- تغطي [HTTP](/ar/core/http) فك ترميز response وقيد JSON غير الصالح الحالي.
+- تغطي [HTTP](/ar/core/http) فك ترميز response وأخطاء تمثيل body.

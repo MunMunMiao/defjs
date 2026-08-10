@@ -34,7 +34,7 @@ La composition suit trois règles :
 
 1. Les helpers qui définissent une valeur la remplacent. Cela comprend `withEndpoint`, les implémentations des transports, le sérialiseur de query, le mode Fetch `credentials`, la configuration XSRF et chaque réglage SSE ou WebSocket individuel.
 2. `withInterceptors(...items)` ajoute les éléments à la suite. Plusieurs appels conservent l'ordre d'ajout des intercepteurs.
-3. `withSSEOptions(...)` et `withWebSocketOptions(...)` remplacent chaque champ de premier niveau défini. La fusion reste superficielle : les objets imbriqués de reconnexion, de heartbeat ou de file ne sont pas fusionnés en profondeur.
+3. `withSSEOptions(...)` et `withWebSocketOptions(...)` remplacent chaque champ de premier niveau défini. La fusion reste superficielle : les objets imbriqués de reconnexion ou de heartbeat ne sont pas fusionnés en profondeur.
 
 Dans l'exemple suivant, le second objet de reconnexion remplace le premier. Il ne conserve pas `attempts: 5`.
 
@@ -72,6 +72,8 @@ Les helpers SSE et WebSocket individuels définissent chacun le champ de premier
 
 `Client.execute` possède trois surcharges. Chacune renvoie un tuple à trois éléments, avec l'erreur en premier.
 
+Pour l'exécution HTTP, SSE et WebSocket, `timeout` doit être un entier sûr positif compris entre `1` et `2_147_483_647` ; `0`, les valeurs négatives ou fractionnaires, `NaN`, `Infinity` et les valeurs supérieures à cette limite renvoient `REQUEST_VALIDATION_FAILED` avant la création de toute ressource de requête, de flux ou de socket.
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-Le troisième élément est un wrapper Defjs `SettledResponse` lorsqu'une réponse est disponible. Les options HTTP comprennent `abort` ou `timeout`, l'alias supplémentaire `signal`, `context`, ainsi que les observateurs de progression d'envoi et de téléchargement.
+Le troisième élément est un wrapper Defjs `HttpResponse` lorsqu'une réponse est disponible. Les options HTTP comprennent `abort` ou `timeout`, l'alias supplémentaire `signal`, `context`, ainsi que les observateurs de progression d'envoi et de téléchargement.
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-Le troisième élément est l'instantané d'ouverture validé au démarrage. `stream.open` est un getter dynamique distinct, qui peut changer après une tentative de reconnexion. L'exécution SSE accepte l'annulation et `HttpContext` ; la reconnexion et la file d'événements se configurent sur le client.
+Le troisième élément est l'instantané d'ouverture validé au démarrage. `stream.open` est un getter dynamique distinct, qui peut changer après une tentative de reconnexion. L'exécution SSE accepte l'annulation et `HttpContext` ; la reconnexion se configure sur le client. Les limites obligatoires `maxBufferSize` et `maxQueueSize` appartiennent à chaque définition d'event stream.
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-Le troisième élément est l'instantané de connexion au démarrage. `session.connection` est un getter dynamique qui peut décrire une tentative de connexion physique ultérieure. L'exécution WebSocket accepte l'annulation et les options `beforeConnect`, `heartbeat`, `protocols`, `queue` et `reconnect` propres à cette exécution. Elle n'accepte pas `HttpContext`.
+Le troisième élément est l'instantané de connexion au démarrage. `session.connection` est un getter dynamique qui peut décrire une tentative de connexion physique ultérieure. L'exécution WebSocket accepte l'annulation et les options `beforeConnect`, `heartbeat`, `protocols` et `reconnect` propres à cette exécution. La limite obligatoire `maxIncomingQueueSize` et la limite facultative `maxOutgoingQueueSize` appartiennent à chaque définition WebSocket. L'exécution n'accepte pas `HttpContext`.
 
 Consultez [Erreurs](/fr-FR/core/errors) pour les branches d'échec exactes, ainsi que [HTTP](/fr-FR/core/http), [SSE](/fr-FR/core/sse) et [WebSocket](/fr-FR/core/web-socket) pour le cycle de vie de chaque transport.
 

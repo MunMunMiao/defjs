@@ -30,14 +30,14 @@ Ici, l'objet transmis à `defineRequest` est la définition d'endpoint, `getUser
 
 `defineRequest(...)` accepte les champs suivants :
 
-| Champ          | Signification                                                                                        |
-| -------------- | ---------------------------------------------------------------------------------------------------- |
-| `method`       | Méthode HTTP sous forme de chaîne.                                                                   |
-| `path`         | Chemin relatif de l'endpoint, avec d'éventuels paramètres `:name`.                                   |
-| `input`        | Struct qui assure le décodage structurel de l'entrée de commande.                                    |
-| `build`        | Projection liée au schéma entre les champs d'entrée et les parties de la requête. Nécessite `input`. |
-| `output`       | Association entre statuts et Structs pour décoder la réponse et inférer le résultat.                 |
-| `responseType` | Mode de réponse facultatif : `json`, `text`, `blob` ou `arraybuffer`.                                |
+| Champ          | Signification                                                                                               |
+| -------------- | ----------------------------------------------------------------------------------------------------------- |
+| `method`       | Méthode HTTP sous forme de chaîne.                                                                          |
+| `path`         | Chemin relatif de l'endpoint, avec d'éventuels paramètres `:name`.                                          |
+| `input`        | Struct qui assure le décodage structurel de l'entrée de commande.                                           |
+| `build`        | Projection liée au schéma entre les champs d'entrée et les parties de la requête. Nécessite `input`.        |
+| `output`       | Association entre statuts et Structs pour décoder la réponse et inférer le résultat.                        |
+| `responseType` | Mode facultatif `json`, `text`, `blob` ou `arraybuffer`, uniquement avec `output` déclaré ; interdit sinon. |
 
 Utilisez `struct.request(...)` lorsque les champs de la commande correspondent directement aux sections du format d'échange :
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-Le type d'entrée d'une Struct objet est partiel : chaque propriété reste facultative pour l'appelant. Les sections de requête le sont aussi. Le décodage structurel remplit les champs de sortie non facultatifs avec leur valeur zéro ; ces deux formes autorisent donc un appel sans argument.
+Lorsqu'un `input` est déclaré, les champs d'objet obligatoires et chaque section de requête déclarée doivent être fournis. Seuls les champs optional ou nullish peuvent être omis. Ne déclarez pas de section inutilisée par l'endpoint.
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-Utilisez une entrée primitive ou un tableau lorsque le constructeur doit recevoir un argument. Ici, une primitive est projetée vers un paramètre de chemin :
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-Cette règle porte seulement sur la présence de l'argument, pas sur la validation métier. L'appelant peut transmettre toute valeur acceptée par le type d'entrée de la Struct, et les champs d'objet absents reçoivent leur valeur zéro.
+Cette validation concerne la présence et le type structurels, pas les règles applicatives d'autorisation, de plage, de montant, de format ou de transition d'état.
 
 ## Construction automatique de la requête
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 Le type de succès HTTP est l'union des corps 2xx déclarés. `error.data` est l'union des corps non-2xx déclarés. La forme tableau nécessite `as const` pour conserver les statuts littéraux et les groupes de statuts `readonly`.
 
-Lorsque `output` est déclaré, chaque statut renvoyé doit correspondre à une Struct. Un statut 2xx ou non-2xx sans correspondance produit `UNDECLARED_STATUS`. Lorsque `output` est omis, le corps de la réponse est ignoré et le résultat vaut `undefined`.
+Lorsque `output` est déclaré, chaque statut renvoyé doit correspondre à une Struct. Un statut 2xx ou non-2xx sans correspondance produit `UNDECLARED_STATUS`. Lorsque `output` est omis, le corps n'est ni lu ni décodé et son annulation est tentée au mieux ; le résultat vaut `undefined`.
 
 ## Définitions SSE et WebSocket
 
@@ -224,6 +209,8 @@ Lorsque `output` est déclaré, chaque statut renvoyé doit correspondre à une 
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ L'entrée racine exporte actuellement les interfaces de commande des transports 
 
 - [Client](/fr-FR/core/client) couvre les surcharges d'exécution et la composition des options.
 - [HTTP](/fr-FR/core/http) décrit les URL, l'encodage, les réponses et l'annulation.
-- [Struct](/fr-FR/core/struct) explique le décodage structurel et les valeurs zéro.
+- [Struct](/fr-FR/core/struct) explique le décodage structurel strict.

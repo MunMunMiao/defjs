@@ -1,5 +1,5 @@
 import type { FnReturn } from '../../internal/utility_types'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import type { EventStreamMessage } from './parser'
 import { createLineParser, createMessageParser, readStreamBytes } from './parser'
 
@@ -7,6 +7,44 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const noop = () => {
   /* intentionally empty */
+}
+
+function settleWithin<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('operation did not settle')), 100)
+    promise.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
+}
+
+async function parseEvents(
+  source: string,
+  options: { lineLimit?: number; messageLimit?: number } = {},
+): Promise<{ ids: string[]; messages: EventStreamMessage[]; retries: number[] }> {
+  const ids: string[] = []
+  const retries: number[] = []
+  const messages: EventStreamMessage[] = []
+  const maxBufferSize = options.messageLimit ?? 1024
+  const parseMessage = createMessageParser(
+    ids.push.bind(ids),
+    retries.push.bind(retries),
+    (message) => {
+      messages.push(message)
+    },
+    { maxBufferSize },
+  )
+  const parseLine = createLineParser(parseMessage, { maxBufferSize: options.lineLimit ?? 1024 })
+
+  await parseLine(encoder.encode(source))
+  return { ids, messages, retries }
 }
 
 describe('sse parser', () => {
@@ -47,17 +85,110 @@ describe('sse parser', () => {
     expect(() => stream.getReader()).not.toThrow()
   })
 
+  test('should cancel upstream once with the original callback error', async () => {
+    const error = new Error('parse failed')
+    const cancel = vi.fn()
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data'))
+      },
+      cancel,
+    })
+
+    await expect(
+      readStreamBytes(stream, () => {
+        throw error
+      }),
+    ).rejects.toBe(error)
+
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(cancel).toHaveBeenCalledWith(error)
+    expect(() => stream.getReader()).not.toThrow()
+  })
+
+  test('should preserve the callback error when upstream cancellation rejects', async () => {
+    const error = new Error('parse failed')
+    const cancel = vi.fn(() => Promise.reject(new Error('cancel failed')))
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data'))
+      },
+      cancel,
+    })
+
+    await expect(
+      readStreamBytes(stream, () => {
+        throw error
+      }),
+    ).rejects.toBe(error)
+
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(() => stream.getReader()).not.toThrow()
+  })
+
+  test('should not wait for upstream cancellation after a callback error', async () => {
+    const error = new Error('parse failed')
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const stream = new ReadableStream<Uint8Array>({
+      cancel,
+      start(controller) {
+        controller.enqueue(encoder.encode('data'))
+      },
+    })
+
+    await expect(
+      settleWithin(
+        readStreamBytes(stream, () => {
+          throw error
+        }),
+      ),
+    ).rejects.toBe(error)
+
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(error)
+    expect(() => stream.getReader()).not.toThrow()
+  })
+
+  test('should not wait for upstream cancellation after abort', async () => {
+    const reason = new DOMException('owner stopped', 'AbortError')
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const stream = new ReadableStream<Uint8Array>({ cancel })
+    const controller = new AbortController()
+    const pending = readStreamBytes(stream, noop, controller.signal)
+
+    controller.abort(reason)
+
+    await expect(settleWithin(pending)).rejects.toBe(reason)
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(reason)
+    expect(() => stream.getReader()).not.toThrow()
+  })
+
+  test('should cancel a pre-aborted stream with the original reason before reading', async () => {
+    const reason = new DOMException('owner already stopped', 'AbortError')
+    const cancel = vi.fn()
+    const stream = new ReadableStream<Uint8Array>({ cancel })
+    const controller = new AbortController()
+    controller.abort(reason)
+
+    await expect(readStreamBytes(stream, noop, controller.signal)).rejects.toBe(reason)
+
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(reason)
+    expect(() => stream.getReader()).not.toThrow()
+  })
+
   test('should release reader lock after normal completion', async () => {
+    const cancel = vi.fn()
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(encoder.encode('ok'))
         controller.close()
       },
+      cancel,
     })
 
     await readStreamBytes(stream, noop)
 
     expect(() => stream.getReader()).not.toThrow()
+    expect(cancel).not.toHaveBeenCalled()
   })
 
   test('should handle abort without reason gracefully', async () => {
@@ -78,7 +209,7 @@ describe('sse parser', () => {
     const abortController = new AbortController()
     setTimeout(() => abortController.abort(), 10)
 
-    await readStreamBytes(stream, noop, abortController.signal)
+    await expect(readStreamBytes(stream, noop, abortController.signal)).rejects.toMatchObject({ name: 'AbortError' })
 
     expect(() => stream.getReader()).not.toThrow()
   })
@@ -129,7 +260,6 @@ describe('sse parser', () => {
         id: '1',
         event: 'update',
         data: 'line 1\nline 2',
-        retry: 500,
       },
     ])
   })
@@ -148,7 +278,6 @@ describe('sse parser', () => {
         id: '',
         event: 'profile',
         data: '{"display_name":"Miao"}',
-        retry: undefined,
       },
     ])
   })
@@ -179,7 +308,6 @@ describe('sse parser', () => {
         id: '',
         event: '',
         data: 'ok',
-        retry: undefined,
       },
     ])
   })
@@ -228,7 +356,6 @@ describe('sse parser', () => {
         id: '',
         event: '',
         data: 'hello\nincomplete',
-        retry: undefined,
       },
     ])
   })
@@ -248,7 +375,6 @@ describe('sse parser', () => {
         id: '',
         event: '',
         data: 'hello',
-        retry: undefined,
       },
     ])
   })
@@ -268,7 +394,6 @@ describe('sse parser', () => {
         id: '',
         event: '',
         data: 'hello world',
-        retry: undefined,
       },
     ])
   })
@@ -288,7 +413,6 @@ describe('sse parser', () => {
         id: '',
         event: '',
         data: 'hello',
-        retry: undefined,
       },
     ])
   })
@@ -362,7 +486,6 @@ describe('sse parser', () => {
         id: '',
         event: '',
         data: 'hello',
-        retry: undefined,
       },
     ])
   })
@@ -378,4 +501,68 @@ describe('sse parser', () => {
 
     expect(messages.map((message) => message.data)).toEqual(['one', 'two'])
   })
+
+  test('should dispatch colonless data fields and preserve empty data lines', async () => {
+    await expect(parseEvents('data\n\n')).resolves.toMatchObject({
+      messages: [{ data: '', event: '', id: '' }],
+    })
+    await expect(parseEvents('data\ndata\n\n')).resolves.toMatchObject({
+      messages: [{ data: '\n', event: '', id: '' }],
+    })
+  })
+
+  test('should accept only ASCII-digit retry values and clamp timer overflow', async () => {
+    const { messages, retries } = await parseEvents('retry: 1000junk\nretry: -1\nretry: 999999999999999999999999\ndata: ok\n\n')
+
+    expect(retries).toEqual([2_147_483_647])
+    expect(messages).toEqual([{ data: 'ok', event: '', id: '' }])
+  })
+
+  test('should persist valid ids across events and ignore ids containing NUL', async () => {
+    const { ids, messages } = await parseEvents('id: good\ndata: one\n\ndata: two\n\nid: bad\0id\ndata: three\n\n')
+
+    expect(ids).toEqual(['good'])
+    expect(messages).toEqual([
+      { data: 'one', event: '', id: 'good' },
+      { data: 'two', event: '', id: 'good' },
+      { data: 'three', event: '', id: 'good' },
+    ])
+  })
+
+  test('should enforce maxBufferSize for complete and unterminated lines at the exact byte boundary', async () => {
+    const exact = createLineParser(noop, { maxBufferSize: 9 })
+    await expect(exact(encoder.encode('data: 猫\n'))).resolves.toBeUndefined()
+
+    const completeOverflow = createLineParser(noop, { maxBufferSize: 8 })
+    await expect(completeOverflow(encoder.encode('data: 猫\n'))).rejects.toThrow('SSE parser buffer exceeded maxBufferSize')
+
+    const partial = createLineParser(noop, { maxBufferSize: 4 })
+    await expect(partial(encoder.encode('data'))).resolves.toBeUndefined()
+    await expect(partial(encoder.encode('x'))).rejects.toThrow('SSE parser buffer exceeded maxBufferSize')
+  })
+
+  test('should enforce cumulative data bytes including inserted line feeds', async () => {
+    await expect(parseEvents('data: 1234\ndata: 5678\n\n', { lineLimit: 10, messageLimit: 10 })).resolves.toMatchObject({
+      messages: [{ data: '1234\n5678', event: '', id: '' }],
+    })
+
+    await expect(parseEvents('data: 1234\ndata: 5678\ndata: 9\n\n', { lineLimit: 10, messageLimit: 10 })).rejects.toThrow(
+      'SSE parser buffer exceeded maxBufferSize',
+    )
+  })
+
+  test('should allow one large chunk containing many bounded events', async () => {
+    const source = Array.from({ length: 100 }, (_, index) => `data: ${index % 10}\n\n`).join('')
+    const { messages } = await parseEvents(source, { lineLimit: 8, messageLimit: 2 })
+
+    expect(messages).toHaveLength(100)
+  })
+
+  test.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    'should reject invalid maxBufferSize %s',
+    (maxBufferSize) => {
+      expect(() => createLineParser(noop, { maxBufferSize })).toThrow('SSE maxBufferSize must be a positive safe integer')
+      expect(() => createMessageParser(noop, noop, noop, { maxBufferSize })).toThrow('SSE maxBufferSize must be a positive safe integer')
+    },
+  )
 })

@@ -15,7 +15,7 @@ Defjs를 사용하면 애플리케이션이 호출할 API 계약을 한 번 정�
 pnpm add @defjs/core
 ```
 
-프로젝트가 다른 패키지 관리자를 사용한다면 npm, Yarn, Bun의 같은 명령을 사용하세요. `@defjs/core`는 ESM입니다. Node.js에서 실행할 때 현재 패키지 metadata는 Node 26 이상을 요구합니다.
+프로젝트가 다른 패키지 관리자를 사용한다면 npm, Yarn, Bun의 같은 명령을 사용하세요. `@defjs/core`는 ESM입니다. Node.js에서 실행할 때 현재 패키지 metadata는 Node 22 이상을 요구합니다.
 
 애플리케이션에 필요한 adapter만 추가하세요.
 
@@ -70,7 +70,7 @@ void loadUser(7)
 ;[error, result, response]
 ```
 
-성공하면 `error`는 `null`, `result`는 디코딩된 출력 데이터, `response`는 Defjs `SettledResponse` 래퍼입니다. 실패하면 `result`는 `undefined`입니다. 응답을 받지 못한 실패에서는 응답 래퍼도 `undefined`입니다.
+성공하면 `error`는 `null`, `result`는 디코딩된 출력 데이터, `response`는 Defjs `HttpResponse` 래퍼입니다. 실패하면 `result`는 `undefined`입니다. 응답을 받지 못한 실패에서는 응답 래퍼도 `undefined`입니다.
 
 ### `as const`가 필요한 이유
 

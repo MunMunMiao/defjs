@@ -26,7 +26,7 @@ export const readInvoiceAging = defineRequest({
 
 // Step 2: Expose invoice aging without leaking refresh or replay mechanics into callers.
 export async function loadInvoiceAging(client: Client, tenant: string) {
-  const [error, summary, response] = await client.execute(readInvoiceAging({ path: { tenant: encodeURIComponent(tenant) } }))
+  const [error, summary, response] = await client.execute(readInvoiceAging({ path: { tenant } }))
   if (error) throw error
   if (response.error) throw response.error
   return summary

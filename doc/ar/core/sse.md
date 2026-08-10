@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: عرّف Server-Sent Events وفك ترميزها، وتعامل مع البدء، واستهلك event queue المشتركة، واضبط reconnect، وأغلق streams التي تملكها.
+description: عرّف Server-Sent Events محدودة الموارد وفك ترميزها، واضبط reconnect، وأغلق streams التي تملكها.
 ---
 
 # SSE
@@ -11,6 +11,8 @@ description: عرّف Server-Sent Events وفك ترميزها، وتعامل م
 import { defineEventStream, struct } from '@defjs/core'
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(
@@ -43,6 +45,8 @@ const notifications = defineEventStream({
 
 ```typescript
 const events = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/events',
   events: {
     update: struct.json(struct.object({ version: struct.number() })),
@@ -59,6 +63,8 @@ const events = defineEventStream({
 
 ```typescript
 const roomEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -81,6 +87,8 @@ const [error, stream, startupOpen] = await client.execute(
   }),
 )
 ```
+
+يجب أن تكون قيمة `timeout` لتنفيذ HTTP وSSE وWebSocket عددًا صحيحًا موجبًا وآمنًا ضمن `1..2_147_483_647`؛ وتؤدي القيم `0` أو السالبة أو الكسرية أو `NaN` أو `Infinity` أو التي تتجاوز الحد إلى `REQUEST_VALIDATION_FAILED` قبل إنشاء أي مورد request أو stream أو socket.
 
 يعيد SSE:
 
@@ -148,7 +156,8 @@ async function consumeNotifications(signal: AbortSignal) {
 ```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message }) => {
+  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+    if (signal.aborted) return
     recordInvalidEvent({ eventName: message.event, reason })
   }),
 )
@@ -157,10 +166,11 @@ const client = createClient(
 يستقبل المراقب:
 
 - `reason: 'missing-struct' | 'validation-failed'`؛
-- قيمة `id` الخام واسم event ونص data وقيمة retry الاختيارية؛
+- قيمة `id` الخام واسم event ونص data؛
 - `cause` عند فشل التحقق.
+- `signal` الخاص بالمحاولة النشطة.
 
-يُسقط event، ويمكن مع ذلك تسليم event صالح لاحقًا. تُلتقط أخطاء المراقب وPromises المرفوضة، لكن يُنتظر المراقب async قبل استمرار معالجة الرسائل اللاحقة. اجعله سريعًا. راجع ونقّح `id` و`data` و`cause` الخام قبل تسجيلها.
+يُسقط event، ويمكن مع ذلك تسليم event صالح لاحقًا. تُعزل أخطاء المراقب وPromises المرفوضة، بينما يوقف abort مراقبًا معلقًا عبر `signal`. اجعله سريعًا وراجع ونقّح `id` و`data` و`cause` قبل تسجيلها.
 
 ## Reconnect
 
@@ -194,44 +204,26 @@ withSSEReconnect({
 })
 ```
 
-يرسل transport أحدث event ID في `Last-Event-ID` في المحاولات اللاحقة. اجعل `shouldReconnect` غير رامٍ. لا يضمن التنفيذ الحالي أن predicate يرمي أو يعيد Promise مرفوضًا سيُنهي كل iterator أو كل مسار `stream.closed` معلق.
+يرسل transport أحدث event ID في `Last-Event-ID` في المحاولات اللاحقة. إذا رمى `shouldReconnect` أو رفض Promise، يتوقف retry وتستقر عملية startup أو stream المعلقة بذلك الخطأ. يوقف abort الـ predicate المعلق عبر signal للمحاولة النشطة.
 
 إخفاقات التحقق من HTTP/open، والأخطاء القاتلة في معالجة الرسائل، وEOF العادي ليست خطأ شبكة أو قراءة قابلًا لإعادة المحاولة. لا تفترض أن كل مسار نهائي يعيد الاتصال.
 
-## طابور العمل المشترك
+## حدود الموارد المملوكة لنقطة النهاية
 
-الـ async iterable هو طابور عمل مشترك واحد للـ stream المنطقي. وليس subscription أو broadcast أو آلية backpressure.
+للـ stream مستهلك async iterator واحد فقط. إنشاء iterator ثانٍ يرمي خطأ، والخروج من الحلقة ما زال يتطلب استدعاء `stream.close(...)` صراحةً.
 
-يكون الطابور غير محدود افتراضيًا. ضع حدًا باستخدام `withSSEQueue(...)` أو `withSSEOptions({ queue })`:
-
-```typescript
-withSSEQueue({
-  maxSize: 100,
-  overflow: 'drop-oldest',
-})
-```
-
-| Overflow      | السلوك عند الحد                           |
-| ------------- | ----------------------------------------- |
-| `drop-newest` | يهمل event الواصل.                        |
-| `drop-oldest` | يزيل أقدم event مخزّن ثم يضيف الجديد.     |
-| `error`       | يرمي queue overflow error وينهي المعالجة. |
-
-تتنافس iterators المتعددة على القيم؛ ولا تحصل كل واحدة على نسخة. لا يؤدي `break` من حلقة `for await` إلى إغلاق transport، لأن iterator لا يملك تنفيذ `return()` واعيًا بدورة الحياة. استدعِ `stream.close(...)` صراحة.
-
-يحدد الإغلاق أن الطابور انتهى، لكنه لا يحذف القيم المخزنة مسبقًا. يستطيع المستهلك تصريفها قبل أن تعيد iteration التالية `done: true`.
-
-### حد Parser Buffer
-
-طابور الأحداث وparser buffer شيئان منفصلان. اضبط `maxBufferSize` موجبة عبر `withSSEOptions(...)` لوضع حد للـ bytes المحتفظ بها لسطر SSE غير مكتمل:
+يجب أن تعلن كل نقطة نهاية `maxBufferSize` و`maxQueueSize` كعددين صحيحين آمنين وموجبين. يحد الأول كل سطر SSE وبيانات الحدث الحالي، ويحد الثاني الأحداث المحللة المنتظرة. تجاوز الطابور خطأ نهائي ولا يحذف أي event بصمت.
 
 ```typescript
-withSSEOptions({
+const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.json(notificationStruct) },
 })
 ```
 
-يؤدي تجاوز الحد بعد البدء إلى رفض iterator وإغلاق stream مع `code: 'error'`. وترك القيمة غير محددة يبقي parser buffer غير محدود.
+يسمح EOF الطبيعي بتصريف الأحداث المخزنة. أما خطأ parser أو transform أو overflow النهائي فيحذف المخزن ويلغي body النشط ويرفض iteration ويغلق `stream.closed` مع `code: 'error'`.
 
 ## الإغلاق النهائي
 

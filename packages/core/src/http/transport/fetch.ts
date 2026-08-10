@@ -1,4 +1,4 @@
-import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
+import { awaitWithSignal, resolveAbortTransportError } from '../../internal/abort'
 import type { HttpProgressFn, HttpRequest } from '../../internal/http_request'
 import type { HttpResponse } from '../../internal/http_response'
 import { makeResponse } from '../../internal/http_response'
@@ -11,7 +11,7 @@ import {
   isReadableStreamBody,
   supportsStreamingRequestBody,
 } from './fetch_init'
-import { concatChunks, getContentLength, getContentType, parseBytesBody, parseJsonText } from './utils'
+import { concatChunks, getContentLength, getContentType, parseBytesBody } from './utils'
 
 export { __resetStreamingRequestBodySupportForTests, ERR_STREAMING_REQUEST_UNSUPPORTED, isReadableStreamBody, supportsStreamingRequestBody }
 
@@ -114,35 +114,93 @@ function wrapUploadProgressStream(
   stream: ReadableStream<Uint8Array>,
   onProgress: HttpProgressFn,
   total: number,
+  signal: AbortSignal | undefined,
 ): ReadableStream<Uint8Array> {
   const reader = stream.getReader()
+  let cleanedUp = false
   let loaded = 0
+  const onAbort = () => cleanup(true, signal?.reason)
 
-  return new ReadableStream<Uint8Array>({
+  function cleanup(cancel: boolean, reason?: unknown): void {
+    if (cleanedUp) {
+      return
+    }
+
+    cleanedUp = true
+    signal?.removeEventListener('abort', onAbort)
+    try {
+      if (cancel) {
+        void reader.cancel(reason).catch(() => undefined)
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  }
+
+  const wrapped = new ReadableStream<Uint8Array>({
     cancel(reason) {
-      return reader.cancel(reason)
+      cleanup(true, reason)
     },
     async pull(controller) {
       try {
         const { done, value } = await reader.read()
 
+        if (cleanedUp) {
+          return
+        }
+
         if (done) {
+          cleanup(false)
           controller.close()
           return
         }
 
         loaded += value.byteLength
-        onProgress({
-          lengthComputable: total > 0,
-          loaded,
-          total,
-        })
+        const event = { lengthComputable: total > 0, loaded, total }
+        await (signal ? awaitWithSignal(() => onProgress(event), signal) : onProgress(event))
+        if (cleanedUp) {
+          return
+        }
         controller.enqueue(value)
       } catch (error) {
+        cleanup(true, error)
         controller.error(error)
       }
     },
   })
+
+  if (signal) {
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) {
+      onAbort()
+    }
+  }
+
+  return wrapped
+}
+
+function cancelWrappedUploadBody(request: HttpRequest, body: unknown, reason: unknown): void {
+  if (request.uploadProgress && isReadableStreamBody(request.body) && isReadableStreamBody(body)) {
+    void body.cancel(reason).catch(() => undefined)
+  }
+}
+
+async function fetchWithSignal(fetchImpl: typeof fetch, request: Request, signal: AbortSignal | undefined): Promise<Response> {
+  if (!signal) {
+    return await fetchImpl(request)
+  }
+
+  return await awaitWithSignal(() => {
+    const pending = Promise.resolve(fetchImpl(request))
+    void pending
+      .then((response) => {
+        if (signal.aborted && response.body) {
+          void response.body.cancel(signal.reason).catch(() => undefined)
+        }
+      })
+      .catch(() => undefined)
+    return pending
+  }, signal)
 }
 
 export function createFetchRequestInit(request: HttpRequest): RequestInit & { duplex?: 'half' } {
@@ -157,87 +215,71 @@ export function createFetchRequestInit(request: HttpRequest): RequestInit & { du
     signal: request.abort,
     streamingRequestUnsupportedError: ERR_STREAMING_REQUEST_UNSUPPORTED,
     wrapReadableStreamBody: uploadProgress
-      ? (body) => wrapUploadProgressStream(body, uploadProgress, getContentLength(headers))
+      ? (body) => wrapUploadProgressStream(body, uploadProgress, getContentLength(headers), request.abort)
       : undefined,
   })
 }
 
 export function createFetchRequest(request: HttpRequest): Request {
   const url = resolveRequestUrl(request)
-  return new Request(url, createFetchRequestInit(request))
-}
+  const init = createFetchRequestInit(request)
 
-async function parseNativeResponseBody(response: Response, responseType: HttpRequest['responseType']): Promise<unknown> {
-  switch (responseType) {
-    case 'json':
-      return parseJsonText(await response.text())
-    case 'text':
-      return await response.text()
-    case 'blob':
-      return await response.blob()
-    case 'arraybuffer':
-      return await response.arrayBuffer()
-    default:
-      return null
+  try {
+    return new Request(url, init)
+  } catch (error) {
+    cancelWrappedUploadBody(request, init.body, error)
+    throw error
   }
 }
 
 async function parseFetchResponse(httpRequest: HttpRequest, response: Response): Promise<HttpResponse<unknown>> {
   const downloadProgress = httpRequest.downloadProgress
   const { headers, status, statusText, url } = response
+
+  if (response.body && httpRequest.responseType === undefined) {
+    void response.body.cancel().catch(() => undefined)
+    return makeResponse({ status, statusText, headers, url, body: null })
+  }
+
   const contentLength = getContentLength(headers)
   const contentType = getContentType(headers)
   let body: unknown = null
 
-  /* istanbul ignore if -- @preserve */
   if (response.body) {
-    if (downloadProgress) {
-      const chunks: Uint8Array[] = []
-      const reader = response.body.getReader()
-      let receivedLength = 0
+    const chunks: Uint8Array[] = []
+    const reader = response.body.getReader()
+    const signal = httpRequest.abort
+    let receivedLength = 0
 
+    try {
       while (true) {
-        const { done, value } = await reader.read()
-
-        if (done) {
+        const result = signal ? await awaitWithSignal(() => reader.read(), signal) : await reader.read()
+        if (result.done) {
           break
         }
 
-        chunks.push(value)
-        receivedLength += value.byteLength
+        chunks.push(result.value)
+        receivedLength += result.value.byteLength
 
-        downloadProgress({
-          lengthComputable: contentLength > 0,
-          loaded: receivedLength,
-          total: contentLength,
-        })
+        if (downloadProgress) {
+          const event = { lengthComputable: contentLength > 0, loaded: receivedLength, total: contentLength }
+          await (signal ? awaitWithSignal(() => downloadProgress(event), signal) : downloadProgress(event))
+        }
       }
+    } catch (error) {
+      void reader.cancel(error).catch(() => undefined)
+      if (downloadProgress || signal?.aborted) {
+        throw error
+      }
+      return makeResponse({ error, status, statusText, headers, url })
+    } finally {
+      reader.releaseLock()
+    }
 
-      const chunksAll = concatChunks(chunks, receivedLength)
-
-      try {
-        body = parseBytesBody(httpRequest.responseType, chunksAll, contentType)
-      } catch (error) {
-        return makeResponse({
-          error,
-          status,
-          statusText,
-          headers,
-          url,
-        })
-      }
-    } else {
-      try {
-        body = await parseNativeResponseBody(response, httpRequest.responseType)
-      } catch (error) {
-        return makeResponse({
-          error,
-          status,
-          statusText,
-          headers,
-          url,
-        })
-      }
+    try {
+      body = parseBytesBody(httpRequest.responseType, concatChunks(chunks, receivedLength), contentType)
+    } catch (error) {
+      return makeResponse({ error, status, statusText, headers, url })
     }
   }
 
@@ -255,25 +297,24 @@ export async function fetchHandler(
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis) as typeof fetch,
 ): Promise<HttpResponse<unknown>> {
   const abortSignal = httpRequest.abort
+  let request: Request | undefined
   let response: Response
 
   try {
-    const request = createFetchRequest(httpRequest)
-    response = await fetchImpl(request)
+    request = createFetchRequest(httpRequest)
+    response = await fetchWithSignal(fetchImpl, request, abortSignal)
   } catch (error) {
-    // Because Safari throws an AbortError instead of a TimeoutError when using AbortSignal.timeout.
-    // So when handling an `AbortError`, one needs to determine whether the reason for the abort is a `TimeoutError` or another `AbortError`.
-    if (abortSignal?.aborted && abortSignal.reason instanceof Error) {
-      switch (true) {
-        case abortSignal.reason.name === 'AbortError':
-          return makeResponse({ error: ERR_ABORTED })
-        case abortSignal.reason.name === 'TimeoutError':
-          return makeResponse({ error: ERR_TIMEOUT })
-      }
-    }
-
-    return makeResponse({ error })
+    cancelWrappedUploadBody(httpRequest, request?.body, error)
+    return makeResponse({ error: (abortSignal && resolveAbortTransportError(abortSignal)?.cause) ?? error })
   }
 
-  return parseFetchResponse(httpRequest, response)
+  try {
+    return await parseFetchResponse(httpRequest, response)
+  } catch (error) {
+    const transportError = abortSignal && resolveAbortTransportError(abortSignal)
+    if (transportError) {
+      return makeResponse({ error: transportError.cause })
+    }
+    throw error
+  }
 }

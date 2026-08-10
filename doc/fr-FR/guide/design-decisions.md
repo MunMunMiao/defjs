@@ -31,9 +31,9 @@ Le tuple rend explicites les échecs attendus au démarrage sans imposer un cont
 
 ## Les options de cycle de vie appartiennent à l'exécution
 
-Les définitions d'endpoint décrivent des contrats d'échange stables. L'annulation, le timeout, le heartbeat, la reconnexion et la configuration des files relèvent de l'exécution qui possède le travail.
+Les définitions d'endpoint décrivent des contrats d'échange stables et possèdent les limites des files de transport. L'annulation, le timeout, le heartbeat et la reconnexion relèvent de l'exécution qui possède le travail.
 
-HTTP et SSE acceptent des options d'annulation à l'exécution. WebSocket accepte aussi, pour chaque exécution, les options de connexion, heartbeat, reconnexion, sous-protocoles et file d'envoi. Les options du client fournissent des valeurs par défaut réutilisables lorsque le transport le permet.
+HTTP et SSE acceptent des options d'annulation à l'exécution. WebSocket accepte aussi, pour chaque exécution, les options `beforeConnect`, heartbeat, reconnexion et sous-protocoles. Les options du client fournissent des valeurs par défaut réutilisables lorsque le transport le permet ; les capacités entrante et sortante de WebSocket restent définies sur l'endpoint.
 
 Cette séparation permet de réutiliser une commande. Un traitement en arrière-plan et un écran interactif peuvent l'exécuter avec des durées de vie différentes sans redéfinir son chemin ni son schéma de message.
 
@@ -47,9 +47,9 @@ Cette contrainte lie la construction de la requête aux champs déclarés par le
 
 ## Les observateurs ne contrôlent pas le flux
 
-Le callback SSE `onInvalidEvent` observe les événements écartés. Une exception ou une promesse rejetée par cet observateur est interceptée pour ne pas fermer le flux. En revanche, un observateur asynchrone est attendu et peut retarder les messages suivants.
+Le callback SSE `onInvalidEvent` observe les événements écartés. Les exceptions et les promesses rejetées sont isolées du flux de contrôle du stream, qui poursuit son traitement ; un observateur asynchrone reste toutefois attendu et peut retarder les messages suivants.
 
-Les listeners WebSocket d'état et d'erreur d'exécution sont eux aussi des observateurs, mais l'implémentation actuelle les appelle directement. Gardez-les synchrones, courts et sans exception. Un listener qui lève une exception peut perturber le cycle de vie et ne constitue pas un mécanisme de contrôle de flux pris en charge.
+Les listeners WebSocket d'état et d'erreur d'exécution sont eux aussi des observateurs. Les exceptions et les promesses rejetées sont isolées : l'échec d'un listener d'état est transmis aux listeners d'erreur d'exécution, l'échec de ces derniers au `reportError` global s'il existe, tandis que les autres listeners et le cycle de vie continuent.
 
 Pilotez le cycle de vie avec le handle ou la session renvoyé. Réservez les observateurs à une journalisation bornée, aux métriques ou aux mises à jour d'état, puis retirez-les lorsque leur propriétaire disparaît.
 

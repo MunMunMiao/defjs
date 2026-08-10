@@ -42,7 +42,7 @@ const getUser = defineRequest({
 })
 ```
 
-プレースホルダー値はパスセグメントとしてエンコードされず、そのまま挿入されます。識別子を制限するか、信頼できない 1 セグメントに対してコマンド作成前に `encodeURIComponent` を呼んでください。未エンコードのスラッシュやドットセグメントは、解決後のパスを変えることがあります。挿入値に `?` または `#` がある場合、エンドポイントパスの検証でリクエストが拒否されます。
+プレースホルダーには未加工の値を渡します。Defjs は各スカラーを文字列化し、空の値と値全体が `.` または `..` の場合を拒否してから、置換前に `encodeURIComponent` を正確に 1 回適用します。`/`、`?`、`#`、`%`、空白、Unicode は 1 つのパスセグメント内に保たれます。値を事前にエンコードしないでください。`%` は未加工の入力として扱われ、`%25` にエンコードされます。
 
 ## リクエストのエンコーディング
 
@@ -108,15 +108,15 @@ const getUser = defineRequest({
 
 `response.ok` が示すのは `status >= 200 && status < 300` だけです。出力デコード、アプリケーション検証、認可の成功を意味しません。
 
-`output` があり `responseType` を省略した場合、レスポンスはデフォルトで `json` としてパースされます。明示できる形式は `json`、`text`、`blob`、`arraybuffer` です。その後、選択された Struct が構造デコードを行います。`output` を省略すると結果データは `undefined` で、返されるレスポンスラッパーは `body: null` になります。
+`output` があり `responseType` を省略した場合、レスポンスはデフォルトで `json` としてパースされます。明示できる形式は `json`、`text`、`blob`、`arraybuffer` です。その後、選択された Struct が構造デコードを行います。`output` を省略する場合は `responseType` を指定できず、結果データは `undefined` で、返されるレスポンスラッパーは `body: null` になります。ランタイムはレスポンスボディを読み込んだりデコードしたりせず、best-effort でキャンセルします。
 
-### 現在の不正 JSON に関する不具合
+コマンド結果の分類には固定の優先順位があります。ステータス 0 の transport failure → `output` なし → ステータスの完全一致または `UNDECLARED_STATUS` → `response.error` → Struct デコードの順です。そのため、ボディ表現エラーは `output` が宣言されている場合にのみ発生します。Fetch がそのエラーを記録しても、未宣言ステータスの分岐が引き続き優先されます。
 
-::: danger 不正な JSON が成功として扱われることがあります
-現在の Fetch 境界は JSON パースエラーを `HttpResponse.error` に保存し、ボディを `null` のままにします。HTTP コマンド実行は出力 Struct を適用する前にそのパースエラーを確認しません。nullable でない `null` も Struct のゼロ値へデコードされるため、不正な 2xx JSON ボディが現在は `[null, zeroValue, response]` になる可能性があります。
+### 表現エラー
 
-ゼロ値で成功した結果を、サーバーが有効な JSON を返した証拠として扱わないでください。これは実装修正と回帰テストが必要な不具合であり、ドキュメント上の警告だけでは解決しません。
-:::
+宣言済み output とステータスが完全一致した場合に JSON または別のボディ codec が失敗すると、Fetch は元の例外を `HttpResponse.error` に保持します。コマンド実行は出力 Struct を適用する前に停止し、`[RESPONSE_VALIDATION_FAILED, undefined, response]` を返します。元の例外は `cause` に残り、型付きの `error.data` は生成されません。
+
+通常の 2xx 以外のレスポンスは `response.error` を設定しません。ステータスは `status` と `ok` で表します。2xx 以外のステータスとボディが宣言済みでボディが有効なら Struct がデコードされ、結果の `HTTP_STATUS` エラーは型付きボディを `error.data` に保持します。
 
 ## HTTP の実行結果
 
@@ -124,7 +124,7 @@ const getUser = defineRequest({
 const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
 ```
 
-成功時の `response` は Defjs の `SettledResponse` ラッパーで、ボディは `data` と一致します。失敗時にレスポンスが存在するかは、処理がどこまで進んだかで変わります。正確な分類は [Errors](/ja-JP/core/errors) を参照してください。
+成功時の `response` は Defjs の `HttpResponse` ラッパーで、ボディは `data` と一致します。失敗時にレスポンスが存在するかは、処理がどこまで進んだかで変わります。正確な分類は [Errors](/ja-JP/core/errors) を参照してください。
 
 ## キャンセルとタイムアウト
 
@@ -140,6 +140,8 @@ const [error] = await client.execute(command, {
 ```
 
 `signal` はクライアント内部の signal、および正のタイムアウトとマージされます。別フィールドの `abort` は、現在の API に残っている代替キャンセル signal です。`abort` と `timeout` を同時に渡すと `REQUEST_VALIDATION_FAILED` になります。`signal` はどちらとも組み合わせられます。
+
+HTTP、SSE、WebSocket 実行の `timeout` は `1..2_147_483_647` の範囲にある正の安全な整数でなければならず、`0`、負数、小数、`NaN`、`Infinity`、上限を超える値を指定すると、request、stream、socket のリソースを作成する前に `REQUEST_VALIDATION_FAILED` になります。
 
 認識されたキャンセルは `ABORTED` になります。`AbortSignal.timeout(...)` の理由または実行タイムアウトは `TIMEOUT`、その他の Fetch 失敗は `NETWORK_ERROR` です。
 
@@ -205,4 +207,4 @@ const [error, file] = await client.execute(downloadFile(), {
 
 - [Interceptors](/ja-JP/core/interceptors) — リクエストの複製、ショートサーキット、再試行
 - [Errors](/ja-JP/core/errors) — HTTP ステータス、トランスポート、定義の失敗
-- [Struct](/ja-JP/core/struct) — ゼロ値を使う構造デコード
+- [Struct](/ja-JP/core/struct) — 厳密な構造デコード

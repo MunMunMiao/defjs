@@ -8,7 +8,7 @@ export interface HttpProgressEvent {
   readonly total: number
 }
 
-export type HttpProgressFn = (event: HttpProgressEvent) => void
+export type HttpProgressFn = (event: HttpProgressEvent) => Promise<void> | void
 
 export interface HttpRequest {
   abort?: AbortSignal

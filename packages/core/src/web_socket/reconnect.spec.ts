@@ -7,9 +7,25 @@ describe('reconnect config', () => {
     expect(normalizeReconnectConfig(undefined)).toBeUndefined()
   })
 
-  test('normalizeReconnectConfig returns undefined when attempts <= 0', () => {
+  test('normalizeReconnectConfig returns undefined when attempts is zero', () => {
     expect(normalizeReconnectConfig({ attempts: 0 })).toBeUndefined()
-    expect(normalizeReconnectConfig({ attempts: -1 })).toBeUndefined()
+  })
+
+  test.each([
+    ['attempts', { attempts: -1 }],
+    ['attempts', { attempts: 1.5 }],
+    ['attempts', { attempts: Number.POSITIVE_INFINITY }],
+    ['delayMs', { delayMs: -1 }],
+    ['delayMs', { delayMs: Number.NaN }],
+    ['factor', { factor: 0 }],
+    ['factor', { factor: Number.POSITIVE_INFINITY }],
+    ['jitter', { jitter: -0.1 }],
+    ['jitter', { jitter: 1.1 }],
+    ['jitter', { jitter: Number.NaN }],
+    ['maxDelayMs', { maxDelayMs: -1 }],
+    ['maxDelayMs', { maxDelayMs: Number.POSITIVE_INFINITY }],
+  ])('rejects invalid %s instead of creating a timer or retry loop', (field, config) => {
+    expect(() => normalizeReconnectConfig(config)).toThrow(`WebSocket reconnect ${field}`)
   })
 
   test('normalizeReconnectConfig uses defaults', () => {
@@ -59,6 +75,24 @@ describe('reconnect config', () => {
       wasClean: false,
     })
   })
+
+  test('normalizeReconnectConfig snapshots shouldReconnect exactly once', () => {
+    const firstPredicate = vi.fn().mockReturnValue(false)
+    const secondPredicate = vi.fn().mockReturnValue(true)
+    let reads = 0
+    const config = normalizeReconnectConfig({
+      get shouldReconnect() {
+        reads += 1
+        return reads === 1 ? firstPredicate : secondPredicate
+      },
+    })
+
+    expect(config?.shouldReconnect({ closeInfo: {}, opened: true } as SocketLifecycleOutcome, 1)).toBe(false)
+    expect(config?.hasShouldReconnect).toBe(true)
+    expect(reads).toBe(1)
+    expect(firstPredicate).toHaveBeenCalledTimes(1)
+    expect(secondPredicate).not.toHaveBeenCalled()
+  })
 })
 
 describe('shouldReconnect', () => {
@@ -81,6 +115,7 @@ describe('shouldReconnect', () => {
       attempts: 0,
       delayMs: 1000,
       factor: 2,
+      hasShouldReconnect: false,
       jitter: 0,
       maxDelayMs: 30000,
       shouldReconnect: () => true,
@@ -109,6 +144,30 @@ describe('computeReconnectDelay', () => {
     }
     expect(computeReconnectDelay(config, 3)).toBe(3000)
     expect(computeReconnectDelay(config, 10)).toBe(3000)
+  })
+
+  test('clamps a finite delay to the platform timer maximum', () => {
+    const config = normalizeReconnectConfig({ delayMs: 3_000_000_000, factor: 1, maxDelayMs: 4_000_000_000 })
+    expect(config).toBeDefined()
+    if (!config) {
+      throw new Error('Expected reconnect config')
+    }
+    expect(computeReconnectDelay(config, 1)).toBe(2_147_483_647)
+  })
+
+  test('rejects a non-finite computed delay instead of passing it to setTimeout', () => {
+    const config: NormalizedReconnectConfig = {
+      attempts: 1,
+      delayMs: Number.MAX_VALUE,
+      factor: Number.MAX_VALUE,
+      hasShouldReconnect: false,
+      jitter: 1,
+      maxDelayMs: Number.MAX_VALUE,
+      shouldReconnect: () => true,
+    }
+    vi.spyOn(Math, 'random').mockReturnValue(1)
+    expect(() => computeReconnectDelay(config, 2)).toThrow('WebSocket reconnect delay must be finite')
+    vi.restoreAllMocks()
   })
 
   test('applies jitter within range', () => {
@@ -144,6 +203,10 @@ describe('wait', () => {
   test('resolves immediately when ms <= 0', async () => {
     await expect(wait(0, new AbortController().signal)).resolves.toBeUndefined()
     await expect(wait(-1, new AbortController().signal)).resolves.toBeUndefined()
+  })
+
+  test('rejects non-finite waits before Node can emit a timer overflow warning', async () => {
+    await expect(wait(Number.POSITIVE_INFINITY, new AbortController().signal)).rejects.toThrow('WebSocket reconnect delay must be finite')
   })
 
   test('rejects when signal is already aborted', async () => {

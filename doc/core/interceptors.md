@@ -48,6 +48,8 @@ Multiple `withInterceptors(...)` calls append:
 createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
+A WebSocket interceptor may call its `next` function at most once. If the chain fails after `next` created a session, Core settles that undelivered session before returning the original interceptor error. If the chain succeeds with a different short-circuit session, Core closes the created session; a wrapper remains associated by delegating the original `closed` Promise.
+
 ## Clone Requests Safely
 
 Treat the incoming request as owned by the chain. Create a new `Headers` object before changing headers:
@@ -106,6 +108,9 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
+    get bufferedAmount() {
+      return session.bufferedAmount
+    },
     get connection() {
       return session.connection
     },
@@ -255,7 +260,7 @@ Credential providers run when a request passes through the interceptor. Keep ser
 
 ## Observer and Callback Safety
 
-SSE and WebSocket interceptors can attach lifecycle observers to returned handles. Unsubscribe WebSocket listeners when their owner ends. Keep listeners and predicates non-throwing; the current realtime implementations do not isolate every listener or reconnect predicate failure.
+SSE and WebSocket interceptors can attach lifecycle observers to returned handles. Unsubscribe WebSocket listeners when their owner ends. WebSocket isolates a state-listener failure through runtime-error observers, forwards a failing runtime-error observer to `reportError`, and treats a thrown reconnect predicate as a terminal session error.
 
 An interceptor can throw or reject. The high-level transport may normalize some failures into a `RequestError`, but interceptor code should not depend on a blanket never-reject guarantee.
 

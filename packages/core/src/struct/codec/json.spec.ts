@@ -29,6 +29,30 @@ describe('codec/json.ts', () => {
     expect(decodeJson(user, { page_size: 50, page: 1 })).toEqual({ pageSize: 50, page: 1 })
   })
 
+  test('stops alias decoding at the first invalid field', () => {
+    const user = struct.object({
+      id: struct.string().alias('user_id'),
+      name: struct.string().alias('user_name'),
+    })
+    let laterReads = 0
+    const input = Object.defineProperties(
+      {},
+      {
+        user_id: { enumerable: true, value: 1 },
+        user_name: {
+          enumerable: true,
+          get() {
+            laterReads += 1
+            throw new Error('later field must not be read')
+          },
+        },
+      },
+    )
+
+    expect(() => decodeJson(user, input)).toThrow(expect.objectContaining({ issues: [expect.objectContaining({ path: ['id'] })] }))
+    expect(laterReads).toBe(0)
+  })
+
   test('unknown JSON wire keys are ignored', () => {
     const query = struct.object({
       pageSize: struct.number().alias('page_size'),
@@ -128,10 +152,9 @@ describe('codec/json.ts', () => {
       count: 3,
       type: 'count',
     })
-    expect(decodeJson(event, { count: 1, kind: 'message' })).toEqual({
-      payload: '',
-      type: 'message',
-    })
+    expect(() => decodeJson(event, { count: 1, kind: 'message' })).toThrow(
+      expect.objectContaining({ issues: [expect.objectContaining({ code: 'invalid_union', path: [] })] }),
+    )
   })
 
   test('selects aliased union branches by scalar field type without a discriminator', () => {
@@ -152,6 +175,44 @@ describe('codec/json.ts', () => {
     )
 
     expect(encodeJson(Payload, { kind: 'date', at: null })).toEqual({ kind: 'date', created_at: null })
+  })
+
+  test('selects an aliased union branch whose literal discriminator is null', () => {
+    const Payload = struct.or(
+      struct.object({ kind: struct.literal(null).alias('event_type'), value: struct.string().alias('body') }),
+      struct.object({ kind: struct.literal('text').alias('event_type'), value: struct.string() }),
+    )
+
+    expect(encodeJson(Payload, { kind: null, value: 'hello' })).toEqual({ event_type: null, body: 'hello' })
+  })
+
+  test('does not select a union branch whose required nullable field is missing', () => {
+    const Payload = struct.or(
+      struct.object({ kind: struct.literal('date').alias('event_type'), at: struct.date().null().alias('created_at') }),
+      struct.object({ kind: struct.literal('text').alias('event_type'), value: struct.string() }),
+    )
+
+    expect(encodeJson(Payload, { kind: 'date' } as never)).toEqual({ kind: 'date' })
+  })
+
+  test('does not select a request union branch with a missing declared section', () => {
+    const Payload = struct.or(
+      struct.request({ query: struct.object({ page: struct.number().alias('p') }) }),
+      struct.object({ kind: struct.literal('fallback').alias('event_type') }),
+    )
+
+    expect(encodeJson(Payload, { kind: 'fallback' })).toEqual({ event_type: 'fallback' })
+  })
+
+  test('does not select an incomplete discriminated-union branch inside or', () => {
+    const Payload = struct.or(
+      struct.discriminatedUnion('type', [
+        struct.object({ type: struct.literal('message').alias('kind'), payload: struct.string().alias('body') }),
+      ]),
+      struct.object({ type: struct.literal('message').alias('fallback_kind') }),
+    )
+
+    expect(encodeJson(Payload, { type: 'message' } as never)).toEqual({ fallback_kind: 'message' })
   })
 
   test('selects aliased union branch by runtime date value rather than string wire guard', () => {
@@ -239,10 +300,9 @@ describe('codec/json.ts', () => {
       count: 3,
       type: 'count',
     })
-    expect(decodeJson(event, { count: 1, kind: 'message' })).toEqual({
-      payload: '',
-      type: 'message',
-    })
+    expect(() => decodeJson(event, { count: 1, kind: 'message' })).toThrow(
+      expect.objectContaining({ issues: [expect.objectContaining({ code: 'missing_key', path: ['payload'] })] }),
+    )
   })
 
   test('routes aliased discriminated union by discriminator wire key before normalizing target branch', () => {
@@ -254,14 +314,54 @@ describe('codec/json.ts', () => {
     expect(decodeJson(Message, { kind: 'count', total_count: 3 })).toEqual({ type: 'count', count: 3 })
   })
 
-  test('rejects conflicting aliased discriminators in discriminated union decode', () => {
+  test('routes an unaliased discriminator before decoding aliased branch fields', () => {
+    const Message = struct.discriminatedUnion('type', [
+      struct.object({ type: struct.literal('text'), body: struct.string().alias('message_body') }),
+    ])
+
+    expect(decodeJson(Message, { type: 'text', message_body: 'hello' })).toEqual({ type: 'text', body: 'hello' })
+  })
+
+  test('reuses resolved discriminator metadata from a getter-defined shape', () => {
+    let typeReads = 0
+    const Message = struct.discriminatedUnion('type', [
+      struct.object({
+        body: struct.string().alias('message_body'),
+        get type() {
+          typeReads += 1
+          if (typeReads > 2) {
+            throw new Error('schema discriminator reread')
+          }
+          return struct.literal('text').alias('kind')
+        },
+      }),
+    ])
+
+    expect(decodeJson(Message, { kind: 'text', message_body: 'hello' })).toEqual({ type: 'text', body: 'hello' })
+    expect(typeReads).toBe(2)
+  })
+
+  test('stops after the first aliased discriminator selects a branch', () => {
     const Message = struct.discriminatedUnion('type', [
       struct.object({ type: struct.literal('text').alias('kind'), body: struct.string() }),
       struct.object({ type: struct.literal('count').alias('event_type'), count: struct.number() }),
     ])
+    let laterReads = 0
+    const input = {
+      body: 1,
+      kind: 'text',
+      get event_type() {
+        laterReads += 1
+        throw new Error('later discriminator must not be read')
+      },
+    }
 
-    expect(() => decodeJson(Message, { kind: 'text', event_type: 'count', count: 1 })).toThrow(
-      'ambiguous discriminated union discriminator',
+    expect(() => decodeJson(Message, input)).toThrow(
+      expect.objectContaining({ issues: [expect.objectContaining({ code: 'invalid_type', path: ['body'] })] }),
+    )
+    expect(laterReads).toBe(0)
+    expect(() => decodeJson(Message, { kind: 'count', count: 1 })).toThrow(
+      expect.objectContaining({ issues: [expect.objectContaining({ code: 'invalid_union', path: ['type'] })] }),
     )
   })
 
@@ -273,7 +373,9 @@ describe('codec/json.ts', () => {
 
     expect(encodeJson(intersectionStruct, { name: 'Miao' })).toEqual({ full_name: 'Miao' })
     expect(decodeJson(intersectionStruct, { full_name: 'Miao' })).toEqual({ name: 'Miao' })
-    expect(decodeJson(intersectionStruct, {})).toEqual({ name: '' })
+    expect(() => decodeJson(intersectionStruct, {})).toThrow(
+      expect.objectContaining({ issues: [expect.objectContaining({ code: 'missing_key', path: ['name'] })] }),
+    )
   })
 
   test('encodes and decodes both aliased intersection object sides', () => {

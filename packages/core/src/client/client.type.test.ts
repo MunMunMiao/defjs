@@ -1,5 +1,9 @@
 import type { HttpRequest } from '../internal/http_request'
 import type { Client, ClientConfig, ClientOptions, QueryParamsSerializer } from './index'
+
+// @ts-expect-error withWebSocketQueue was removed; endpoint definitions own queue limits
+import { withWebSocketQueue } from './index'
+
 import {
   createClient,
   withCredentials,
@@ -10,8 +14,8 @@ import {
   withWebSocketBeforeConnect,
   withWebSocketHandle,
   withWebSocketHeartbeat,
+  withWebSocketOptions,
   withWebSocketProtocols,
-  withWebSocketQueue,
   withWebSocketReconnect,
   withXSRF,
 } from './index'
@@ -57,15 +61,14 @@ const client = createClient(
   withHTTPHandle(customFetch),
   withSSEHandle(customFetch),
   withWebSocketHandle(MockWebSocket as unknown as typeof WebSocket),
-  withWebSocketBeforeConnect(async () => undefined),
+  withWebSocketBeforeConnect(async ({ attempt, signal }) => {
+    void attempt
+    void signal
+  }),
   withWebSocketProtocols(['json']),
   withWebSocketHeartbeat({
     intervalMs: 1_000,
     timeoutMs: 5_000,
-  }),
-  withWebSocketQueue({
-    maxSize: 128,
-    overflow: 'drop-oldest',
   }),
   withWebSocketReconnect({
     attempts: 3,
@@ -93,16 +96,15 @@ const options = {
   },
   webSocket: {
     handle: MockWebSocket as unknown as typeof WebSocket,
-    beforeConnect: async () => undefined,
+    beforeConnect: async ({ attempt, signal }) => {
+      void attempt
+      void signal
+    },
     heartbeat: {
       intervalMs: 1_000,
       timeoutMs: 5_000,
     },
     protocols: ['json'],
-    queue: {
-      maxSize: 128,
-      overflow: 'drop-oldest',
-    },
     reconnect: {
       attempts: 3,
       delayMs: 1_000,
@@ -152,8 +154,15 @@ createClient(withEndpoint('https://api.example.com'), withWebSocketHeartbeat({ t
 // @ts-expect-error withWebSocketBeforeConnect expects a function
 createClient(withEndpoint('https://api.example.com'), withWebSocketBeforeConnect('not-a-function'))
 
-// @ts-expect-error withWebSocketQueue overflow must be a known strategy
-createClient(withEndpoint('https://api.example.com'), withWebSocketQueue({ overflow: 'invalid' }))
+void withWebSocketQueue
+
+createClient(
+  withEndpoint('https://api.example.com'),
+  withWebSocketOptions({
+    // @ts-expect-error client-level WebSocket queue configuration was removed
+    queue: { maxSize: 1 },
+  }),
+)
 
 // @ts-expect-error withWebSocketReconnect attempts must be numeric
 createClient(withEndpoint('https://api.example.com'), withWebSocketReconnect({ attempts: '3' }))

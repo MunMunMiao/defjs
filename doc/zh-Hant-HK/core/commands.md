@@ -30,14 +30,14 @@ const result = await client.execute(command)
 
 `defineRequest(...)` 接受以下欄位：
 
-| 欄位           | 意思                                                                                |
-| -------------- | ----------------------------------------------------------------------------------- |
-| `method`       | HTTP method string。                                                                |
-| `path`         | 相對 endpoint path，可包含 `:name` placeholder。                                    |
-| `input`        | 對 command input 作結構式解碼的 Struct。                                            |
-| `build`        | 把 input 欄位投影至 request part 的 schema-bound projection；必須同時提供 `input`。 |
-| `output`       | 用於 response decoding 與 result inference 的 status-to-Struct mapping。            |
-| `responseType` | 可選的 `json`、`text`、`blob` 或 `arraybuffer` response mode。                      |
+| 欄位           | 意思                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `method`       | HTTP method string。                                                                           |
+| `path`         | 相對 endpoint path，可包含 `:name` placeholder。                                               |
+| `input`        | 對 command input 作結構式解碼的 Struct。                                                       |
+| `build`        | 把 input 欄位投影至 request part 的 schema-bound projection；必須同時提供 `input`。            |
+| `output`       | 用於 response decoding 與 result inference 的 status-to-Struct mapping。                       |
+| `responseType` | 只可在宣告 `output` 時選用 `json`、`text`、`blob` 或 `arraybuffer`；省略 `output` 時禁止宣告。 |
 
 Command 欄位直接對應 wire section 時，使用 `struct.request(...)`：
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-Object Struct 的 input property 在 type level 全部 optional，request section 亦可省略。結構式解碼會以零值填入 non-optional output 欄位，所以這兩種 shape 都不會令 builder argument 成為必填。
+宣告 `input` 後，必填 object field 與每個已宣告 request section 都必須提供。只有 optional 或 nullish field 可以省略；endpoint 不使用的 section 不要宣告。
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-如果 builder 必須接收 argument，請使用 primitive 或 array input。以下用 primitive，並投影至 path parameter：
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-這只控制 argument optionality，不是 business validation。呼叫方仍可傳入 Struct input type 接受的值；缺少的 object 欄位會得到零值。
+這只驗證結構存在與 type，不負責應用層 authorization、range、amount、format 或 state-transition rule。
 
 ## 自動建立 Request
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 HTTP success type 是所有已宣告 2xx body 的 union。`error.data` 則是所有已宣告 non-2xx body 的 union。Array form 需要 `as const`，才可保留 status literal 與 grouped readonly array。
 
-宣告 `output` 後，每個回傳 status 都要有 matching Struct。無論 2xx 或 non-2xx，未匹配都會產生 `UNDECLARED_STATUS`。省略 `output` 時，response body 會被忽略，result 是 `undefined`。
+宣告 `output` 後，每個回傳 status 都要有 matching Struct。無論 2xx 或 non-2xx，未匹配都會產生 `UNDECLARED_STATUS`。省略 `output` 時不會讀取或解碼 response body，並會盡力取消它；result 是 `undefined`。
 
 ## SSE 與 WebSocket 定義
 
@@ -224,6 +209,8 @@ HTTP success type 是所有已宣告 2xx body 的 union。`error.data` 則是所
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ Root entry 目前會匯出 transport command interface 與 low-level executor fu
 
 - [Client](/zh-Hant-HK/core/client)：execute overload 與 option composition。
 - [HTTP](/zh-Hant-HK/core/http)：URL、encoding、response 與 cancellation 行為。
-- [Struct](/zh-Hant-HK/core/struct)：結構式解碼與零值。
+- [Struct](/zh-Hant-HK/core/struct)：嚴格結構式解碼。

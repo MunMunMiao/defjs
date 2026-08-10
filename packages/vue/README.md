@@ -4,13 +4,11 @@ Thin Vue 3 adapter for `@defjs/core`. It provides Vue plugin and inject wiring s
 
 Supports Vue 3+.
 
-## Repository workspace setup
+## Package and repository setup
 
-This README documents source/workspace usage from this repository. `@defjs/vue` lives at `packages/vue`, and its peer dependency expects the matching workspace version of `@defjs/core` from `packages/core`.
+Install `@defjs/vue` with compatible `@defjs/core` and `vue` releases. Inside this repository, those package names resolve to the workspace source packages at `packages/vue` and `packages/core`.
 
-The imports below use package names, but in this repository they resolve to workspace source packages rather than a registry-published package pair. Public npm does not currently provide `@defjs/vue`, and the latest standalone `@defjs/core` release available there does not match the API shown here. If you later publish compatible `@defjs/vue` and `@defjs/core` versions, install those published packages together with a compatible `vue` version in that environment instead of mixing this package with an older standalone `@defjs/core` release.
-
-Current workspace/package baseline: this repository uses `Node >=26`, `pnpm@11.6.0`, and `engine-strict=true`, and `packages/vue/package.json` currently declares `engines.node >=26`. That means this source checkout and any package built from the current manifests have a Node >=26 floor. If you install a future published package, follow the engine field and release notes that ship with that published version.
+Repository development uses Node 26 or newer with `pnpm@11.6.0` and `engine-strict=true`. The published package manifest supports Node 22 or newer, and CI verifies the same packed artifact on Node 22, 24, and 26.
 
 ## What this package does
 

@@ -98,8 +98,20 @@ export async function setup({ provide }: TestProject) {
     })
   })
 
+  app.post('/json/alias', async (c) => {
+    const body = await c.req.json<{ user_name?: unknown }>()
+    return c.json({ user_name: body.user_name })
+  })
+
   app.get('/text', (c) => c.text('Hello World!'))
   app.get('/json', (c) => c.json({ id: 1 }))
+  app.get('/json/malformed-error', (c) =>
+    c.body('{not-json}', {
+      headers: { 'content-type': 'application/json' },
+      status: 500,
+      statusText: 'Server Error',
+    }),
+  )
   app.get('/null', (c) => c.body(null, 200))
   app.get('/no-content-type', (c) => {
     c.header('content-type', '')

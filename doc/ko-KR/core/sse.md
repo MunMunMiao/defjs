@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: Server-Sent Events를 정의하고 디코딩하며 시작을 처리하고 공유 이벤트 큐를 소비하고 재연결을 설정하고 소유한 스트림을 닫습니다.
+description: 제한된 Server-Sent Events를 정의하고 디코딩하며 재연결을 설정하고 소유한 스트림을 닫습니다.
 ---
 
 # SSE
@@ -11,6 +11,8 @@ description: Server-Sent Events를 정의하고 디코딩하며 시작을 처리
 import { defineEventStream, struct } from '@defjs/core'
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(
@@ -43,6 +45,8 @@ SSE `data:`는 text로 들어옵니다.
 
 ```typescript
 const events = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/events',
   events: {
     update: struct.json(struct.object({ version: struct.number() })),
@@ -59,6 +63,8 @@ path, query, header section에는 `struct.request(...)`를 사용합니다.
 
 ```typescript
 const roomEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -81,6 +87,8 @@ const [error, stream, startupOpen] = await client.execute(
   }),
 )
 ```
+
+HTTP, SSE, WebSocket 실행의 `timeout`은 `1..2_147_483_647` 범위의 양의 안전 정수여야 하며, `0`, 음수, 소수, `NaN`, `Infinity`, 상한을 넘는 값은 request, stream, socket 리소스를 만들기 전에 `REQUEST_VALIDATION_FAILED`를 반환합니다.
 
 SSE는 다음 값을 반환합니다.
 
@@ -148,7 +156,8 @@ async function consumeNotifications(signal: AbortSignal) {
 ```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message }) => {
+  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+    if (signal.aborted) return
     recordInvalidEvent({ eventName: message.event, reason })
   }),
 )
@@ -157,10 +166,11 @@ const client = createClient(
 observer는 다음 값을 받습니다.
 
 - `reason: 'missing-struct' | 'validation-failed'`
-- 원본 event `id`, 이름, data text, 선택적인 retry 값
+- 원본 event `id`, 이름, data text
 - 검증 실패의 `cause`
+- 현재 시도의 `signal`
 
-이 이벤트는 버립니다. 이후 유효한 이벤트는 계속 전달될 수 있습니다. observer의 throw와 reject는 잡아서 처리하지만, 비동기 observer는 이후 메시지 처리를 계속하기 전에 await합니다. 빠르게 끝나도록 작성하세요. 원본 `id`, `data`, `cause`를 기록하기 전에 검토하고 민감 정보를 마스킹하세요.
+이 이벤트는 버리지만 이후 유효한 이벤트는 전달될 수 있습니다. Observer 오류는 격리되고 abort는 `signal`을 통해 대기 중인 observer를 중단합니다. 빠르게 끝나도록 작성하고 원본 `id`, `data`, `cause`는 기록 전에 마스킹하세요.
 
 ## 재연결
 
@@ -194,44 +204,26 @@ withSSEReconnect({
 })
 ```
 
-트랜스포트는 이후 시도에 최신 event ID를 `Last-Event-ID`로 보냅니다. `shouldReconnect`는 throw하지 않게 작성하세요. predicate가 throw하거나 reject하면 현재 모든 대기 iterator 또는 `stream.closed` 경로가 반드시 settle된다고 보장할 수 없습니다.
+트랜스포트는 이후 시도에 최신 event ID를 `Last-Event-ID`로 보냅니다. `shouldReconnect`가 throw하거나 reject하면 retry가 중단되고 대기 중인 startup 또는 stream이 해당 policy 오류로 settle됩니다. Abort는 현재 시도의 signal을 통해 대기 중인 predicate를 중단합니다.
 
 HTTP/open 검증 실패, 메시지 처리의 fatal 오류, 정상 EOF는 재시도 가능한 네트워크/read 실패와 다릅니다. 모든 최종 경로가 재연결된다고 가정하지 마세요.
 
-## 공유 작업 큐
+## 엔드포인트 소유 제한
 
-async iterable은 논리 스트림 하나의 공유 작업 큐입니다. 독립된 subscription이나 broadcast가 아니며 backpressure도 제공하지 않습니다.
+스트림에는 async iterator consumer가 정확히 하나만 허용됩니다. 두 번째 iterator 생성은 오류를 던지며, 루프를 빠져나갈 때도 `stream.close(...)`를 명시적으로 호출해야 합니다.
 
-기본 큐는 무제한입니다. `withSSEQueue(...)` 또는 `withSSEOptions({ queue })`로 제한하세요.
-
-```typescript
-withSSEQueue({
-  maxSize: 100,
-  overflow: 'drop-oldest',
-})
-```
-
-| Overflow      | 제한에 도달했을 때의 동작                                     |
-| ------------- | ------------------------------------------------------------- |
-| `drop-newest` | 새로 들어온 이벤트를 버립니다.                                |
-| `drop-oldest` | buffer의 가장 오래된 이벤트를 제거한 뒤 새 이벤트를 넣습니다. |
-| `error`       | queue overflow 오류를 throw하고 처리를 종료합니다.            |
-
-iterator가 여러 개면 각자 복사본을 받지 않고 값을 차지하려고 경쟁합니다. iterator에 생명주기를 처리하는 `return()` 구현이 없으므로 한 `for await` loop에서 `break`해도 트랜스포트가 닫히지 않습니다. `stream.close(...)`를 명시적으로 호출하세요.
-
-close는 큐를 done 상태로 표시하지만 이미 buffer에 있는 값은 버리지 않습니다. consumer는 다음 iteration에서 `done: true`를 받기 전에 남은 값을 비울 수 있습니다.
-
-### Parser buffer 제한
-
-이벤트 큐와 parser buffer는 별개입니다. `withSSEOptions(...)`에서 양수 `maxBufferSize`를 설정해 끝나지 않은 SSE line에 보관하는 byte 수를 제한하세요.
+모든 정의에는 양의 안전한 정수 `maxBufferSize`와 `maxQueueSize`가 필요합니다. 전자는 각 SSE line과 현재 event data를, 후자는 소비 대기 중인 파싱된 event를 제한합니다. Queue overflow는 fatal이며 event를 조용히 버리지 않습니다.
 
 ```typescript
-withSSEOptions({
+const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.json(notificationStruct) },
 })
 ```
 
-시작 이후 이 제한을 넘으면 iterator가 reject되고 스트림은 `code: 'error'`로 닫힙니다. 생략하면 이 parser buffer는 무제한입니다.
+정상 EOF에서는 buffered event를 계속 비울 수 있습니다. Fatal parser, transform, overflow 오류는 buffer를 지우고 active body를 취소하며 iteration을 reject하고 `stream.closed`를 `code: 'error'`로 settle합니다.
 
 ## 최종 종료
 

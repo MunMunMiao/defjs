@@ -152,16 +152,7 @@ export된 함수에서 throw하는 것은 애플리케이션 통합상의 선택
 
 ```typescript
 // consume-notifications.ts
-import {
-  createClient,
-  defineEventStream,
-  struct,
-  type Infer,
-  withEndpoint,
-  withSSEOnInvalidEvent,
-  withSSEQueue,
-  withSSEReconnect,
-} from '@defjs/core'
+import { createClient, defineEventStream, struct, type Infer, withEndpoint, withSSEOnInvalidEvent, withSSEReconnect } from '@defjs/core'
 
 const notificationStruct = struct.object({
   id: struct.number(),
@@ -175,6 +166,8 @@ interface NotificationHandlers {
 }
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(notificationStruct),
@@ -185,7 +178,6 @@ export async function consumeNotifications(signal: AbortSignal, handlers: Notifi
   const client = createClient(
     withEndpoint('https://api.example.com'),
     withSSEReconnect({ attempts: 5, delayMs: 1_000, maxDelayMs: 10_000 }),
-    withSSEQueue({ maxSize: 100, overflow: 'drop-oldest' }),
     withSSEOnInvalidEvent(({ reason, message }) => {
       handlers.onInvalid({ eventName: message.event, reason })
     }),
@@ -215,19 +207,11 @@ handler는 빠르고 throw하지 않게 작성해야 합니다. 이 레시피는
 
 ## WebSocket room consumer
 
-재연결을 명시적으로 활성화합니다. 이 함수는 논리 세션 생명주기 동안 무제한 incoming 큐를 소비하고 outgoing 큐를 제한하며 모든 종료 경로에서 세션을 닫습니다.
+재연결을 명시적으로 활성화합니다. endpoint가 incoming/outgoing 용량을 제한하고 하나의 iterator가 논리 세션을 소비하며 모든 종료 경로에서 세션을 닫습니다.
 
 ```typescript
 // consume-room.ts
-import {
-  createClient,
-  defineWebSocket,
-  struct,
-  withEndpoint,
-  withWebSocketHeartbeat,
-  withWebSocketQueue,
-  withWebSocketReconnect,
-} from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketHeartbeat, withWebSocketReconnect } from '@defjs/core'
 
 interface RoomHandlers {
   onMessage(message: { text: string; userId: number }): void
@@ -235,6 +219,8 @@ interface RoomHandlers {
 }
 
 const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   path: '/rooms/:roomId',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -262,11 +248,9 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
       message: () => ({ type: 'ping' }),
       isAck: (message) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'pong',
     }),
-    withWebSocketQueue({ maxSize: 20, overflow: 'drop-oldest' }),
   )
 
-  const encodedRoomId = encodeURIComponent(roomId)
-  const [error, session] = await client.execute(room({ path: { roomId: encodedRoomId } }), { signal })
+  const [error, session] = await client.execute(room({ path: { roomId } }), { signal })
 
   if (error) {
     throw error
@@ -292,7 +276,7 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
 }
 ```
 
-endpoint path는 placeholder를 인코딩하지 않으므로 이 레시피는 커맨드를 만들기 전에 segment 하나를 인코딩합니다. 결과 URL이나 payload는 로그에 남기지 않습니다.
+placeholder 값은 원본 그대로 전달합니다. Core는 path에 치환할 때 각 값을 정확히 한 번 인코딩합니다. `%`가 다시 인코딩되므로 미리 인코딩하지 마세요. 이 레시피는 결과 URL이나 payload를 로그에 남기지 않습니다.
 
 ## 인증과 operation metric
 

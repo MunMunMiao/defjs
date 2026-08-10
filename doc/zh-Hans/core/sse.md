@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: 定义并解码 Server-Sent Events，处理启动流程，消费共享 event queue，配置重连，并关闭自己拥有的 stream。
+description: 定义并解码有界 Server-Sent Events，配置重连，并关闭自己拥有的 stream。
 ---
 
 # SSE
@@ -11,6 +11,8 @@ description: 定义并解码 Server-Sent Events，处理启动流程，消费共
 import { defineEventStream, struct } from '@defjs/core'
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(
@@ -43,6 +45,8 @@ SSE `data:` 以 text 到达：
 
 ```typescript
 const events = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/events',
   events: {
     update: struct.json(struct.object({ version: struct.number() })),
@@ -59,6 +63,8 @@ Path、query 和 header section 使用 `struct.request(...)`：
 
 ```typescript
 const roomEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -81,6 +87,8 @@ const [error, stream, startupOpen] = await client.execute(
   }),
 )
 ```
+
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
 
 SSE 返回：
 
@@ -148,7 +156,8 @@ async function consumeNotifications(signal: AbortSignal) {
 ```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message }) => {
+  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+    if (signal.aborted) return
     recordInvalidEvent({ eventName: message.event, reason })
   }),
 )
@@ -157,10 +166,11 @@ const client = createClient(
 Observer 会收到：
 
 - `reason: 'missing-struct' | 'validation-failed'`；
-- 原始 event 的 `id`、name、data text 和可选 retry value；
+- 原始 event 的 `id`、name 和 data text；
 - validation failure 的 `cause`。
+- 当前 attempt 的 `signal`。
 
-该 event 会被丢弃，后续合法 event 仍可正常投递。Observer 抛错和 rejected promise 会被捕获，但 async observer 会在继续处理后续消息前被等待。请保持它足够快。记录原始 `id`、`data` 或 `cause` 前要先审查并脱敏。
+该 event 会被丢弃，后续合法 event 仍可正常投递。Observer 抛错和 rejected promise 会被隔离；abort 会通过 `signal` 立即打断 pending observer。请保持它足够快，并在记录原始 `id`、`data` 或 `cause` 前脱敏。
 
 ## 重连
 
@@ -194,44 +204,26 @@ withSSEReconnect({
 })
 ```
 
-Transport 会在后续尝试中把最近的 event ID 作为 `Last-Event-ID` 发送。确保 `shouldReconnect` 不抛错。Predicate 抛错或 reject 时，目前不能保证所有 pending iterator 或 `stream.closed` path 都会 settle。
+Transport 会在后续 attempt 中把最近的 event ID 作为 `Last-Event-ID` 发送。`shouldReconnect` 抛错或 reject 时会停止 retry，并让 pending startup 或 stream 以该 policy error settle。Abort 会通过当前 attempt signal 打断 pending predicate。
 
 HTTP/open validation failure、消息处理 fatal error 和正常 EOF 都不同于可重试的网络/read failure。不要假定每条终止路径都会重连。
 
-## 共享工作队列
+## Endpoint 自有资源上限
 
-Async iterable 是逻辑 stream 上的一个共享工作队列（shared work queue），不是 subscription、broadcast 或 backpressure 机制。
+一个 stream 只允许一个 async iterator consumer；创建第二个 iterator 会抛错。退出循环时仍需显式调用 `stream.close(...)`。
 
-Queue 默认无界。用 `withSSEQueue(...)` 或 `withSSEOptions({ queue })` 设置上限：
-
-```typescript
-withSSEQueue({
-  maxSize: 100,
-  overflow: 'drop-oldest',
-})
-```
-
-| Overflow      | 达到上限时的行为                                 |
-| ------------- | ------------------------------------------------ |
-| `drop-newest` | 丢弃刚到达的 event。                             |
-| `drop-oldest` | 移除最旧的 buffered event，再 enqueue 新 event。 |
-| `error`       | 抛出 queue overflow error 并终止处理。           |
-
-多个 iterator 会竞争 value，不会各自收到副本。退出某个 `for await` loop 不会关闭 transport，因为 iterator 没有 lifecycle-aware `return()` implementation。必须显式调用 `stream.close(...)`。
-
-关闭只会把 queue 标记为 done，不会丢弃已 buffer 的 value。Consumer 可以先 drain 这些 value，下一次迭代才会得到 `done: true`。
-
-### Parser Buffer 上限
-
-Event queue 和 parser buffer 是两回事。通过 `withSSEOptions(...)` 设置正数 `maxBufferSize`，可以限制不完整 SSE line 占用的 byte：
+每个定义都必须提供正安全整数 `maxBufferSize` 和 `maxQueueSize`。前者限制每条 SSE line 和当前 event 的累计 data，后者限制等待 consumer 的已解析 event。Queue overflow 是 fatal error，不会静默丢弃 event。
 
 ```typescript
-withSSEOptions({
+const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.json(notificationStruct) },
 })
 ```
 
-启动后超过上限会 reject iterator，并以 `code: 'error'` 关闭 stream。省略该值时，parser buffer 无界。
+正常 EOF 允许 consumer drain 已 buffer 的 event。Fatal parser、transform 或 overflow error 会清空 buffer、cancel active body、reject iteration，并让 `stream.closed` 以 `code: 'error'` settle。
 
 ## 终止关闭
 

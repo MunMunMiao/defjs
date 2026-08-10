@@ -31,9 +31,9 @@ Das Tupel macht erwartete Startfehler explizit, ohne den Kontrollfluss über Exc
 
 ## Lebenszyklusoptionen gehören zur Ausführung
 
-Endpunktdefinitionen beschreiben stabile Wire-Verträge. Abbruch, Timeout, Heartbeat, Reconnect und Warteschlangen gehören zu der Ausführung, die diese Arbeit besitzt.
+Endpunktdefinitionen beschreiben stabile Wire-Verträge und besitzen die begrenzten Transportwarteschlangen. Abbruch, Timeout, Heartbeat und Reconnect gehören zu der Ausführung, die diese Arbeit besitzt.
 
-HTTP und SSE akzeptieren Abbruchoptionen bei der Ausführung. WebSocket akzeptiert außerdem verbindungsbezogene `beforeConnect`-, Heartbeat-, Reconnect-, Protokoll- und Sendewarteschlangenoptionen pro Ausführung. Clientoptionen stellen wiederverwendbare Standardwerte bereit, soweit der jeweilige Transport sie unterstützt.
+HTTP und SSE akzeptieren Abbruchoptionen bei der Ausführung. WebSocket akzeptiert außerdem `beforeConnect`-, Heartbeat-, Reconnect- und Protokolloptionen pro Ausführung. Clientoptionen stellen wiederverwendbare Standardwerte bereit, soweit der Transport sie unterstützt; die eingehende und ausgehende WebSocket-Kapazität bleibt am Endpunkt definiert.
 
 Diese Trennung hält einen Command wiederverwendbar. Ein Hintergrundjob und eine interaktive Ansicht können denselben Command mit verschiedenen Lebenszeiten ausführen, ohne Pfad oder Nachrichtenschema neu zu definieren.
 
@@ -47,9 +47,9 @@ So bleibt der Request-Aufbau an deklarierte Struct-Felder gebunden. Normalisieru
 
 ## Beobachter steuern nicht den Kontrollfluss
 
-SSE-`onInvalidEvent` beobachtet verworfene Events. Geworfene Fehler und abgelehnte Promises werden abgefangen, damit sie den Stream nicht beenden. Ein asynchroner Beobachter wird allerdings abgewartet und kann die Verarbeitung späterer Nachrichten verzögern.
+SSE-`onInvalidEvent` beobachtet verworfene Events. Geworfene Fehler und abgelehnte Promises werden vom Kontrollfluss des Streams isoliert, sodass die Verarbeitung weiterläuft. Ein asynchroner Beobachter wird weiterhin abgewartet und kann spätere Nachrichten verzögern.
 
-WebSocket-Listener für Status und Laufzeitfehler sind ebenfalls Beobachter, werden derzeit aber direkt aufgerufen. Halte sie synchron, klein und frei von Exceptions. Werfende Listener können Lebenszyklusarbeit unterbrechen und sind kein unterstützter Mechanismus zur Steuerung des Kontrollflusses.
+WebSocket-Listener für Status und Laufzeitfehler sind ebenfalls Beobachter. Geworfene Fehler und abgelehnte Promises werden isoliert: Fehler eines Status-Listeners gehen an die Laufzeitfehler-Listener, Fehler eines Laufzeitfehler-Listeners an das globale `reportError`, sofern vorhanden; die übrigen Listener und die Lebenszyklusarbeit laufen weiter.
 
 Nutze den zurückgegebenen Handle oder die Session für Entscheidungen zum Lebenszyklus. Beobachter eignen sich für begrenztes Logging, Metriken oder Zustandsupdates. Entferne sie, sobald ihr Besitzer endet.
 

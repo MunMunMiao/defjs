@@ -1,6 +1,6 @@
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
 import { createFetchInitBase } from '../../http/transport/fetch_init'
-import { mergeAbortSignals } from '../../internal/abort'
+import { awaitWithSignal, mergeAbortSignals, resolveAbortedTransportError } from '../../internal/abort'
 import { AsyncQueue } from '../../internal/async_queue'
 import { createDeferred } from '../../internal/deferred'
 import type { HttpRequest } from '../../internal/http_request'
@@ -8,7 +8,7 @@ import type { HttpResponse } from '../../internal/http_response'
 import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
 import type { EventStreamMessage } from './parser'
-import { createLineParser, createMessageParser, readStreamBytes } from './parser'
+import { createLineParser, createMessageParser, readStreamBytes, SSEParserLimitError } from './parser'
 
 export const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream'
 export const LAST_EVENT_ID_HEADER = 'last-event-id'
@@ -45,23 +45,16 @@ export interface SSEReconnectOptions {
   }) => boolean | Promise<boolean>
 }
 
-export interface SSEQueueOptions {
-  maxSize?: number
-  overflow?: 'drop-newest' | 'drop-oldest' | 'error'
-}
-
 export interface FetchEventStreamOptions<TEvent = EventStreamMessage> {
   fetch?: typeof fetch
   onopen?: (open: EventStreamOpenInfo) => void | Promise<void>
-  onmessage?: (message: EventStreamMessage) => void
   onclose?: (open: EventStreamOpenInfo) => void | Promise<void>
   onerror?: (error: unknown, context: FetchEventStreamErrorContext) => number | null | undefined | Promise<number | null | undefined>
-  transformMessage?: (message: EventStreamMessage) => Promise<TEvent | undefined> | TEvent | undefined
+  transformMessage?: (message: EventStreamMessage, signal: AbortSignal) => Promise<TEvent | undefined> | TEvent | undefined
   retryInterval?: number
-  requireContentType?: boolean
   reconnect?: SSEReconnectOptions
-  queue?: SSEQueueOptions
-  maxBufferSize?: number
+  maxBufferSize: number
+  maxQueueSize: number
 }
 
 export interface FetchEventStreamErrorContext {
@@ -71,24 +64,39 @@ export interface FetchEventStreamErrorContext {
   open?: EventStreamOpenInfo
 }
 
+type EventStreamFatalCode = 'INVALID_RESPONSE' | 'MESSAGE_PROCESSING_FAILED' | 'PARSER_LIMIT_EXCEEDED'
+
 class EventStreamFatalError extends Error {
+  readonly code: EventStreamFatalCode
   cause?: unknown
 
-  constructor(message: string, options?: { cause?: unknown }) {
+  constructor(code: EventStreamFatalCode, message: string, options?: { cause?: unknown }) {
     super(message)
     this.name = 'EventStreamFatalError'
-    /* istanbul ignore else -- unreachable: EventStreamFatalError is always constructed with options */
-    if (options) {
-      this.cause = options.cause
-    }
+    this.code = code
+    this.cause = options?.cause
   }
+}
+
+export function getEventStreamFatalCode(error: unknown): EventStreamFatalCode | undefined {
+  return error instanceof EventStreamFatalError ? error.code : undefined
+}
+
+function toEventStreamFatalError(error: unknown): EventStreamFatalError | undefined {
+  if (error instanceof EventStreamFatalError) {
+    return error
+  }
+  if (error instanceof SSEParserLimitError) {
+    return new EventStreamFatalError('PARSER_LIMIT_EXCEEDED', error.message, { cause: error })
+  }
+  return undefined
 }
 
 export async function fetchEventStream<TEvent = EventStreamMessage>(
   request: HttpRequest,
-  options: FetchEventStreamOptions<TEvent> = {},
+  options: FetchEventStreamOptions<TEvent>,
 ): Promise<EventStreamHandle<TEvent>> {
-  const queue = new AsyncQueue<TEvent>(options.queue)
+  const queue = new AsyncQueue<TEvent>({ maxSize: options.maxQueueSize })
   const closedDeferred = createDeferred<EventStreamCloseInfo>()
   const openDeferred = createDeferred<EventStreamHandle<TEvent>>()
   const closeController = new AbortController()
@@ -133,139 +141,161 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
     },
   }
 
-  void start()
+  // start() contains its terminal catch; this fallback only guards a type-invariant failure outside that catch.
+  void start().catch(
+    /* istanbul ignore next -- @preserve */
+    (error: unknown) => {
+      finishError(error)
+    },
+  )
   return openDeferred.promise
 
   async function start(): Promise<void> {
     while (!closeController.signal.aborted) {
       const attemptAbort = mergeAbortSignals(closeController.signal, [request.abort])
+      let response: Response | undefined
+      let readerStarted = false
 
       try {
-        const response = await fetchImpl(createEventStreamRequest(request, headers, attemptAbort))
+        response = await fetchWithSignal(fetchImpl, createEventStreamRequest(request, headers, attemptAbort), attemptAbort)
         const open = createOpenInfo(response)
         latestOpen = open
 
-        validateOpenResponse(open, options.requireContentType !== false)
-        await options.onopen?.(open)
+        validateOpenResponse(open)
+
+        if (!response.body) {
+          throw new EventStreamFatalError('INVALID_RESPONSE', 'Missing response body for event stream')
+        }
+
+        await runFatalHook(() => options.onopen?.(open), attemptAbort, 'Event stream onopen callback failed')
 
         if (!settledOpen) {
           settledOpen = true
           openDeferred.resolve(handle)
         }
 
-        /* istanbul ignore next -- defensive: standard fetch always returns a body */
-        if (!response.body) {
-          throw new Error('Missing response body for event stream')
-        }
-
+        readerStarted = true
         await consumeEventStream(response.body, attemptAbort)
-        await options.onclose?.(open)
+        await runFatalHook(() => options.onclose?.(open), attemptAbort, 'Event stream onclose callback failed')
 
         queue.close()
         settleClosed({ code: 'eof' })
         return
       } catch (error) {
+        if (response?.body && !readerStarted) {
+          void response.body.cancel(error).catch(() => undefined)
+        }
+
         const normalizedError = normalizeAbortError(error, request.abort, closeController.signal)
 
         if (closeController.signal.aborted || request.abort?.aborted) {
-          /* istanbul ignore next -- request.abort path is a micro-race variant */
-          /* istanbul ignore next -- request.abort path is a micro-race variant */
-          const reason = closeController.signal.aborted ? closeController.signal.reason : request.abort?.reason
-          /* istanbul ignore next -- unreachable: normalizeAbortError always returns a value */
-          const abortedError = normalizedError ?? ERR_ABORTED
-          attachOpenInfo(abortedError, latestOpen)
-
-          if (settledOpen) {
-            queue.close()
-          } else {
-            settledOpen = true
-            openDeferred.reject(abortedError)
-          }
-
-          /* istanbul ignore next -- unreachable: AbortController always sets a default reason */
-          const closeReason = toCloseReason(reason ?? abortedError)
-          /* istanbul ignore next -- unreachable: AbortController always sets a default reason */
-          const closeCause = reason ?? abortedError
-          settleClosed({
-            code: 'aborted',
-            reason: closeReason,
-            cause: closeCause,
-          })
+          finishAborted(attemptAbort)
           return
         }
 
-        /* istanbul ignore next -- unreachable: normalizeAbortError always returns a value */
         const retryError = normalizedError ?? error
-        const retryDelay = await resolveRetryDelay(retryError)
-        if (typeof retryDelay !== 'number' || retryDelay < 0) {
-          /* istanbul ignore next -- unreachable: normalizeAbortError always returns a value */
-          const finalError = normalizedError ?? error
-          attachOpenInfo(finalError, latestOpen)
-          if (settledOpen) {
-            queue.fail(finalError)
+        const fatalError = toEventStreamFatalError(retryError)
+        if (fatalError) {
+          await observeFatalError(fatalError, attemptAbort)
+          if (closeController.signal.aborted || request.abort?.aborted) {
+            finishAborted(attemptAbort)
           } else {
-            settledOpen = true
-            openDeferred.reject(finalError)
+            finishError(fatalError)
           }
-
-          settleClosed({
-            code: 'error',
-            reason: toCloseReason(finalError),
-            cause: finalError,
-          })
           return
         }
 
-        await wait(retryDelay, closeController.signal)
+        let retryDelay: number | null
+        try {
+          retryDelay = await resolveRetryDelay(retryError, attemptAbort)
+        } catch (policyError) {
+          if (closeController.signal.aborted || request.abort?.aborted) {
+            finishAborted(attemptAbort)
+          } else {
+            finishError(policyError)
+          }
+          return
+        }
+
+        if (typeof retryDelay !== 'number' || retryDelay < 0) {
+          finishError(retryError)
+          return
+        }
+
+        try {
+          await wait(retryDelay, attemptAbort)
+        } catch (waitError) {
+          // wait() rejects only from the merged close/request abort signal.
+          /* istanbul ignore else -- @preserve */
+          if (closeController.signal.aborted || request.abort?.aborted) {
+            finishAborted(attemptAbort)
+          } else {
+            finishError(waitError)
+          }
+          return
+        }
       }
     }
   }
 
-  async function consumeEventStream(stream: ReadableStream<Uint8Array>, abort?: AbortSignal): Promise<void> {
-    await readStreamBytes(
-      stream,
-      createLineParser(
-        createMessageParser(
-          (id) => {
-            lastEventId = id
-            if (id) {
-              headers.set(LAST_EVENT_ID_HEADER, id)
-            } else {
-              headers.delete(LAST_EVENT_ID_HEADER)
-            }
-          },
-          (retry) => {
-            retryInterval = retry
-          },
-          async (message) => {
-            try {
-              options.onmessage?.(message)
-              const transformed = options.transformMessage ? await options.transformMessage(message) : (message as TEvent)
+  async function consumeEventStream(stream: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<void> {
+    const parseMessage = createMessageParser(
+      (id) => {
+        lastEventId = id
+        if (id) {
+          headers.set(LAST_EVENT_ID_HEADER, id)
+        } else {
+          headers.delete(LAST_EVENT_ID_HEADER)
+        }
+      },
+      (retry) => {
+        retryInterval = retry
+      },
+      async (message) => {
+        try {
+          const transformed = options.transformMessage
+            ? await awaitWithSignal(() => options.transformMessage?.(message, signal), signal)
+            : (message as TEvent)
 
-              if (typeof transformed !== 'undefined') {
-                queue.push(transformed)
-              }
-            } catch (error) {
-              throw new EventStreamFatalError('Failed to process event stream message', { cause: error })
-            }
-          },
-        ),
-        { maxBufferSize: options.maxBufferSize },
-      ),
-      abort,
+          if (typeof transformed !== 'undefined') {
+            queue.push(transformed)
+          }
+        } catch (error) {
+          if (signal.aborted) {
+            throw error
+          }
+          throw new EventStreamFatalError('MESSAGE_PROCESSING_FAILED', 'Failed to process event stream message', { cause: error })
+        }
+      },
+      { maxBufferSize: options.maxBufferSize },
     )
+    const parseLine = createLineParser(parseMessage, { maxBufferSize: options.maxBufferSize })
+
+    try {
+      await readStreamBytes(stream, parseLine, signal)
+    } catch (error) {
+      if (error instanceof SSEParserLimitError) {
+        throw new EventStreamFatalError('PARSER_LIMIT_EXCEEDED', error.message, { cause: error })
+      }
+      throw error
+    }
   }
 
-  async function resolveRetryDelay(error: unknown): Promise<number | null> {
+  async function resolveRetryDelay(error: unknown, signal: AbortSignal): Promise<number | null> {
     retryCount += 1
 
-    // 1. Respect existing onerror callback first
-    const next = await options.onerror?.(error, {
-      lastEventId,
-      retryCount,
-      retryInterval,
-      open: latestOpen,
-    })
+    const next = options.onerror
+      ? await awaitWithSignal(
+          () =>
+            options.onerror?.(error, {
+              lastEventId,
+              retryCount,
+              retryInterval,
+              open: latestOpen,
+            }),
+          signal,
+        )
+      : undefined
 
     if (next === null) {
       return null
@@ -273,12 +303,16 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
 
     // 2. Check shouldReconnect
     if (options.reconnect?.shouldReconnect) {
-      const should = await options.reconnect.shouldReconnect({
-        attempt: retryCount,
-        cause: error,
-        lastEventId,
-        open: latestOpen,
-      })
+      const should = await awaitWithSignal(
+        () =>
+          options.reconnect?.shouldReconnect?.({
+            attempt: retryCount,
+            cause: error,
+            lastEventId,
+            open: latestOpen,
+          }),
+        signal,
+      )
       if (!should) {
         return null
       }
@@ -311,11 +345,82 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       }
     }
 
-    if (!options.onerror && error instanceof EventStreamFatalError) {
-      return null
+    if (!Number.isFinite(baseDelay)) {
+      throw new TypeError('SSE retry delay must be finite')
     }
 
-    return baseDelay
+    return Math.min(baseDelay, 2_147_483_647)
+  }
+
+  async function observeFatalError(error: EventStreamFatalError, signal: AbortSignal): Promise<void> {
+    if (!options.onerror) {
+      return
+    }
+
+    try {
+      await awaitWithSignal(
+        () =>
+          options.onerror?.(error, {
+            lastEventId,
+            retryCount,
+            retryInterval,
+            open: latestOpen,
+          }),
+        signal,
+      )
+    } catch {
+      // Fatal errors own the terminal outcome; observers cannot replace them.
+    }
+  }
+
+  async function runFatalHook(run: () => void | Promise<void> | undefined, signal: AbortSignal, fallback: string): Promise<void> {
+    try {
+      await awaitWithSignal(run, signal)
+    } catch (error) {
+      if (signal.aborted) {
+        throw error
+      }
+      throw new EventStreamFatalError('MESSAGE_PROCESSING_FAILED', error instanceof Error ? error.message : fallback, { cause: error })
+    }
+  }
+
+  function finishAborted(signal: AbortSignal): void {
+    const abortedError = normalizeAbortReason(signal)
+    if (abortedError === ERR_TIMEOUT) {
+      finishError(ERR_TIMEOUT)
+      return
+    }
+    const closeCause = signal.reason
+    attachOpenInfo(abortedError, latestOpen)
+
+    if (settledOpen) {
+      queue.close()
+    } else {
+      settledOpen = true
+      openDeferred.reject(abortedError)
+    }
+
+    settleClosed({
+      code: 'aborted',
+      reason: toCloseReason(closeCause),
+      cause: closeCause,
+    })
+  }
+
+  function finishError(error: unknown): void {
+    attachOpenInfo(error, latestOpen)
+    if (settledOpen) {
+      queue.fail(error)
+    } else {
+      settledOpen = true
+      openDeferred.reject(error)
+    }
+
+    settleClosed({
+      code: 'error',
+      reason: toCloseReason(error),
+      cause: error,
+    })
   }
 
   function settleClosed(info: EventStreamCloseInfo): void {
@@ -335,6 +440,20 @@ function cloneHeaders(headers?: Headers): Headers {
 function createEventStreamRequest(request: HttpRequest, headers: Headers, abort?: AbortSignal): Request {
   const url = resolveRequestUrl(request)
   return new Request(url, createEventStreamRequestInit(request, headers, abort))
+}
+
+async function fetchWithSignal(fetchImpl: typeof fetch, request: Request, signal: AbortSignal): Promise<Response> {
+  return await awaitWithSignal(() => {
+    const pending = Promise.resolve(fetchImpl(request))
+    void pending
+      .then((response) => {
+        if (signal.aborted && response.body) {
+          void response.body.cancel(signal.reason).catch(() => undefined)
+        }
+      })
+      .catch(() => undefined)
+    return pending
+  }, signal)
 }
 
 function createOpenInfo(response: Response): EventStreamOpenInfo {
@@ -361,20 +480,125 @@ function createEventStreamRequestInit(request: HttpRequest, headers: Headers, ab
   })
 }
 
-function validateOpenResponse(open: EventStreamOpenInfo, requireContentType: boolean): void {
+function validateOpenResponse(open: EventStreamOpenInfo): void {
   const { response } = open
-  if (response.error) {
-    throw new EventStreamFatalError('Event stream request failed', { cause: response.error })
-  }
-
-  if (!requireContentType) {
-    return
+  if (!response.ok || response.error !== undefined) {
+    throw new EventStreamFatalError('INVALID_RESPONSE', 'Event stream request failed', { cause: response.error })
   }
 
   const contentType = response.headers.get('content-type') || ''
-  if (!contentType.toLowerCase().startsWith(EVENT_STREAM_CONTENT_TYPE)) {
-    throw new EventStreamFatalError(`Expected content-type to start with ${EVENT_STREAM_CONTENT_TYPE}, got ${contentType || '(empty)'}`)
+  if (parseMediaTypeEssence(contentType) !== EVENT_STREAM_CONTENT_TYPE) {
+    throw new EventStreamFatalError(
+      'INVALID_RESPONSE',
+      `Expected content-type to start with ${EVENT_STREAM_CONTENT_TYPE}, got ${contentType || '(empty)'}`,
+    )
   }
+}
+
+function parseMediaTypeEssence(value: string): string | undefined {
+  let position = 0
+  const readToken = (): string | undefined => {
+    const start = position
+    while (position < value.length && isHttpTokenChar(value.charCodeAt(position))) {
+      position += 1
+    }
+    return position > start ? value.slice(start, position) : undefined
+  }
+  const skipWhitespace = () => {
+    while (value[position] === ' ' || value[position] === '\t') {
+      position += 1
+    }
+  }
+
+  const type = readToken()
+  if (!type || value[position] !== '/') {
+    return undefined
+  }
+  position += 1
+  const subtype = readToken()
+  if (!subtype) {
+    return undefined
+  }
+
+  while (true) {
+    skipWhitespace()
+    if (position === value.length) {
+      return `${type.toLowerCase()}/${subtype.toLowerCase()}`
+    }
+    if (value[position] !== ';') {
+      return undefined
+    }
+    position += 1
+    skipWhitespace()
+
+    if (!readToken()) {
+      return undefined
+    }
+    skipWhitespace()
+    if (value[position] !== '=') {
+      return undefined
+    }
+    position += 1
+    skipWhitespace()
+
+    if (value[position] === '"') {
+      position += 1
+      let closed = false
+      while (position < value.length) {
+        const code = value.charCodeAt(position)
+        if (code === 0x22) {
+          position += 1
+          closed = true
+          break
+        }
+        if (code === 0x5c) {
+          position += 1
+          if (position >= value.length || !isQuotedPairChar(value.charCodeAt(position))) {
+            return undefined
+          }
+        } else if (!isQuotedTextChar(code)) {
+          return undefined
+        }
+        position += 1
+      }
+      if (!closed) {
+        return undefined
+      }
+    } else if (!readToken()) {
+      return undefined
+    }
+  }
+}
+
+function isHttpTokenChar(code: number): boolean {
+  return (
+    (code >= 0x30 && code <= 0x39) ||
+    (code >= 0x41 && code <= 0x5a) ||
+    (code >= 0x61 && code <= 0x7a) ||
+    code === 0x21 ||
+    code === 0x23 ||
+    code === 0x24 ||
+    code === 0x25 ||
+    code === 0x26 ||
+    code === 0x27 ||
+    code === 0x2a ||
+    code === 0x2b ||
+    code === 0x2d ||
+    code === 0x2e ||
+    code === 0x5e ||
+    code === 0x5f ||
+    code === 0x60 ||
+    code === 0x7c ||
+    code === 0x7e
+  )
+}
+
+function isQuotedTextChar(code: number): boolean {
+  return code === 0x09 || code === 0x20 || code === 0x21 || (code >= 0x23 && code <= 0x5b) || (code >= 0x5d && code <= 0x7e) || code >= 0x80
+}
+
+function isQuotedPairChar(code: number): boolean {
+  return code === 0x09 || code === 0x20 || (code >= 0x21 && code <= 0x7e) || code >= 0x80
 }
 
 async function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -414,14 +638,7 @@ function normalizeAbortError(error: unknown, requestAbort?: AbortSignal, closeAb
 }
 
 function normalizeAbortReason(signal: AbortSignal): Error {
-  if (signal.reason instanceof Error) {
-    if (signal.reason.name === 'TimeoutError') {
-      return ERR_TIMEOUT
-    }
-    return ERR_ABORTED
-  }
-
-  return ERR_ABORTED
+  return resolveAbortedTransportError(signal).code === 'TIMEOUT' ? ERR_TIMEOUT : ERR_ABORTED
 }
 
 function toCloseReason(reason: unknown): string | undefined {

@@ -249,7 +249,7 @@ export function LiveNotifications() {
 }
 ```
 
-這個 fragment 假設 `recordRealtimeFailure` 是應用程式的 telemetry function。它會主動讀取 `session.receive`；一直不讀取這個無界 incoming queue 並非有效 ownership pattern。SSE handle 亦應遵循相同 startup 與 cleanup discipline。
+這個 fragment 假設 `recordRealtimeFailure` 是應用程式的 telemetry function。它會主動讀取 `session.receive`；一直不讀取有限 incoming queue，最終 overflow 會 fatal 終止 session。SSE handle 亦應遵循相同 startup 與 cleanup discipline。
 
 Provider unmount/remount 會改變 client scope，但不會呼叫 `dispose`、abort request 或關閉 handle/session，因為 core `Client` 沒有這種 lifecycle API。
 

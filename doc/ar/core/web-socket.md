@@ -13,6 +13,8 @@ import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core
 const client = createClient(withEndpoint('wss://api.example.com'))
 
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   path: '/chat',
   incoming: {
     message: struct.object({ userId: struct.number(), text: struct.string() }),
@@ -45,6 +47,7 @@ const chat = defineWebSocket({
 
 ```typescript
 const audit = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/audit',
   incoming: {
     entry: struct.object({ data: struct.string(), source: struct.string() }),
@@ -75,6 +78,8 @@ if (!auditError) {
 const [error, session, startupConnection] = await client.execute(chat())
 ```
 
+يجب أن تكون قيمة `timeout` لتنفيذ HTTP وSSE وWebSocket عددًا صحيحًا موجبًا وآمنًا ضمن `1..2_147_483_647`؛ وتؤدي القيم `0` أو السالبة أو الكسرية أو `NaN` أو `Infinity` أو التي تتجاوز الحد إلى `REQUEST_VALIDATION_FAILED` قبل إنشاء أي مورد request أو stream أو socket.
+
 تعيد WebSocket:
 
 ```typescript
@@ -83,9 +88,9 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
   | [error: RequestError<unknown>, session: undefined, connection: WebSocketConnectionInfo | undefined]
 ```
 
-العنصر الثالث عند النجاح هو لقطة اتصال البدء. قد يحتوي `url` و`protocol` و`extensions` الملتقطة عند فتح أول socket فعلي.
+العنصر الثالث عند النجاح هو لقطة اتصال البدء ذات `generation: 1`. قد يحتوي `url` و`protocol` و`extensions` الملتقطة عند فتح أول socket فعلي.
 
-أما `session.connection` فهو getter حي. يستبدل reconnect الـ socket الفعلي الأساسي وقد يحدّث هذه القيمة. احتفظ بالعنصر الثالث من الـ tuple عندما تكون لقطة البدء مهمة.
+أما `session.connection` فهو getter حي؛ يزيد `generation` عند كل فتح فعلي ناجح. احتفظ بالعنصر الثالث من الـ tuple عندما تكون لقطة البدء مهمة.
 
 لا تسجّل connection URLs. فقد تحتوي على path identifiers وapplication query data وحقول نشر telemetry.
 
@@ -93,29 +98,29 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
 
 تمثل `WebSocketSession` جلسة منطقية واحدة قد تمتد عبر عدة محاولات اتصال فعلية.
 
-| العضو                      | السلوك                                                           |
-| -------------------------- | ---------------------------------------------------------------- |
-| `connection`               | أحدث معلومات connection الحية.                                   |
-| `state`                    | حالة الجلسة المنطقية الحية.                                      |
-| `receive`                  | طابور عمل async مشترك للرسائل الواردة بعد التحقق.                |
-| `send(message)`            | يتحقق من outgoing message ويرمزها ثم يرسلها أو يضيفها إلى queue. |
-| `close(code?, reason?)`    | يطلب إغلاقًا نهائيًا.                                            |
-| `closed`                   | Promise بمعلومات الإغلاق النهائي المرصودة.                       |
-| `onStateChange(listener)`  | يضيف state observer ويعيد دالة إلغاء الاشتراك.                   |
-| `onRuntimeError(listener)` | يضيف runtime-error observer ويعيد دالة إلغاء الاشتراك.           |
+| العضو                      | السلوك                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| `connection`               | أحدث معلومات connection الحية.                                               |
+| `bufferedAmount`           | عدد بايتات native socket غير المرسلة، أو `0` عند غيابه.                      |
+| `state`                    | حالة الجلسة المنطقية الحية.                                                  |
+| `receive`                  | طابور عمل async مشترك للرسائل الواردة بعد التحقق.                            |
+| `send(message)`            | يفحص قابلية الكتابة ثم يتحقق من الرسالة ويرمزها ويرسلها أو يضيفها إلى queue. |
+| `close(code?, reason?)`    | يطلب إغلاقًا نهائيًا.                                                        |
+| `closed`                   | Promise بمعلومات الإغلاق النهائي المرصودة.                                   |
+| `onStateChange(listener)`  | يضيف state observer ويعيد دالة إلغاء الاشتراك.                               |
+| `onRuntimeError(listener)` | يضيف runtime-error observer ويعيد دالة إلغاء الاشتراك.                       |
 
 لا يتتبع العميل الجلسة بعد إعادتها. يملك المستدعي الاستهلاك والمراقبين والإلغاء والإغلاق.
 
 ## استقبال الرسائل
 
-تُفك رسائل النص وArrayBuffer وtyped-array وBlob على أنها JSON بترميز UTF-8. تُسقط المدخلات التالية بصمت:
+تُفك رسائل النص وArrayBuffer وtyped-array وBlob بالترتيب الذي وصلت به على أنها JSON بترميز UTF-8. تُسقط المدخلات التالية بصمت:
 
-- JSON غير صالح؛
 - envelope ليس كائنًا؛
 - `type` مفقود أو string فارغ؛
 - نوع غير معروف من دون Struct باسم `incoming.default`.
 
-بعد اختيار Struct، يُرسل فشل فك الترميز إلى `onRuntimeError` وتُسقط الرسالة.
+يُرسل JSON غير الصالح وفشل التحقق من Struct المحدد إلى `onRuntimeError`، وتُسقط الرسالة وتستمر الجلسة.
 
 ```typescript
 const unsubscribeError = session.onRuntimeError(() => {
@@ -135,7 +140,7 @@ try {
 }
 ```
 
-الـ incoming iterable طابور عمل مشترك واحد غير محدود. تتنافس iterators المتعددة على الرسائل؛ وليست subscriptions مستقلة. ولا يبطئ transport الخادم عندما تنمو queue. استهلك الرسائل الواردة دائمًا أو أغلق الجلسة سريعًا.
+يسمح `receive` بـ iterator واحد فقط. `maxIncomingQueueSize` حد عناصر موجب وإلزامي؛ overflow يمسح القيم المخزنة ويفشل iterator وينهي الجلسة كـ `error`.
 
 ## إرسال الرسائل
 
@@ -145,7 +150,7 @@ try {
 - لا تملك الرسالة `type` صالحًا؛
 - يكون النوع غير معلن؛
 - يفشل فك payload البنيوي أو ترميزه؛
-- تستخدم send queue محدودة `overflow: 'error'`؛
+- تكون outgoing queue المملوكة للـ endpoint معطلة أو ممتلئة أثناء `reconnecting`؛
 - يرمي native socket أثناء إرسال فوري.
 
 ```typescript
@@ -156,42 +161,42 @@ try {
 }
 ```
 
-تدخل الرسائل المرسلة قبل open أو بين محاولات reconnect إلى outgoing send queue. وتُصرّف queue عند فتح socket فعلي.
+تُفحص قابلية الكتابة المنطقية قبل validation أو serialization للـ payload. لا يحدث الإرسال المباشر إلا عندما تكون الحالة المنطقية والـ socket الفعلي الحالي `open`. ولا يحدث enqueue إلا أثناء `reconnecting` عندما تكون `maxOutgoingQueueSize` في endpoint موجبة. تُصرّف FIFO قبل أن يعلن socket البديل حالة `open`.
 
-لا تستدعِ `send` بعد الوصول إلى حالة نهائية. لا يوفّر التنفيذ الحالي عقد رفض مستقرًا بعد الإغلاق، وقد لا تُرسل البيانات الموضوعة في queue بعد الإغلاق النهائي أبدًا.
+أثناء الإغلاق اليدوي أو بعد الحالة النهائية أو بينما لم يحسم reconnect predicate إغلاقًا بعيدًا بعد، ترمي `send` خطأ `InvalidStateError`. لا يعيد transport تشغيل frames سبق إرسالها إلى socket فعلي سابق.
 
 ## الحالة
 
 يمكن أن تكون `session.state`:
 
-| الحالة         | المعنى                                                                                                    |
-| -------------- | --------------------------------------------------------------------------------------------------------- |
-| `idle`         | الحالة الداخلية الأولى قبل بدء التنفيذ.                                                                   |
-| `connecting`   | بدء أول محاولة فعلية.                                                                                     |
-| `open`         | آخر حالة منطقية صادرة بعد فتح socket فعلي. أثناء تأخير reconnect قد تبقى `open` رغم عدم وجود socket فعلي. |
-| `reconnecting` | بدء محاولة فعلية لاحقة بعد انقضاء تأخيرها.                                                                |
-| `closing`      | إغلاق socket نشط في حالة connecting أو open بسبب الإلغاء.                                                 |
-| `closed`       | إغلاق نهائي بلا خطأ مطبّع.                                                                                |
-| `aborted`      | إلغاء خارجي نهائي طُبّع إلى `ABORTED`.                                                                    |
-| `error`        | فشل نهائي آخر.                                                                                            |
+| الحالة         | المعنى                                    |
+| -------------- | ----------------------------------------- |
+| `idle`         | الحالة الداخلية الأولى قبل بدء التنفيذ.   |
+| `connecting`   | بدء أول محاولة فعلية.                     |
+| `open`         | الـ socket الفعلي الحالي مفتوح.           |
+| `reconnecting` | يجري تحضير محاولة فعلية لاحقة أو تأخيرها. |
+| `closing`      | طلب المالك إغلاقًا يدويًا.                |
+| `closed`       | إغلاق نهائي بلا خطأ مطبّع.                |
+| `aborted`      | إلغاء خارجي نهائي طُبّع إلى `ABORTED`.    |
+| `error`        | فشل نهائي آخر.                            |
 
-لا تُصدر `reconnecting` أثناء التأخير. بل تُصدر عند بدء المحاولة التالية بعد التأخير. تعامل مع `session.state` على أنها آخر حالة lifecycle صادرة، لا دليلًا على وجود native socket حاليًا. تدخل الرسائل المرسلة خلال هذه الفجوة إلى outgoing queue.
+تصف `session.state` دورة الحياة المنطقية، ولا تثبت وجود native socket حالي. أثناء `reconnecting` تستخدم `send` السعة الصادرة المملوكة للـ endpoint.
 
-تعمل state listeners مباشرة. اجعلها غير رامية وألغِ اشتراكها عند انتهاء مالكها.
+تُعزل أخطاء observers: يُرسل خطأ state listener إلى runtime-error listeners، ويُمرر خطأ هؤلاء إلى `globalThis.reportError` عند توفرها. تحرر التسوية النهائية كل observers؛ وألغِ الاشتراك إذا انتهى المالك قبل ذلك.
 
 ### قبل كل محاولة
 
 يمكن ضبط `beforeConnect` على العميل أو على تنفيذ واحد. تعمل قبل native constructor في المحاولة الأولى وكل محاولة reconnect:
 
 ```typescript
-declare const refreshConnectionState: () => Promise<void>
+declare const refreshConnectionState: (signal: AbortSignal) => Promise<void>
 
 const [error, session] = await client.execute(chat(), {
-  beforeConnect: refreshConnectionState,
+  beforeConnect: ({ signal }) => refreshConnectionState(signal),
 })
 ```
 
-يكون command input وإسقاط الطلب قد بُنيا بالفعل. لا تعيد hook تشغيل `build` ولا تغيّر قيم query المرتبطة. استخدمها لتحضير يملكه التطبيق، مثل تحديث حالة تستخدمها آلية handshake في البيئة. الرمي أو رفض Promise فشل نقل نهائي؛ ولا يمر إلى reconnect predicate الخاص بنتيجة الإغلاق.
+تستقبل hook الكائن `{ attempt, signal }`؛ تبدأ `attempt` من `0` وتزداد عند reconnect. مرّر `signal` إلى async work الذي تملكه. يتسابق abort وtimeout مع hook، ويُستهلك late rejection، ولا يمكن لنتيجة متأخرة إنشاء socket. الرمي أو الرفض فشل transport نهائي.
 
 ## Reconnect اختياري
 
@@ -227,7 +232,7 @@ const [error, session] = await client.execute(chat(), {
 
 قيمة التأخير الأساسية هي `min(delayMs * factor ** (attempt - 1), maxDelayMs)`. jitter في WebSocket مضاعِفة: تختار قيمة مثل `0.2` عاملًا عشوائيًا بين `0.8` و`1.2`. وهذا يختلف عن jitter في SSE التي تُضاف بوحدة المللي ثانية.
 
-اجعل `shouldReconnect` متزامنة وغير رامية. يغطي reconnect socket فعليًا جديدًا داخل الجلسة المنطقية نفسها. وتنتمي incoming وoutgoing queues إلى تلك الجلسة المنطقية.
+تكون `shouldReconnect` متزامنة. الرمي ينهي session كـ `error`، وإرجاع `false` صراحة ينهيها كـ `closed`. ينشئ reconnect socket فعليًا جديدًا فقط ولا يعيد أي send سابق. عند زيادة `session.connection.generation` أعد فقط subscriptions النشطة والآمنة لإعادة التشغيل، ولا تعد mutations.
 
 ## Heartbeat
 
@@ -247,49 +252,36 @@ const [error, session] = await client.execute(chat(), {
 
 يجب أن تنتج `message` قيمة صالحة لخريطة `outgoing` الخاصة بنقطة النهاية. تمسح الرسالة التي تتعرف عليها `isAck` heartbeat timeout ولا تدخل `receive`.
 
-عندما تنتهي `timeoutMs` موجبة، يرسل وقت التشغيل `Error('WebSocket heartbeat timeout')` إلى runtime-error listeners، ويطلب native close بالرمز `4000` والسبب `heartbeat timeout`. ما زال reconnect يحتاج إلى سياسة منفصلة تسمح بالإغلاق الناتج.
+أخطاء serialization أو send أو ack predicate أو timeout في heartbeat كلها fatal. تُخطر runtime-error listeners، وتفشل `receive`، وتنهي session كـ `error` من دون استشارة reconnect policy.
 
-أبقِ `timeoutMs < intervalMs`. لا يتحقق التنفيذ الحالي من هذه العلاقة، وقد يتداخل timeout يساوي interval أو يتجاوزه مع heartbeat timers لاحقة.
+يجب أن تكون `intervalMs` و`timeoutMs` عند تعريفها موجبتين ومحدودتين ولا تتجاوزان `2_147_483_647`. ما دام ack deadline قائمًا، لا ترسل interval ticks التالية ping جديدًا ولا تعيد ضبط deadline؛ ويمسحه ack أو توقف session.
 
 ## Queues
 
-يضبط خيار `queue` الرسائل الصادرة فقط:
+توجد حدود الـ queue في تعريف endpoint. يجب أن تكون `maxIncomingQueueSize` عددًا صحيحًا آمنًا موجبًا؛ والـ overflow خطأ نهائي يمسح القيم المخزنة. أما `maxOutgoingQueueSize` فهو عدد صحيح آمن غير سالب، وقيمته الافتراضية `0`؛ والقيمة الموجبة تحفظ الإطارات بترتيب FIFO بين المحاولات وترفض overflow دون حذف الإطارات الأقدم.
 
-```typescript
-const [error, session] = await client.execute(chat(), {
-  queue: {
-    maxSize: 100,
-    overflow: 'drop-oldest',
-  },
-})
-```
-
-تكون outgoing queue غير محدودة افتراضيًا. وعندما تكون محدودة، يكون overflow الافتراضي `drop-oldest`؛ والبديلان هما `drop-newest` و`error`. يمسح الإغلاق النهائي send queue هذه.
-
-لا تملك incoming queue خيار bound أو overflow عامًا. إنها طابور عمل مشترك غير محدود ولا توفر backpressure. يجب على مالكي الموارد استهلاكها باستمرار أو إغلاق الجلسة.
+كلا الحدين يحسب العناصر لا البايتات. يعرض `session.bufferedAmount` تراكم البايتات في native socket بشكل منفصل. ويجب أن يكون لـ `receive` iterator واحد فقط.
 
 ## ملكية الإغلاق
 
-تستدعي `session.close(code, reason)` دالة `close` للـ native socket الحالي وتلغي الجلسة المنطقية بعلامة manual close. إنها تطلب الإغلاق؛ ولا تضمن إتمام مصافحة الإغلاق بصورة سليمة أو حالة `closing` ظاهرة أو أن قيمة `closed` النهائية ستطابق code وreason المطلوبين حرفيًا.
+تتحقق `session.close(code, reason)` أولًا من أن code هو `1000` أو ضمن `3000..4999` وأن reason لا يتجاوز 123 بايت UTF-8. تنتقل القيم الصالحة إلى `closing` وتطلب native close وتنتظر `CloseEvent` الفعلي؛ code وreason المرصودان يسبقان القيم المطلوبة.
 
 تُحل `session.closed` من معلومات الإغلاق التي يرصدها وقت التشغيل:
 
 ```typescript
-interface WebSocketCloseInfo {
-  cause?: unknown
-  code?: number
-  reason?: string
-  wasClean?: boolean
-}
+type WebSocketCloseInfo =
+  | { kind: 'closed'; code?: number; reason?: string; wasClean?: boolean }
+  | { kind: 'aborted'; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }
+  | { kind: 'error'; cause: unknown; code?: number; reason?: string; wasClean?: boolean }
 ```
 
-قد يؤخر native implementation لا يصدر close event تسوية Promise. وقد ينتهي الإلغاء الخارجي إلى `aborted` أو `error` بحسب السبب المطبّع، ويمكنه تجاوز `closing` عندما تكون الجلسة بين المحاولات.
+ينتج عن manual close وremote close بلا cause ورفض reconnect صراحةً `closed`. ينتج عن external abort حالة `aborted`، وعن timeout وruntime failure حالة `error`. إذا رمى native close تُجرّب مرة واحدة بلا arguments؛ وإذا رمى الاستدعاءان تتم التسوية كـ `error` بلا استدعاء ثالث.
 
 ألغِ اشتراك listeners وأغلق عند حد component أو route أو job أو service الذي فتح الجلسة. لا يؤدي provider unmount وحده هذا العمل.
 
 ## أمان URL والمصادقة
 
-تتحول HTTP base URLs إلى WebSocket schemes: يتحول `http:` إلى `ws:` و`https:` إلى `wss:`. لا تُرمّز path placeholders كـ segments. وتستخدم قيم query الـ serializer المضبوط.
+تتحول HTTP base URLs إلى WebSocket schemes: يتحول `http:` إلى `ws:` و`https:` إلى `wss:`. مرّر قيم path-placeholder الخام؛ يرمّز Core كل segment مرة واحدة بالضبط، ويحوّل `%` إلى `%25`، ويرفض القيمة الفارغة و`.` و`..`. تستخدم قيم query الـ serializer المضبوط.
 
 أولوية protocols هي خيار التنفيذ ثم خيار العميل ثم تعريف نقطة النهاية. تمنع مصفوفة protocols فارغة صراحة القيم الأقل أولوية.
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createClient, getClientConfig, withEndpoint, withInterceptors, type Client } from '../client'
 import { ERR_ABORTED } from '../error'
-import { createWebSocketInterceptor } from '../interceptor'
+import { createWebSocketInterceptor, type WebSocketSessionLike } from '../interceptor'
 import { struct } from '../struct'
 import { defineWebSocket, type SocketAwaitResult } from './index'
 
@@ -22,6 +22,7 @@ describe('web socket runtime', () => {
 
   test('should return transport error with invalid client', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {},
       path: '/ws/basic',
     })
@@ -44,6 +45,7 @@ describe('web socket runtime', () => {
     const controller = new AbortController()
     let beforeConnectCalls = 0
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {},
       path: '/ws/basic',
     })
@@ -69,6 +71,7 @@ describe('web socket runtime', () => {
     const controller = new AbortController()
     controller.abort(ERR_ABORTED)
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {},
       path: '/ws/basic',
     })
@@ -86,8 +89,30 @@ describe('web socket runtime', () => {
     expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
   })
 
+  test.each([
+    { options: { heartbeat: { intervalMs: Number.POSITIVE_INFINITY } }, source: 'heartbeat' },
+    { options: { reconnect: { attempts: Number.POSITIVE_INFINITY, delayMs: 0 } }, source: 'reconnect' },
+  ])('should reject invalid $source timer config before constructing a socket', async ({ options }) => {
+    let constructorCalls = 0
+    getClientConfig(client).webSocket.handle = class {
+      constructor() {
+        constructorCalls += 1
+      }
+    } as unknown as typeof WebSocket
+    const useSocket = defineWebSocket({ maxIncomingQueueSize: 1, incoming: {}, path: '/ws/basic' })
+
+    const [error, socket, connection] = await run(useSocket(), options)
+
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(socket).toBeUndefined()
+    expect(connection).toBeUndefined()
+    expect(constructorCalls).toBe(0)
+  })
+
   test('should resolve execute and receive typed messages', async () => {
     const useChatSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       build: (request, input) => {
         request.setQueryParams({
           roomId: input.query.roomId,
@@ -141,6 +166,7 @@ describe('web socket runtime', () => {
 
   test('should validate outgoing messages and echo typed responses', async () => {
     const useEchoSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         message: struct.object({
           text: struct.string(),
@@ -189,6 +215,7 @@ describe('web socket runtime', () => {
 
   test('should support heartbeat with timeout', async () => {
     const useHeartbeatSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         pong: struct.object({
           ok: struct.boolean(),
@@ -227,6 +254,7 @@ describe('web socket runtime', () => {
 
   test('should mark heartbeat ack when server responds with pong', async () => {
     const useHeartbeatSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         pong: struct.object({
           ok: struct.boolean(),
@@ -244,7 +272,7 @@ describe('web socket runtime', () => {
         intervalMs: 10,
         isAck: (message: { type: string }) => message.type === 'pong',
         message: () => ({ type: 'ping' }),
-        timeoutMs: 30,
+        timeoutMs: 1_000,
       },
     })
 
@@ -258,12 +286,15 @@ describe('web socket runtime', () => {
       runtimeError = err
     })
 
+    const iterator = socket.receive[Symbol.asyncIterator]()
     await expect(socket.closed).resolves.toMatchObject({ code: 1000, reason: 'heartbeat-ok' })
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
     expect(runtimeError).toBeUndefined()
   })
 
-  test('should skip invalid incoming websocket payloads without runtime error', async () => {
+  test('should report malformed JSON, drop the frame, and keep the session alive', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         message: struct.object({
           text: struct.string(),
@@ -279,17 +310,23 @@ describe('web socket runtime', () => {
       throw new Error('Expected socket')
     }
 
+    let runtimeError: unknown
+    socket.onRuntimeError((error) => {
+      runtimeError = error
+    })
     const events: unknown[] = []
     for await (const event of socket.receive) {
       events.push(event)
     }
 
     expect(events).toEqual([])
+    expect(runtimeError).toBeInstanceOf(SyntaxError)
     await expect(socket.closed).resolves.toMatchObject({ code: 1000, reason: 'done' })
   })
 
   test('should emit runtime error when incoming message struct validation fails', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         message: struct.object({
           text: struct.string(),
@@ -316,6 +353,7 @@ describe('web socket runtime', () => {
 
   test('should skip undeclared incoming message types', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         message: struct.object({
           text: struct.string(),
@@ -342,6 +380,7 @@ describe('web socket runtime', () => {
 
   test('should expose session state transitions and allow unsubscribing listeners', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         ready: struct.object({
           ok: struct.boolean(),
@@ -380,6 +419,7 @@ describe('web socket runtime', () => {
 
   test('should support abort after startup and ignore socket.close after cleanup', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         ready: struct.object({
           ok: struct.boolean(),
@@ -405,6 +445,7 @@ describe('web socket runtime', () => {
 
   test('should abort before startup and surface aborted transport error', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {},
       path: '/ws/basic',
     })
@@ -423,6 +464,7 @@ describe('web socket runtime', () => {
 
   test('should return definition error when input validation fails', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {},
       input: struct.object({
         id: struct.number(),
@@ -440,6 +482,7 @@ describe('web socket runtime', () => {
 
   test('should return definition error when build throws', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       build: () => {
         throw new Error('build failed')
       },
@@ -458,6 +501,7 @@ describe('web socket runtime', () => {
 
   test('should return definition error when websocket url creation fails', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {},
       path: '/ws/basic',
     })
@@ -473,6 +517,7 @@ describe('web socket runtime', () => {
 
   test('should return transport error when beforeConnect throws', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {},
       path: '/ws/basic',
     })
@@ -491,6 +536,8 @@ describe('web socket runtime', () => {
 
   test('should support reconnect, queued sends, and abort during reconnect delay', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
+      maxOutgoingQueueSize: 1,
       build(request, input) {
         request.setQueryParams({ key: input.query.key })
       },
@@ -525,7 +572,18 @@ describe('web socket runtime', () => {
     }
 
     const iterator = socket.receive[Symbol.asyncIterator]()
-    await new Promise((resolve) => setTimeout(resolve, 40))
+    await new Promise<void>((resolve) => {
+      if (socket.state === 'reconnecting') {
+        resolve()
+        return
+      }
+      const unsubscribe = socket.onStateChange((state) => {
+        if (state === 'reconnecting') {
+          unsubscribe()
+          resolve()
+        }
+      })
+    })
     socket.send({ type: 'message', text: 'queued-before-reconnect' })
 
     await expect(iterator.next()).resolves.toEqual({
@@ -539,11 +597,12 @@ describe('web socket runtime', () => {
 
     controller.abort('stop reconnect loop')
     await expect(socket.closed).resolves.toBeDefined()
-    expect(socket.state).toBe('error')
+    expect(socket.state).toBe('aborted')
   }, 5000)
 
   test('should abort during reconnect delay with aborted state', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       build(request, input) {
         request.setQueryParams({ key: input.query.key })
       },
@@ -557,7 +616,7 @@ describe('web socket runtime', () => {
     })
 
     const controller = new AbortController()
-    const command = useSocket()
+    const command = useSocket({ query: { key: 'abort-during-delay' } })
     const [error, socket] = await run(command, {
       abort: controller.signal,
       reconnect: { attempts: 2, delayMs: 100 },
@@ -577,6 +636,7 @@ describe('web socket runtime', () => {
 
   test('should reconnect immediately when delay is zero', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       build(request, input) {
         request.setQueryParams({ key: input.query.key })
       },
@@ -611,6 +671,7 @@ describe('web socket runtime', () => {
 
   test('should allow websocket interceptors to short-circuit startup', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {},
       path: '/ws/basic',
     })
@@ -631,8 +692,121 @@ describe('web socket runtime', () => {
     expect(error).toBeInstanceOf(Error)
   })
 
+  test('should settle every session created before an interceptor chain fails', async () => {
+    const useSocket = defineWebSocket({ maxIncomingQueueSize: 16, incoming: {}, path: '/ws/echo' })
+    const interceptorFailure = new Error('outer interceptor failed')
+    const createdSessions: WebSocketSessionLike[] = []
+    const clientWithInterceptor = createClient(
+      withEndpoint(inject('testServerHost')),
+      withInterceptors(
+        createWebSocketInterceptor(async (request, next) => {
+          createdSessions.push(await next(request))
+          throw interceptorFailure
+        }),
+      ),
+    )
+
+    const [error, socket] = await clientWithInterceptor.execute(useSocket())
+
+    expect(error).toBe(interceptorFailure)
+    expect(socket).toBeUndefined()
+    expect(createdSessions).toHaveLength(1)
+    const terminal = await Promise.race([
+      Promise.all(createdSessions.map((session) => session.closed)),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    ])
+    expect(terminal).not.toBe(false)
+    expect(createdSessions.every((session) => ['aborted', 'closed', 'error'].includes(session.state))).toBe(true)
+  })
+
+  test('should reject a second websocket interceptor next call and settle the first session', async () => {
+    const useSocket = defineWebSocket({ maxIncomingQueueSize: 16, incoming: {}, path: '/ws/echo' })
+    let firstSession: WebSocketSessionLike | undefined
+    const clientWithInterceptor = createClient(
+      withEndpoint(inject('testServerHost')),
+      withInterceptors(
+        createWebSocketInterceptor(async (request, next) => {
+          firstSession = await next(request)
+          return next(request)
+        }),
+      ),
+    )
+
+    const [error, socket] = await clientWithInterceptor.execute(useSocket())
+
+    if (socket) {
+      socket.close(1000, 'unexpected second session')
+      await socket.closed
+    }
+
+    expect(error).toMatchObject({ message: 'WebSocket interceptor next() may only be called once' })
+    expect(socket).toBeUndefined()
+    expect(firstSession).toBeDefined()
+    const terminal = await Promise.race([firstSession?.closed, new Promise<false>((resolve) => setTimeout(() => resolve(false), 50))])
+    expect(terminal).not.toBe(false)
+  })
+
+  test('should close a created session discarded by a successful interceptor', async () => {
+    const useSocket = defineWebSocket({ maxIncomingQueueSize: 16, incoming: {}, path: '/ws/echo' })
+    let discardedSession: WebSocketSessionLike | undefined
+    const shortCircuitSession: WebSocketSessionLike = {
+      bufferedAmount: 0,
+      close() {},
+      closed: Promise.resolve({ kind: 'closed' }),
+      connection: { generation: 99 },
+      onRuntimeError: () => () => {},
+      onStateChange: () => () => {},
+      receive: {
+        async *[Symbol.asyncIterator]() {},
+      },
+      send() {},
+      state: 'closed',
+    }
+    const clientWithInterceptor = createClient(
+      withEndpoint(inject('testServerHost')),
+      withInterceptors(
+        createWebSocketInterceptor(async (request, next) => {
+          discardedSession = await next(request)
+          return shortCircuitSession
+        }),
+      ),
+    )
+
+    const [error, socket] = await clientWithInterceptor.execute(useSocket())
+
+    expect(error).toBeNull()
+    expect(socket).toBe(shortCircuitSession)
+    expect(discardedSession).toBeDefined()
+    const terminal = await Promise.race([discardedSession?.closed, new Promise<false>((resolve) => setTimeout(() => resolve(false), 50))])
+    expect(terminal).not.toBe(false)
+  })
+
+  test('should preserve a wrapper that delegates the created session closed promise', async () => {
+    const useSocket = defineWebSocket({ maxIncomingQueueSize: 16, incoming: {}, path: '/ws/echo' })
+    let createdSession: WebSocketSessionLike | undefined
+    const clientWithInterceptor = createClient(
+      withEndpoint(inject('testServerHost')),
+      withInterceptors(
+        createWebSocketInterceptor(async (request, next) => {
+          createdSession = await next(request)
+          return new Proxy(createdSession, {})
+        }),
+      ),
+    )
+
+    const [error, socket] = await clientWithInterceptor.execute(useSocket())
+
+    expect(error).toBeNull()
+    expect(socket).toBeDefined()
+    expect(socket).not.toBe(createdSession)
+    expect(socket?.state).toBe('open')
+    socket?.close(1000, 'done')
+    await expect(socket?.closed).resolves.toMatchObject({ kind: 'closed' })
+  })
+
   test('should connect with request changes made by websocket interceptors', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         joined: struct.object({
           roomId: struct.string(),

@@ -48,6 +48,8 @@ const second = createHttpInterceptor(async (request, next) => {
 createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
+WebSocket interceptor 最多只能调用一次 `next`。如果 chain 在创建 session 后失败，Core 会先 settle 这个未交付 session，再返回原始 interceptor error。如果 chain 成功返回另一份 short-circuit session，Core 会关闭已创建的 session；wrapper 需复用原始 `closed` Promise 来保持关联。
+
 ## 安全 Clone Request
 
 把传入 request 视为 chain 所拥有的对象。修改 header 前先创建新的 `Headers`：
@@ -106,6 +108,9 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
+    get bufferedAmount() {
+      return session.bufferedAmount
+    },
     get connection() {
       return session.connection
     },
@@ -255,7 +260,7 @@ Credential provider 会在 request 经过 interceptor 时执行。服务端 cred
 
 ## Observer 与 Callback 安全
 
-SSE 和 WebSocket interceptor 可以给返回的 handle 附加生命周期 observer。所有者结束时要取消 WebSocket listener。Listener 和 predicate 应保持不抛错；当前 realtime 实现没有隔离所有 listener 或 reconnect predicate failure。
+SSE 和 WebSocket interceptor 可以给返回的 handle 附加生命周期 observer。所有者结束时要取消 WebSocket listener。WebSocket 会把 state listener failure 交给 runtime-error observer，把后者的 failure 转发到 `reportError`，并把 reconnect predicate throw 作为 terminal session error。
 
 Interceptor 可以 throw 或 reject。高层 transport 可能把部分 failure 归一化成 `RequestError`，但 interceptor 代码不应依赖“绝不 reject”的笼统保证。
 

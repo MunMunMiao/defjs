@@ -34,7 +34,7 @@ const client = createClient(
 
 1. Setter helper 替换原值。包括 `withEndpoint`、transport handle、query serializer、credentials、XSRF 配置，以及单项 SSE 或 WebSocket 设置。
 2. `withInterceptors(...items)` 追加。多次调用会保留 interceptor 的添加顺序。
-3. `withSSEOptions(...)` 和 `withWebSocketOptions(...)` 对每个已定义的顶层字段做浅替换。它们不会 deep merge 嵌套的 reconnect、heartbeat 或 queue 对象。
+3. `withSSEOptions(...)` 和 `withWebSocketOptions(...)` 对每个已定义的顶层字段做浅替换。它们不会 deep merge 嵌套的 reconnect 或 heartbeat 对象。
 
 例如，下面第二个 reconnect 对象会完整替换第一个，不会保留 `attempts: 5`：
 
@@ -72,6 +72,8 @@ const client = createClient(
 
 `Client.execute` 有三个 overload。每个都返回 error-first 三元素 tuple。
 
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-有 response 时，第三项是 Defjs `SettledResponse` wrapper。HTTP option 包括 `abort` 或 `timeout`、额外的 `signal` alias、`context`，以及上传/下载进度 observer。
+有 response 时，第三项是 Defjs `HttpResponse` wrapper。HTTP option 包括 `abort` 或 `timeout`、额外的 `signal` alias、`context`，以及上传/下载进度 observer。
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-第三项是已通过校验的启动 open 快照。`stream.open` 是单独的 live getter，可能在重连后变化。SSE execution 接受取消和 `HttpContext`；reconnect 和 event queue 在 client option 中配置。
+第三项是已通过校验的启动 open 快照。`stream.open` 是单独的 live getter，可能在重连后变化。SSE execution 接受取消和 `HttpContext`；reconnect 在 client option 中配置。必填的 `maxBufferSize` 和 `maxQueueSize` 限制属于每个 event stream 定义。
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-第三项是启动 connection 快照。`session.connection` 是 live getter，可能描述后续的物理连接尝试。WebSocket execution 接受取消，以及单次执行的 `beforeConnect`、`heartbeat`、`protocols`、`queue` 和 `reconnect`。它不接受 `HttpContext`。
+第三项是启动 connection 快照。`session.connection` 是 live getter，可能描述后续的物理连接尝试。WebSocket execution 接受取消，以及单次执行的 `beforeConnect`、`heartbeat`、`protocols` 和 `reconnect`。必填的 `maxIncomingQueueSize` 和可选的 `maxOutgoingQueueSize` 限制属于每个 WebSocket 定义。WebSocket execution 不接受 `HttpContext`。
 
 具体失败分支见 [Errors](/zh-Hans/core/errors)；transport 生命周期见 [HTTP](/zh-Hans/core/http)、[SSE](/zh-Hans/core/sse) 和 [WebSocket](/zh-Hans/core/web-socket)。
 

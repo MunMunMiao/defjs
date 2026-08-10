@@ -7,18 +7,24 @@ import { DEFINITION } from './symbols'
 import type { RuntimeStruct } from './types'
 
 describe('runtime.ts chain methods', () => {
-  test('null, nullish and optional only adjust missing value behavior', () => {
+  test('nullable stays required while optional and nullish may be omitted', () => {
     const testStruct = struct.object({
       a: struct.string().optional(),
       b: struct.string().null(),
       c: struct.string().nullish(),
     })
 
-    const [err, val] = parse(testStruct, {})
+    const [missingError, missingValue] = parse(testStruct, {})
+    expect(missingError).toBeInstanceOf(StructError)
+    expect(missingError?.issues[0]?.code).toBe('missing_key')
+    expect(missingError?.issues[0]?.path).toEqual(['b'])
+    expect(missingValue).toBeUndefined()
+
+    const [err, val] = parse(testStruct, { b: null })
     if (err) {
       throw err
     }
-    expect(val).toEqual({ b: null, c: null })
+    expect(val).toEqual({ b: null })
   })
 
   test('alias stores wire names without changing parse output', () => {
@@ -169,10 +175,10 @@ describe('runtime.ts chain methods', () => {
     expect(isStruct(fake)).toBe(false)
   })
 
-  test('invalid primitive parse returns StructError and zero value', () => {
+  test('invalid primitive parse returns StructError and undefined', () => {
     const [err, val] = parse(struct.string(), 42)
 
     expect(err).toBeInstanceOf(StructError)
-    expect(val).toBe('')
+    expect(val).toBeUndefined()
   })
 })

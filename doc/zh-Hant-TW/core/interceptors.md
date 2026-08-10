@@ -48,6 +48,8 @@ const second = createHttpInterceptor(async (request, next) => {
 createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
+WebSocket 攔截器最多只能呼叫一次 `next`。如果 chain 在建立 session 後失敗，Core 會先 settle 未交付的 session，再回傳原始攔截器錯誤。如果 chain 成功回傳另一個 short-circuit session，Core 會關閉已建立的 session；wrapper 必須沿用原始 `closed` Promise 以維持關聯。
+
 ## 安全複製 Request
 
 把傳入的 request 視為 chain 所擁有。修改 header 前，先建立新的 `Headers` 物件：
@@ -106,6 +108,9 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
+    get bufferedAmount() {
+      return session.bufferedAmount
+    },
     get connection() {
       return session.connection
     },
@@ -255,7 +260,7 @@ Credential provider 會在 request 經過攔截器時執行。伺服器端 crede
 
 ## 觀察器與 Callback 安全性
 
-SSE 與 WebSocket 攔截器可以在回傳 handle 上註冊生命週期觀察器。擁有者結束時要取消訂閱 WebSocket listener。Listener 與 predicate 都應保持不 throw；目前 realtime 實作並未隔離每一個 listener 或 reconnect predicate failure。
+SSE 與 WebSocket 攔截器可以在回傳 handle 上註冊生命週期觀察器。擁有者結束時要取消訂閱 WebSocket listener。WebSocket 會把 state listener failure 交給 runtime-error observer，把後者的 failure 轉送到 `reportError`，並把 reconnect predicate throw 視為 terminal session error。
 
 攔截器本身可以 throw 或 reject。High-level transport 可能會把部分失敗正規化成 `RequestError`，但攔截器程式碼不應依賴「永遠不 reject」的概括保證。
 

@@ -66,11 +66,11 @@ describe('codec helpers', () => {
     expect(error?.code).toBe('ABORTED')
   })
 
-  test('resolveAbortTransportError returns NETWORK_ERROR for string reason', () => {
+  test('resolveAbortTransportError classifies an explicit abort with a string reason as ABORTED', () => {
     const controller = new AbortController()
     controller.abort('some reason')
     const error = resolveAbortTransportError(controller.signal)
-    expect(error?.code).toBe('NETWORK_ERROR')
+    expect(error?.code).toBe('ABORTED')
   })
 
   test('resolveAbortTransportError handles DOMException timeout', () => {
@@ -88,11 +88,11 @@ describe('codec helpers', () => {
     expect(error?.code).toBe('ABORTED')
   })
 
-  test('resolveAbortTransportError returns ERR_TIMEOUT for plain Error with matching message', () => {
+  test('resolveAbortTransportError treats a plain Error with a timeout-like message as ABORTED', () => {
     const controller = new AbortController()
     controller.abort(new Error(ERR_TIMEOUT.message))
     const error = resolveAbortTransportError(controller.signal)
-    expect(error?.code).toBe('TIMEOUT')
+    expect(error?.code).toBe('ABORTED')
   })
 })
 
@@ -161,9 +161,9 @@ describe('transformWebSocketMessage', () => {
     expect(await transformWebSocketMessage(incoming, undefined)).toBeUndefined()
   })
 
-  test('returns undefined for invalid JSON string', async () => {
+  test('rejects invalid JSON so the session can report a runtime decode error', async () => {
     const incoming = { msg: struct.string() }
-    expect(await transformWebSocketMessage(incoming, 'not json')).toBeUndefined()
+    await expect(transformWebSocketMessage(incoming, 'not json')).rejects.toBeInstanceOf(SyntaxError)
   })
 
   test('returns undefined when decoded lacks type', async () => {

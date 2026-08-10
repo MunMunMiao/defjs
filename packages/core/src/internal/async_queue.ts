@@ -1,6 +1,3 @@
-// Generic async queue shared by SSE event stream and WebSocket incoming messages.
-// Behaves as a backpressure-less push/pull queue with optional error propagation.
-
 type PendingNext<T> = {
   resolve: (result: IteratorResult<T>) => void
   reject: (reason: unknown) => void
@@ -9,21 +6,22 @@ type PendingNext<T> = {
 const NO_ERROR = Symbol('NO_ERROR')
 
 export interface AsyncQueueOptions {
-  maxSize?: number
-  overflow?: 'drop-newest' | 'drop-oldest' | 'error'
+  maxSize: number
 }
 
 export class AsyncQueue<T> implements AsyncIterable<T> {
   private readonly values: T[] = []
   private readonly waiting: PendingNext<T>[] = []
-  private readonly maxSize: number | undefined
-  private readonly overflow: 'drop-newest' | 'drop-oldest' | 'error'
+  private readonly maxSize: number
   private done = false
   private error: unknown = NO_ERROR
+  private iteratorClaimed = false
 
-  constructor(options?: AsyncQueueOptions) {
-    this.maxSize = options?.maxSize
-    this.overflow = options?.overflow ?? 'error'
+  constructor(options: AsyncQueueOptions) {
+    if (!Number.isSafeInteger(options.maxSize) || options.maxSize < 1) {
+      throw new TypeError('AsyncQueue maxSize must be a positive safe integer')
+    }
+    this.maxSize = options.maxSize
   }
 
   push(value: T): void {
@@ -37,18 +35,8 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
       return
     }
 
-    if (this.maxSize !== undefined && this.values.length >= this.maxSize) {
-      switch (this.overflow) {
-        case 'drop-newest':
-          return
-        case 'drop-oldest': {
-          this.values.shift()
-          break
-        }
-        case 'error': {
-          throw new Error('AsyncQueue overflow')
-        }
-      }
+    if (this.values.length >= this.maxSize) {
+      throw new Error('AsyncQueue overflow')
     }
 
     this.values.push(value)
@@ -72,12 +60,18 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
 
     this.done = true
     this.error = error
+    this.values.length = 0
     while (this.waiting.length > 0) {
       this.waiting.shift()?.reject(error)
     }
   }
 
   [Symbol.asyncIterator](): AsyncIterator<T> {
+    if (this.iteratorClaimed) {
+      throw new TypeError('AsyncQueue supports one consumer')
+    }
+    this.iteratorClaimed = true
+
     return {
       next: () => {
         if (this.values.length > 0) {

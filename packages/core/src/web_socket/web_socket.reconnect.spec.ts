@@ -20,6 +20,8 @@ describe('web socket runtime reconnect', () => {
 
   test('should reconnect and flush queued messages', async () => {
     const useReconnectSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
+      maxOutgoingQueueSize: 2,
       build: (request, input) => {
         request.setQueryParams({
           key: input.query.key,
@@ -56,7 +58,6 @@ describe('web socket runtime reconnect', () => {
       | undefined
 
     const executePromise = run(command, {
-      queue: { maxSize: 2 },
       reconnect: { attempts: 1, delayMs: 0 },
     })
 
@@ -98,6 +99,7 @@ describe('web socket runtime reconnect', () => {
     const retryClient = createClient(withEndpoint('http://127.0.0.1:1'))
 
     const useRetrySocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {},
       path: '/ws/reconnect',
     })
@@ -125,6 +127,7 @@ describe('web socket runtime reconnect', () => {
 
   test('should not consider manual session close for reconnect', async () => {
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         ready: struct.object({
           ok: struct.boolean(),

@@ -34,7 +34,7 @@ const client = createClient(
 
 1. setter ヘルパーは値を置き換えます。`withEndpoint`、各トランスポートハンドル、クエリシリアライザー、認証情報、XSRF 設定、個別の SSE/WebSocket 設定が該当します。
 2. `withInterceptors(...items)` は末尾へ追加します。複数回呼ぶと、登録した順序が保たれます。
-3. `withSSEOptions(...)` と `withWebSocketOptions(...)` は、値が定義されている最上位フィールドごとに浅く置き換えます。内側の再接続、ハートビート、キューオブジェクトを再帰的にマージすることはありません。
+3. `withSSEOptions(...)` と `withWebSocketOptions(...)` は、値が定義されている最上位フィールドごとに浅く置き換えます。内側の再接続やハートビートオブジェクトを再帰的にマージすることはありません。
 
 次の例では、2 番目の再接続オブジェクトが 1 番目を丸ごと置き換えます。`attempts: 5` は残りません。
 
@@ -72,6 +72,8 @@ SSE と WebSocket の個別ヘルパーは、対応する最上位フィール�
 
 `Client.execute` には 3 つのオーバーロードがあります。どれもエラーを先頭に置く 3 要素タプルを返します。
 
+HTTP、SSE、WebSocket 実行の `timeout` は `1..2_147_483_647` の範囲にある正の安全な整数でなければならず、`0`、負数、小数、`NaN`、`Infinity`、上限を超える値を指定すると、request、stream、socket のリソースを作成する前に `REQUEST_VALIDATION_FAILED` になります。
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-レスポンスが存在する場合、3 番目の要素は Defjs の `SettledResponse` ラッパーです。HTTP オプションには `abort` または `timeout`、追加の `signal` エイリアス、`context`、アップロード・ダウンロード進捗のオブザーバーがあります。
+レスポンスが存在する場合、3 番目の要素は Defjs の `HttpResponse` ラッパーです。HTTP オプションには `abort` または `timeout`、追加の `signal` エイリアス、`context`、アップロード・ダウンロード進捗のオブザーバーがあります。
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-3 番目の要素は、検証済みの起動時オープンスナップショットです。`stream.open` は別のライブ getter で、再接続後に変わることがあります。SSE 実行はキャンセルと `HttpContext` を受け取ります。再接続とイベントキューはクライアントオプションで設定します。
+3 番目の要素は、検証済みの起動時オープンスナップショットです。`stream.open` は別のライブ getter で、再接続後に変わることがあります。SSE 実行はキャンセルと `HttpContext` を受け取り、再接続はクライアントオプションで設定します。必須の `maxBufferSize` と `maxQueueSize` は各 event stream 定義に属します。
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-3 番目の要素は、起動時接続スナップショットです。`session.connection` はライブ getter で、後続の物理接続試行を表す値へ変わることがあります。WebSocket 実行はキャンセルのほか、実行ごとの `beforeConnect`、`heartbeat`、`protocols`、`queue`、`reconnect` を受け取ります。`HttpContext` は受け取りません。
+3 番目の要素は、起動時接続スナップショットです。`session.connection` はライブ getter で、後続の物理接続試行を表す値へ変わることがあります。WebSocket 実行はキャンセルのほか、実行ごとの `beforeConnect`、`heartbeat`、`protocols`、`reconnect` を受け取ります。必須の `maxIncomingQueueSize` と任意の `maxOutgoingQueueSize` は各 WebSocket 定義に属します。WebSocket 実行は `HttpContext` を受け取りません。
 
 失敗時の正確な分岐は [Errors](/ja-JP/core/errors)、各トランスポートのライフサイクルは [HTTP](/ja-JP/core/http)、[SSE](/ja-JP/core/sse)、[WebSocket](/ja-JP/core/web-socket) を参照してください。
 

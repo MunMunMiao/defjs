@@ -31,9 +31,9 @@ Tuple 令預期內的 startup failure 保持明確，毋須強迫應用程式以
 
 ## Lifecycle Option 由 Execution 決定
 
-Endpoint definition 用來描述穩定的 wire contract。至於 cancellation、timeout、heartbeat、reconnect 同 queue 點揀，應由真正負責這次工作的 execution 決定。
+Endpoint definition 用來描述穩定的 wire contract，同時擁有 transport queue 上限。至於 cancellation、timeout、heartbeat 同 reconnect，應由真正負責這次工作的 execution 決定。
 
-HTTP 同 SSE 可在 execution 時傳入 cancellation option。WebSocket 亦可為單次 execution 設定 connection、heartbeat、reconnect、protocol 同 send queue option。Transport 共用的預設值，才放入 client option。
+HTTP 同 SSE 可在 execution 時傳入 cancellation option。WebSocket 亦可為單次 execution 設定 `beforeConnect`、heartbeat、reconnect 同 protocol option。Transport 共用的預設值放入 client option；WebSocket incoming/outgoing 容量仍由 endpoint 定義。
 
 這樣一來，command 就可以重用。Background job 同互動頁面可按各自的 lifecycle 執行同一個 command，不必重新定義 path 或 message schema。
 
@@ -47,9 +47,9 @@ HTTP 同 SSE 可在 execution 時傳入 cancellation option。WebSocket 亦可�
 
 ## Observer 不負責控制流
 
-SSE `onInvalidEvent` 只觀察被丟棄的 event。它拋出的錯誤或回傳的 rejected promise 會被捕捉，不會終止 stream；但 async observer 會被 await，可能拖慢後續 message processing。
+SSE `onInvalidEvent` 只觀察被丟棄的 event。它拋出的錯誤同回傳的 rejected promise 會與 stream control flow 隔離，後續處理仍會繼續；但 async observer 依然會被 await，可能拖慢後續 message。
 
-WebSocket state 與 runtime-error listener 也是 observer，但目前實作會直接呼叫。這些 listener 應保持同步、不拋錯，而且工作量要小。Listener 若拋錯，可能打斷 lifecycle work；它並非受支援的 control-flow 機制。
+WebSocket state 與 runtime-error listener 也是 observer。它們拋出的錯誤同 rejected promise 會被隔離：state listener 失敗會轉交 runtime-error listener，runtime-error listener 失敗會在可用時交給全局 `reportError`，其餘 listener 同 lifecycle work 仍會繼續。
 
 Lifecycle decision 應以回傳的 handle 或 session 為準。Observer 只適合做受限 logging、metrics 或 state update；擁有者 dispose 時要移除它們。
 

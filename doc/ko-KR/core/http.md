@@ -42,7 +42,7 @@ const getUser = defineRequest({
 })
 ```
 
-placeholder 값은 path segment encoding 없이 삽입됩니다. 식별자를 제한하거나 신뢰할 수 없는 segment 하나에 `encodeURIComponent`를 적용한 뒤 커맨드를 만드세요. 인코딩하지 않은 slash나 dot segment는 해석되는 path를 바꿀 수 있고, 삽입된 `?`나 `#`는 endpoint path 검증에서 요청을 거부하게 합니다.
+placeholder에는 가공하지 않은 값을 전달하세요. Defjs는 각 scalar를 문자열로 변환하고 빈 값과 값 전체가 `.` 또는 `..`인 경우를 거부한 다음, 치환 전에 `encodeURIComponent`를 정확히 한 번 적용합니다. `/`, `?`, `#`, `%`, 공백, Unicode는 하나의 path segment 안에 유지됩니다. 값을 미리 인코딩하지 마세요. `%`는 원시 입력으로 취급되어 `%25`로 인코딩됩니다.
 
 ## 요청 인코딩
 
@@ -108,15 +108,15 @@ const getUser = defineRequest({
 
 `response.ok`는 `status >= 200 && status < 300`이라는 뜻일 뿐입니다. output 디코딩, 애플리케이션 검증 또는 인가 성공을 의미하지 않습니다.
 
-`output`을 선언하고 `responseType`을 생략하면 응답 parsing은 기본적으로 `json`을 사용합니다. 명시적인 모드는 `json`, `text`, `blob`, `arraybuffer`입니다. 선택된 Struct가 이어서 구조적 디코딩을 수행합니다. `output`이 없으면 결과 데이터는 `undefined`이고 반환된 응답 래퍼의 `body`는 `null`입니다.
+`output`을 선언하고 `responseType`을 생략하면 응답 parsing은 기본적으로 `json`을 사용합니다. 명시적인 모드는 `json`, `text`, `blob`, `arraybuffer`입니다. 선택된 Struct가 이어서 구조적 디코딩을 수행합니다. `output`이 없으면 `responseType`을 지정할 수 없고, 결과 데이터는 `undefined`이며, 반환된 응답 래퍼의 `body`는 `null`입니다. 런타임은 응답 body를 읽거나 디코딩하는 대신 best-effort로 취소합니다.
 
-### 현재 malformed JSON 결함
+커맨드 결과 분류는 고정 우선순위를 따릅니다. status 0 transport failure → `output` 없음 → 정확한 status 일치 또는 `UNDECLARED_STATUS` → `response.error` → Struct 디코딩 순서입니다. 따라서 body 표현 오류는 `output`을 선언한 경우에만 발생할 수 있으며, Fetch가 이 오류를 기록해도 선언되지 않은 status 분기가 계속 우선합니다.
 
-::: danger 잘못된 JSON이 성공처럼 보일 수 있습니다
-현재 Fetch 경계는 JSON parse 실패를 `HttpResponse.error`에 저장하고 body를 `null`로 남깁니다. HTTP 커맨드 실행은 output Struct를 적용하기 전에 이 parse 오류를 확인하지 않습니다. non-nullable `null`이 Struct 제로 값으로 디코딩될 수 있으므로, 잘못된 2xx JSON body가 현재 `[null, zeroValue, response]`를 만들 수 있습니다.
+### 표현 오류
 
-제로 값인 성공 결과만으로 서버가 유효한 JSON을 보냈다고 판단하지 마세요. 구현 수정과 regression test가 필요한 결함이며, 문서의 경고만으로 해결되지는 않습니다.
-:::
+선언된 output과 status가 정확히 일치한 경우 JSON 또는 다른 body codec이 실패하면 Fetch는 원래 예외를 `HttpResponse.error`에 보존합니다. 커맨드 실행은 output Struct를 적용하기 전에 중단하고 `[RESPONSE_VALIDATION_FAILED, undefined, response]`를 반환합니다. 원래 예외는 `cause`에 남고 typed `error.data`는 생성되지 않습니다.
+
+일반적인 비-2xx 응답은 `response.error`를 채우지 않으며 status는 `status`와 `ok`로 표현합니다. 비-2xx status와 body가 선언되어 있고 body가 유효하면 Struct가 디코딩되고 결과 `HTTP_STATUS` 오류는 typed body를 `error.data`에 보존합니다.
 
 ## HTTP 결과
 
@@ -124,7 +124,7 @@ const getUser = defineRequest({
 const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
 ```
 
-성공하면 `response`는 body가 `data`와 일치하는 Defjs `SettledResponse` 래퍼입니다. 실패할 때 response가 있는지는 실행이 어디까지 진행됐는지에 따라 달라집니다. 정확한 분류는 [오류](/ko-KR/core/errors)를 참고하세요.
+성공하면 `response`는 body가 `data`와 일치하는 Defjs `HttpResponse` 래퍼입니다. 실패할 때 response가 있는지는 실행이 어디까지 진행됐는지에 따라 달라집니다. 정확한 분류는 [오류](/ko-KR/core/errors)를 참고하세요.
 
 ## 취소와 timeout
 
@@ -140,6 +140,8 @@ const [error] = await client.execute(command, {
 ```
 
 `signal`은 클라이언트 내부 signal 및 양수 timeout과 병합됩니다. 별도의 `abort` 필드는 현재 API에 남아 있는 다른 취소 signal입니다. `abort`와 `timeout`을 함께 전달하면 `REQUEST_VALIDATION_FAILED`가 반환됩니다. `signal`은 둘 중 어느 것과도 함께 사용할 수 있습니다.
+
+HTTP, SSE, WebSocket 실행의 `timeout`은 `1..2_147_483_647` 범위의 양의 안전 정수여야 하며, `0`, 음수, 소수, `NaN`, `Infinity`, 상한을 넘는 값은 request, stream, socket 리소스를 만들기 전에 `REQUEST_VALIDATION_FAILED`를 반환합니다.
 
 인식된 취소는 `ABORTED`를 만듭니다. `AbortSignal.timeout(...)` reason이나 실행 timeout은 `TIMEOUT`을 만듭니다. 그 외 Fetch 실패는 `NETWORK_ERROR`를 만듭니다.
 
@@ -205,4 +207,4 @@ progress callback은 트랜스포트의 read/write 경로에서 실행됩니다.
 
 - [인터셉터](/ko-KR/core/interceptors)에서는 요청 복제, short-circuit, 재시도를 설명합니다.
 - [오류](/ko-KR/core/errors)에서는 HTTP status, 트랜스포트, definition 실패를 설명합니다.
-- [Struct](/ko-KR/core/struct)에서는 제로 값 구조 디코딩을 설명합니다.
+- [Struct](/ko-KR/core/struct)에서는 엄격한 구조 디코딩을 설명합니다.

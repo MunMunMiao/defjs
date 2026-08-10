@@ -13,6 +13,8 @@ import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core
 const client = createClient(withEndpoint('wss://api.example.com'))
 
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   path: '/chat',
   incoming: {
     message: struct.object({ userId: struct.number(), text: struct.string() }),
@@ -45,6 +47,7 @@ Si es un escalar o un array, colócalo en `data`:
 
 ```typescript
 const audit = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/audit',
   incoming: {
     entry: struct.object({ data: struct.string(), source: struct.string() }),
@@ -75,6 +78,8 @@ Un Struct opcional `incoming.default` gestiona los tipos de mensaje que no esté
 const [error, session, startupConnection] = await client.execute(chat())
 ```
 
+Para la ejecución HTTP, SSE y WebSocket, `timeout` debe ser un entero seguro positivo dentro de `1..2_147_483_647`; `0`, los valores negativos o fraccionarios, `NaN`, `Infinity` y los valores superiores al límite devuelven `REQUEST_VALIDATION_FAILED` antes de crear cualquier recurso de request, stream o socket.
+
 WebSocket devuelve:
 
 ```typescript
@@ -83,9 +88,9 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
   | [error: RequestError<unknown>, session: undefined, connection: WebSocketConnectionInfo | undefined]
 ```
 
-El tercer elemento cuando el arranque tiene éxito es la instantánea de la conexión inicial. Puede contener `url`, `protocol` y `extensions`, capturados cuando se abrió el primer socket físico.
+El tercer elemento cuando el arranque tiene éxito es la instantánea inicial con `generation: 1`. Puede contener `url`, `protocol` y `extensions` del primer socket físico.
 
-`session.connection` es un getter actualizado. Una reconexión sustituye el socket físico subyacente y puede cambiar este valor. Conserva el tercer elemento de la tupla si necesitas la instantánea inicial.
+`session.connection` es un getter actualizado; cada apertura física correcta incrementa `generation`. Conserva el tercer elemento de la tupla si necesitas la instantánea inicial.
 
 No registres las URLs de conexión. Pueden contener identificadores de ruta, datos de query de la aplicación y campos de propagación de telemetría.
 
@@ -96,9 +101,10 @@ Un `WebSocketSession` representa una sesión lógica que puede abarcar varios in
 | Miembro                    | Comportamiento                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------ |
 | `connection`               | Información actual de la última conexión.                                                        |
+| `bufferedAmount`           | Bytes no enviados del socket nativo, o `0` si no existe.                                         |
 | `state`                    | Estado actual de la sesión lógica.                                                               |
 | `receive`                  | Cola de trabajo asíncrona compartida con mensajes entrantes ya validados.                        |
-| `send(message)`            | Valida, serializa y después envía o encola un mensaje saliente.                                  |
+| `send(message)`            | Comprueba escritura, valida, serializa y después envía o encola.                                 |
 | `close(code?, reason?)`    | Solicita el cierre definitivo.                                                                   |
 | `closed`                   | Promesa con la información de cierre definitivo observada.                                       |
 | `onStateChange(listener)`  | Añade un observador de estado y devuelve una función para darlo de baja.                         |
@@ -108,14 +114,13 @@ Una vez devuelta, el cliente no registra la sesión. Quien llama es responsable 
 
 ## Recibir mensajes
 
-Los mensajes de texto, ArrayBuffer, arrays tipados y Blob se decodifican como JSON UTF-8. Las siguientes entradas se descartan sin notificación:
+Los mensajes de texto, ArrayBuffer, arrays tipados y Blob se decodifican por orden de llegada como JSON UTF-8. Las siguientes entradas se descartan sin notificación:
 
-- JSON no válido;
 - un sobre que no sea un objeto;
 - un `type` ausente o una cadena vacía;
 - un tipo desconocido sin Struct `incoming.default`.
 
-Una vez seleccionado un Struct, los fallos de decodificación se envían a `onRuntimeError` y el mensaje se descarta.
+El JSON no válido y los fallos del Struct seleccionado se envían a `onRuntimeError`; el frame se descarta y la sesión continúa.
 
 ```typescript
 const unsubscribeError = session.onRuntimeError(() => {
@@ -135,7 +140,7 @@ try {
 }
 ```
 
-El iterable de entrada es una única cola de trabajo compartida sin límite. Si hay varios iteradores, compiten por los mensajes; no son suscripciones independientes. El transporte no frena al servidor cuando crece la cola. Consume siempre los mensajes entrantes o cierra pronto la sesión.
+`receive` admite exactamente un iterador. `maxIncomingQueueSize` es un límite positivo obligatorio; el desbordamiento vacía el búfer, hace fallar el iterador y termina la sesión como `error`.
 
 ## Enviar mensajes
 
@@ -145,7 +150,7 @@ El iterable de entrada es una única cola de trabajo compartida sin límite. Si 
 - el mensaje no tiene un `type` válido;
 - el tipo no está declarado;
 - falla la decodificación estructural o la codificación del payload;
-- una cola de envío acotada utiliza `overflow: 'error'`;
+- la cola de salida del endpoint está deshabilitada o llena durante `reconnecting`;
 - el socket nativo lanza durante un envío inmediato.
 
 ```typescript
@@ -156,42 +161,42 @@ try {
 }
 ```
 
-Los mensajes enviados antes de la apertura o entre intentos de reconexión entran en la cola de salida. La cola se vacía cuando se abre un socket físico.
+La capacidad lógica de escritura se comprueba antes de validar o serializar el payload. Solo se envía directamente cuando el estado lógico y el socket físico actual son `open`. Solo se encola durante `reconnecting` si `maxOutgoingQueueSize` del endpoint es positivo. La FIFO se vacía antes de publicar `open` para el socket de reemplazo.
 
-No llames a `send` después de un estado definitivo. La implementación actual no ofrece un contrato estable de rechazo después del cierre, y los datos encolados tras el cierre definitivo podrían no enviarse nunca.
+Durante el cierre manual, tras un estado definitivo y mientras el predicado de reconexión aún no ha decidido un cierre remoto, `send` lanza `InvalidStateError`. El transporte no repite frames ya enviados a un socket físico anterior.
 
 ## Estado
 
 `session.state` puede tomar estos valores:
 
-| Estado         | Significado                                                                                                                                                   |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `idle`         | Estado interno inicial antes de comenzar la ejecución.                                                                                                        |
-| `connecting`   | Está comenzando el primer intento físico.                                                                                                                     |
-| `open`         | Último estado lógico emitido después de abrir un socket físico. Durante la espera de reconexión puede seguir en `open` aunque no exista ningún socket físico. |
-| `reconnecting` | Está comenzando un intento físico posterior una vez transcurrida la espera.                                                                                   |
-| `closing`      | Se está cerrando por cancelación un socket que estaba conectando o abierto.                                                                                   |
-| `closed`       | Cierre definitivo sin un error normalizado.                                                                                                                   |
-| `aborted`      | Cancelación externa definitiva normalizada como `ABORTED`.                                                                                                    |
-| `error`        | Otro fallo definitivo.                                                                                                                                        |
+| Estado         | Significado                                                  |
+| -------------- | ------------------------------------------------------------ |
+| `idle`         | Estado interno inicial antes de comenzar la ejecución.       |
+| `connecting`   | Está comenzando el primer intento físico.                    |
+| `open`         | El socket físico actual está abierto.                        |
+| `reconnecting` | Se está preparando o retrasando un intento físico posterior. |
+| `closing`      | El propietario ha solicitado un cierre manual.               |
+| `closed`       | Cierre definitivo sin un error normalizado.                  |
+| `aborted`      | Cancelación externa definitiva normalizada como `ABORTED`.   |
+| `error`        | Otro fallo definitivo.                                       |
 
-`reconnecting` no se emite durante la espera. Se emite cuando comienza el intento siguiente, después de esa espera. Trata `session.state` como el último estado de ciclo de vida emitido, no como prueba de que exista un socket nativo en ese momento. Los mensajes enviados durante ese intervalo entran en la cola de salida.
+`session.state` describe el ciclo de vida lógico, no demuestra que exista un socket nativo. Durante `reconnecting`, `send` utiliza la capacidad de salida definida por el endpoint.
 
-Los listeners de estado se ejecutan directamente. No deben lanzar; dales de baja cuando termine su propietario.
+Los fallos de observadores están aislados: un fallo de listener de estado se notifica a los listeners de errores y el fallo de estos se reenvía a `globalThis.reportError` cuando existe. El estado definitivo libera todos los observadores; dales de baja si su propietario termina antes.
 
 ### Antes de cada intento
 
 Puedes configurar `beforeConnect` en el cliente o en una ejecución. Se ejecuta antes del constructor nativo tanto en el intento inicial como en cada reconexión:
 
 ```typescript
-declare const refreshConnectionState: () => Promise<void>
+declare const refreshConnectionState: (signal: AbortSignal) => Promise<void>
 
 const [error, session] = await client.execute(chat(), {
-  beforeConnect: refreshConnectionState,
+  beforeConnect: ({ signal }) => refreshConnectionState(signal),
 })
 ```
 
-La entrada del comando y la proyección de la petición ya están construidas. El hook no vuelve a ejecutar `build` ni cambia los valores de query vinculados. Úsalo para tareas preparatorias controladas por la aplicación, como actualizar estado que utilice el mecanismo de handshake del entorno. Si lanza o rechaza una promesa, se produce un fallo definitivo de transporte; no se pasa al predicado de reconexión que evalúa el cierre.
+El hook recibe `{ attempt, signal }`; `attempt` empieza en `0` y aumenta en las reconexiones. Pasa `signal` al trabajo asíncrono propio. La cancelación y el timeout compiten con el hook, consumen rechazos tardíos e impiden construir un socket desde un resultado tardío. Lanzar o rechazar es un fallo definitivo de transporte.
 
 ## La reconexión es opcional
 
@@ -227,7 +232,7 @@ El predicado por defecto reintenta tanto cierres remotos limpios como no limpios
 
 La espera base es `min(delayMs * factor ** (attempt - 1), maxDelayMs)`. En WebSocket, el jitter es multiplicativo: un valor como `0.2` selecciona un factor aleatorio entre `0.8` y `1.2`. Esto es distinto del jitter SSE, que añade milisegundos.
 
-`shouldReconnect` debe ser síncrono y no lanzar. La reconexión crea un socket físico nuevo dentro de la misma sesión lógica. Las colas de entrada y salida pertenecen a esa sesión lógica.
+`shouldReconnect` es síncrono. Si lanza, la sesión termina como `error`; si devuelve explícitamente `false`, termina como `closed`. La reconexión solo crea un socket físico nuevo y no repite envíos anteriores. Cuando aumente `session.connection.generation`, restaura solo suscripciones aún activas y seguras para repetir, nunca mutaciones.
 
 ## Heartbeat
 
@@ -247,49 +252,36 @@ const [error, session] = await client.execute(chat(), {
 
 `message` debe producir un valor válido para el mapa `outgoing` del endpoint. Un mensaje reconocido por `isAck` cancela el timeout del heartbeat y no se añade a `receive`.
 
-Cuando vence un `timeoutMs` positivo, la implementación emite `Error('WebSocket heartbeat timeout')` a los listeners de errores y solicita al socket nativo el cierre con código `4000` y motivo `heartbeat timeout`. Para reconectar sigue haciendo falta una política de reconexión independiente que permita el cierre resultante.
+Los fallos de serialización, envío, predicado de ack o timeout del heartbeat son fatales. Notifican a los listeners de errores, hacen fallar `receive` y terminan la sesión como `error` sin consultar la política de reconexión.
 
-Mantén `timeoutMs < intervalMs`. La implementación actual no valida esta relación y, si el timeout es igual o superior al intervalo, puede solaparse con temporizadores de heartbeat posteriores.
+`intervalMs` y un `timeoutMs` definido deben ser positivos, finitos y como máximo `2_147_483_647`. Mientras haya un deadline de ack activo, los intervalos posteriores no envían otro ping ni reinician el deadline; un ack o el cierre de la sesión lo elimina.
 
 ## Colas
 
-La opción `queue` solo configura los mensajes salientes:
+Los límites de cola pertenecen a la definición del endpoint. `maxIncomingQueueSize` es un entero seguro positivo obligatorio; el desbordamiento es fatal y descarta los valores almacenados. `maxOutgoingQueueSize` es un entero seguro no negativo opcional, con valor predeterminado `0`; un valor positivo conserva frames FIFO entre intentos y rechaza el desbordamiento sin borrar frames anteriores.
 
-```typescript
-const [error, session] = await client.execute(chat(), {
-  queue: {
-    maxSize: 100,
-    overflow: 'drop-oldest',
-  },
-})
-```
-
-La cola de salida no tiene límite por defecto. Cuando se acota, su modo de desbordamiento por defecto es `drop-oldest`; las alternativas son `drop-newest` y `error`. El cierre definitivo vacía esta cola de envío.
-
-La cola de entrada no tiene ninguna opción pública de límite o desbordamiento. Es una cola de trabajo compartida sin límite y no ofrece backpressure. Quien controle el recurso debe consumirla continuamente o cerrar la sesión.
+Ambos límites cuentan elementos, no bytes. `session.bufferedAmount` expone por separado los bytes pendientes del socket nativo. `receive` admite exactamente un iterador.
 
 ## Responsabilidad del cierre
 
-`session.close(code, reason)` llama al método `close` del socket nativo actual y cancela la sesión lógica con un marcador de cierre manual. Solicita el cierre; no garantiza un handshake correcto, un estado `closing` visible ni que el valor final de `closed` reproduzca exactamente el código y el motivo solicitados.
+`session.close(code, reason)` valida primero que el código sea `1000` o `3000..4999` y que el motivo tenga como máximo 123 bytes UTF-8. Una entrada válida pasa a `closing`, solicita el cierre nativo y espera el `CloseEvent` real; el código y motivo observados prevalecen sobre los solicitados.
 
 `session.closed` se resuelve a partir de la información de cierre que observa la implementación:
 
 ```typescript
-interface WebSocketCloseInfo {
-  cause?: unknown
-  code?: number
-  reason?: string
-  wasClean?: boolean
-}
+type WebSocketCloseInfo =
+  | { kind: 'closed'; code?: number; reason?: string; wasClean?: boolean }
+  | { kind: 'aborted'; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }
+  | { kind: 'error'; cause: unknown; code?: number; reason?: string; wasClean?: boolean }
 ```
 
-Una implementación nativa que nunca emita su evento de cierre puede retrasar la resolución. Una cancelación externa puede terminar como `aborted` o `error` según el motivo normalizado, y puede omitir `closing` si la sesión se encuentra entre intentos.
+El cierre manual, un cierre remoto sin causa y una reconexión rechazada explícitamente producen `closed`. La cancelación externa produce `aborted`; timeout y fallos de ejecución producen `error`. Si el cierre nativo lanza, se intenta una sola vez sin argumentos; si ambos lanzan, se resuelve como `error` sin una tercera llamada.
 
 Da de baja los listeners y cierra la sesión en el límite del componente, ruta, trabajo o servicio que la abrió. Desmontar un provider no realiza por sí solo estas tareas.
 
 ## Seguridad de URL y autenticación
 
-Las URLs base HTTP se convierten a esquemas WebSocket: `http:` pasa a `ws:` y `https:` a `wss:`. Los placeholders de ruta no se codifican como segmentos. Los valores de query utilizan el serializador configurado.
+Las URLs base HTTP se convierten a esquemas WebSocket: `http:` pasa a `ws:` y `https:` a `wss:`. Proporciona valores de placeholder de ruta sin codificar: Core codifica cada segmento exactamente una vez, convierte `%` en `%25` y rechaza vacío, `.` y `..`. Los valores de query utilizan el serializador configurado.
 
 La prioridad de los protocolos es: opción de ejecución, opción del cliente y, por último, definición del endpoint. Un array de protocolos vacío y explícito impide usar valores de menor prioridad.
 

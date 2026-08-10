@@ -1,4 +1,4 @@
-import type { HttpRequest } from '@defjs/core'
+import { ERR_ABORTED, type HttpRequest } from '@defjs/core'
 import type { Context, TextMapGetter, TextMapPropagator, TextMapSetter } from '@opentelemetry/api'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import {
@@ -21,10 +21,12 @@ function createMockWsPropagator(): TextMapPropagator {
     inject: vi.fn((_ctx: Context, carrier: unknown, _setter?: TextMapSetter<unknown>) => {
       if (isQueryCarrier(carrier)) {
         carrier.params.set('traceparent', 'mock-trace-id')
+        carrier.params.set('tracestate', 'vendor=value')
+        carrier.params.set('baggage', 'tenant=acme')
       }
     }),
     extract: vi.fn((ctx: Context, _carrier?: unknown, _getter?: TextMapGetter<unknown>) => ctx),
-    fields: vi.fn(() => ['traceparent']),
+    fields: vi.fn(() => ['traceparent', 'tracestate', 'baggage']),
   }
 }
 
@@ -52,9 +54,13 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
     expect(mockPropagator.extract).toHaveBeenCalled()
   })
 
-  test('should inject traceparent into query params', async () => {
+  test('should inject propagation fields into query params when explicitly enabled', async () => {
     const { tracer } = createMockTracer()
-    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator })
+    const interceptor = createOpenTelemetryWebSocketInterceptor({
+      tracer,
+      propagator: mockPropagator,
+      queryPropagation: true,
+    })
 
     const req = makeWsRequest()
     const next = vi.fn(async (_req: HttpRequest) => makeWsSession())
@@ -64,12 +70,18 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
     expect(mockPropagator.inject).toHaveBeenCalled()
     const calls = vi.mocked(next).mock.calls
     expect(calls[0]?.[0].queryParams?.get('traceparent')).toBe('mock-trace-id')
-    expect(calls[0]?.[0].queryString).toBe('traceparent=mock-trace-id')
+    expect(calls[0]?.[0].queryParams?.get('tracestate')).toBe('vendor=value')
+    expect(calls[0]?.[0].queryParams?.get('baggage')).toBe('tenant=acme')
+    expect(calls[0]?.[0].queryString).toBe('traceparent=mock-trace-id&tracestate=vendor%3Dvalue&baggage=tenant%3Dacme')
   })
 
   test('should preserve existing query params when injecting traceparent', async () => {
     const { tracer } = createMockTracer()
-    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator })
+    const interceptor = createOpenTelemetryWebSocketInterceptor({
+      tracer,
+      propagator: mockPropagator,
+      queryPropagation: true,
+    })
 
     const req = makeWsRequest(new URLSearchParams({ room: 'alpha' }))
     const next = vi.fn(async (_req: HttpRequest) => makeWsSession())
@@ -83,7 +95,11 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
 
   test('should append propagation params without rewriting existing queryString', async () => {
     const { tracer } = createMockTracer()
-    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator })
+    const interceptor = createOpenTelemetryWebSocketInterceptor({
+      tracer,
+      propagator: mockPropagator,
+      queryPropagation: true,
+    })
 
     const req = {
       ...makeWsRequest(
@@ -100,7 +116,9 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
 
     const calls = vi.mocked(next).mock.calls
     expect(calls[0]?.[0].queryParams?.get('traceparent')).toBe('mock-trace-id')
-    expect(calls[0]?.[0].queryString).toBe('space=hello%20world&room=alpha&traceparent=mock-trace-id')
+    expect(calls[0]?.[0].queryString).toBe(
+      'space=hello%20world&room=alpha&traceparent=mock-trace-id&tracestate=vendor%3Dvalue&baggage=tenant%3Dacme',
+    )
   })
 
   test('should create span with correct name', async () => {
@@ -168,6 +186,64 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
     )
   })
 
+  test('should treat a legacy close info without kind or cause as closed', async () => {
+    const { tracer } = createMockTracer()
+    const metrics = createMockMetrics()
+    const ws = makeDeferredWsSession()
+    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator, metrics })
+
+    await interceptor.fn(makeWsRequest(), async () => ws.session)
+    ws.close({ code: 1000, reason: 'legacy normal close', wasClean: true } as never)
+    await waitForSettledPromises()
+
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('websocket.closed')
+    expect(activeSpans[0]?.recordException).not.toHaveBeenCalled()
+    expect(activeSpans[0]?.status?.code).toBe(1)
+    expect(metrics.connectionDuration.record).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ 'defjs.result': 'success' }),
+    )
+  })
+
+  test('should treat a non-object legacy close result as closed', async () => {
+    const { tracer } = createMockTracer()
+    const metrics = createMockMetrics()
+    const ws = makeDeferredWsSession()
+    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator, metrics })
+
+    await interceptor.fn(makeWsRequest(), async () => ws.session)
+    ws.close(null as never)
+    await waitForSettledPromises()
+
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('websocket.closed')
+    expect(activeSpans[0]?.recordException).not.toHaveBeenCalled()
+    expect(activeSpans[0]?.status?.code).toBe(1)
+    expect(metrics.connectionDuration.record).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ 'defjs.result': 'success' }),
+    )
+  })
+
+  test('should treat a legacy close info cause as an error', async () => {
+    const { tracer } = createMockTracer()
+    const metrics = createMockMetrics()
+    const ws = makeDeferredWsSession()
+    const closeCause = new TypeError('legacy connection failure')
+    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator, metrics })
+
+    await interceptor.fn(makeWsRequest(), async () => ws.session)
+    ws.close({ cause: closeCause, code: 1006, wasClean: false } as never)
+    await waitForSettledPromises()
+
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('websocket.error', { 'error.type': 'TypeError' })
+    expect(activeSpans[0]?.recordException).toHaveBeenCalledWith(closeCause)
+    expect(activeSpans[0]?.status?.code).toBe(2)
+    expect(metrics.connectionDuration.record).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ 'defjs.result': 'error', 'error.type': 'TypeError' }),
+    )
+  })
+
   test('should record error when session.closed rejects', async () => {
     const { tracer } = createMockTracer()
     const metrics = createMockMetrics()
@@ -198,7 +274,7 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
     const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator, metrics })
 
     await interceptor.fn(makeWsRequest(), async () => ws.session)
-    ws.close({ code: 1006, cause: new TypeError('connection lost'), reason: 'abnormal', wasClean: false })
+    ws.close({ code: 1006, cause: new TypeError('connection lost'), kind: 'error', reason: 'abnormal', wasClean: false })
     await waitForSettledPromises()
 
     expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('websocket.error', { 'error.type': 'TypeError' })
@@ -210,6 +286,29 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
       expect.objectContaining({
         'defjs.result': 'error',
         'error.type': 'TypeError',
+      }),
+    )
+  })
+
+  test('should record an aborted session without a cause as an error', async () => {
+    const { tracer } = createMockTracer()
+    const metrics = createMockMetrics()
+    const ws = makeDeferredWsSession()
+    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator, metrics })
+
+    await interceptor.fn(makeWsRequest(), async () => ws.session)
+    ws.close({ kind: 'aborted' })
+    await waitForSettledPromises()
+
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('websocket.error', { 'error.type': 'Error' })
+    expect(activeSpans[0]?.recordException).toHaveBeenCalledWith(ERR_ABORTED)
+    expect(activeSpans[0]?.status?.code).toBe(2)
+    expect(activeSpans[0]?.ended).toBe(true)
+    expect(metrics.connectionDuration.record).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({
+        'defjs.result': 'error',
+        'error.type': 'Error',
       }),
     )
   })
@@ -253,15 +352,17 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
     expect(next).toHaveBeenCalledTimes(1)
   })
 
-  test('should not inject query params when queryPropagation is false', async () => {
+  test('should leave existing query state unchanged when queryPropagation is omitted', async () => {
     const { tracer } = createMockTracer()
     const interceptor = createOpenTelemetryWebSocketInterceptor({
       tracer,
       propagator: mockPropagator,
-      queryPropagation: false,
     })
 
-    const req = makeWsRequest()
+    const req = {
+      ...makeWsRequest(new URLSearchParams({ room: 'alpha' })),
+      queryString: 'room=alpha',
+    }
     const next = vi.fn(async (_req: HttpRequest) => makeWsSession())
 
     await interceptor.fn(req, next)
@@ -269,7 +370,8 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
     expect(mockPropagator.inject).not.toHaveBeenCalled()
     const calls = vi.mocked(next).mock.calls
     expect(calls[0]?.[0].queryParams?.get('traceparent')).toBeNull()
-    expect(calls[0]?.[0].queryString).toBe('')
+    expect(calls[0]?.[0].queryParams).toBe(req.queryParams)
+    expect(calls[0]?.[0].queryString).toBe('room=alpha')
   })
 
   test('should keep queryString unchanged when propagator injects nothing', async () => {
@@ -279,7 +381,11 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
       extract: vi.fn((ctx: Context) => ctx),
       fields: vi.fn(() => []),
     }
-    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: noOpPropagator })
+    const interceptor = createOpenTelemetryWebSocketInterceptor({
+      tracer,
+      propagator: noOpPropagator,
+      queryPropagation: true,
+    })
 
     const req = makeWsRequest(new URLSearchParams({ room: 'alpha' }))
     const next = vi.fn(async (_req: HttpRequest) => makeWsSession())
@@ -298,7 +404,11 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
       extract: vi.fn((ctx: Context) => ctx),
       fields: vi.fn(() => []),
     }
-    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: noOpPropagator })
+    const interceptor = createOpenTelemetryWebSocketInterceptor({
+      tracer,
+      propagator: noOpPropagator,
+      queryPropagation: true,
+    })
 
     const req = { ...makeWsRequest(), queryString: undefined }
     const next = vi.fn(async (_req: HttpRequest) => makeWsSession())

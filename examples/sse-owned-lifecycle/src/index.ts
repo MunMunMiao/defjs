@@ -4,6 +4,8 @@ import { createClient, defineEventStream, struct, type Infer, withEndpoint, with
 const caseAssignmentStruct = struct.object({ caseId: struct.string(), queue: struct.string() })
 export type CaseAssignment = Infer<typeof caseAssignmentStruct>
 export const caseAssignmentEvents = defineEventStream({
+  maxBufferSize: 1024,
+  maxQueueSize: 8,
   path: '/v1/support/case-assignments',
   events: {
     'case-assigned': struct.json(caseAssignmentStruct),

@@ -1,28 +1,44 @@
 import { describe, expect, test, vi } from 'vitest'
 import { struct } from '../struct'
 import type { HeartbeatSession } from './heartbeat'
-import { startHeartbeat, stopHeartbeat } from './heartbeat'
-import { createSendQueue } from './queue'
+import { startHeartbeat, stopHeartbeat, validateHeartbeatConfig } from './heartbeat'
 
 describe('heartbeat', () => {
   function createMockSocket(readyState: number = WebSocket.OPEN) {
     return {
+      bufferedAmount: 0,
       readyState,
       send: vi.fn(),
-      close: vi.fn(),
     } as unknown as WebSocket
   }
 
-  function createMockSession(): HeartbeatSession<unknown> {
+  function createMockSession(currentSocket?: WebSocket): HeartbeatSession<unknown> {
     return {
-      currentSocket: undefined,
+      currentSocket,
       heartbeat: undefined,
     }
   }
 
+  test.each([
+    ['intervalMs', { intervalMs: 0 }],
+    ['intervalMs', { intervalMs: -1 }],
+    ['intervalMs', { intervalMs: Number.NaN }],
+    ['intervalMs', { intervalMs: Number.POSITIVE_INFINITY }],
+    ['intervalMs', { intervalMs: 2_147_483_648 }],
+    ['timeoutMs', { intervalMs: 100, timeoutMs: 0 }],
+    ['timeoutMs', { intervalMs: 100, timeoutMs: Number.POSITIVE_INFINITY }],
+    ['timeoutMs', { intervalMs: 100, timeoutMs: 2_147_483_648 }],
+  ])('should reject invalid %s before creating a platform timer', (field, config) => {
+    expect(() => validateHeartbeatConfig(config)).toThrow(`WebSocket heartbeat ${field}`)
+  })
+
+  test('should accept the maximum platform timer delay', () => {
+    expect(() => validateHeartbeatConfig({ intervalMs: 2_147_483_647, timeoutMs: 2_147_483_647 })).not.toThrow()
+  })
+
   test('should do nothing when config is undefined', () => {
     const session = createMockSession()
-    startHeartbeat(createMockSocket(), session, undefined, undefined, createSendQueue(), vi.fn())
+    startHeartbeat(createMockSocket(), session, undefined, undefined, vi.fn(), WebSocket.OPEN)
     expect(session.heartbeat).toBeUndefined()
   })
 
@@ -35,198 +51,227 @@ describe('heartbeat', () => {
     }
     session.heartbeat = existingHeartbeat
 
-    startHeartbeat(createMockSocket(), session, { intervalMs: 1000 }, undefined, createSendQueue(), vi.fn())
+    startHeartbeat(createMockSocket(), session, { intervalMs: 1000 }, undefined, vi.fn(), WebSocket.OPEN)
 
     expect(existingHeartbeat.stop).toHaveBeenCalled()
   })
 
-  test('should send heartbeat message at interval', () => {
+  test('should send heartbeat messages at the configured interval', () => {
     vi.useFakeTimers()
     const socket = createMockSocket()
-    const session = createMockSession()
-    const messageFn = vi.fn().mockReturnValue({ type: 'ping' })
+    const session = createMockSession(socket)
+    const message = vi.fn().mockReturnValue({ type: 'ping' })
 
-    startHeartbeat(socket, session, { intervalMs: 100, message: messageFn }, { ping: struct.object({}) }, createSendQueue(), vi.fn())
+    startHeartbeat(socket, session, { intervalMs: 100, message }, { ping: struct.object({}) }, vi.fn(), WebSocket.OPEN)
 
-    expect(messageFn).not.toHaveBeenCalled()
-
-    vi.advanceTimersByTime(100)
-    expect(messageFn).toHaveBeenCalledTimes(1)
-    expect(socket.send).toHaveBeenCalledTimes(1)
-
-    vi.advanceTimersByTime(100)
-    expect(messageFn).toHaveBeenCalledTimes(2)
+    vi.advanceTimersByTime(200)
+    expect(message).toHaveBeenCalledTimes(2)
     expect(socket.send).toHaveBeenCalledTimes(2)
-
     vi.useRealTimers()
   })
 
-  test('should skip heartbeat when socket is not open', () => {
+  test('should not send when outgoing serialization stops the active heartbeat runtime', () => {
     vi.useFakeTimers()
-    const socket = createMockSocket(WebSocket.CONNECTING)
-    const session = createMockSession()
+    const socket = createMockSocket()
+    const session = createMockSession(socket)
+    const message = {
+      get text() {
+        stopHeartbeat(session)
+        return 'late'
+      },
+      type: 'ping' as const,
+    }
 
     startHeartbeat(
       socket,
       session,
-      { intervalMs: 100, message: () => ({ type: 'ping' }) },
-      { ping: struct.object({}) },
-      createSendQueue(),
+      { intervalMs: 100, message: () => message, timeoutMs: 200 },
+      { ping: struct.object({ text: struct.string() }) },
       vi.fn(),
+      WebSocket.OPEN,
     )
 
     vi.advanceTimersByTime(100)
     expect(socket.send).not.toHaveBeenCalled()
-
+    expect(vi.getTimerCount()).toBe(0)
     vi.useRealTimers()
   })
 
-  test('should skip heartbeat when message is undefined', () => {
+  test('should not arm an acknowledgement timeout when native send stops the active heartbeat runtime', () => {
     vi.useFakeTimers()
     const socket = createMockSocket()
-    const session = createMockSession()
-
-    startHeartbeat(socket, session, { intervalMs: 100 }, undefined, createSendQueue(), vi.fn())
-
-    vi.advanceTimersByTime(100)
-    expect(socket.send).not.toHaveBeenCalled()
-
-    vi.useRealTimers()
-  })
-
-  test('should call onError when message serialization fails', () => {
-    vi.useFakeTimers()
-    const socket = createMockSocket()
-    const onError = vi.fn()
-    const session = createMockSession()
+    const session = createMockSession(socket)
+    socket.send = vi.fn(() => stopHeartbeat(session))
 
     startHeartbeat(
       socket,
       session,
-      { intervalMs: 100, message: () => ({ type: 'unknown' }) },
+      { intervalMs: 100, message: () => ({ type: 'ping' }), timeoutMs: 200 },
       { ping: struct.object({}) },
-      createSendQueue(),
-      onError,
+      vi.fn(),
+      WebSocket.OPEN,
     )
 
     vi.advanceTimersByTime(100)
-    expect(onError).toHaveBeenCalled()
-    expect(socket.send).not.toHaveBeenCalled()
+    expect(socket.send).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    vi.useRealTimers()
+  })
+
+  test('should skip heartbeat when socket is not open or message is undefined', () => {
+    vi.useFakeTimers()
+    const closedSocket = createMockSocket(WebSocket.CONNECTING)
+    const openSocket = createMockSocket()
+    const closedSession = createMockSession(closedSocket)
+    const openSession = createMockSession(openSocket)
+
+    startHeartbeat(closedSocket, closedSession, { intervalMs: 100, message: () => ({ type: 'ping' }) }, undefined, vi.fn(), WebSocket.OPEN)
+    startHeartbeat(openSocket, openSession, { intervalMs: 100 }, undefined, vi.fn(), WebSocket.OPEN)
+
+    vi.advanceTimersByTime(100)
+    expect(closedSocket.send).not.toHaveBeenCalled()
+    expect(openSocket.send).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  test('should report message factory, serialization, and native send failures as fatal', () => {
+    vi.useFakeTimers()
+
+    for (const setup of [
+      () => ({
+        message: () => {
+          throw new Error('factory failed')
+        },
+        outgoing: undefined,
+        socket: createMockSocket(),
+      }),
+      () => ({ message: () => ({ type: 'unknown' }), outgoing: { ping: struct.object({}) }, socket: createMockSocket() }),
+      () => {
+        const socket = createMockSocket()
+        socket.send = vi.fn(() => {
+          throw new Error('send failed')
+        })
+        return { message: () => ({ type: 'ping' }), outgoing: { ping: struct.object({}) }, socket }
+      },
+    ]) {
+      const onFatal = vi.fn()
+      const { message, outgoing, socket } = setup()
+      startHeartbeat(socket, createMockSession(socket), { intervalMs: 100, message }, outgoing, onFatal, WebSocket.OPEN)
+      vi.advanceTimersByTime(100)
+      expect(onFatal).toHaveBeenCalledTimes(1)
+    }
 
     vi.useRealTimers()
   })
 
-  test('should trigger timeout when no ack received', () => {
+  test('should report timeout without owning socket close or queues', () => {
     vi.useFakeTimers()
     const socket = createMockSocket()
-    const onError = vi.fn()
-    const session = createMockSession()
+    const onFatal = vi.fn()
+    const session = createMockSession(socket)
 
     startHeartbeat(
       socket,
       session,
       { intervalMs: 100, timeoutMs: 50, message: () => ({ type: 'ping' }) },
       { ping: struct.object({}) },
-      createSendQueue(),
-      onError,
+      onFatal,
+      WebSocket.OPEN,
     )
 
-    vi.advanceTimersByTime(100)
-    expect(socket.send).toHaveBeenCalledTimes(1)
-
-    vi.advanceTimersByTime(50)
-    expect(onError).toHaveBeenCalledWith(new Error('WebSocket heartbeat timeout'))
-    expect(socket.close).toHaveBeenCalledWith(4000, 'heartbeat timeout')
-
+    vi.advanceTimersByTime(150)
+    expect(onFatal).toHaveBeenCalledWith(new Error('WebSocket heartbeat timeout'))
     vi.useRealTimers()
   })
 
-  test('should clear timeout on ack', () => {
+  test('should keep one acknowledgement deadline when interval is shorter than timeout', () => {
     vi.useFakeTimers()
     const socket = createMockSocket()
-    const onError = vi.fn()
-    const session = createMockSession()
+    const onFatal = vi.fn()
+    const session = createMockSession(socket)
 
     startHeartbeat(
       socket,
       session,
-      { intervalMs: 100, timeoutMs: 200, message: () => ({ type: 'ping' }) },
+      { intervalMs: 5, timeoutMs: 20, message: () => ({ type: 'ping' }) },
       { ping: struct.object({}) },
-      createSendQueue(),
-      onError,
+      onFatal,
+      WebSocket.OPEN,
     )
+
+    vi.advanceTimersByTime(24)
+    expect(socket.send).toHaveBeenCalledTimes(1)
+    expect(onFatal).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(1)
+    expect(onFatal).toHaveBeenCalledOnce()
+    expect(onFatal).toHaveBeenCalledWith(new Error('WebSocket heartbeat timeout'))
 
     vi.advanceTimersByTime(100)
     expect(socket.send).toHaveBeenCalledTimes(1)
-
-    session.heartbeat?.markAck()
-
-    vi.advanceTimersByTime(200)
-    expect(onError).not.toHaveBeenCalled()
-    expect(socket.close).not.toHaveBeenCalled()
-
+    expect(onFatal).toHaveBeenCalledOnce()
     vi.useRealTimers()
   })
 
-  test('should call isAck to verify ack messages', () => {
-    const session = createMockSession()
+  test('should clear timeout on ack and expose isAck', () => {
+    vi.useFakeTimers()
+    const socket = createMockSocket()
+    const onFatal = vi.fn()
+    const session = createMockSession(socket)
     const isAck = vi.fn().mockReturnValue(true)
 
-    startHeartbeat(createMockSocket(), session, { intervalMs: 1000, isAck }, undefined, createSendQueue(), vi.fn())
+    startHeartbeat(
+      socket,
+      session,
+      { intervalMs: 100, isAck, timeoutMs: 200, message: () => ({ type: 'ping' }) },
+      { ping: struct.object({}) },
+      onFatal,
+      WebSocket.OPEN,
+    )
 
-    expect(session.heartbeat?.isAck?.('test')).toBe(true)
-    expect(isAck).toHaveBeenCalledWith('test')
+    vi.advanceTimersByTime(100)
+    expect(session.heartbeat?.isAck?.('pong')).toBe(true)
+    session.heartbeat?.markAck()
+    vi.advanceTimersByTime(200)
+    expect(onFatal).not.toHaveBeenCalled()
+    expect(socket.send).toHaveBeenCalledTimes(2)
+    expect(isAck).toHaveBeenCalledWith('pong')
+    vi.useRealTimers()
   })
 
   test('should stop heartbeat', () => {
     vi.useFakeTimers()
     const socket = createMockSocket()
-    const session = createMockSession()
+    const session = createMockSession(socket)
 
-    startHeartbeat(
-      socket,
-      session,
-      { intervalMs: 100, message: () => ({ type: 'ping' }) },
-      { ping: struct.object({}) },
-      createSendQueue(),
-      vi.fn(),
-    )
-
+    startHeartbeat(socket, session, { intervalMs: 100, message: () => ({ type: 'ping' }) }, undefined, vi.fn(), WebSocket.OPEN)
     stopHeartbeat(session)
-    expect(session.heartbeat).toBeUndefined()
 
+    expect(session.heartbeat).toBeUndefined()
     vi.advanceTimersByTime(100)
     expect(socket.send).not.toHaveBeenCalled()
-
     vi.useRealTimers()
   })
 
-  test('should handle close error during timeout', () => {
+  test('should use the injected constructor open state when global WebSocket is unavailable', () => {
     vi.useFakeTimers()
-    const socket = createMockSocket()
-    socket.close = vi.fn(() => {
-      throw new Error('already closed')
-    })
-    const onError = vi.fn()
-    const session = createMockSession()
-    const sendQueue = createSendQueue()
-    sendQueue.enqueue('test')
+    const socket = createMockSocket(1)
+    const onFatal = vi.fn()
+    vi.stubGlobal('WebSocket', undefined)
 
     startHeartbeat(
       socket,
-      session,
-      { intervalMs: 100, timeoutMs: 50, message: () => ({ type: 'ping' }) },
+      createMockSession(socket),
+      { intervalMs: 100, message: () => ({ type: 'ping' }) },
       { ping: struct.object({}) },
-      sendQueue,
-      onError,
+      onFatal,
+      1,
     )
-
     vi.advanceTimersByTime(100)
-    vi.advanceTimersByTime(50)
 
-    expect(onError).toHaveBeenCalledTimes(1) // heartbeat timeout only
-    expect(sendQueue.shift()).toBeUndefined() // queue cleared
-
+    expect(socket.send).toHaveBeenCalledTimes(1)
+    expect(onFatal).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
     vi.useRealTimers()
   })
 })

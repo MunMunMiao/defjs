@@ -65,18 +65,31 @@ export function endSpan(span: Span): void {
   span.end()
 }
 
-export function runSpanHook(span: Span, hookName: string, hook: (() => void) | undefined): void {
+export function runSpanHook(span: Span, hookName: string, hook: (() => Promise<void> | void) | undefined): void {
   if (!hook) {
     return
   }
   try {
-    hook()
+    const result = hook()
+    void Promise.resolve(result).catch((error) => recordSpanHookError(span, hookName, error))
   } catch (error) {
+    recordSpanHookError(span, hookName, error)
+  }
+}
+
+function recordSpanHookError(span: Span, hookName: string, error: unknown): void {
+  try {
     span.addEvent('defjs.otel.hook.error', {
       'hook.name': hookName,
       'error.type': getErrorType(error),
     })
+  } catch {
+    // Telemetry hooks must not affect transport execution.
+  }
+  try {
     span.recordException(toError(error))
+  } catch {
+    // Telemetry hooks must not affect transport execution.
   }
 }
 

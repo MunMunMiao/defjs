@@ -32,7 +32,7 @@ export async function collectConversationMessageIds(client: Client, conversation
     pages++
     const [error, page, response] = await client.execute(
       listConversationMessages({
-        path: { conversationId: encodeURIComponent(conversationId) },
+        path: { conversationId },
         query: { cursor },
       }),
     )

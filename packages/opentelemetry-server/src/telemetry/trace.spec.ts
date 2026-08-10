@@ -118,6 +118,73 @@ describe('trace helpers', () => {
     expect(hook).toHaveBeenCalledTimes(1)
   })
 
+  test.each([
+    { error: new Error('async hook failed'), errorType: 'Error' },
+    { error: 'async hook failed', errorType: 'async hook failed' },
+  ])('runSpanHook records async $errorType hook failures without an unhandled rejection', async ({ error, errorType }) => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+
+    try {
+      runSpanHook(span, 'requestHook', async () => {
+        throw error
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(spans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', {
+        'error.type': errorType,
+        'hook.name': 'requestHook',
+      })
+      expect(spans[0]?.recordException).toHaveBeenCalledWith(error instanceof Error ? error : new Error(error))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
+  test('runSpanHook does not wait for a pending async hook', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    const pending = new Promise<void>(() => undefined)
+
+    runSpanHook(span, 'requestHook', () => pending)
+
+    expect(spans[0]?.addEvent).not.toHaveBeenCalled()
+    expect(spans[0]?.recordException).not.toHaveBeenCalled()
+  })
+
+  test('runSpanHook isolates failures while recording an async hook rejection', async () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    spans[0]?.addEvent.mockImplementation(() => {
+      throw new Error('addEvent failed')
+    })
+    spans[0]?.recordException.mockImplementation(() => {
+      throw new Error('recordException failed')
+    })
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+
+    try {
+      runSpanHook(span, 'requestHook', async () => {
+        throw new Error('async hook failed')
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(spans[0]?.addEvent).toHaveBeenCalledTimes(1)
+      expect(spans[0]?.recordException).toHaveBeenCalledTimes(1)
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
   test('runSpanHook records non-Error hook failures', () => {
     const { tracer, spans } = createMockTracer()
     const span = tracer.startSpan('test')

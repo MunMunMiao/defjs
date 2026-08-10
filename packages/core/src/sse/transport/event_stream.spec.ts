@@ -1,8 +1,22 @@
 import { describe, expect, inject, test } from 'vitest'
 import { ERR_ABORTED } from '../../error'
 import type { HttpRequest } from '../../http'
-import { fetchEventStream } from './event_stream'
+import type { FetchEventStreamOptions } from './event_stream'
+import { fetchEventStream as fetchEventStreamInternal, getErrorOpenInfo } from './event_stream'
 import type { EventStreamMessage } from './parser'
+
+type TestOptions<T> = Omit<FetchEventStreamOptions<T>, 'maxBufferSize' | 'maxQueueSize'> & {
+  maxBufferSize?: number
+  maxQueueSize?: number
+}
+
+function fetchEventStream<T = EventStreamMessage>(request: HttpRequest, options: TestOptions<T> = {}) {
+  return fetchEventStreamInternal(request, {
+    maxBufferSize: 1024,
+    maxQueueSize: 16,
+    ...options,
+  } as FetchEventStreamOptions<T>)
+}
 
 describe('fetchEventStream', () => {
   test('should read basic sse messages with open and closed info', async () => {
@@ -13,6 +27,7 @@ describe('fetchEventStream', () => {
     }
 
     const stream = await fetchEventStream(request)
+    expect(stream.open.response.ok).toBe(true)
     expect(stream.open.response.status).toBe(200)
     expect(stream.open.response.headers.get('x-request-id')).toBe('trace-sse-basic')
 
@@ -22,8 +37,8 @@ describe('fetchEventStream', () => {
     }
 
     expect(messages).toEqual([
-      { id: '1', event: 'message', data: 'first', retry: undefined },
-      { id: '2', event: 'message', data: 'second line 1\nsecond line 2', retry: undefined },
+      { id: '1', event: 'message', data: 'first' },
+      { id: '2', event: 'message', data: 'second line 1\nsecond line 2' },
     ])
 
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
@@ -31,21 +46,40 @@ describe('fetchEventStream', () => {
 
   test('should retry with last-event-id and update open info', async () => {
     const request: HttpRequest = {
-      baseEndpoint: inject('testServerHost'),
-      endpoint: '/sse/retry',
+      baseEndpoint: 'https://example.com',
+      endpoint: '/events',
       method: 'GET',
     }
+    let attempt = 0
+    const fetch = async (input: RequestInfo | URL) => {
+      attempt += 1
+      const lastEventId = new Request(input).headers.get('last-event-id')
+      if (attempt === 1) {
+        expect(lastEventId).toBeNull()
+        let pulled = false
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (!pulled) {
+                pulled = true
+                controller.enqueue(new TextEncoder().encode('id: 1\ndata: first\n\n'))
+                return
+              }
+              controller.error(new Error('connection lost'))
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream', 'x-request-id': 'attempt-1' } },
+        )
+      }
 
-    const seen: string[] = []
+      expect(lastEventId).toBe('1')
+      return new Response('id: 2\ndata: second\n\n', {
+        headers: { 'content-type': 'text/event-stream', 'x-request-id': 'attempt-2' },
+      })
+    }
+
     const stream = await fetchEventStream(request, {
-      onmessage(message) {
-        seen.push(message.data)
-      },
-      onclose() {
-        if (seen.length < 2) {
-          throw new Error('retry')
-        }
-      },
+      fetch: fetch as typeof globalThis.fetch,
       onerror() {
         return 0
       },
@@ -57,7 +91,7 @@ describe('fetchEventStream', () => {
     }
 
     expect(messages.map((event) => event.data)).toEqual(['first', 'second'])
-    expect(stream.open.response.headers.get('x-request-id')).toBe('trace-sse-retry-2')
+    expect(stream.open.response.headers.get('x-request-id')).toBe('attempt-2')
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
   })
 
@@ -92,6 +126,33 @@ describe('fetchEventStream', () => {
     }
 
     await expect(fetchEventStream(request)).rejects.toThrowError(/Expected content-type/)
+  })
+
+  test('should reject non-2xx open responses through response.ok without a synthetic error', async () => {
+    const request: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/events',
+      method: 'GET',
+    }
+    let thrown: unknown
+
+    try {
+      await fetchEventStream(request, {
+        fetch: (async () =>
+          new Response('data: ignored\n\n', {
+            headers: { 'content-type': 'text/event-stream' },
+            status: 503,
+            statusText: 'Service Unavailable',
+          })) as unknown as typeof fetch,
+      })
+    } catch (error) {
+      thrown = error
+    }
+
+    const open = getErrorOpenInfo(thrown)
+    expect(thrown).toBeInstanceOf(Error)
+    expect(open?.response.ok).toBe(false)
+    expect(open?.response.error).toBeUndefined()
   })
 
   test('should reject with aborted error when aborted before open', async () => {

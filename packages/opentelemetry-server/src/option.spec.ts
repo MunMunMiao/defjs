@@ -167,6 +167,26 @@ describe('withOpenTelemetryServer', () => {
     expect(typeof option).toBe('function')
   })
 
+  test('should default WebSocket query propagation to off', async () => {
+    const { tracer } = createMockTracer()
+    const propagator = makePropagator()
+    const config = makeConfig()
+
+    withOpenTelemetryServer({
+      tracer,
+      propagator,
+      http: { enabled: false },
+      sse: { enabled: false },
+    })(config)
+
+    const req = makeWsRequest(new URLSearchParams({ room: 'alpha' }))
+    const next = vi.fn(async () => makeWsSession())
+    await webSocketInterceptor(config).fn(req, next)
+
+    expect(propagator.inject).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ queryParams: req.queryParams, queryString: 'room=alpha' }))
+  })
+
   test('should pass HTTP hooks only to HTTP interceptor', async () => {
     const { tracer } = createMockTracer()
     const requestHook = vi.fn()
@@ -207,7 +227,7 @@ describe('withOpenTelemetryServer', () => {
     expect(responseHook).toHaveBeenCalledTimes(1)
   })
 
-  test('should pass WebSocket hooks and queryPropagation to WebSocket interceptor', async () => {
+  test('should pass WebSocket hooks and explicit query propagation to WebSocket interceptor', async () => {
     const { tracer } = createMockTracer()
     const requestHook = vi.fn()
     const responseHook = vi.fn()
@@ -219,13 +239,13 @@ describe('withOpenTelemetryServer', () => {
       propagator,
       http: { enabled: false },
       sse: { enabled: false },
-      webSocket: { queryPropagation: false, requestHook, responseHook },
+      webSocket: { queryPropagation: true, requestHook, responseHook },
     })(config)
 
     await webSocketInterceptor(config).fn(makeWsRequest(), async () => makeWsSession())
 
     expect(requestHook).toHaveBeenCalledTimes(1)
     expect(responseHook).toHaveBeenCalledTimes(1)
-    expect(propagator.inject).not.toHaveBeenCalled()
+    expect(propagator.inject).toHaveBeenCalledTimes(1)
   })
 })

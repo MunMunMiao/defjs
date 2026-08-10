@@ -7,7 +7,7 @@ export const DEFAULT_QUERY_PARAMS_SERIALIZER: QueryParamsSerializer = (params) =
 
 export interface ClientWebSocketOptions {
   handle?: typeof WebSocket
-  beforeConnect?: () => void | Promise<void>
+  beforeConnect?: (context: { attempt: number; signal: AbortSignal }) => void | Promise<void>
   heartbeat?: {
     intervalMs: number
     isAck?: (message: unknown) => boolean
@@ -15,7 +15,6 @@ export interface ClientWebSocketOptions {
     timeoutMs?: number
   }
   protocols?: readonly string[]
-  queue?: { maxSize?: number; overflow?: 'drop-newest' | 'drop-oldest' | 'error' }
   reconnect?: {
     attempts?: number
     delayMs?: number
@@ -30,8 +29,9 @@ export interface ClientSSEOptions {
   handle?: typeof fetch
   onInvalidEvent?: (context: {
     reason: 'missing-struct' | 'validation-failed'
-    message: { id: string; event: string; data: string; retry?: number }
+    message: { id: string; event: string; data: string }
     cause?: unknown
+    signal: AbortSignal
   }) => void | Promise<void>
   reconnect?: {
     attempts?: number
@@ -46,8 +46,6 @@ export interface ClientSSEOptions {
       open?: { response: { status: number; statusText: string; url: string }; url: string }
     }) => boolean | Promise<boolean>
   }
-  queue?: { maxSize?: number; overflow?: 'drop-newest' | 'drop-oldest' | 'error' }
-  maxBufferSize?: number
 }
 
 export interface ClientSSEConfig extends ClientSSEOptions {
@@ -94,6 +92,4 @@ export const DEFAULT_SSE_OPTIONS: ClientSSEConfig = {
   handle: DEFAULT_FETCH,
   onInvalidEvent: undefined,
   reconnect: undefined,
-  queue: undefined,
-  maxBufferSize: undefined,
 }

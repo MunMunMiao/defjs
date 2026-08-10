@@ -13,6 +13,8 @@ import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core
 const client = createClient(withEndpoint('wss://api.example.com'))
 
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   path: '/chat',
   incoming: {
     message: struct.object({ userId: struct.number(), text: struct.string() }),
@@ -45,6 +47,7 @@ Scalar 或 array payload 放进 `data`：
 
 ```typescript
 const audit = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/audit',
   incoming: {
     entry: struct.object({ data: struct.string(), source: struct.string() }),
@@ -75,6 +78,8 @@ if (!auditError) {
 const [error, session, startupConnection] = await client.execute(chat())
 ```
 
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
+
 WebSocket 返回：
 
 ```typescript
@@ -83,9 +88,9 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
   | [error: RequestError<unknown>, session: undefined, connection: WebSocketConnectionInfo | undefined]
 ```
 
-成功时，第三项是启动 connection 快照。它可以包含第一次物理 socket open 时捕获的 `url`、`protocol` 和 `extensions`。
+成功时，第三项是 `generation: 1` 的启动 connection 快照。它可以包含第一次物理 socket 的 `url`、`protocol` 和 `extensions`。
 
-`session.connection` 是 live getter。重连会替换底层物理 socket，也可能更新该值。需要启动快照时，请保留 tuple 的第三项。
+`session.connection` 是 live getter；每次物理 socket 成功 open 都会递增 `generation`。需要启动快照时，请保留 tuple 的第三项。
 
 不要记录 connection URL。它可能包含 path identifier、应用 query 数据和 telemetry propagation 字段。
 
@@ -96,9 +101,10 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
 | Member                     | 行为                                                       |
 | -------------------------- | ---------------------------------------------------------- |
 | `connection`               | 最新 connection 信息的 live getter。                       |
+| `bufferedAmount`           | 原生 socket 尚未发送的 byte 数；没有 socket 时为 `0`。     |
 | `state`                    | 逻辑 session state 的 live getter。                        |
 | `receive`                  | 已校验 incoming message 的共享 async work queue。          |
-| `send(message)`            | 校验、序列化，然后发送或 enqueue outgoing message。        |
+| `send(message)`            | 先检查可写性，再校验、序列化、发送或 enqueue。             |
 | `close(code?, reason?)`    | 请求终止关闭。                                             |
 | `closed`                   | 返回已观察到的终止关闭信息的 promise。                     |
 | `onStateChange(listener)`  | 添加 state observer，并返回 unsubscribe function。         |
@@ -108,14 +114,13 @@ Client 返回 session 后不会继续跟踪它。调用方负责消费、observe
 
 ## 接收 Message
 
-Text、ArrayBuffer、typed-array 和 Blob message 会按 UTF-8 JSON 解码。以下输入会被静默丢弃：
+Text、ArrayBuffer、typed-array 和 Blob message 会按到达顺序解码为 UTF-8 JSON。以下输入会被静默丢弃：
 
-- 无效 JSON；
 - 非 object envelope；
 - 缺少 `type`，或 `type` 不是非空 string；
 - 没有 `incoming.default` Struct 的 unknown type。
 
-选中 Struct 后，如果解码失败，该错误会传给 `onRuntimeError`，message 随后被丢弃。
+无效 JSON 和已选 Struct 的校验失败会传给 `onRuntimeError`；frame 会被丢弃，session 继续运行。
 
 ```typescript
 const unsubscribeError = session.onRuntimeError(() => {
@@ -135,7 +140,7 @@ try {
 }
 ```
 
-Incoming iterable 是一个无界共享工作队列。多个 iterator 会竞争 message，不是相互独立的 subscription。Queue 增长时，transport 不会让服务端减速。必须持续消费 incoming message，或尽快关闭 session。
+`receive` 只允许一个 iterator。`maxIncomingQueueSize` 是必填的正 item 上限；overflow 会清空缓冲、让 iterator 失败，并以 `error` 终止 session。
 
 ## 发送 Message
 
@@ -145,7 +150,7 @@ Incoming iterable 是一个无界共享工作队列。多个 iterator 会竞争 
 - message 没有合法 `type`；
 - type 未声明；
 - payload 结构化解码或编码失败；
-- 有界 send queue 使用 `overflow: 'error'`；
+- reconnecting 时 endpoint-owned outgoing queue 被禁用或已满；
 - 立即发送时，原生 socket 抛错。
 
 ```typescript
@@ -156,42 +161,42 @@ try {
 }
 ```
 
-Open 前或重连间隙发送的 message 会进入 outgoing send queue。物理 socket open 后，queue 会 flush。
+逻辑可写性会在 payload 校验和序列化前检查。只有逻辑 state 与当前物理 socket 都是 `open` 才会直接发送；只有 `reconnecting` 且 endpoint 的 `maxOutgoingQueueSize` 为正数时才会入队。保留的 FIFO 会在 replacement socket 发布 `open` 前 flush。
 
-不要在 terminal state 后调用 `send`。当前实现没有稳定的 post-close rejection contract，终止关闭后入队的数据也可能永远不会发送。
+Manual closing、terminal state，以及 remote close 后 reconnect predicate 尚未决定的窗口都会让 `send` 抛出 `InvalidStateError`。Transport 不会 replay 已经发送到先前物理 socket 的 frame。
 
 ## State
 
 `session.state` 可以是：
 
-| State          | 含义                                                                                                  |
-| -------------- | ----------------------------------------------------------------------------------------------------- |
-| `idle`         | execution 开始前的初始内部状态。                                                                      |
-| `connecting`   | 第一次物理连接尝试正在开始。                                                                          |
-| `open`         | 物理 socket 打开后最近一次发出的逻辑状态。等待重连时，即使物理 socket 已不存在，它仍可能保持 `open`。 |
-| `reconnecting` | delay 结束后，后续物理连接尝试正在开始。                                                              |
-| `closing`      | 取消正在关闭 active connecting/open socket。                                                          |
-| `closed`       | 没有 normalized error 的终止关闭。                                                                    |
-| `aborted`      | 外部取消被归一化为 `ABORTED` 后的 terminal state。                                                    |
-| `error`        | 其他 terminal failure。                                                                               |
+| State          | 含义                                               |
+| -------------- | -------------------------------------------------- |
+| `idle`         | execution 开始前的初始内部状态。                   |
+| `connecting`   | 第一次物理连接尝试正在开始。                       |
+| `open`         | 当前物理 socket 已打开。                           |
+| `reconnecting` | 后续物理连接尝试正在准备或 delay。                 |
+| `closing`      | 所有者请求 manual close。                          |
+| `closed`       | 没有 normalized error 的终止关闭。                 |
+| `aborted`      | 外部取消被归一化为 `ABORTED` 后的 terminal state。 |
+| `error`        | 其他 terminal failure。                            |
 
-`reconnecting` 不会在 delay 期间发出，只会在 delay 结束、下一次尝试开始时发出。`session.state` 只是最近一次发出的生命周期状态，不能证明当前一定存在 native socket。这段空档里发送的消息会进入 outgoing queue。
+`session.state` 是逻辑生命周期，不是当前一定存在 native socket 的证明。`reconnecting` 期间，`send` 使用 endpoint-owned outgoing capacity。
 
-State listener 会被直接调用。确保它不抛错，并在所有者结束时 unsubscribe。
+Observer failure 会被隔离：state-listener failure 会通知 runtime-error listener；runtime-error listener failure 会转发给可用的 `globalThis.reportError`。Terminal settlement 会释放 observer，所有者更早结束时仍应 unsubscribe。
 
 ### 每次尝试前
 
 `beforeConnect` 可以配置在 client 或单次 execution 上。初次尝试和每次重连时，它都会在原生 constructor 之前运行：
 
 ```typescript
-declare const refreshConnectionState: () => Promise<void>
+declare const refreshConnectionState: (signal: AbortSignal) => Promise<void>
 
 const [error, session] = await client.execute(chat(), {
-  beforeConnect: refreshConnectionState,
+  beforeConnect: ({ signal }) => refreshConnectionState(signal),
 })
 ```
 
-此时 command input 和 request projection 已经构建完成。这个 hook 不会重新运行 `build`，也不能修改已绑定 query value。它适合做应用拥有的准备工作，例如刷新环境 handshake 机制会读取的状态。Throw 或 rejection 是 terminal transport failure，不会传给处理 close outcome 的 reconnect predicate。
+Hook 接收 `{ attempt, signal }`；初次 `attempt` 为 `0`，重连时递增。把 `signal` 传给 owned async work。Abort 和 timeout 会与 hook race、消费 late rejection，并阻止 late result 创建 socket。Throw 或 rejection 是 terminal transport failure。
 
 ## 重连需要显式开启
 
@@ -227,7 +232,7 @@ const [error, session] = await client.execute(chat(), {
 
 Base delay 是 `min(delayMs * factor ** (attempt - 1), maxDelayMs)`。WebSocket jitter 是乘法比例：例如 `0.2` 会在 `0.8` 到 `1.2` 之间随机选择 factor。这与 SSE 额外增加毫秒数的 additive jitter 不同。
 
-确保 `shouldReconnect` 同步且不抛错。Reconnect 会在同一个逻辑 session 中建立新的物理 socket。Incoming 和 outgoing queue 都属于该逻辑 session。
+`shouldReconnect` 必须同步；throw 会让 session 以 `error` 终止，明确返回 `false` 会以 `closed` 终止。Reconnect 只建立同一逻辑 session 的新物理 socket，不会 replay 先前 send。应用可在 `session.connection.generation` 增加时只恢复仍 active、可安全 replay 的 subscription，绝不能用它 replay mutation。
 
 ## Heartbeat
 
@@ -247,49 +252,36 @@ const [error, session] = await client.execute(chat(), {
 
 `message` 必须产生 endpoint `outgoing` map 接受的值。`isAck` 识别出的 message 会清除 heartbeat timeout，不会加入 `receive`。
 
-正数 `timeoutMs` 到期时，runtime 会向 runtime-error listener 发出 `Error('WebSocket heartbeat timeout')`，并请求原生 close code `4000`，reason 为 `heartbeat timeout`。要重连，仍需单独配置允许该 close outcome 的 reconnect policy。
+Heartbeat serialization、send、ack predicate 和 timeout failure 都是 fatal：它们会通知 runtime-error listener、让 `receive` 失败，并使 session 以 `error` 终止，不会咨询 reconnect policy。
 
-保持 `timeoutMs < intervalMs`。当前实现不会校验这个关系；timeout 大于等于 interval 时，后续 heartbeat timer 可能重叠。
+`intervalMs` 与已定义的 `timeoutMs` 都必须是正有限值，且不超过 `2_147_483_647`。一个 ack deadline 生效期间，后续 interval 不会发送新 ping 或重置 deadline；ack 或 session stop 会清除它。
 
 ## Queue
 
-`queue` option 只配置 outgoing message：
+Queue limit 归 endpoint definition 所有。`maxIncomingQueueSize` 是必填的正 safe integer；overflow 会清空缓冲并以 fatal error 终止。`maxOutgoingQueueSize` 是可选的非负 safe integer，默认 `0`；正数容量会在连接尝试之间按 FIFO 保留 frame，overflow 会拒绝新 frame，而不会删除旧 frame。
 
-```typescript
-const [error, session] = await client.execute(chat(), {
-  queue: {
-    maxSize: 100,
-    overflow: 'drop-oldest',
-  },
-})
-```
-
-Outgoing queue 默认无界。设置上限后，默认 overflow mode 是 `drop-oldest`；其他选项是 `drop-newest` 和 `error`。终止关闭会清空 send queue。
-
-Incoming queue 没有公开的上限或 overflow option。它是无界共享工作队列，也不提供 backpressure。资源所有者必须持续消费，或关闭 session。
+两个 limit 都按 item 而非 byte 计数。`session.bufferedAmount` 单独暴露原生 socket 尚未发送的 byte。`receive` 只允许一个 iterator。
 
 ## 关闭所有权
 
-`session.close(code, reason)` 会调用当前原生 socket 的 `close` method，并用 manual-close marker abort 逻辑 session。它只请求关闭，不保证 graceful handshake、可见的 `closing` state，也不保证最终 `closed` value 精确回显请求的 code 和 reason。
+`session.close(code, reason)` 会先校验 code 必须是 `1000` 或 `3000..4999`，reason 最多 123 个 UTF-8 byte。合法输入进入 `closing`、请求原生 close，并等待实际 `CloseEvent`；实际观察到的 code/reason 优先于请求值。
 
 `session.closed` resolve 为 runtime 实际观察到的 close 信息：
 
 ```typescript
-interface WebSocketCloseInfo {
-  cause?: unknown
-  code?: number
-  reason?: string
-  wasClean?: boolean
-}
+type WebSocketCloseInfo =
+  | { kind: 'closed'; code?: number; reason?: string; wasClean?: boolean }
+  | { kind: 'aborted'; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }
+  | { kind: 'error'; cause: unknown; code?: number; reason?: string; wasClean?: boolean }
 ```
 
-如果原生实现从不发出 close event，settlement 可能一直延后。根据 normalized reason 不同，外部取消可能最终是 `aborted` 或 `error`；如果 session 正在两次尝试之间，还可能跳过 `closing`。
+Manual close、无 cause 的 remote close 和明确拒绝重连都会产生 `closed`。外部 abort 产生 `aborted`；timeout 与 runtime failure 产生 `error`。原生 close 抛错时只做一次无参数 fallback；两次都抛错时直接以 `error` settle，不会第三次调用 close。
 
 在打开 session 的 component、route、job 或 service 边界 unsubscribe listener 并关闭 session。只卸载 provider 不会完成这些工作。
 
 ## URL 与 Authentication 安全
 
-HTTP base URL 会转换为 WebSocket scheme：`http:` 变成 `ws:`，`https:` 变成 `wss:`。Path placeholder 不做 segment encoding。Query value 使用已配置的 serializer。
+HTTP base URL 会转换为 WebSocket scheme：`http:` 变成 `ws:`，`https:` 变成 `wss:`。请提供 raw path-placeholder value；Core 会逐 segment 精确编码一次，`%` 会变为 `%25`，并拒绝空值、`.` 和 `..`。Query value 使用已配置的 serializer。
 
 Protocol 优先级依次是 execution option、client option、endpoint definition。显式传入空 protocol array 会屏蔽低优先级值。
 

@@ -15,7 +15,7 @@ export const getInventoryItem = defineRequest({
 
 // Step 2: Expose the same validated inventory operation through any injected Fetch implementation.
 export async function loadInventoryItem(client: Client, sku: string) {
-  const [error, item] = await client.execute(getInventoryItem({ path: { sku: encodeURIComponent(sku) } }))
+  const [error, item] = await client.execute(getInventoryItem({ path: { sku } }))
   if (error) throw error
   return item
 }

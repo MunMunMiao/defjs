@@ -8,6 +8,7 @@ export type HttpResponse<R> = {
   readonly headers: Headers
   readonly body: R | null
   readonly error?: unknown
+  readonly ok: boolean
 }
 
 export type MakeResponseOptions<R> = {
@@ -19,10 +20,6 @@ export type MakeResponseOptions<R> = {
   error?: unknown
 }
 
-export type SettledResponse<TBody = unknown> = HttpResponse<TBody> & {
-  readonly ok: boolean
-}
-
 export function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R> {
   const status = options?.status ?? 0
   const ok = status >= 200 && status < 300
@@ -32,12 +29,8 @@ export function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<
   const body = options?.body ?? null
   let error = options?.error
 
-  if (!error && !ok) {
-    let message = `Http failure response for ${url || '(unknown url)'}: ${status}`
-    if (statusText) {
-      message += ` - ${statusText}`
-    }
-    error = new Error(message)
+  if (error === undefined && status === 0) {
+    error = new Error(getHttpErrorMessage({ status, statusText, url }))
   }
 
   return {
@@ -48,12 +41,14 @@ export function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<
     headers,
     body,
     error,
+    ok,
   }
 }
 
-export function toSettledResponse<TBody>(response: HttpResponse<TBody>): SettledResponse<TBody> {
-  return {
-    ...response,
-    ok: response.status >= 200 && response.status < 300,
+export function getHttpErrorMessage(response: { readonly status: number; readonly statusText: string; readonly url: string }): string {
+  let message = `Http failure response for ${response.url || '(unknown url)'}: ${response.status}`
+  if (response.statusText) {
+    message += ` - ${response.statusText}`
   }
+  return message
 }

@@ -13,7 +13,7 @@ const [sseError, stream, startupOpen] = await client.execute(sseCommand)
 const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-- HTTP liefert dekodierte Daten und einen Defjs-`SettledResponse`-Wrapper.
+- HTTP liefert dekodierte Daten und einen Defjs-`HttpResponse`-Wrapper.
 - SSE liefert einen logischen Stream-Handle und den Snapshot der beim Start geöffneten Verbindung.
 - WebSocket liefert eine logische Session und den Verbindungs-Snapshot vom Start.
 
@@ -44,7 +44,7 @@ interface HttpStatusError<TErrorData = unknown> {
   status: number
   message: string
   data: TErrorData
-  response: SettledResponseLike<unknown>
+  response: HttpResponse<unknown>
 }
 ```
 
@@ -75,7 +75,7 @@ interface DefinitionError {
   code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'UNDECLARED_STATUS'
   message: string
   cause?: unknown
-  response?: SettledResponseLike<unknown>
+  response?: HttpResponse<unknown>
 }
 ```
 
@@ -133,7 +133,9 @@ Logge `cause`, `data`, Response-Header, Bodies oder URLs nur mit einer ausdrück
 
 ## Verfügbarkeit der Response
 
-`SettledResponseLike` und `SettledResponse` sind Defjs-Wrapper, keine nativen `Response`-Objekte. Sie stellen Status, Statustext, Header, URL, Body, optionale Fehlerinformationen und bei Settled-Wrappern ein `ok`-Flag bereit. `ok` bedeutet ausschließlich, dass der Status im 2xx-Bereich liegt.
+`HttpResponse` ist ein Defjs-Wrapper, kein natives `Response`-Objekt. Er stellt Status, Statustext, Header, URL, Body, `error` und `ok` bereit. `ok` bedeutet nur, dass der Status im 2xx-Bereich liegt. `error` ist Transport- oder Body-Repräsentationsfehlern vorbehalten; eine normale Nicht-2xx-Response lässt es leer.
+
+Ein gültiger deklarierter Nicht-2xx-Body wird per Struct dekodiert und typisiert in `HttpStatusError.data` erhalten. Eine ungültige Repräsentation erzeugt stattdessen `RESPONSE_VALIDATION_FAILED` mit der ursprünglichen Codec-Ausnahme als `cause`, einer Response, wenn sie empfangen wurde, und ohne `data`.
 
 Für HTTP gilt:
 

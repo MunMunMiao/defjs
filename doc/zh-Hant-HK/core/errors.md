@@ -13,7 +13,7 @@ const [sseError, stream, startupOpen] = await client.execute(sseCommand)
 const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-- HTTP 回傳解碼後的 data 與 Defjs `SettledResponse` wrapper。
+- HTTP 回傳解碼後的 data 與 Defjs `HttpResponse` wrapper。
 - SSE 回傳 logical stream handle 與 startup-open snapshot。
 - WebSocket 回傳 logical session 與 startup-connection snapshot。
 
@@ -44,7 +44,7 @@ interface HttpStatusError<TErrorData = unknown> {
   status: number
   message: string
   data: TErrorData
-  response: SettledResponseLike<unknown>
+  response: HttpResponse<unknown>
 }
 ```
 
@@ -75,7 +75,7 @@ interface DefinitionError {
   code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'UNDECLARED_STATUS'
   message: string
   cause?: unknown
-  response?: SettledResponseLike<unknown>
+  response?: HttpResponse<unknown>
 }
 ```
 
@@ -133,7 +133,9 @@ if (!error) {
 
 ## Response Availability
 
-`SettledResponseLike` 與 `SettledResponse` 是 Defjs wrapper，不是 native `Response`。它們提供 status、status text、headers、URL、body 與 optional error information；settled wrapper 另有 `ok`。`ok` 只代表 status 落在 2xx 範圍。
+`HttpResponse` 是 Defjs wrapper，不是 native `Response`。它提供 status、status text、headers、URL、body、`error` 與 `ok`。`ok` 只代表 status 落在 2xx 範圍。`error` 只用於 transport 或 body representation failure；普通 non-2xx response 會留空。
+
+有效而且已宣告的 non-2xx body 會經 Struct 解碼，並以 typed `HttpStatusError.data` 保留。Malformed representation 則產生 `RESPONSE_VALIDATION_FAILED`，原始 codec exception 保存在 `cause`，已收到的 response 仍保留，但沒有 `data`。
 
 對 HTTP 而言：
 

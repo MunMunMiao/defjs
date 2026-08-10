@@ -1,21 +1,20 @@
 import { DEFINITION } from './symbols'
-import type { ParseResult, Path, PrimitiveKind, RuntimeStruct, Struct, StructDefinition, StructFlags, StructLike } from './types'
+import type { InternalParseResult, Path, PrimitiveKind, RuntimeStruct, Struct, StructDefinition, StructFlags, StructLike } from './types'
 
 export interface PrimitiveDefinitionInput<K extends PrimitiveKind, TInput, TOutput = TInput> {
-  decode?: (value: TInput, path: Path) => ParseResult<TOutput>
+  decode?: (value: TInput, path: Path) => InternalParseResult<TOutput>
   encode?: (value: TOutput) => unknown
   expected: string
   is: (value: unknown) => value is TInput
   kind: K
   alias?: string
   runtimeIs?: (value: unknown) => boolean
-  zero: () => TOutput
 }
 
 export function createPrimitiveStruct<TInput, TOutput = TInput>(
   definition: PrimitiveDefinitionInput<PrimitiveKind, TInput, TOutput>,
-): Struct<TInput | undefined, TOutput> {
-  return castStruct<Struct<TInput | undefined, TOutput>>(
+): Struct<TInput, TOutput> {
+  return castStruct<Struct<TInput, TOutput>>(
     makeStruct({
       ...definition,
       flags: DEFAULT_FLAGS,

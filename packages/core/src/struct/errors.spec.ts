@@ -16,7 +16,7 @@ describe('StructError format / flatten / prettify', () => {
     tags: struct.array(struct.string()),
   })
 
-  test('format builds a nested tree of issues', () => {
+  test('format exposes only the first parse issue', () => {
     const [err] = parse(userStruct, { id: 42, profile: { email: false }, tags: [10] })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
@@ -26,17 +26,12 @@ describe('StructError format / flatten / prettify', () => {
     const tree = err.format()
     expect(tree._errors).toEqual([])
     expect(tree['id']).toEqual({ _errors: ['Expected string at id, received 42'] })
-    expect(tree['profile']).toEqual({
-      _errors: [],
-      email: { _errors: ['Expected string at profile.email, received false'] },
-    })
-    expect(tree['tags']).toEqual({
-      _errors: [],
-      '0': { _errors: ['Expected string at tags[0], received 10'] },
-    })
+    expect(tree['profile']).toBeUndefined()
+    expect(tree['tags']).toBeUndefined()
+    expect(err.issues).toHaveLength(1)
   })
 
-  test('flatten groups by first path segment', () => {
+  test('flatten groups the first parse issue by path segment', () => {
     const [err] = parse(userStruct, { id: 42, profile: { email: false }, tags: [10] })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
@@ -46,8 +41,8 @@ describe('StructError format / flatten / prettify', () => {
     const flat = err.flatten()
     expect(flat.formErrors).toEqual([])
     expect(flat.fieldErrors['id']).toEqual(['Expected string at id, received 42'])
-    expect(flat.fieldErrors['profile']).toEqual(['Expected string at profile.email, received false'])
-    expect(flat.fieldErrors['tags']).toEqual(['Expected string at tags[0], received 10'])
+    expect(flat.fieldErrors['profile']).toBeUndefined()
+    expect(flat.fieldErrors['tags']).toBeUndefined()
   })
 
   test('flatten places empty-path issues in formErrors', () => {
@@ -66,7 +61,7 @@ describe('StructError format / flatten / prettify', () => {
     expect(flat.fieldErrors).toEqual({})
   })
 
-  test('prettify renders multi-line human readable output', () => {
+  test('prettify renders the first parse issue', () => {
     const [err] = parse(userStruct, { id: 42, profile: { email: false }, tags: [10] })
     expect(err).toBeInstanceOf(StructError)
     if (!err) {
@@ -75,8 +70,8 @@ describe('StructError format / flatten / prettify', () => {
 
     const text = err.prettify()
     expect(text).toContain('× id: Expected string at id, received 42')
-    expect(text).toContain('× profile.email: Expected string at profile.email, received false')
-    expect(text).toContain('× tags[0]: Expected string at tags[0], received 10')
+    expect(text).not.toContain('profile.email')
+    expect(text).not.toContain('tags[0]')
   })
 
   test('format keeps a declared _errors field separate from node errors', () => {

@@ -20,9 +20,7 @@ export const getRepository = defineRequest({
 
 // Step 2: Expose validated repository data while version selection remains client policy.
 export async function loadRepository(client: Client, owner: string, repository: string) {
-  const [error, result] = await client.execute(
-    getRepository({ path: { owner: encodeURIComponent(owner), repository: encodeURIComponent(repository) } }),
-  )
+  const [error, result] = await client.execute(getRepository({ path: { owner, repository } }))
   if (error) throw error
   return result
 }

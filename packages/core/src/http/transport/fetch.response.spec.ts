@@ -4,6 +4,186 @@ import type { HttpRequest } from '../../http'
 import { fetchHandler } from './fetch'
 
 describe('Fetch handler responses', () => {
+  test('should cancel an unused response body before returning', async () => {
+    let canceled = false
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        canceled = true
+      },
+    })
+
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        endpoint: '/unused',
+        method: 'GET',
+      },
+      async () => new Response(body),
+    )
+
+    expect(response.body).toBeNull()
+    expect(canceled).toBe(true)
+  })
+
+  test('should cancel an unused response body before download progress', async () => {
+    let canceled = false
+    const onProgress = vi.fn()
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('partial'))
+        controller.close()
+      },
+      cancel() {
+        canceled = true
+      },
+    })
+
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        downloadProgress: onProgress,
+        endpoint: '/unused',
+        method: 'GET',
+      },
+      async () => new Response(body),
+    )
+
+    expect(response.body).toBeNull()
+    expect(canceled).toBe(true)
+    expect(onProgress).not.toHaveBeenCalled()
+  })
+
+  test.each(['json', 'text'] as const)('should consume an explicit %s response without canceling it', async (responseType) => {
+    let canceled = false
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"id":1}'))
+        controller.close()
+      },
+      cancel() {
+        canceled = true
+      },
+    })
+
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        endpoint: '/explicit',
+        method: 'GET',
+        responseType,
+      },
+      async () => new Response(body, { headers: { 'content-type': 'application/json' } }),
+    )
+
+    expect(response.body).toEqual(responseType === 'json' ? { id: 1 } : '{"id":1}')
+    expect(canceled).toBe(false)
+  })
+
+  test('should ignore an unsupported runtime response type', async () => {
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        endpoint: '/unsupported',
+        method: 'GET',
+        responseType: 'unsupported' as HttpRequest['responseType'],
+      },
+      async () => new Response('ignored'),
+    )
+
+    expect(response.body).toBeNull()
+    expect(response.error).toBeUndefined()
+  })
+
+  test('should ignore an unused response body cancellation failure', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        return Promise.reject(new Error('cancel failed'))
+      },
+    })
+
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        endpoint: '/unused',
+        method: 'GET',
+      },
+      async () => new Response(body),
+    )
+
+    expect(response.body).toBeNull()
+    expect(response.error).toBeUndefined()
+  })
+
+  test('should not wait for unused response body cancellation to settle', async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const body = new ReadableStream<Uint8Array>({ cancel })
+
+    const response = await settleWithin(
+      fetchHandler(
+        {
+          baseEndpoint: 'https://example.com',
+          endpoint: '/unused',
+          method: 'GET',
+        },
+        async () => new Response(body),
+      ),
+    )
+
+    expect(response.body).toBeNull()
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  test('should cancel and unlock a progress response when the async observer rejects', async () => {
+    const observerError = new Error('observer failed')
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const body = new ReadableStream<Uint8Array>({
+      cancel,
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('partial'))
+      },
+    })
+
+    const pending = fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        async downloadProgress() {
+          await Promise.resolve()
+          throw observerError
+        },
+        endpoint: '/progress-error',
+        method: 'GET',
+        responseType: 'text',
+      },
+      async () => new Response(body),
+    )
+
+    await expect(settleWithin(pending)).rejects.toBe(observerError)
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(observerError)
+    expect(body.locked).toBe(false)
+  })
+
+  test('should return a response error when reading a body fails without progress', async () => {
+    const readError = new Error('read failed')
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(readError)
+      },
+    })
+
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        endpoint: '/read-error',
+        method: 'GET',
+        responseType: 'text',
+      },
+      async () => new Response(body),
+    )
+
+    expect(response.error).toBe(readError)
+    expect(body.locked).toBe(false)
+  })
+
   test('should response is null when responseType is not set', async () => {
     const requestConfig: HttpRequest = {
       baseEndpoint: inject('testServerHost'),
@@ -31,6 +211,108 @@ describe('Fetch handler responses', () => {
 
     const { error } = await fetchHandler(requestConfig)
     expect(error).toBe(ERR_ABORTED)
+  })
+
+  test('should settle an ignored fetch abort and cancel a late response body', async () => {
+    const controller = new AbortController()
+    const cancel = vi.fn(() => Promise.reject(new Error('cancel failed')))
+    let resolveFetch!: (response: Response) => void
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve
+        }),
+    )
+    const pending = fetchHandler(
+      {
+        abort: controller.signal,
+        baseEndpoint: 'https://example.com',
+        endpoint: '/ignored-abort',
+        method: 'GET',
+        responseType: 'text',
+      },
+      fetchMock as unknown as typeof fetch,
+    )
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    controller.abort()
+
+    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    resolveFetch(new Response(new ReadableStream<Uint8Array>({ cancel })))
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason))
+  })
+
+  test('should abort a stalled response body read without waiting for cancellation', async () => {
+    const controller = new AbortController()
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    let startPull!: () => void
+    const pullStarted = new Promise<void>((resolve) => {
+      startPull = resolve
+    })
+    const body = new ReadableStream<Uint8Array>(
+      {
+        cancel,
+        pull() {
+          startPull()
+          return new Promise<void>(() => undefined)
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const pending = fetchHandler(
+      {
+        abort: controller.signal,
+        baseEndpoint: 'https://example.com',
+        endpoint: '/stalled-body',
+        method: 'GET',
+        responseType: 'text',
+      },
+      async () => new Response(body),
+    )
+
+    await pullStarted
+    controller.abort()
+
+    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
+    expect(body.locked).toBe(false)
+  })
+
+  test('should abort a stalled progress response body read without waiting for cancellation', async () => {
+    const controller = new AbortController()
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    let startPull!: () => void
+    const pullStarted = new Promise<void>((resolve) => {
+      startPull = resolve
+    })
+    const body = new ReadableStream<Uint8Array>(
+      {
+        cancel,
+        pull() {
+          startPull()
+          return new Promise<void>(() => undefined)
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const pending = fetchHandler(
+      {
+        abort: controller.signal,
+        baseEndpoint: 'https://example.com',
+        downloadProgress: vi.fn(),
+        endpoint: '/stalled-progress-body',
+        method: 'GET',
+        responseType: 'text',
+      },
+      async () => new Response(body),
+    )
+
+    await pullStarted
+    controller.abort()
+
+    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
+    expect(body.locked).toBe(false)
   })
 
   test('should timeout network', async () => {
@@ -91,29 +373,7 @@ describe('Fetch handler responses', () => {
     await expect(fetchHandler(blobRequest).then((response) => response.body)).resolves.toBeInstanceOf(Blob)
   })
 
-  test('should use native response methods when download progress is not requested', async () => {
-    const response = new Response(JSON.stringify({ id: 1 }), {
-      headers: { 'content-type': 'application/json' },
-      status: 200,
-    })
-    const text = vi.spyOn(response, 'text')
-    const fetchMock = vi.fn(async () => response)
-
-    const result = await fetchHandler(
-      {
-        baseEndpoint: 'https://example.com',
-        endpoint: '/json',
-        method: 'GET',
-        responseType: 'json',
-      },
-      fetchMock as unknown as typeof fetch,
-    )
-
-    expect(result.body).toEqual({ id: 1 })
-    expect(text).toHaveBeenCalledTimes(1)
-  })
-
-  test('should expose http errors when status is not ok', async () => {
+  test('should expose non-2xx status without a synthetic response error', async () => {
     const requestConfig: HttpRequest = {
       baseEndpoint: inject('testServerHost'),
       endpoint: '/500',
@@ -121,8 +381,9 @@ describe('Fetch handler responses', () => {
       responseType: 'text',
     }
 
-    const { error } = await fetchHandler(requestConfig)
-    expect(error).toBeInstanceOf(Error)
+    const response = await fetchHandler(requestConfig)
+    expect(response.error).toBeUndefined()
+    expect(response.ok).toBe(false)
   })
 
   test('should reject when need json but return text', async () => {
@@ -192,3 +453,19 @@ describe('Fetch handler responses', () => {
     expect(res.body).toBeNull()
   })
 })
+
+function settleWithin<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('operation did not settle')), 100)
+    promise.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
+}

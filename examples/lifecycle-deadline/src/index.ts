@@ -17,7 +17,7 @@ export const SETTLEMENT_DEADLINE_MS = 25
 
 // Step 2: Distinguish caller cancellation from the operation's fixed deadline in application results.
 export async function readSettlementReport(client: Client, id: string, signal?: AbortSignal) {
-  const [error, report] = await client.execute(getSettlementReport({ path: { id: encodeURIComponent(id) } }), {
+  const [error, report] = await client.execute(getSettlementReport({ path: { id } }), {
     signal,
     timeout: SETTLEMENT_DEADLINE_MS,
   })

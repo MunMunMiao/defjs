@@ -1,9 +1,38 @@
 import { expectTypeOf } from 'vitest'
 import type { EVENT_STREAM_COMMAND } from '../client/command'
 import { COMMAND_TYPE } from '../client/command'
+import type { ClientSSEOptions } from '../client/config'
+
+// @ts-expect-error client-level SSE queue configuration was removed.
+import { withSSEQueue } from '../index'
+
+// @ts-expect-error low-level transport callback context is not part of the public barrel.
+import type { FetchEventStreamErrorContext } from '../index'
+
+// @ts-expect-error low-level transport options are not part of the public barrel.
+import type { FetchEventStreamOptions } from '../index'
+
 import { createClient, defineEventStream, struct, type EventStreamData, type EventStructs } from '../index'
 
+// @ts-expect-error SSE definitions require an endpoint-owned queue limit.
+defineEventStream({ maxBufferSize: 1024, path: '/missing-queue-limit', events: { message: struct.string() } })
+
+// @ts-expect-error SSE definitions require an endpoint-owned parser limit.
+defineEventStream({ maxQueueSize: 16, path: '/missing-buffer-limit', events: { message: struct.string() } })
+
+void withSSEQueue
+void (undefined as unknown as FetchEventStreamOptions)
+void (undefined as unknown as FetchEventStreamErrorContext)
+
+const removedClientLimit: ClientSSEOptions = {
+  // @ts-expect-error maxBufferSize belongs to each event-stream definition.
+  maxBufferSize: 1024,
+}
+void removedClientLimit
+
 const useEvents = defineEventStream({
+  maxBufferSize: 1024,
+  maxQueueSize: 16,
   path: '/events',
   events: { message: struct.object({ text: struct.string() }) },
 })
@@ -19,7 +48,12 @@ const catalogEventStructs = {
 
 expectTypeOf<EventStreamData<typeof catalogEventStructs>['event']>().toEqualTypeOf<'price-updated' | 'product-retired'>()
 
-const catalogEvents = defineEventStream({ path: '/catalog/events', events: catalogEventStructs })
+const catalogEvents = defineEventStream({
+  events: catalogEventStructs,
+  maxBufferSize: 1024,
+  maxQueueSize: 16,
+  path: '/catalog/events',
+})
 
 async function assertNamedEventNarrowing(): Promise<void> {
   const [error, stream] = await createClient().execute(catalogEvents())
@@ -53,6 +87,9 @@ async function assertNamedEventNarrowing(): Promise<void> {
 void assertNamedEventNarrowing
 
 type CatalogEvent = EventStreamData<typeof catalogEventStructs>
+declare const catalogEvent: CatalogEvent
+// @ts-expect-error retry is parser control state, not public event data.
+void catalogEvent.retry
 // @ts-expect-error Undeclared events are dropped when no default Struct exists.
 const undeclaredCatalogEvent: CatalogEvent = { data: 'raw', event: 'inventory-reset' }
 void undeclaredCatalogEvent

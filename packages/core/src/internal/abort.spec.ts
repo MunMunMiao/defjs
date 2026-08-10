@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { createAbortTimeoutConflictError, hasAbortTimeoutConflict, mergeAbortSignals } from './abort'
+import {
+  awaitWithSignal,
+  createAbortTimeoutConflictError,
+  hasAbortTimeoutConflict,
+  mergeAbortSignals,
+  validateTransportTimeout,
+} from './abort'
 
 describe('abort helpers', () => {
   afterEach(() => {
@@ -30,6 +36,14 @@ describe('abort helpers', () => {
     expect(merged.reason).toBeInstanceOf(Error)
   })
 
+  test.each([-1, 0, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])('should reject invalid transport timeout %s', (timeout) => {
+    expect(() => validateTransportTimeout(timeout)).toThrow('Request timeout must be a positive safe integer no greater than 2147483647')
+  })
+
+  test('should accept the largest safe transport timer delay', () => {
+    expect(() => validateTransportTimeout(2_147_483_647)).not.toThrow()
+  })
+
   test('should detect abort and timeout field conflict', () => {
     const signal = new AbortController().signal
 
@@ -49,5 +63,78 @@ describe('abort helpers', () => {
     expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
     expect(error.message).toBe('with.abort and with.timeout cannot be used together')
     expect(error.cause).toBeInstanceOf(Error)
+  })
+
+  test('should resolve an asynchronous callback result', async () => {
+    const signal = new AbortController().signal
+
+    await expect(awaitWithSignal(() => Promise.resolve(1), signal)).resolves.toBe(1)
+  })
+
+  test('should stop waiting for a callback when aborted', async () => {
+    const controller = new AbortController()
+    const result = awaitWithSignal(() => new Promise<never>(() => undefined), controller.signal)
+
+    controller.abort(new Error('stop'))
+
+    await expect(result).rejects.toThrow('stop')
+  })
+
+  test('should not invoke a callback when already aborted', async () => {
+    const controller = new AbortController()
+    const run = vi.fn()
+    controller.abort(new Error('already stopped'))
+
+    await expect(awaitWithSignal(run, controller.signal)).rejects.toThrow('already stopped')
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  test('should not start a queued callback after same-tick abort', async () => {
+    const controller = new AbortController()
+    const run = vi.fn()
+    const result = awaitWithSignal(run, controller.signal)
+
+    controller.abort(new Error('stop before start'))
+
+    await expect(result).rejects.toThrow('stop before start')
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  test('should reject when a callback schedules abort before its result settles', async () => {
+    const controller = new AbortController()
+    const reason = new Error('stop before result')
+
+    const result = awaitWithSignal(() => {
+      queueMicrotask(() => controller.abort(reason))
+      return 'value'
+    }, controller.signal)
+
+    await expect(result).rejects.toBe(reason)
+  })
+
+  test('should consume a callback rejection that arrives after abort', async () => {
+    const controller = new AbortController()
+    const unhandled = vi.fn()
+    let rejectTask: ((reason: unknown) => void) | undefined
+    process.on('unhandledRejection', unhandled)
+
+    try {
+      const result = awaitWithSignal(
+        () =>
+          new Promise<never>((_resolve, reject) => {
+            rejectTask = reject
+          }),
+        controller.signal,
+      )
+      controller.abort(new Error('stop'))
+      await expect(result).rejects.toThrow('stop')
+
+      rejectTask?.(new Error('late failure'))
+      await new Promise((resolve) => setImmediate(resolve))
+
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
   })
 })

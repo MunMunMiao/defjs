@@ -48,6 +48,8 @@ Varias llamadas a `withInterceptors(...)` añaden elementos:
 createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
+Un interceptor WebSocket puede llamar a `next` como máximo una vez. Si la cadena falla tras crear una sesión, Core resuelve esa sesión no entregada antes de devolver el error original del interceptor. Si la cadena termina con otra sesión short-circuit, Core cierra la sesión creada; un wrapper conserva la asociación delegando la promesa `closed` original.
+
 ## Clona las peticiones con seguridad
 
 Considera que la petición recibida pertenece a la cadena. Crea un objeto `Headers` nuevo antes de modificar las cabeceras:
@@ -106,6 +108,9 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
+    get bufferedAmount() {
+      return session.bufferedAmount
+    },
     get connection() {
       return session.connection
     },
@@ -255,7 +260,7 @@ Los proveedores de credenciales se ejecutan cuando una petición atraviesa el in
 
 ## Seguridad de observadores y callbacks
 
-Los interceptores SSE y WebSocket pueden conectar observadores de ciclo de vida a los manejadores devueltos. Da de baja los listeners WebSocket cuando termine su propietario. Haz que listeners y predicados no lancen excepciones; las implementaciones de tiempo real actuales no aíslan todos los fallos de listeners o predicados de reconexión.
+Los interceptores SSE y WebSocket pueden conectar observadores de ciclo de vida a los manejadores devueltos. Da de baja los listeners WebSocket cuando termine su propietario. WebSocket dirige el fallo de un listener de estado a los observadores de errores, reenvía a `reportError` el fallo de uno de esos observadores y trata un predicado de reconexión que lanza como error terminal de sesión.
 
 Un interceptor puede lanzar o rechazar una promesa. El transporte de alto nivel puede normalizar algunos fallos como `RequestError`, pero el código del interceptor no debe depender de una garantía general de que nunca habrá rechazo.
 

@@ -75,7 +75,7 @@ withOpenTelemetryServer({
 
 عند حذف `propagator`، تنشئ الحزمة `CompositePropagator` خاصًا بها يحتوي W3C Trace Context وW3C Baggage propagators. ولا تقرأ إعداد propagator العام.
 
-تحقن HTTP وSSE كل حقل ينتجه propagator في request headers. إذا كانت `req.headers` كائن `Headers` أصلًا، يعيد التنفيذ الحالي استخدام الكائن نفسه ويعدّله مباشرة؛ وإلا ينشئ كائن `Headers` جديدًا. يكون WebSocket query propagation مساويًا لـ `true` افتراضيًا لأن browser sockets لا تستطيع إضافة handshake headers اعتباطية. وتُلحق كل حقل ينتجه propagator بـ connection query string.
+تحقن HTTP وSSE كل حقل ينتجه propagator في request headers. إذا كانت `req.headers` كائن `Headers` أصلًا، يعيد التنفيذ الحالي استخدام الكائن نفسه ويعدّله مباشرة؛ وإلا ينشئ كائن `Headers` جديدًا. يكون WebSocket query propagation مساويًا لـ `false` افتراضيًا. ولا يحدث الحقن إلا عند ضبط `queryPropagation: true`؛ ولأن browser sockets لا تستطيع إضافة handshake headers اعتباطية، تُلحق عندئذ كل حقل ينتجه propagator بـ connection query string.
 
 قبل إنشاء span، يستدعي كل interceptor أيضًا `propagator.extract(...)` على request headers. تعامل مع هذا carrier على أنه input موثوق يملكه التطبيق. لا تسمح لمصدر غير موثوق بإرسال `traceparent` أو `tracestate` أو `baggage`، لأن هذه الحقول قد تستبدل active parent context. احذف حقول النشر غير الموثوقة أو طبّعها قبل وصول الطلب إلى هذا interceptor.
 
@@ -83,12 +83,12 @@ withOpenTelemetryServer({
 withOpenTelemetryServer({
   tracer,
   webSocket: {
-    queryPropagation: false,
+    queryPropagation: true,
   },
 })
 ```
 
-عطّل query propagation ما لم تُراجع طريقة نشر URL في البيئة. قد تسجّل trace context وbaggage في المتصفحات وproxies وaccess logs وأنظمة telemetry. وقد يضيف custom propagator حقولًا أكثر من `traceparent`.
+راجع نشر URL قبل تمكين query propagation. قد تسجّل المتصفحات وproxies وaccess logs وأنظمة telemetry قيم trace context وbaggage، وقد يضيف custom propagator حقولًا أكثر من `traceparent`. فضّل first message جرى تدقيقه ضمن البروتوكول أو connection ticket قصيرة العمر وأحادية الاستخدام عندما يدعم الخادم أحدهما.
 
 عندما تكون `requireParentSpan: true`، تبحث المعترضات عن active parent span قبل أي instrumentation. إذا لم يوجد، تتجاوز إنشاء span والنشر والـ hooks والـ metrics، ثم تستدعي handler التالي من دون تعديل.
 
@@ -110,7 +110,7 @@ withOpenTelemetryServer({
 })
 ```
 
-الـ hooks متزامنة. يُلتقط الرمي المتزامن ويُسجل كـ `defjs.otel.hook.error` من دون إيقاف عملية العميل. إذا تجاوز JavaScript النوع وأعاد Promise مرفوضًا، فلا ينتظر wrapper ذلك الرفض غير المتزامن ولا يلتقطه.
+يمكن أن تعيد الـ hooks القيمة `void` أو `Promise<void>` وتظل غير حاجبة. يُلتقط كل من الرمي المتزامن والرفض غير المتزامن ويُسجل كـ `defjs.otel.hook.error` من دون إيقاف عملية العميل، كما تُعزل أخطاء تسجيل telemetry نفسها.
 
 استخدم attributes من allowlist منخفضة cardinality. لا تُرفق headers أو query strings أو bodies أو baggage أو event IDs أو message payloads خامًا.
 
@@ -149,8 +149,6 @@ withOpenTelemetryServer({
 | `defjs.client.sse.active_streams`      | عدد المقابض المنطقية التي لم تستقر Promise الخاصة بـ `closed` فيها. |
 
 هذه مقاييس مخصصة لـ Defjs. يشمل active counter الوقت بين محاولات reconnect الفعلية. ولا يعد اتصالات HTTP المفتوحة حاليًا.
-
-إذا ترك مسار callback في core قيمة `stream.closed` معلقة، فلن يستطيع span أو counter الانتهاء عبر تلك Promise. اجعل reconnect callbacks غير رامية.
 
 ## دلالات WebSocket
 

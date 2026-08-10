@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: Server-Sent Events の定義とデコード、起動、共有ワークキュー、再接続、所有するストリームのクローズを説明します。
+description: 上限付き Server-Sent Events の定義とデコード、再接続、所有するストリームのクローズを説明します。
 ---
 
 # SSE
@@ -11,6 +11,8 @@ description: Server-Sent Events の定義とデコード、起動、共有ワー
 import { defineEventStream, struct } from '@defjs/core'
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(
@@ -43,6 +45,8 @@ SSE の `data:` はテキストとして届きます。
 
 ```typescript
 const events = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/events',
   events: {
     update: struct.json(struct.object({ version: struct.number() })),
@@ -59,6 +63,8 @@ const events = defineEventStream({
 
 ```typescript
 const roomEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -81,6 +87,8 @@ const [error, stream, startupOpen] = await client.execute(
   }),
 )
 ```
+
+HTTP、SSE、WebSocket 実行の `timeout` は `1..2_147_483_647` の範囲にある正の安全な整数でなければならず、`0`、負数、小数、`NaN`、`Infinity`、上限を超える値を指定すると、request、stream、socket のリソースを作成する前に `REQUEST_VALIDATION_FAILED` になります。
 
 SSE は次の形を返します。
 
@@ -148,7 +156,8 @@ async function consumeNotifications(signal: AbortSignal) {
 ```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message }) => {
+  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+    if (signal.aborted) return
     recordInvalidEvent({ eventName: message.event, reason })
   }),
 )
@@ -157,10 +166,11 @@ const client = createClient(
 オブザーバーは次を受け取ります。
 
 - `reason: 'missing-struct' | 'validation-failed'`
-- 生のイベントの `id`、イベント名、データテキスト、任意の再試行値
+- 生のイベントの `id`、イベント名、データテキスト
 - 検証失敗の `cause`
+- 現在の試行の `signal`
 
-イベントは破棄されます。後続の有効なイベントは引き続き配信できます。オブザーバーが送出した例外や reject された Promise は捕捉されますが、非同期オブザーバーは後続メッセージの処理前に完了を待たれます。短時間で終わるようにしてください。生の `id`、`data`、`cause` は、記録前に内容を確認してマスキングします。
+イベントは破棄されますが、後続の有効なイベントは配信できます。オブザーバーの例外は隔離され、abort は `signal` を通じて待機中のオブザーバーを中断します。短時間で終わるようにし、生の `id`、`data`、`cause` は記録前にマスキングしてください。
 
 ## 再接続
 
@@ -194,44 +204,26 @@ withSSEReconnect({
 })
 ```
 
-トランスポートは後続試行で最新イベント ID を `Last-Event-ID` として送ります。`shouldReconnect` は例外を送出しないようにしてください。述語が例外を送出したり reject されたりした場合、現在は待機中のイテレーターと `stream.closed` のすべてが確実に確定するとは限りません。
+トランスポートは後続試行で最新イベント ID を `Last-Event-ID` として送ります。`shouldReconnect` が例外を送出または reject すると再試行は止まり、待機中の起動またはストリームはそのポリシーエラーで確定します。Abort は現在の試行の signal を通じて待機中の述語を中断します。
 
 HTTP またはオープン時の検証失敗、メッセージ処理の致命的エラー、通常の EOF は、再試行可能なネットワーク・読み取り失敗とは異なります。すべての終端経路が再接続するとは考えないでください。
 
-## 共有ワークキュー
+## エンドポイント所有の上限
 
-非同期イテラブルは、論理ストリームに 1 つだけある共有ワークキューです。購読、ブロードキャスト、バックプレッシャーの仕組みではありません。
+ストリームの非同期イテレーターを消費できるのは 1 つだけです。2 つ目のイテレーター作成は例外になり、ループを抜ける場合も `stream.close(...)` を明示的に呼ぶ必要があります。
 
-デフォルトではキューに上限がありません。`withSSEQueue(...)` または `withSSEOptions({ queue })` で上限を設定します。
-
-```typescript
-withSSEQueue({
-  maxSize: 100,
-  overflow: 'drop-oldest',
-})
-```
-
-| Overflow      | 上限到達時の動作                                                     |
-| ------------- | -------------------------------------------------------------------- |
-| `drop-newest` | 到着したイベントを破棄します。                                       |
-| `drop-oldest` | バッファ内の最古イベントを削除してから、新しいイベントを追加します。 |
-| `error`       | キューオーバーフローエラーを送出して処理を終了します。               |
-
-複数のイテレーターは値を奪い合い、それぞれにコピーは届きません。イテレーターにはライフサイクルに対応した `return()` 実装がないため、1 つの `for await` ループを `break` してもトランスポートは閉じません。`stream.close(...)` を明示的に呼んでください。
-
-クローズするとキューへ新しい値を追加できなくなりますが、バッファ済みの値は破棄されません。コンシューマーは残りの値を取り出した後、次の反復で `done: true` を受け取ります。
-
-### パーサーバッファの上限
-
-イベントキューとパーサーバッファは別です。不完全な SSE 行を保持するバイト数には、`withSSEOptions(...)` で正の `maxBufferSize` を指定します。
+各定義には正の安全な整数 `maxBufferSize` と `maxQueueSize` が必要です。前者は SSE の各行と現在のイベントデータを、後者は消費待ちの解析済みイベントを制限します。キューの上限超過は致命的で、イベントを黙って破棄しません。
 
 ```typescript
-withSSEOptions({
+const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.json(notificationStruct) },
 })
 ```
 
-起動後に上限を超えるとイテレーターが reject され、ストリームは `code: 'error'` で閉じます。省略した場合、このパーサーバッファに上限はありません。
+通常の EOF では残りのイベントを取り出せます。致命的な parser、transform、overflow エラーではバッファを消去し、active body をキャンセルし、iteration を reject して `stream.closed` を `code: 'error'` で確定します。
 
 ## 終端クローズ
 

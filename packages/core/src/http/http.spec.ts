@@ -65,32 +65,25 @@ describe('request http runtime', () => {
     })
   })
 
-  test('should decode response bodies with struct key aliases', async () => {
-    const client = createClient(
-      withEndpoint('https://example.com'),
-      withInterceptors(
-        createHttpInterceptor(async () =>
-          makeResponse({
-            body: {
-              user_name: 'Miao',
-            },
-            status: 200,
+  test('should encode request aliases and decode response aliases through a real round-trip', async () => {
+    const useUser = defineRequest({
+      input: struct.request({
+        body: struct.json(
+          struct.object({
+            name: struct.string().alias('user_name'),
           }),
         ),
-      ),
-    )
-
-    const useUser = defineRequest({
-      method: 'GET',
+      }),
+      method: 'POST',
       output: {
         200: struct.object({
           name: struct.string().alias('user_name'),
         }),
       },
-      path: '/user',
+      path: '/json/alias',
     })
 
-    const [error, result] = await client.execute(useUser())
+    const [error, result] = await client.execute(useUser({ body: { name: 'Miao' } }))
 
     expect(error).toBeNull()
     expect(result).toEqual({ name: 'Miao' })
@@ -178,6 +171,29 @@ describe('request http runtime', () => {
     expect(capturedRequest?.queryParams?.getAll('tags')).toEqual(['a', 'b'])
     expect(capturedRequest?.headers?.get('x-token')).toBe('secret')
     expect(capturedRequest?.body).toBe('{"nickname":"Miao"}')
+  })
+
+  test('should encode a raw path value as one segment', async () => {
+    let endpoint: string | undefined
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async (request) => {
+          endpoint = request.endpoint
+          return makeResponse({ status: 204 })
+        }),
+      ),
+    )
+    const useUser = defineRequest({
+      input: struct.request({ path: struct.object({ id: struct.string() }) }),
+      method: 'GET',
+      path: '/users/:id',
+    })
+
+    const [error] = await client.execute(useUser({ path: { id: 'a/b ?#%猫' } }))
+
+    expect(error).toBeNull()
+    expect(endpoint).toBe('/users/a%2Fb%20%3F%23%25%E7%8C%AB')
   })
 
   test('should expose xsrf client config on the final HttpRequest', async () => {
@@ -271,22 +287,9 @@ describe('request http runtime', () => {
   })
 
   test('should return http error when output is omitted and response is not ok', async () => {
-    const client = createClient(
-      withEndpoint('https://example.com'),
-      withInterceptors(
-        createHttpInterceptor(async () =>
-          makeResponse({
-            body: { error: 'fail' },
-            status: 500,
-            statusText: 'Internal Server Error',
-          }),
-        ),
-      ),
-    )
-
     const useNoOutput = defineRequest({
       method: 'GET',
-      path: '/fail',
+      path: '/500',
     })
 
     const [error, result, response] = await client.execute(useNoOutput())

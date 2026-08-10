@@ -1,11 +1,11 @@
 ---
 title: Struct
-description: Décodez les données de façon structurelle, comprenez les valeurs zéro, les entrées partielles, les alias et StructError.
+description: Décodez strictement les données structurées et gérez les entrées obligatoires, facultatives, les alias et StructError.
 ---
 
 # Struct
 
-Les Structs décrivent le décodage structurel et l'encodage du format d'échange. Certains comportements de valeur zéro s'inspirent de Go, sans reproduire toute la sémantique de son package `encoding/json`.
+Les Structs décrivent le décodage structurel strict et l'encodage du format d'échange. Une valeur obligatoire absente ou invalide échoue au lieu de produire une valeur par défaut.
 
 Utilisez la façade `struct` et `Infer<T>` depuis l'entrée racine :
 
@@ -47,7 +47,7 @@ struct.discriminatedUnion('kind', [
 ])
 ```
 
-`struct.any()` et `struct.unknown()` acceptent des valeurs sans contrainte. Les constructeurs binaires sont `struct.blob()`, `struct.file()` et `struct.arrayBuffer()`.
+`struct.any()` et `struct.unknown()` acceptent toute valeur sauf `null` et `undefined` ; les mêmes modificateurs permettent de les autoriser explicitement. Les constructeurs binaires sont `struct.blob()`, `struct.file()` et `struct.arrayBuffer()`.
 
 Chaque Struct accepte ces modificateurs :
 
@@ -58,57 +58,54 @@ struct.string().nullish()
 struct.string().alias('wire_name')
 ```
 
-## Valeurs zéro
+## Décodage strict
 
-Une valeur absente ou `undefined` est décodée en valeur zéro, sauf pour une Struct facultative. Un `null` reçu par une Struct non nullable suit le même chemin. Une Struct nullable décode une valeur absente, `undefined` ou `null` en `null`.
-
-Quelques valeurs zéro :
-
-| Struct                        | Valeur zéro                                             |
-| ----------------------------- | ------------------------------------------------------- |
-| `string`                      | `''`                                                    |
-| `number`                      | `0`                                                     |
-| `boolean`                     | `false`                                                 |
-| `bigint`                      | `0n`                                                    |
-| `date`                        | `new Date(0)`                                           |
-| tableau                       | `[]`                                                    |
-| objet                         | un objet dont les champs contiennent leur valeur zéro   |
-| tuple                         | un tuple dont les éléments contiennent leur valeur zéro |
-| enum                          | la première valeur déclarée                             |
-| littéral                      | le littéral déclaré                                     |
-| `blob`, `file`, `arrayBuffer` | une valeur vide du type correspondant                   |
-| `any`, `unknown`              | `undefined`                                             |
-
-Dans un objet, un champ absent marqué seulement avec `.optional()` est omis de la sortie décodée. `.nullish()` est à la fois facultatif et nullable ; le traitement nullable l'emporte, si bien qu'une valeur absente est actuellement décodée en `null`.
+Utilisez `struct.parse(schema, input)` pour décoder hors d'une commande. Il renvoie un tuple error-first fixe :
 
 ```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
   biography: struct.string().null(),
+  note: struct.string().nullish(),
 })
 
-// Decoding {} produces an object equivalent to:
-// { name: '', biography: null }
+const [error, profile] = struct.parse(Profile, input)
+
+if (error) {
+  // profile is undefined
+  return
+}
 ```
-
-Les clés d'objet inconnues sont supprimées. Les objets et records décodés ont un prototype nul. Si votre code dépend des méthodes d'`Object.prototype`, utilisez `Object.keys`, `Object.entries` ou copiez explicitement la valeur dans un objet ordinaire.
-
-## Les entrées partielles sont intentionnelles
-
-À la frontière TypeScript, les propriétés d'entrée d'un objet restent facultatives même si la propriété décodée existe toujours en sortie. Les sections de `struct.request(...)` sont elles aussi facultatives.
 
 ```typescript
-const Point = struct.object({
-  x: struct.number(),
-  y: struct.number(),
-})
-
-// A command using Point as input accepts {}.
-// Structural decoding produces { x: 0, y: 0 }.
+type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
 ```
 
-Ne présentez pas ces champs comme obligatoires. Les Structs ne valident pas les exigences applicatives de présence, d'autorisation, de plage, de montant, de format ou de transition d'état. Aucun DSL public de raffinement, de plage ou de format n'existe.
+Un seul contrat s'applique aux modificateurs : une valeur absente ou `undefined` n'est acceptée qu'avec `.optional()` ou `.nullish()` ; un `null` explicite qu'avec `.null()` ou `.nullish()`. `.null()` ne rend pas la valeur facultative.
+
+Les champs optional et nullish absents sont omis de l'objet de sortie ; au niveau racine, ils deviennent `undefined`. Les clés inconnues sont supprimées. Les objets et records décodés ont un prototype nul.
+
+## Entrées d'objet et de requête obligatoires
+
+Les propriétés d'objet sont obligatoires en TypeScript et à l'exécution, sauf si leur Struct est optional ou nullish. Chaque section déclarée dans `struct.request(...)` est elle aussi obligatoire ; une section non déclarée n'appartient pas au type d'entrée.
+
+```typescript
+const Input = struct.request({
+  path: struct.object({ id: struct.string() }),
+  query: struct.object({ page: struct.number().optional() }),
+})
+
+// { path: { id: string }; query: { page?: number } }
+```
+
+Omettre `query` est une erreur ; `query: {}` est valide. Un champ obligatoire absent, un `undefined` explicite, un `null` interdit ou un mauvais type d'exécution fait échouer tout le décodage sans valeur partielle.
+
+Les Structs composées s'arrêtent au premier issue déterminé. La longueur d'un tuple doit correspondre exactement à sa déclaration. `struct.or(...)` continue d'essayer les alternatives dans l'ordre et `struct.discriminatedUnion(...)` de sélectionner une branche déclarée.
+
+Lorsque les champs discriminateurs utilisent des alias, `struct.discriminatedUnion(...)` lit le premier discriminateur wire réellement présent, dans l'ordre de déclaration des options. Une fois une branche sélectionnée, il ne lit aucun alias d'une option ultérieure.
+
+Les Structs imposent la structure déclarée, pas les règles applicatives d'autorisation, de plage, de montant, de format ou de transition d'état. Aucun DSL public de raffinement, de plage ou de format n'existe.
 
 `struct.number()` accepte `Infinity` et `-Infinity` ; parmi les nombres JavaScript, seul `NaN` est exclu. Contrôlez la finitude, la plage et le domaine dans le code applicatif avant de créer une commande. Ne placez pas ces contrôles dans `build`, car celui-ci reçoit une projection liée au schéma et non les valeurs de l'appelant à l'exécution.
 
@@ -203,4 +200,4 @@ Cette fonction agit globalement, pas au niveau d'un client. La modifier affecte 
 
 - [Commandes](/fr-FR/core/commands) projette les champs Struct vers les requêtes et les messages.
 - [Erreurs](/fr-FR/core/errors) explique comment les échecs Struct apparaissent dans les tuples d'exécution.
-- [HTTP](/fr-FR/core/http) couvre le décodage des réponses et la limite actuelle avec le JSON malformé.
+- [HTTP](/fr-FR/core/http) couvre le décodage des réponses et les erreurs de représentation.

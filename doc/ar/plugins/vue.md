@@ -195,7 +195,7 @@ export default defineNuxtPlugin((nuxtApp) => {
 - يستدعي `stream.close(...)` أو `session.close(...)` للمورد النشط؛
 - يلغي اشتراك WebSocket observers.
 
-لا تفتح WebSocket لمجرد ربط state listener ثم تترك incoming queue غير المحدودة بلا قراءة. راجع [SSE](/ar/core/sse) و[WebSocket](/ar/core/web-socket) لقواعد دورة الحياة الكاملة.
+لا تفتح WebSocket لمجرد ربط state listener ثم تترك incoming queue المحدودة بلا قراءة؛ فالـ overflow قاتل للجلسة. راجع [SSE](/ar/core/sse) و[WebSocket](/ar/core/web-socket) لقواعد دورة الحياة الكاملة.
 
 ## API
 

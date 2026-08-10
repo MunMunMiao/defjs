@@ -11,7 +11,8 @@
     "**/.claude/**",
     "**/playwright-report/**",
     "**/blob-report/**",
-    "**/test-results/**"
+    "**/test-results/**",
+    "field-study/**"
   ],
   "printWidth": 140,
   "semi": false,

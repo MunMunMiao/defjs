@@ -1,11 +1,11 @@
 ---
 title: Struct
-description: 構造デコード、ゼロ値、部分指定できるオブジェクト入力、エイリアス、StructError の処理を説明します。
+description: 厳密な構造デコード、必須・任意入力、エイリアス、StructError の処理を説明します。
 ---
 
 # Struct
 
-Struct は構造デコードと通信時のエンコーディングを記述します。一部のゼロ値動作は Go に着想を得ていますが、Go の `encoding/json` の挙動を完全に実装したものではありません。
+Struct は厳密な構造デコードと通信時のエンコーディングを記述します。必須値の欠損や不正値は、既定値を生成せず失敗します。
 
 ルートエントリーの `struct` ファサードと `Infer<T>` を使います。
 
@@ -47,7 +47,7 @@ struct.discriminatedUnion('kind', [
 ])
 ```
 
-`struct.any()` と `struct.unknown()` は値を制約せず受け取ります。バイナリ用のコンストラクターは `struct.blob()`、`struct.file()`、`struct.arrayBuffer()` です。
+`struct.any()` と `struct.unknown()` は `null` と `undefined` 以外の任意の値を受け取ります。これらを許可する場合も同じ修飾メソッドを使います。バイナリ用のコンストラクターは `struct.blob()`、`struct.file()`、`struct.arrayBuffer()` です。
 
 すべての Struct で次の修飾メソッドを使えます。
 
@@ -58,57 +58,54 @@ struct.string().nullish()
 struct.string().alias('wire_name')
 ```
 
-## ゼロ値
+## 厳密なパース
 
-Struct が optional でない場合、欠損値または `undefined` はゼロ値へデコードされます。nullable でない `null` も同じです。nullable な Struct では、欠損値、`undefined`、`null` が `null` になります。
-
-主なゼロ値は次のとおりです。
-
-| Struct                        | ゼロ値                                 |
-| ----------------------------- | -------------------------------------- |
-| `string`                      | `''`                                   |
-| `number`                      | `0`                                    |
-| `boolean`                     | `false`                                |
-| `bigint`                      | `0n`                                   |
-| `date`                        | `new Date(0)`                          |
-| 配列                          | `[]`                                   |
-| オブジェクト                  | 各フィールドにゼロ値を持つオブジェクト |
-| タプル                        | 各要素にゼロ値を持つタプル             |
-| enum                          | 最初に宣言した値                       |
-| リテラル                      | 宣言したリテラル                       |
-| `blob`, `file`, `arrayBuffer` | 対応する空の値                         |
-| `any`, `unknown`              | `undefined`                            |
-
-オブジェクト内で `.optional()` だけを付けたフィールドが欠けている場合、デコード結果にはそのフィールドが含まれません。`.nullish()` は optional かつ nullable です。欠損値には nullable の処理が優先されるため、現在は `null` へデコードされます。
+コマンド外でデコードするには `struct.parse(schema, input)` を使います。固定の error-first タプルを返します。
 
 ```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
   biography: struct.string().null(),
+  note: struct.string().nullish(),
 })
 
-// Decoding {} produces an object equivalent to:
-// { name: '', biography: null }
+const [error, profile] = struct.parse(Profile, input)
+
+if (error) {
+  // profile is undefined
+  return
+}
 ```
-
-未知のオブジェクトキーは破棄されます。パース後のオブジェクトと record の出力には null prototype が使われます。`Object.prototype` のメソッドに依存するコードでは、`Object.keys`、`Object.entries` を使うか、意図的に通常のオブジェクトへコピーしてください。
-
-## 入力の部分指定は仕様
-
-TypeScript の境界では、オブジェクト入力のプロパティはすべて任意です。デコード後の出力プロパティが存在する場合も同じです。`struct.request(...)` のリクエストセクションも任意です。
 
 ```typescript
-const Point = struct.object({
-  x: struct.number(),
-  y: struct.number(),
-})
-
-// A command using Point as input accepts {}.
-// Structural decoding produces { x: 0, y: 0 }.
+type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
 ```
 
-これらのフィールドを必須と説明しないでください。Struct は、アプリケーションレベルの必須項目、認可、範囲、金額、形式、状態遷移を検証しません。公開された refine/range/format DSL もありません。
+修飾子の規則は共通です。欠損値と `undefined` は `.optional()` または `.nullish()` の場合だけ、明示的な `null` は `.null()` または `.nullish()` の場合だけ受理されます。`.null()` は値を optional にはしません。
+
+欠損した optional と nullish のオブジェクトフィールドは出力から省かれ、トップレベルでは `undefined` になります。未知のキーは破棄され、デコード後のオブジェクトと record は null prototype を使います。
+
+## 必須のオブジェクト・リクエスト入力
+
+Struct が optional または nullish でない限り、オブジェクトプロパティは TypeScript と実行時の両方で必須です。`struct.request(...)` で宣言した各セクションも必須です。宣言しないセクションは入力型に現れません。
+
+```typescript
+const Input = struct.request({
+  path: struct.object({ id: struct.string() }),
+  query: struct.object({ page: struct.number().optional() }),
+})
+
+// { path: { id: string }; query: { page?: number } }
+```
+
+`query` の省略はエラーですが、`query: {}` は有効です。必須フィールドの欠損、明示的な `undefined`、禁止された `null`、不正な実行時型のどれでも、部分値を返さずパース全体が失敗します。
+
+複合 Struct は最初に確定した issue で停止します。タプル入力の長さは宣言と完全に一致する必要があります。`struct.or(...)` は順番に代替候補を試し、`struct.discriminatedUnion(...)` は宣言済みの分岐を選びます。
+
+discriminator フィールドに alias がある場合、`struct.discriminatedUnion(...)` は option の宣言順に、実際に存在する最初の wire discriminator を読み取ります。分岐を選択した後は、後続 option の alias を読み取りません。
+
+Struct が保証するのは宣言した構造であり、アプリケーションの認可、範囲、金額、形式、状態遷移ではありません。公開 refine/range/format DSL はありません。
 
 `struct.number()` は正負の `Infinity` を受け付け、JavaScript の数値のうち除外するのは `NaN` だけです。有限性、範囲、ドメインのチェックは、コマンド作成前にアプリケーションコードで行ってください。`build` の中には置けません。`build` が受け取るのは呼び出し元の実値ではなく、スキーマに束縛されたプロジェクションだからです。
 
@@ -203,4 +200,4 @@ setErrorMap((issue) => {
 
 - [Commands](/ja-JP/core/commands) — Struct フィールドとリクエスト/メッセージのマッピング
 - [Errors](/ja-JP/core/errors) — Struct 失敗が実行タプルに現れる形
-- [HTTP](/ja-JP/core/http) — レスポンスデコードと現在の不正 JSON に関する制約
+- [HTTP](/ja-JP/core/http) — レスポンスデコードと表現エラー

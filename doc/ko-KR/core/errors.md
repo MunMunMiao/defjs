@@ -13,7 +13,7 @@ const [sseError, stream, startupOpen] = await client.execute(sseCommand)
 const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-- HTTP는 디코딩된 데이터와 Defjs `SettledResponse` 래퍼를 반환합니다.
+- HTTP는 디코딩된 데이터와 Defjs `HttpResponse` 래퍼를 반환합니다.
 - SSE는 논리 스트림 핸들과 시작 시점 open 스냅샷을 반환합니다.
 - WebSocket은 논리 세션과 시작 시점 connection 스냅샷을 반환합니다.
 
@@ -44,7 +44,7 @@ interface HttpStatusError<TErrorData = unknown> {
   status: number
   message: string
   data: TErrorData
-  response: SettledResponseLike<unknown>
+  response: HttpResponse<unknown>
 }
 ```
 
@@ -75,7 +75,7 @@ interface DefinitionError {
   code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'UNDECLARED_STATUS'
   message: string
   cause?: unknown
-  response?: SettledResponseLike<unknown>
+  response?: HttpResponse<unknown>
 }
 ```
 
@@ -133,7 +133,9 @@ if (!error) {
 
 ## 응답 가용성
 
-`SettledResponseLike`와 `SettledResponse`는 native `Response`가 아니라 Defjs 래퍼입니다. status, status text, header, URL, body, 선택적인 오류 정보를 노출하며 settled 래퍼에는 `ok` flag도 있습니다. `ok`는 status가 2xx 범위라는 뜻일 뿐입니다.
+`HttpResponse`는 native `Response`가 아니라 Defjs 래퍼입니다. status, status text, header, URL, body, `error`, `ok`를 노출합니다. `ok`는 status가 2xx 범위라는 뜻일 뿐입니다. `error`는 transport 또는 body 표현 실패에만 사용되며 일반적인 비-2xx 응답에서는 비어 있습니다.
+
+유효하고 선언된 비-2xx body는 Struct로 디코딩되어 typed `HttpStatusError.data`에 보존됩니다. 잘못된 representation은 대신 `RESPONSE_VALIDATION_FAILED`를 만들고, 원래 codec 예외를 `cause`에, 수신한 response를 response 필드에 보존하며 `data`는 만들지 않습니다.
 
 HTTP에서는 다음과 같이 동작합니다.
 

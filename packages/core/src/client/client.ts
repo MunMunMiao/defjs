@@ -66,7 +66,6 @@ export function createClient(...options: ClientOption[]): Client {
       beforeConnect: undefined,
       heartbeat: undefined,
       protocols: undefined,
-      queue: undefined,
       reconnect: undefined,
     },
     xsrf: undefined,

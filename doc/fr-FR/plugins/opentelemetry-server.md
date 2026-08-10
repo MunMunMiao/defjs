@@ -75,7 +75,7 @@ Les anciens booléens de transport, les hooks de premier niveau et `webSocketQue
 
 Lorsque `propagator` est omis, le package crée son propre `CompositePropagator` avec W3C Trace Context et W3C Baggage. Il ne consulte pas le propagator global.
 
-HTTP et SSE injectent tous les champs produits dans les en-têtes de requête. Si `req.headers` est déjà une instance de `Headers`, l'implémentation actuelle réutilise et modifie cette même instance. Sinon, elle crée un nouvel objet `Headers`. Pour WebSocket, la propagation dans la query vaut `true` par défaut, car les WebSocket du navigateur ne peuvent pas ajouter d'en-têtes arbitraires au handshake. Chaque champ produit par le propagator est ajouté à la query de connexion.
+HTTP et SSE injectent tous les champs produits dans les en-têtes de requête. Si `req.headers` est déjà une instance de `Headers`, l'implémentation actuelle réutilise et modifie cette même instance. Sinon, elle crée un nouvel objet `Headers`. Pour WebSocket, la propagation dans la query vaut `false` par défaut. Seul `queryPropagation: true` l'active ; comme les WebSocket du navigateur ne peuvent pas ajouter d'en-têtes arbitraires au handshake, chaque champ produit par le propagator est alors ajouté à la query de connexion.
 
 Avant de créer un span, chaque intercepteur appelle aussi `propagator.extract(...)` sur les en-têtes de requête. Considérez ce carrier comme une entrée de confiance contrôlée par l'application. N'autorisez pas une source non fiable à fournir `traceparent`, `tracestate` ou `baggage` : ces champs peuvent remplacer le contexte parent actif. Supprimez ou normalisez les champs de propagation non fiables avant que la requête n'atteigne cet intercepteur.
 
@@ -83,12 +83,12 @@ Avant de créer un span, chaque intercepteur appelle aussi `propagator.extract(.
 withOpenTelemetryServer({
   tracer,
   webSocket: {
-    queryPropagation: false,
+    queryPropagation: true,
   },
 })
 ```
 
-Désactivez la propagation par query tant qu'elle n'a pas été validée pour le déploiement. Les navigateurs, proxies, journaux d'accès et systèmes de télémétrie peuvent enregistrer le contexte de trace et le baggage. Un propagator personnalisé peut ajouter d'autres champs que `traceparent`.
+Validez la propagation par URL avant de l'activer. Les navigateurs, proxies, journaux d'accès et systèmes de télémétrie peuvent enregistrer le contexte de trace et le baggage. Un propagator personnalisé peut ajouter d'autres champs que `traceparent`. Si le serveur le permet, préférez un premier message validé dans le protocole ou un ticket de connexion à courte durée de vie et à usage unique.
 
 `requireParentSpan: true` vérifie l'existence d'un span parent actif avant toute instrumentation. Sans span actif, l'intercepteur ignore la création du span, la propagation, les hooks et les métriques, puis appelle le handler suivant sans modification.
 
@@ -110,7 +110,7 @@ withOpenTelemetryServer({
 })
 ```
 
-Les hooks sont synchrones. Une exception synchrone est interceptée et enregistrée dans `defjs.otel.hook.error` sans interrompre l'opération du client. Si du JavaScript contourne le type et renvoie une promesse rejetée, le wrapper du hook ne l'attend pas et ne l'intercepte pas.
+Les hooks peuvent renvoyer `void` ou `Promise<void>` et restent non bloquants. Les exceptions synchrones et les rejets asynchrones sont interceptés et enregistrés dans `defjs.otel.hook.error` sans interrompre l'opération du client ; les erreurs produites par cet enregistrement de télémétrie sont également isolées.
 
 Limitez les attributs à une liste autorisée de faible cardinalité. N'attachez ni en-têtes bruts, ni chaînes de requête, ni corps, ni baggage, ni ID d'événement, ni payloads de message, ni identifiants.
 
@@ -149,8 +149,6 @@ Avec un Meter, SSE instrumente :
 | `defjs.client.sse.active_streams`      | Nombre de handles logiques dont la promesse `closed` n'est pas résolue. |
 
 Ce sont des métriques Defjs personnalisées. Le compteur actif inclut le temps passé entre les tentatives de reconnexion physique. Il ne compte pas les connexions HTTP actuellement ouvertes.
-
-Si un callback Core laisse `stream.closed` en attente, ni le span ni le compteur ne peuvent se terminer par cette promesse. Les callbacks de reconnexion ne doivent pas lever d'exception.
 
 ## Sémantique WebSocket
 

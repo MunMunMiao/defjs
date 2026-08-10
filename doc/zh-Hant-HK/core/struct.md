@@ -1,11 +1,11 @@
 ---
 title: Struct
-description: 說明結構式解碼、零值、partial object input、alias 與 StructError handling。
+description: 說明嚴格結構式解碼、必填與可選 input、alias 與 StructError handling。
 ---
 
 # Struct
 
-Struct 描述結構式解碼與 wire encoding。當中選用的零值行為受 Go 啟發，但並非完整實作 Go `encoding/json` semantics。
+Struct 描述嚴格結構式解碼與 wire encoding。必填值缺少或值無效時會失敗，不會產生預設值。
 
 從 root entry 使用 `struct` facade 與 `Infer<T>`：
 
@@ -47,7 +47,7 @@ struct.discriminatedUnion('kind', [
 ])
 ```
 
-`struct.any()` 與 `struct.unknown()` 接受不受限制的值。Binary constructor 包括 `struct.blob()`、`struct.file()` 及 `struct.arrayBuffer()`。
+`struct.any()` 與 `struct.unknown()` 接受 `null`、`undefined` 以外的任何值；需要接受兩者時仍使用相同的 modifier。Binary constructor 包括 `struct.blob()`、`struct.file()` 及 `struct.arrayBuffer()`。
 
 每個 Struct 都支援以下 modifier：
 
@@ -58,57 +58,54 @@ struct.string().nullish()
 struct.string().alias('wire_name')
 ```
 
-## 零值
+## 嚴格 Parse
 
-缺少值或 `undefined` 會解碼成零值，除非 Struct 標記為 optional。Non-nullable `null` 亦走同一條零值路徑。Nullable Struct 則把缺少值、`undefined` 或 `null` 解碼成 `null`。
-
-常見零值如下：
-
-| Struct                        | 零值                         |
-| ----------------------------- | ---------------------------- |
-| `string`                      | `''`                         |
-| `number`                      | `0`                          |
-| `boolean`                     | `false`                      |
-| `bigint`                      | `0n`                         |
-| `date`                        | `new Date(0)`                |
-| array                         | `[]`                         |
-| object                        | 各欄位都包含其零值的 object  |
-| tuple                         | 各 item 都包含其零值的 tuple |
-| enum                          | 第一個宣告值                 |
-| literal                       | 已宣告的 literal             |
-| `blob`, `file`, `arrayBuffer` | 對應類型的空值               |
-| `any`, `unknown`              | `undefined`                  |
-
-在 object 內，只標記 `.optional()` 的缺少欄位不會出現在 decoded output。`.nullish()` 同時是 optional 與 nullable；缺少值時 nullable handling 優先，所以目前會解碼成 `null`。
+在 command 以外解碼時使用 `struct.parse(schema, input)`。它回傳固定的 error-first tuple：
 
 ```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
   biography: struct.string().null(),
+  note: struct.string().nullish(),
 })
 
-// Decoding {} produces an object equivalent to:
-// { name: '', biography: null }
+const [error, profile] = struct.parse(Profile, input)
+
+if (error) {
+  // profile is undefined
+  return
+}
 ```
-
-Unknown object key 會被丟棄。Parsed object 與 record 使用 null prototype。程式碼如依賴 `Object.prototype` method，請改用 `Object.keys`、`Object.entries`，或明確複製成普通 object。
-
-## Partial Input 是刻意設計
-
-Object input property 在 TypeScript boundary 全部 optional，即使 decoded output property 一定存在。`struct.request(...)` 的 request section 亦可省略。
 
 ```typescript
-const Point = struct.object({
-  x: struct.number(),
-  y: struct.number(),
-})
-
-// A command using Point as input accepts {}.
-// Structural decoding produces { x: 0, y: 0 }.
+type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
 ```
 
-不要把這些欄位描述成 required。Struct 不提供應用層 required-field、authorization、range、amount、format 或 state-transition validation，亦沒有 public refine/range/format DSL。
+所有 modifier 使用同一 contract：缺少值與 `undefined` 只會在 `.optional()` 或 `.nullish()` 下接受；明確 `null` 只會在 `.null()` 或 `.nullish()` 下接受。`.null()` 不會令值變成 optional。
+
+缺少的 optional 與 nullish object field 會從 output 省略；在頂層則解碼成 `undefined`。Unknown key 會被丟棄，decoded object 與 record 使用 null prototype。
+
+## 必填 Object 與 Request Input
+
+除非欄位 Struct 是 optional 或 nullish，否則 object property 在 TypeScript 與 runtime 都必填。`struct.request(...)` 中每個已宣告 section 亦必填；未宣告 section 不會出現在 input type。
+
+```typescript
+const Input = struct.request({
+  path: struct.object({ id: struct.string() }),
+  query: struct.object({ page: struct.number().optional() }),
+})
+
+// { path: { id: string }; query: { page?: number } }
+```
+
+省略 `query` 會報錯，`query: {}` 合法。缺少必填欄位、明確 `undefined`、禁止的 `null` 或錯誤 runtime type 都會令整次 parse 失敗，而且不回傳 partial value。
+
+複合 Struct 在第一個確定的 issue 停止。Tuple input 長度必須與宣告完全一致。`struct.or(...)` 仍按次序嘗試 alternative，`struct.discriminatedUnion(...)` 仍選擇已宣告 branch。
+
+Discriminator field 使用 alias 時，`struct.discriminatedUnion(...)` 會按 option 宣告次序讀取第一個實際存在的 wire discriminator。選中 branch 後，不再讀取後續 option 的 alias。
+
+Struct 強制執行已宣告結構，不負責應用層 authorization、range、amount、format 或 state-transition rules，亦沒有 public refine/range/format DSL。
 
 `struct.number()` 接受正負 `Infinity`；在 JavaScript number 之中只排除 `NaN`。建立 command 前，請在應用程式碼完成 finite、range 與 domain check。不要把這些檢查放入 `build`，因為 `build` 收到的是 schema-bound projection，不是呼叫方 runtime value。
 
@@ -203,4 +200,4 @@ setErrorMap((issue) => {
 
 - [Commands](/zh-Hant-HK/core/commands)：把 Struct field 對應至 request 與 message。
 - [Errors](/zh-Hant-HK/core/errors)：Struct failure 如何出現在 execution tuple。
-- [HTTP](/zh-Hant-HK/core/http)：response decoding 與目前 malformed JSON limitation。
+- [HTTP](/zh-Hant-HK/core/http)：response decoding 與 representation error。

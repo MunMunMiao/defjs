@@ -30,14 +30,14 @@ const result = await client.execute(command)
 
 `defineRequest(...)` 接受下列欄位：
 
-| 欄位           | 意義                                                                 |
-| -------------- | -------------------------------------------------------------------- |
-| `method`       | HTTP method 字串。                                                   |
-| `path`         | 相對端點路徑，可包含 `:name` placeholder。                           |
-| `input`        | 對指令輸入做結構解碼的 Struct。                                      |
-| `build`        | 將輸入欄位對應到請求各部分的結構描述綁定投影。必須同時提供 `input`。 |
-| `output`       | 用於回應解碼與結果推導的 status-to-Struct 對應。                     |
-| `responseType` | 選用的 `json`、`text`、`blob` 或 `arraybuffer` 回應模式。            |
+| 欄位           | 意義                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `method`       | HTTP method 字串。                                                                             |
+| `path`         | 相對端點路徑，可包含 `:name` placeholder。                                                     |
+| `input`        | 對指令輸入做結構解碼的 Struct。                                                                |
+| `build`        | 將輸入欄位對應到請求各部分的結構描述綁定投影。必須同時提供 `input`。                           |
+| `output`       | 用於回應解碼與結果推導的 status-to-Struct 對應。                                               |
+| `responseType` | 僅在宣告 `output` 時可選用 `json`、`text`、`blob` 或 `arraybuffer`；省略 `output` 時禁止宣告。 |
 
 指令欄位會直接對應到 wire section 時，請使用 `struct.request(...)`：
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-Object Struct 的輸入在型別層級是 partial，呼叫端可以省略每個 object property。Request section 也都可以省略。結構解碼會用零值補上非 optional 的輸出欄位，所以這兩種形狀都不會讓建構器引數成為必填。
+宣告 `input` 後，必填 object field 與每個已宣告 request section 都必須提供。只有 optional 或 nullish field 可以省略；endpoint 不使用的 section 不要宣告。
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-若建構器一定要收到引數，請使用 primitive 或 array 輸入。以下範例使用 primitive，並投影到 path parameter：
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-這說的是引數能不能省略，不是商務規則驗證。呼叫端仍可傳入 Struct input type 接受的值，遺漏的 object field 則會取得零值。
+這只驗證結構存在與型別，不負責應用程式層級 authorization、range、amount、format 或 state transition 規則。
 
 ## 自動建構請求
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 HTTP 成功型別是所有已宣告 2xx body 的 union；`error.data` 是所有已宣告非 2xx body 的 union。陣列形式需要 `as const`，才能保留 status literal 與 grouped readonly array。
 
-宣告 `output` 後，每個實際回傳的 status 都必須有對應 Struct。任何未對應的 2xx 或非 2xx status 都會產生 `UNDECLARED_STATUS`。省略 `output` 時，response body 會被忽略，結果則是 `undefined`。
+宣告 `output` 後，每個實際回傳的 status 都必須有對應 Struct。任何未對應的 2xx 或非 2xx status 都會產生 `UNDECLARED_STATUS`。省略 `output` 時不會讀取或解碼 response body，並會盡力取消它；結果則是 `undefined`。
 
 ## SSE 與 WebSocket 定義
 
@@ -224,6 +209,8 @@ HTTP 成功型別是所有已宣告 2xx body 的 union；`error.data` 是所有�
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ const chat = defineWebSocket({
 
 - [Client](/zh-Hant-TW/core/client)說明 execute overload 與選項組合。
 - [HTTP](/zh-Hant-TW/core/http)負責 URL、編碼、回應與取消行為。
-- [Struct](/zh-Hant-TW/core/struct)說明結構解碼與零值。
+- [Struct](/zh-Hant-TW/core/struct)說明嚴格結構解碼。

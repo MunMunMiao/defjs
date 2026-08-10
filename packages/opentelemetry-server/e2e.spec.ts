@@ -107,6 +107,8 @@ describe('e2e: opentelemetry-server with real test server', () => {
       events: {
         traceparent: struct.string(),
       },
+      maxBufferSize: 64 * 1024,
+      maxQueueSize: 16,
       path: '/sse',
     })
 
@@ -144,6 +146,8 @@ describe('e2e: opentelemetry-server with real test server', () => {
       events: {
         traceparent: struct.string(),
       },
+      maxBufferSize: 64 * 1024,
+      maxQueueSize: 16,
       path: '/sse/500',
     })
 
@@ -156,7 +160,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
     expect(span.ended).toBe(true)
   })
 
-  test('WebSocket request carries traceparent in query params', async () => {
+  test('WebSocket explicit query propagation carries traceparent in query params', async () => {
     const { tracer, spans } = createMockTracer()
     const propagator = createPropagator()
     const host = inject('testServerHost')
@@ -164,9 +168,13 @@ describe('e2e: opentelemetry-server with real test server', () => {
     // Replace http:// with ws:// for WebSocket endpoint
     const wsHost = host.replace(/^http:/, 'ws:')
 
-    const client = createClient(withEndpoint(wsHost), withOpenTelemetryServer({ tracer, propagator }))
+    const client = createClient(
+      withEndpoint(wsHost),
+      withOpenTelemetryServer({ tracer, propagator, webSocket: { queryPropagation: true } }),
+    )
 
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         traceparent: struct.object({
           value: struct.string(),
@@ -204,7 +212,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
     expect(url.searchParams.get('traceparent')).toMatch(TRACE_PARENT_REGEX)
   })
 
-  test('WebSocket queryPropagation false does not put traceparent in query params', async () => {
+  test('WebSocket omitted query propagation leaves the URL unchanged', async () => {
     const { tracer, spans } = createMockTracer()
     const propagator = createPropagator()
     const host = inject('testServerHost')
@@ -215,11 +223,11 @@ describe('e2e: opentelemetry-server with real test server', () => {
       withOpenTelemetryServer({
         tracer,
         propagator,
-        webSocket: { queryPropagation: false },
       }),
     )
 
     const useSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         traceparent: struct.object({
           value: struct.string(),
@@ -252,5 +260,6 @@ describe('e2e: opentelemetry-server with real test server', () => {
 
     const url = new URL(connection?.url ?? '')
     expect(url.searchParams.get('traceparent')).toBeNull()
+    expect(connection?.url).toBe(`${wsHost}/ws`)
   })
 })

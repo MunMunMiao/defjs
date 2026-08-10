@@ -34,7 +34,7 @@ const client = createClient(
 
 1. Setter helper 會取代原值，包括 `withEndpoint`、transport handle、query serializer、credentials、XSRF 設定，以及個別 SSE 或 WebSocket 設定。
 2. `withInterceptors(...items)` 會追加。多次呼叫仍會保留 interceptor 的加入次序。
-3. `withSSEOptions(...)` 與 `withWebSocketOptions(...)` 會淺層取代每個有定義的 top-level 欄位，不會 deep merge 內層 reconnect、heartbeat 或 queue object。
+3. `withSSEOptions(...)` 與 `withWebSocketOptions(...)` 會淺層取代每個有定義的 top-level 欄位，不會 deep merge 內層 reconnect 或 heartbeat object。
 
 例如，以下第二個 reconnect object 會整個取代第一個，不會保留 `attempts: 5`：
 
@@ -72,6 +72,8 @@ const client = createClient(
 
 `Client.execute` 有三個 overload，每個都回傳 error-first 三項 tuple。
 
+HTTP、SSE 與 WebSocket execution 的 `timeout` 必須是 `1..2_147_483_647` 範圍內的正安全整數；`0`、負數、小數、`NaN`、`Infinity` 或超出上限的值會在建立 request、stream 或 socket 資源前回傳 `REQUEST_VALIDATION_FAILED`。
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-有 response 時，第三項是 Defjs `SettledResponse` wrapper。HTTP option 包括 `abort` 或 `timeout`、額外的 `signal` alias、`context`，以及 upload/download progress observer。
+有 response 時，第三項是 Defjs `HttpResponse` wrapper。HTTP option 包括 `abort` 或 `timeout`、額外的 `signal` alias、`context`，以及 upload/download progress observer。
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-第三項是已驗證的 startup-open snapshot。`stream.open` 是另一個 live getter，可能在 reconnect 後改變。SSE execution 接受 cancellation 與 `HttpContext`；reconnect 和 event queue 則在 client option 設定。
+第三項是已驗證的 startup-open snapshot。`stream.open` 是另一個 live getter，可能在 reconnect 後改變。SSE execution 接受 cancellation 與 `HttpContext`；reconnect 在 client option 設定。必填的 `maxBufferSize` 和 `maxQueueSize` 限制屬於每個 event stream definition。
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-第三項是 startup-connection snapshot。`session.connection` 是 live getter，可能描述之後的實體連線嘗試。WebSocket execution 接受 cancellation，以及單次 execution 的 `beforeConnect`、`heartbeat`、`protocols`、`queue` 與 `reconnect`，但不接受 `HttpContext`。
+第三項是 startup-connection snapshot。`session.connection` 是 live getter，可能描述之後的實體連線嘗試。WebSocket execution 接受 cancellation，以及單次 execution 的 `beforeConnect`、`heartbeat`、`protocols` 與 `reconnect`。必填的 `maxIncomingQueueSize` 和可選的 `maxOutgoingQueueSize` 限制屬於每個 WebSocket definition。WebSocket execution 不接受 `HttpContext`。
 
 準確的 failure branch 見 [Errors](/zh-Hant-HK/core/errors)；transport lifecycle 見 [HTTP](/zh-Hant-HK/core/http)、[SSE](/zh-Hant-HK/core/sse) 與 [WebSocket](/zh-Hant-HK/core/web-socket)。
 

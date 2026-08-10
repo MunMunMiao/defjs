@@ -41,8 +41,8 @@ Two preparations correspond to the initial dial and its one reconnect. The repla
 
 ## Key points
 
-- `beforeConnect` runs inside each physical attempt, not once per logical session.
-- Defjs awaits the returned Promise before invoking the WebSocket constructor.
+- `beforeConnect` receives `{ attempt, signal }` inside each physical attempt, not once per logical session.
+- Defjs awaits the returned Promise before invoking the WebSocket constructor; abort and timeout race the hook and suppress late construction.
 - The hook prepares prerequisites; the server still owns handshake authentication and authorization.
 
 ## Production notes

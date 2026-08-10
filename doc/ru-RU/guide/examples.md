@@ -152,16 +152,7 @@ export async function deleteUser(id: number, signal: AbortSignal): Promise<void>
 
 ```typescript
 // consume-notifications.ts
-import {
-  createClient,
-  defineEventStream,
-  struct,
-  type Infer,
-  withEndpoint,
-  withSSEOnInvalidEvent,
-  withSSEQueue,
-  withSSEReconnect,
-} from '@defjs/core'
+import { createClient, defineEventStream, struct, type Infer, withEndpoint, withSSEOnInvalidEvent, withSSEReconnect } from '@defjs/core'
 
 const notificationStruct = struct.object({
   id: struct.number(),
@@ -175,6 +166,8 @@ interface NotificationHandlers {
 }
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(notificationStruct),
@@ -185,7 +178,6 @@ export async function consumeNotifications(signal: AbortSignal, handlers: Notifi
   const client = createClient(
     withEndpoint('https://api.example.com'),
     withSSEReconnect({ attempts: 5, delayMs: 1_000, maxDelayMs: 10_000 }),
-    withSSEQueue({ maxSize: 100, overflow: 'drop-oldest' }),
     withSSEOnInvalidEvent(({ reason, message }) => {
       handlers.onInvalid({ eventName: message.event, reason })
     }),
@@ -215,19 +207,11 @@ export async function consumeNotifications(signal: AbortSignal, handlers: Notifi
 
 ## Потребитель WebSocket-комнаты
 
-Переподключение включено явно. Функция читает неограниченную входящую очередь всё время жизни логического сеанса, ограничивает исходящую очередь и закрывает ресурс при любом выходе.
+Переподключение включено явно. Endpoint задаёт ограниченную ёмкость входящей и исходящей очередей, один iterator читает логический сеанс, а каждый путь выхода закрывает его.
 
 ```typescript
 // consume-room.ts
-import {
-  createClient,
-  defineWebSocket,
-  struct,
-  withEndpoint,
-  withWebSocketHeartbeat,
-  withWebSocketQueue,
-  withWebSocketReconnect,
-} from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketHeartbeat, withWebSocketReconnect } from '@defjs/core'
 
 interface RoomHandlers {
   onMessage(message: { text: string; userId: number }): void
@@ -235,6 +219,8 @@ interface RoomHandlers {
 }
 
 const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   path: '/rooms/:roomId',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -262,11 +248,9 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
       message: () => ({ type: 'ping' }),
       isAck: (message) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'pong',
     }),
-    withWebSocketQueue({ maxSize: 20, overflow: 'drop-oldest' }),
   )
 
-  const encodedRoomId = encodeURIComponent(roomId)
-  const [error, session] = await client.execute(room({ path: { roomId: encodedRoomId } }), { signal })
+  const [error, session] = await client.execute(room({ path: { roomId } }), { signal })
 
   if (error) {
     throw error
@@ -292,7 +276,7 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
 }
 ```
 
-Путь эндпоинта не кодирует плейсхолдеры, поэтому рецепт кодирует один сегмент до создания команды. Итоговый URL и payload в журнал не попадают.
+Передавайте значения плейсхолдеров без кодирования. Core кодирует каждое значение ровно один раз при подстановке в путь; не кодируйте их заранее, иначе `%` будет закодирован повторно. Этот рецепт не записывает итоговый URL или payload в журнал.
 
 ## Аутентификация и метрики операций
 

@@ -14,7 +14,7 @@ The first two serialized frames fit the Defjs queue. The third call throws `WebS
 
 ## Approach
 
-Configure a two-frame erroring outbox, hold the replacement socket in `CONNECTING`, enqueue two confirmations, observe explicit overflow on the third, then close and await the session.
+Set endpoint `maxOutgoingQueueSize` to two, hold the replacement socket in `CONNECTING`, enqueue two confirmations, observe explicit overflow on the third, then close and await the session.
 
 ## Source map
 
@@ -41,8 +41,9 @@ The retained confirmations flush in FIFO order, and the rejected third confirmat
 
 ## Key points
 
-- Outgoing Struct validation and serialization happen before enqueue.
-- `maxSize` bounds queued item count, not bytes or the platform socket's `bufferedAmount`.
+- The endpoint-owned `maxOutgoingQueueSize` defaults to `0`; positive capacity is available only during `reconnecting`.
+- `maxOutgoingQueueSize` bounds queued item count, not bytes or the platform socket's `bufferedAmount`.
+- The retained FIFO flushes before replacement `open` observers can send, and the transport never replays frames already sent to an earlier socket.
 - FIFO transport flush is not exactly-once delivery; durable work still needs stable IDs and receiver idempotency.
 
 ## Production notes

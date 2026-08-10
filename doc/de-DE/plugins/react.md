@@ -249,7 +249,7 @@ export function LiveNotifications() {
 }
 ```
 
-Dieses Fragment nimmt an, dass `recordRealtimeFailure` eine Telemetriefunktion der Anwendung ist. Es konsumiert `session.receive` absichtlich; die unbegrenzte eingehende Warteschlange ungelesen zu lassen, ist kein gültiges Besitzmodell. Wende dieselbe Disziplin für Start und Cleanup auf SSE-Handles an.
+Dieses Fragment nimmt an, dass `recordRealtimeFailure` eine Telemetriefunktion der Anwendung ist. Es konsumiert `session.receive` absichtlich; bleibt die begrenzte eingehende Warteschlange ungelesen, beendet ein Overflow die Session fatal. Wende dieselbe Disziplin für Start und Cleanup auf SSE-Handles an.
 
 Unmount und erneuter Mount des Providers ändern den Client-Scope. Sie rufen weder `dispose` auf noch brechen sie Requests ab oder schließen Handles und Sessions, denn der Core-`Client` hat keine solche Lebenszyklus-API.
 

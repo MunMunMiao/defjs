@@ -48,6 +48,8 @@ const second = createHttpInterceptor(async (request, next) => {
 createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
+WebSocket 인터셉터는 `next`를 한 번만 호출할 수 있습니다. session 생성 후 chain이 실패하면 Core는 전달되지 않은 session을 종료한 뒤 원래 interceptor error를 반환합니다. chain이 다른 short-circuit session으로 성공하면 생성된 session을 닫습니다. wrapper는 원래 `closed` Promise를 위임해 연결을 유지합니다.
+
 ## 요청을 안전하게 복제하기
 
 들어온 요청은 체인이 소유하는 값으로 다루세요. header를 바꾸기 전에 새 `Headers` 객체를 만듭니다.
@@ -106,6 +108,9 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
+    get bufferedAmount() {
+      return session.bufferedAmount
+    },
     get connection() {
       return session.connection
     },
@@ -255,7 +260,7 @@ credential provider는 요청이 인터셉터를 통과할 때 실행됩니다. 
 
 ## Observer와 callback의 안전성
 
-SSE와 WebSocket 인터셉터는 반환된 핸들에 생명주기 observer를 붙일 수 있습니다. 소유 범위가 끝나면 WebSocket listener를 구독 해제하세요. listener와 predicate는 throw하지 않게 작성하세요. 현재 realtime 구현은 모든 listener 또는 reconnect predicate 실패를 격리하지 않습니다.
+SSE와 WebSocket 인터셉터는 반환된 핸들에 생명주기 observer를 붙일 수 있습니다. 소유 범위가 끝나면 WebSocket listener를 구독 해제하세요. WebSocket은 state listener 실패를 runtime-error observer에 알리고, 그 observer의 실패를 `reportError`로 전달하며, reconnect predicate throw를 최종 session error로 처리합니다.
 
 인터셉터는 throw하거나 reject할 수 있습니다. high-level 트랜스포트가 일부 실패를 `RequestError`로 정규화할 수 있지만, 인터셉터 코드는 모든 경우에 promise가 절대 reject하지 않는다고 가정하면 안 됩니다.
 

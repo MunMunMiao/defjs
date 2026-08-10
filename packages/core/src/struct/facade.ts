@@ -26,6 +26,7 @@ import {
   createUnknownStruct,
   createUrlencodedBodyStruct,
 } from './constructors'
+import { parseStructTuple } from './introspection'
 import type { Struct, StructLike, UnionStruct } from './types'
 
 type EnumValue<T> = T extends readonly (infer U extends string)[]
@@ -34,8 +35,8 @@ type EnumValue<T> = T extends readonly (infer U extends string)[]
     ? U
     : never
 
-function structEnum<const T extends readonly [string, ...string[]]>(value: T): Struct<EnumValue<T> | undefined, EnumValue<T>>
-function structEnum<const T extends { [key: string]: number | string }>(value: T): Struct<EnumValue<T> | undefined, EnumValue<T>>
+function structEnum<const T extends readonly [string, ...string[]]>(value: T): Struct<EnumValue<T>, EnumValue<T>>
+function structEnum<const T extends { [key: string]: number | string }>(value: T): Struct<EnumValue<T>, EnumValue<T>>
 function structEnum(value: { [key: string]: number | string } | readonly [string, ...string[]]) {
   if (Array.isArray(value)) {
     return createEnumStruct(value as readonly [string, ...string[]])
@@ -67,6 +68,7 @@ export const struct = {
   number: createNumberStruct,
   object: createObjectStruct,
   or: structOr,
+  parse: parseStructTuple,
   record: createRecordStruct,
   request: createRequestStruct,
   string: createStringStruct,

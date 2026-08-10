@@ -42,7 +42,7 @@ const getUser = defineRequest({
 })
 ```
 
-Placeholder 值插入时不会做 path-segment encoding。请限制 identifier 格式，或在创建 command 前对一个不可信 segment 调用 `encodeURIComponent`。未编码的 slash 或 dot segment 可能改变最终 path；插入 `?` 或 `#` 会让 endpoint-path 校验拒绝该请求。
+请直接传入原始 placeholder 值。Defjs 会先把 scalar 序列化为字符串，拒绝空值以及完整值 `.`、`..`，再在替换前精确调用一次 `encodeURIComponent`。`/`、`?`、`#`、`%`、空格和 Unicode 都会保留在单个 path segment 内。不要预编码；`%` 会按原始输入处理并编码为 `%25`。
 
 ## Request 编码
 
@@ -108,15 +108,15 @@ Runtime 按精确 status 选择 Struct。声明了 `output` 时，任何未匹�
 
 `response.ok` 只表示 `status >= 200 && status < 300`，不代表 output 解码、应用校验或 authorization 成功。
 
-声明 `output` 且省略 `responseType` 时，response 默认按 `json` 解析。显式 mode 包括 `json`、`text`、`blob` 和 `arraybuffer`。随后由选中的 Struct 做结构化解码。省略 `output` 时，结果 data 是 `undefined`，返回的 response wrapper 中 `body` 为 `null`。
+声明 `output` 且省略 `responseType` 时，response 默认按 `json` 解析。显式 mode 包括 `json`、`text`、`blob` 和 `arraybuffer`。随后由选中的 Struct 做结构化解码。省略 `output` 时不允许指定 `responseType`，结果 data 是 `undefined`，返回的 response wrapper 中 `body` 为 `null`。Runtime 不会读取或解码 response body，只会尽力取消它。
 
-### 当前 Malformed JSON 缺陷
+Command 结果按固定优先级分类：status 0 transport failure → 无 `output` → 精确 status 匹配或 `UNDECLARED_STATUS` → `response.error` → Struct 解码。因此，body representation error 只可能在声明了 `output` 时出现；如果 Fetch 记录了这类错误，未声明 status 分支仍然优先。
 
-::: danger Malformed JSON 可能表现为成功
-当前 Fetch boundary 会把 JSON parse failure 存入 `HttpResponse.error`，并让 body 保持 `null`。HTTP command execution 在应用 output Struct 前没有检查这个 parse error。由于非 nullable 的 `null` 可能解码为 Struct 零值，malformed 2xx JSON body 目前可能产生 `[null, zeroValue, response]`。
+### Representation Error
 
-不要把全零值 success 当成服务端确实返回了合法 JSON 的证据。这个问题需要源码修复和 regression test；文档只能给出警告。
-:::
+对于精确匹配的已声明 output，JSON 或其他 body codec 失败时，Fetch 会把原始异常保存在 `HttpResponse.error`。Command execution 会在应用 output Struct 前停止，并返回 `[RESPONSE_VALIDATION_FAILED, undefined, response]`；原始异常保留为 `cause`，且不会生成 typed `error.data`。
+
+普通非 2xx response 不会填充 `response.error`，其状态由 `status` 和 `ok` 表示。非 2xx status 与 body 已声明且 body 合法时，Struct 会正常解码，最终 `HTTP_STATUS` error 会把 typed body 保留在 `error.data`。
 
 ## HTTP 结果
 
@@ -124,7 +124,7 @@ Runtime 按精确 status 选择 Struct。声明了 `output` 时，任何未匹�
 const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
 ```
 
-成功时，`response` 是 Defjs `SettledResponse` wrapper，它的 body 与 `data` 一致。失败时是否有 response，取决于 execution 进行到哪一步。完整分类见 [Errors](/zh-Hans/core/errors)。
+成功时，`response` 是 Defjs `HttpResponse` wrapper，它的 body 与 `data` 一致。失败时是否有 response，取决于 execution 进行到哪一步。完整分类见 [Errors](/zh-Hans/core/errors)。
 
 ## 取消与 Timeout
 
@@ -140,6 +140,8 @@ const [error] = await client.execute(command, {
 ```
 
 `signal` 会与 client internal signal、正数 timeout 合并。独立的 `abort` 字段是当前 API 保留的另一种 cancellation signal。不能同时提供 `abort` 和 `timeout`；这样做会返回 `REQUEST_VALIDATION_FAILED`。`signal` 可以与其中任意一个组合。
+
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
 
 已识别的取消产生 `ABORTED`。`AbortSignal.timeout(...)` reason 或 execution timeout 产生 `TIMEOUT`。其他 Fetch failure 产生 `NETWORK_ERROR`。
 
@@ -205,4 +207,4 @@ Progress callback 在 transport read/write path 中运行。请确保它不抛�
 
 - [Interceptors](/zh-Hans/core/interceptors)：request cloning、short-circuit 和 retry。
 - [Errors](/zh-Hans/core/errors)：HTTP status、transport 和 definition failure。
-- [Struct](/zh-Hans/core/struct)：零值结构化解码。
+- [Struct](/zh-Hans/core/struct)：严格结构化解码。

@@ -74,12 +74,6 @@ export function withWebSocketHeartbeat(options: ClientWebSocketOptions['heartbea
   }
 }
 
-export function withWebSocketQueue(options: ClientWebSocketOptions['queue']): ClientOption {
-  return (config) => {
-    config.webSocket.queue = options
-  }
-}
-
 export function withWebSocketReconnect(options: ClientWebSocketOptions['reconnect']): ClientOption {
   return (config) => {
     config.webSocket.reconnect = options
@@ -99,12 +93,6 @@ export function withSSEOnInvalidEvent(handler: ClientSSEOptions['onInvalidEvent'
 export function withSSEReconnect(options: ClientSSEOptions['reconnect']): ClientOption {
   return (config) => {
     config.sse.reconnect = options
-  }
-}
-
-export function withSSEQueue(options: ClientSSEOptions['queue']): ClientOption {
-  return (config) => {
-    config.sse.queue = options
   }
 }
 

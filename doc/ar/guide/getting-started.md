@@ -15,7 +15,7 @@ description: ثبّت Defjs، وعرّف endpoint HTTP مضبوط النوع، �
 pnpm add @defjs/core
 ```
 
-استخدم أمر npm أو Yarn أو Bun المكافئ إذا كان مشروعك يستعمل مدير حزم آخر. حزمة `@defjs/core` بنمط ESM. وعند تشغيلها على Node.js، تتطلب metadata الحالية Node 26 أو أحدث.
+استخدم أمر npm أو Yarn أو Bun المكافئ إذا كان مشروعك يستعمل مدير حزم آخر. حزمة `@defjs/core` بنمط ESM. وعند تشغيلها على Node.js، تتطلب metadata الحالية Node 22 أو أحدث.
 
 أضف adapter فقط عندما يحتاجه تطبيقك:
 
@@ -70,7 +70,7 @@ void loadUser(7)
 ;[error, result, response]
 ```
 
-عند النجاح تكون `error` مساوية لـ `null`، وتكون `result` البيانات بعد فك ترميزها، وتكون `response` غلاف `SettledResponse` من Defjs. عند الفشل تكون `result` مساوية لـ `undefined`؛ ويكون غلاف الاستجابة أيضًا `undefined` إذا لم تصل أي استجابة.
+عند النجاح تكون `error` مساوية لـ `null`، وتكون `result` البيانات بعد فك ترميزها، وتكون `response` غلاف `HttpResponse` من Defjs. عند الفشل تكون `result` مساوية لـ `undefined`؛ ويكون غلاف الاستجابة أيضًا `undefined` إذا لم تصل أي استجابة.
 
 ### لماذا تهم `as const`؟
 

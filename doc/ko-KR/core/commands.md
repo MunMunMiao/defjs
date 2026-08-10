@@ -30,14 +30,14 @@ const result = await client.execute(command)
 
 `defineRequest(...)`는 다음 필드를 받습니다.
 
-| 필드           | 의미                                                                                   |
-| -------------- | -------------------------------------------------------------------------------------- |
-| `method`       | HTTP method 문자열입니다.                                                              |
-| `path`         | 선택적인 `:name` placeholder를 포함한 상대 endpoint path입니다.                        |
-| `input`        | 커맨드 입력을 구조적으로 디코딩하는 Struct입니다.                                      |
-| `build`        | 입력 필드에서 요청 부분으로 이어지는 스키마 결합 프로젝션입니다. `input`이 필요합니다. |
-| `output`       | 응답 디코딩과 결과 추론에 쓰는 상태 코드와 Struct의 매핑입니다.                        |
-| `responseType` | 선택적인 `json`, `text`, `blob`, `arraybuffer` 응답 모드입니다.                        |
+| 필드           | 의미                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `method`       | HTTP method 문자열입니다.                                                                                                |
+| `path`         | 선택적인 `:name` placeholder를 포함한 상대 endpoint path입니다.                                                          |
+| `input`        | 커맨드 입력을 구조적으로 디코딩하는 Struct입니다.                                                                        |
+| `build`        | 입력 필드에서 요청 부분으로 이어지는 스키마 결합 프로젝션입니다. `input`이 필요합니다.                                   |
+| `output`       | 응답 디코딩과 결과 추론에 쓰는 상태 코드와 Struct의 매핑입니다.                                                          |
+| `responseType` | `output`을 선언한 경우에만 선택할 수 있는 `json`, `text`, `blob`, `arraybuffer` 모드이며, 생략 시에는 허용되지 않습니다. |
 
 커맨드 필드가 wire section에 직접 대응하면 `struct.request(...)`를 사용하세요.
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-객체 Struct 입력은 타입 수준에서 partial입니다. 호출자에게는 모든 객체 property가 선택 사항이며 request section도 선택 사항입니다. 구조적 디코딩은 optional이 아닌 출력 필드를 제로 값으로 채우므로, 두 형태 모두 빌더 인자를 필수로 만들지 않습니다.
+`input`을 선언하면 필수 객체 필드와 선언한 모든 request section을 제공해야 합니다. optional 또는 nullish 필드만 생략할 수 있습니다. endpoint가 사용하지 않는 section은 선언하지 마세요.
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-빌더가 인자를 반드시 받아야 한다면 primitive 또는 배열 입력을 사용하세요. 다음 예제는 primitive를 path parameter로 프로젝션합니다.
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-이는 인자의 선택성에 관한 동작이지 비즈니스 검증이 아닙니다. 호출자는 여전히 Struct 입력 타입이 허용하는 값을 전달할 수 있고, 누락된 객체 필드는 제로 값을 받습니다.
+이는 구조의 존재 여부와 타입을 검증하는 것이며 애플리케이션 인가, 범위, 금액, 형식, 상태 전이 규칙을 검증하는 것은 아닙니다.
 
 ## 자동 요청 구성
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 HTTP 성공 타입은 선언된 2xx body의 union입니다. `error.data`는 선언된 2xx가 아닌 body의 union입니다. 배열 형식에서는 상태 코드 리터럴과 그룹화된 readonly 배열을 보존하려고 `as const`를 사용합니다.
 
-`output`을 선언하면 반환된 모든 status에 대응하는 Struct가 있어야 합니다. 일치하지 않는 2xx 또는 비-2xx status는 `UNDECLARED_STATUS`를 만듭니다. `output`이 없으면 응답 body는 무시되고 결과는 `undefined`입니다.
+`output`을 선언하면 반환된 모든 status에 대응하는 Struct가 있어야 합니다. 일치하지 않는 2xx 또는 비-2xx status는 `UNDECLARED_STATUS`를 만듭니다. `output`이 없으면 응답 body를 읽거나 디코딩하지 않고 best-effort로 취소하며, 결과는 `undefined`입니다.
 
 ## SSE 및 WebSocket 정의
 
@@ -224,6 +209,8 @@ HTTP 성공 타입은 선언된 2xx body의 union입니다. `error.data`는 선�
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ const chat = defineWebSocket({
 
 - [클라이언트](/ko-KR/core/client)에서는 실행 오버로드와 옵션 조합을 설명합니다.
 - [HTTP](/ko-KR/core/http)에서는 URL, 인코딩, 응답, 취소 동작을 설명합니다.
-- [Struct](/ko-KR/core/struct)에서는 구조적 디코딩과 제로 값을 설명합니다.
+- [Struct](/ko-KR/core/struct)에서는 엄격한 구조 디코딩을 설명합니다.

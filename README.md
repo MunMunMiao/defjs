@@ -24,7 +24,7 @@ Defjs is a TypeScript library for defining typed HTTP, SSE, and WebSocket APIs a
 - Streaming support.
 - Interceptor support.
 - Works in browser and server applications that provide the required platform transports.
-- The current package metadata requires Node.js 26 or newer when running in Node.
+- The published packages require Node.js 22 or newer when running in Node.
 - ESM. `@defjs/core` declares no runtime dependencies.
 
 ## Quick Start

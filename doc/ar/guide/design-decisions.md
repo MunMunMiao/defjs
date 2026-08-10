@@ -31,9 +31,9 @@ const [socketError, session, startupConnection] = await client.execute(socketCom
 
 ## خيارات دورة الحياة تخص التنفيذ
 
-تصف تعريفات نقاط النهاية عقود wire المستقرة. أما الإلغاء وtimeout وheartbeat وreconnect وخيارات queue فتخص التنفيذ الذي يملك العمل.
+تصف تعريفات نقاط النهاية عقود wire المستقرة، وتملك حدود transport queue المقيدة. أما الإلغاء وtimeout وheartbeat وreconnect فتخص التنفيذ الذي يملك العمل.
 
-تقبل HTTP وSSE خيارات الإلغاء وقت التنفيذ. وتقبل WebSocket أيضًا خيارات `beforeConnect` وheartbeat وreconnect وprotocol وsend queue لكل تنفيذ. توفّر خيارات العميل قيمًا افتراضية قابلة لإعادة الاستخدام حيث تدعمها وسيلة النقل.
+تقبل HTTP وSSE خيارات الإلغاء وقت التنفيذ. وتقبل WebSocket أيضًا خيارات `beforeConnect` وheartbeat وreconnect وprotocol لكل تنفيذ. توفّر خيارات العميل قيمًا افتراضية قابلة لإعادة الاستخدام حيث تدعمها وسيلة النقل، بينما تبقى سعات incoming وoutgoing في WebSocket مملوكة لتعريف endpoint.
 
 يجعل هذا الفصل الأمر قابلًا لإعادة الاستخدام. يستطيع job في الخلفية وشاشة تفاعلية تنفيذ الأمر نفسه بأعمار مختلفة، من دون إعادة تعريف path أو message schema.
 
@@ -47,9 +47,9 @@ const [socketError, session, startupConnection] = await client.execute(socketCom
 
 ## المراقبون لا يملكون control flow
 
-يراقب `onInvalidEvent` في SSE الأحداث التي أُسقطت. يُلتقط ناتج المراقب إذا رمى أو أعاد Promise مرفوضًا كي لا ينهي stream، مع أن المراقب async يُنتظر وقد يؤخر معالجة الرسائل اللاحقة.
+يراقب `onInvalidEvent` في SSE الأحداث التي أُسقطت. تُعزل الأخطاء المطروحة وPromises المرفوضة عن control flow للـ stream، لذلك تستمر المعالجة؛ لكن المراقب async يُنتظر وقد يؤخر الرسائل اللاحقة.
 
-مستمعو الحالة وأخطاء وقت التشغيل في WebSocket مراقبون أيضًا، لكن التنفيذ الحالي يستدعيهم مباشرة. اجعلهم متزامنين وصغارًا ولا تسمح لهم بالرمي. قد يعطل listener يرمي خطأ أعمال دورة الحياة، وليس آلية control flow مدعومة.
+مستمعو الحالة وأخطاء وقت التشغيل في WebSocket مراقبون أيضًا. تُعزل الأخطاء المطروحة وPromises المرفوضة: تُمرّر أخطاء state listener إلى runtime-error listeners، وتُرسل أخطاء runtime-error listener إلى `reportError` العام عند توفره، وتستمر بقية listeners وأعمال lifecycle.
 
 استخدم المقبض أو الجلسة المعادة لاتخاذ قرارات دورة الحياة. واستخدم المراقبين لتسجيل محدود أو metrics أو تحديث حالة، وأزلهم عندما ينتهي مالكهم.
 

@@ -152,16 +152,7 @@ export async function deleteUser(id: number, signal: AbortSignal): Promise<void>
 
 ```typescript
 // consume-notifications.ts
-import {
-  createClient,
-  defineEventStream,
-  struct,
-  type Infer,
-  withEndpoint,
-  withSSEOnInvalidEvent,
-  withSSEQueue,
-  withSSEReconnect,
-} from '@defjs/core'
+import { createClient, defineEventStream, struct, type Infer, withEndpoint, withSSEOnInvalidEvent, withSSEReconnect } from '@defjs/core'
 
 const notificationStruct = struct.object({
   id: struct.number(),
@@ -175,6 +166,8 @@ interface NotificationHandlers {
 }
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(notificationStruct),
@@ -185,7 +178,6 @@ export async function consumeNotifications(signal: AbortSignal, handlers: Notifi
   const client = createClient(
     withEndpoint('https://api.example.com'),
     withSSEReconnect({ attempts: 5, delayMs: 1_000, maxDelayMs: 10_000 }),
-    withSSEQueue({ maxSize: 100, overflow: 'drop-oldest' }),
     withSSEOnInvalidEvent(({ reason, message }) => {
       handlers.onInvalid({ eventName: message.event, reason })
     }),
@@ -215,19 +207,11 @@ export async function consumeNotifications(signal: AbortSignal, handlers: Notifi
 
 ## WebSocket ルームコンシューマー
 
-再接続を明示的に設定しています。この関数は論理セッションの存続中、上限のない受信キューを消費し続け、送信キューには上限を設け、すべての終了経路でクローズします。
+再接続を明示的に設定しています。endpoint が受信・送信容量を制限し、1 つの iterator が論理セッションを消費し、すべての終了経路でセッションを閉じます。
 
 ```typescript
 // consume-room.ts
-import {
-  createClient,
-  defineWebSocket,
-  struct,
-  withEndpoint,
-  withWebSocketHeartbeat,
-  withWebSocketQueue,
-  withWebSocketReconnect,
-} from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketHeartbeat, withWebSocketReconnect } from '@defjs/core'
 
 interface RoomHandlers {
   onMessage(message: { text: string; userId: number }): void
@@ -235,6 +219,8 @@ interface RoomHandlers {
 }
 
 const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   path: '/rooms/:roomId',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -262,11 +248,9 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
       message: () => ({ type: 'ping' }),
       isAck: (message) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'pong',
     }),
-    withWebSocketQueue({ maxSize: 20, overflow: 'drop-oldest' }),
   )
 
-  const encodedRoomId = encodeURIComponent(roomId)
-  const [error, session] = await client.execute(room({ path: { roomId: encodedRoomId } }), { signal })
+  const [error, session] = await client.execute(room({ path: { roomId } }), { signal })
 
   if (error) {
     throw error
@@ -292,7 +276,7 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
 }
 ```
 
-エンドポイントパスはプレースホルダーをエンコードしないため、この例ではコマンド作成前に 1 セグメントをエンコードしています。結果の URL やペイロードはログへ出しません。
+プレースホルダー値は未加工のまま渡します。Core はパスへ代入するときに各値を正確に 1 回エンコードします。`%` が再度エンコードされるため、事前にエンコードしないでください。この例は結果の URL やペイロードをログへ出しません。
 
 ## 認証と操作メトリクス
 

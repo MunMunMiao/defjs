@@ -4,6 +4,8 @@ import { createTelemetryFixture } from './telemetry'
 
 // Step 1: Admit typed shipment progress and keepalive events from the logical SSE stream.
 export const shipmentUpdates = defineEventStream({
+  maxBufferSize: 1024,
+  maxQueueSize: 8,
   path: '/v1/shipments/ship-204/updates',
   events: {
     heartbeat: struct.string(),

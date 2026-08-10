@@ -34,7 +34,7 @@ const client = createClient(
 
 1. تستبدل دوال setter قيمتها. يشمل ذلك `withEndpoint` وtransport handles وquery serializer وcredentials وإعداد XSRF وإعدادات SSE أو WebSocket المفردة.
 2. تُلحق `withInterceptors(...items)` العناصر. وتحافظ الاستدعاءات المتعددة على ترتيب إضافة المعترضات.
-3. تستبدل `withSSEOptions(...)` و`withWebSocketOptions(...)` سطحيًا كل حقل علوي معرّف. ولا تدمجان كائنات reconnect أو heartbeat أو queue المتداخلة بعمق.
+3. تستبدل `withSSEOptions(...)` و`withWebSocketOptions(...)` سطحيًا كل حقل علوي معرّف. ولا تدمجان كائنات reconnect أو heartbeat المتداخلة بعمق.
 
 في المثال التالي، يستبدل كائن reconnect الثاني الأول. ولا يحتفظ بـ `attempts: 5`.
 
@@ -72,6 +72,8 @@ const client = createClient(
 
 لدى `Client.execute` ثلاثة overloads. يعيد كل واحد منها tuple يبدأ بالخطأ ويتكون من ثلاثة عناصر.
 
+يجب أن تكون قيمة `timeout` لتنفيذ HTTP وSSE وWebSocket عددًا صحيحًا موجبًا وآمنًا ضمن `1..2_147_483_647`؛ وتؤدي القيم `0` أو السالبة أو الكسرية أو `NaN` أو `Infinity` أو التي تتجاوز الحد إلى `REQUEST_VALIDATION_FAILED` قبل إنشاء أي مورد request أو stream أو socket.
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-العنصر الثالث هو غلاف `SettledResponse` من Defjs عندما تتوفر استجابة. تشمل خيارات HTTP `abort` أو `timeout`، والاسم الإضافي `signal`، و`context`، ومراقبي تقدم الرفع والتنزيل.
+العنصر الثالث هو غلاف `HttpResponse` من Defjs عندما تتوفر استجابة. تشمل خيارات HTTP `abort` أو `timeout`، والاسم الإضافي `signal`، و`context`، ومراقبي تقدم الرفع والتنزيل.
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-العنصر الثالث هو لقطة فتح تم التحقق منها عند البدء. أما `stream.open` فهو getter حي منفصل يمكن أن يتغير بعد محاولات reconnect. يقبل تنفيذ SSE الإلغاء و`HttpContext`؛ ويأتي إعداد reconnect وevent queue من خيارات العميل.
+العنصر الثالث هو لقطة فتح تم التحقق منها عند البدء. أما `stream.open` فهو getter حي منفصل يمكن أن يتغير بعد محاولات reconnect. يقبل تنفيذ SSE الإلغاء و`HttpContext`، بينما يأتي إعداد reconnect من خيارات العميل. وينتمي الحدان الإلزاميان `maxBufferSize` و`maxQueueSize` إلى تعريف كل event stream.
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-العنصر الثالث هو لقطة اتصال البدء. أما `session.connection` فهو getter حي وقد يصف محاولة اتصال فعلية لاحقة. يقبل تنفيذ WebSocket الإلغاء، إلى جانب `beforeConnect` وheartbeat وprotocols وqueue وreconnect لكل تنفيذ. ولا يقبل `HttpContext`.
+العنصر الثالث هو لقطة اتصال البدء. أما `session.connection` فهو getter حي وقد يصف محاولة اتصال فعلية لاحقة. يقبل تنفيذ WebSocket الإلغاء، إلى جانب `beforeConnect` وheartbeat وprotocols وreconnect لكل تنفيذ. وينتمي الحد الإلزامي `maxIncomingQueueSize` والحد الاختياري `maxOutgoingQueueSize` إلى تعريف كل WebSocket. ولا يقبل التنفيذ `HttpContext`.
 
 راجع [الأخطاء](/ar/core/errors) لمعرفة فروع الفشل الدقيقة، وصفحات [HTTP](/ar/core/http) و[SSE](/ar/core/sse) و[WebSocket](/ar/core/web-socket) لتفاصيل دورة حياة كل وسيلة نقل.
 

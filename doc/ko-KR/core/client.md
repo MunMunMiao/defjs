@@ -34,7 +34,7 @@ const client = createClient(
 
 1. setter helper는 해당 값을 교체합니다. `withEndpoint`, 트랜스포트 handle, query serializer, credentials, XSRF 설정, 개별 SSE·WebSocket 설정이 여기에 포함됩니다.
 2. `withInterceptors(...items)`는 뒤에 추가합니다. 여러 번 호출해도 인터셉터를 추가한 순서를 유지합니다.
-3. `withSSEOptions(...)`와 `withWebSocketOptions(...)`는 정의된 각 최상위 필드를 얕게 교체합니다. 중첩된 reconnect, heartbeat, queue 객체를 깊게 병합하지 않습니다.
+3. `withSSEOptions(...)`와 `withWebSocketOptions(...)`는 정의된 각 최상위 필드를 얕게 교체합니다. 중첩된 reconnect 또는 heartbeat 객체를 깊게 병합하지 않습니다.
 
 예를 들어 아래 두 번째 reconnect 객체는 첫 번째 객체를 통째로 교체합니다. `attempts: 5`는 유지되지 않습니다.
 
@@ -72,6 +72,8 @@ const client = createClient(
 
 `Client.execute`에는 세 가지 오버로드가 있습니다. 모두 오류 우선 3요소 튜플을 반환합니다.
 
+HTTP, SSE, WebSocket 실행의 `timeout`은 `1..2_147_483_647` 범위의 양의 안전 정수여야 하며, `0`, 음수, 소수, `NaN`, `Infinity`, 상한을 넘는 값은 request, stream, socket 리소스를 만들기 전에 `REQUEST_VALIDATION_FAILED`를 반환합니다.
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-응답이 있으면 세 번째 요소는 Defjs `SettledResponse` 래퍼입니다. HTTP 옵션에는 `abort` 또는 `timeout`, 추가 별칭인 `signal`, `context`, upload/download progress observer가 있습니다.
+응답이 있으면 세 번째 요소는 Defjs `HttpResponse` 래퍼입니다. HTTP 옵션에는 `abort` 또는 `timeout`, 추가 별칭인 `signal`, `context`, upload/download progress observer가 있습니다.
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-세 번째 요소는 검증을 통과한 시작 시점 open 스냅샷입니다. `stream.open`은 재연결 시도 이후 바뀔 수 있는 별도의 라이브 getter입니다. SSE 실행은 취소와 `HttpContext`를 받고, 재연결 및 이벤트 큐는 클라이언트 옵션으로 설정합니다.
+세 번째 요소는 검증을 통과한 시작 시점 open 스냅샷입니다. `stream.open`은 재연결 시도 이후 바뀔 수 있는 별도의 라이브 getter입니다. SSE 실행은 취소와 `HttpContext`를 받고, 재연결은 클라이언트 옵션으로 설정합니다. 필수 제한인 `maxBufferSize`와 `maxQueueSize`는 각 event stream 정의에 속합니다.
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-세 번째 요소는 시작 시점 connection 스냅샷입니다. `session.connection`은 이후 물리 연결 시도를 나타낼 수 있는 라이브 getter입니다. WebSocket 실행은 취소와 연결별 `beforeConnect`, `heartbeat`, `protocols`, `queue`, `reconnect`를 받습니다. `HttpContext`는 받지 않습니다.
+세 번째 요소는 시작 시점 connection 스냅샷입니다. `session.connection`은 이후 물리 연결 시도를 나타낼 수 있는 라이브 getter입니다. WebSocket 실행은 취소와 연결별 `beforeConnect`, `heartbeat`, `protocols`, `reconnect`를 받습니다. 필수 `maxIncomingQueueSize`와 선택적 `maxOutgoingQueueSize` 제한은 각 WebSocket 정의에 속합니다. WebSocket 실행은 `HttpContext`를 받지 않습니다.
 
 정확한 실패 분기는 [오류](/ko-KR/core/errors)를, 트랜스포트별 생명주기는 [HTTP](/ko-KR/core/http), [SSE](/ko-KR/core/sse), [WebSocket](/ko-KR/core/web-socket)을 참고하세요.
 

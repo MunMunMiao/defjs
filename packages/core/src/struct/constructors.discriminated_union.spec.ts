@@ -49,6 +49,28 @@ describe('constructors.ts discriminatedUnion', () => {
     expect(issue?.message).toContain('"unknown"')
   })
 
+  test('reports missing_key when the discriminator is absent', () => {
+    const [err, value] = parse(event, { x: 10, y: 20 })
+
+    expect(err).toBeInstanceOf(StructError)
+    expect(err?.issues).toHaveLength(1)
+    expect(err?.issues[0]?.code).toBe('missing_key')
+    expect(err?.issues[0]?.path).toEqual(['type'])
+    expect(value).toBeUndefined()
+  })
+
+  test('does not read an inherited discriminator value', () => {
+    const ConstructorEvent = struct.discriminatedUnion('constructor', [
+      struct.object({ constructor: struct.literal('event'), value: struct.string() }),
+    ])
+    const [err, value] = parse(ConstructorEvent, {})
+
+    expect(err).toBeInstanceOf(StructError)
+    expect(err?.issues[0]?.code).toBe('missing_key')
+    expect(err?.issues[0]?.path).toEqual(['constructor'])
+    expect(value).toBeUndefined()
+  })
+
   test('forwards selected branch issues with full path', () => {
     const [err] = parse(event, { type: 'click', x: 'no', y: 20 })
     expect(err).toBeInstanceOf(StructError)
@@ -84,6 +106,19 @@ describe('constructors.ts discriminatedUnion', () => {
     expect(() => struct.discriminatedUnion('type', [struct.object({ type: struct.string() }) as never])).toThrowError(
       'must be a literal struct',
     )
+  })
+
+  test.each([struct.literal('a').optional(), struct.literal('a').null(), struct.literal('a').nullish()])(
+    'rejects discriminator field modifiers',
+    (type) => {
+      expect(() => struct.discriminatedUnion('type', [struct.object({ type })] as never)).toThrowError('must be a required literal struct')
+    },
+  )
+
+  test('accepts an exact null discriminator declaration', () => {
+    const NullEvent = struct.discriminatedUnion('type', [struct.object({ payload: struct.string(), type: struct.literal(null).null() })])
+
+    expect(parse(NullEvent, { payload: 'hello', type: null })).toEqual([null, { payload: 'hello', type: null }])
   })
 
   test('internal parse routes via discriminator as well', () => {

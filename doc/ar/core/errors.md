@@ -13,7 +13,7 @@ const [sseError, stream, startupOpen] = await client.execute(sseCommand)
 const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-- تعيد HTTP بيانات مفكوكة الترميز وغلاف `SettledResponse` من Defjs.
+- تعيد HTTP بيانات مفكوكة الترميز وغلاف `HttpResponse` من Defjs.
 - يعيد SSE مقبض stream منطقيًا ولقطة فتح عند البدء.
 - تعيد WebSocket جلسة منطقية ولقطة اتصال عند البدء.
 
@@ -44,7 +44,7 @@ interface HttpStatusError<TErrorData = unknown> {
   status: number
   message: string
   data: TErrorData
-  response: SettledResponseLike<unknown>
+  response: HttpResponse<unknown>
 }
 ```
 
@@ -75,7 +75,7 @@ interface DefinitionError {
   code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'UNDECLARED_STATUS'
   message: string
   cause?: unknown
-  response?: SettledResponseLike<unknown>
+  response?: HttpResponse<unknown>
 }
 ```
 
@@ -133,7 +133,9 @@ if (!error) {
 
 ## توفر الاستجابة
 
-`SettledResponseLike` و`SettledResponse` أغلفة من Defjs، وليسا كائنات `Response` أصلية. يعرضان status وstatus text وheaders وURL وbody ومعلومات خطأ اختيارية، ويعرض الغلاف settled علامة `ok`. تعني `ok` فقط أن status يقع ضمن نطاق 2xx.
+`HttpResponse` غلاف من Defjs وليس كائن `Response` أصليًا. يعرض status وstatus text وheaders وURL وbody و`error` و`ok`. تعني `ok` فقط أن status ضمن نطاق 2xx، أما `error` فمخصص لفشل transport أو تمثيل body؛ وتتركه استجابة non-2xx العادية فارغًا.
+
+يُفك body صالح ومعلن من نوع non-2xx عبر Struct ويُحفظ typed في `HttpStatusError.data`. أما representation غير الصالح فينتج `RESPONSE_VALIDATION_FAILED` مع استثناء codec الأصلي في `cause` وresponse إذا وصلت، ومن دون `data`.
 
 بالنسبة إلى HTTP:
 

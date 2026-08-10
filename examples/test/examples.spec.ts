@@ -34,11 +34,18 @@ async function readExampleCases(): Promise<ExampleCase[]> {
     .map((entry) => entry.name)
     .sort()
 
+  const packages: Array<{ directory: string; manifest: ExampleManifest }> = []
+  for (const directory of directories) {
+    const manifest = JSON.parse(await readFile(resolve(examplesRoot, directory, 'package.json'), 'utf8')) as ExampleManifest
+    if (typeof manifest.name === 'string' && manifest.name.startsWith('@defjs/example-')) {
+      packages.push({ directory, manifest })
+    }
+  }
+
   return Promise.all(
-    directories.map(async (directory) => {
+    packages.map(async ({ directory, manifest }) => {
       const exampleRoot = resolve(examplesRoot, directory)
-      const [manifestSource, readme, source] = await Promise.all([
-        readFile(resolve(exampleRoot, 'package.json'), 'utf8'),
+      const [readme, source] = await Promise.all([
         readFile(resolve(exampleRoot, 'README.md'), 'utf8'),
         readFile(resolve(exampleRoot, 'src/index.ts'), 'utf8'),
       ])
@@ -54,7 +61,7 @@ async function readExampleCases(): Promise<ExampleCase[]> {
       return {
         directory,
         expected: JSON.parse(expectedResult) as unknown,
-        manifest: JSON.parse(manifestSource) as ExampleManifest,
+        manifest,
         readme,
         source,
       }

@@ -41,8 +41,8 @@ function isResponseValidationError(
 }
 
 export async function main(): Promise<void> {
-  // Step 4: Return a malformed aisle type from an otherwise successful response.
-  const fixtureFetch: typeof fetch = async () => Response.json({ sku: 'sku-2048', available: true, location: { aisle: 7 } })
+  // Step 4: Omit the required aisle from an otherwise successful response.
+  const fixtureFetch: typeof fetch = async () => Response.json({ sku: 'sku-2048', available: true, location: {} })
 
   // Step 5: Load the snapshot through the declared response Struct.
   const client = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(fixtureFetch))

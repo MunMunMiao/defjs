@@ -10,7 +10,7 @@ One business operation should share the owner's abort signal, consume updates, a
 
 A local support socket emits one typed `case-status` update for `case-842` and otherwise remains open. The business callback records the assignment and aborts its owner.
 
-That cancellation closes the fixture socket, ends iteration, and lets `consumeCaseStatus` finish its `finally` cleanup before returning the terminal `aborted` state.
+That cancellation closes the fixture socket and rejects the receive iterator with the owner's abort reason. The owner operation recognizes that expected cancellation, finishes its `finally` cleanup, and returns the terminal `aborted` state.
 
 ## Approach
 
@@ -43,6 +43,7 @@ The callback receives one validated update while its owner is active, and the ow
 
 - The operation owner controls the abort signal passed to Defjs.
 - The receive iterator and business callback remain inside the same cleanup scope.
+- Abort rejects active receive work; the owner boundary handles only its own expected abort reason.
 - Calling `close` is idempotent; awaiting `closed` defines completion.
 
 ## Production notes

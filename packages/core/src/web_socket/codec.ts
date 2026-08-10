@@ -1,9 +1,8 @@
-import type { TransportError } from '../error'
-import { createTransportError, ERR_ABORTED, ERR_TIMEOUT } from '../error'
+import { resolveAbortTransportError } from '../internal/abort'
 import type { AnyStruct } from '../struct'
 import { decodeJson, encodeJson } from '../struct/codec/json'
 import { parseStructValue } from '../struct/introspection'
-import type { ManualSocketCloseReason, SocketStructs, WebSocketCloseInfo, WebSocketIncomingData, WebSocketOutgoingData } from './web_socket'
+import type { ManualSocketCloseReason, SocketStructs, WebSocketIncomingData, WebSocketOutgoingData } from './web_socket'
 
 // ---- outgoing serialization ----
 
@@ -79,11 +78,7 @@ async function decodeWebSocketData(raw: unknown): Promise<unknown> {
 }
 
 function decodeWebSocketText(text: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
+  return JSON.parse(text)
 }
 
 function normalizeSocketPayload(type: string, payload: unknown): { [key: string]: unknown } {
@@ -111,7 +106,14 @@ export function isRecord(value: unknown): value is { [key: string]: unknown } {
 
 // ---- close-info helpers ----
 
-export function extractCloseInfo(event?: CloseEvent, cause?: unknown): WebSocketCloseInfo & { cause?: unknown } {
+export interface WebSocketCloseSnapshot {
+  cause?: unknown
+  code?: number
+  reason?: string
+  wasClean?: boolean
+}
+
+export function extractCloseInfo(event?: CloseEvent, cause?: unknown): WebSocketCloseSnapshot {
   return {
     cause,
     code: event?.code,
@@ -124,27 +126,4 @@ export function isManualSocketCloseReason(value: unknown): value is ManualSocket
   return typeof value === 'object' && value !== null && 'kind' in value && value.kind === 'manual-web-socket-close'
 }
 
-export function resolveAbortTransportError(signal: AbortSignal): TransportError | undefined {
-  if (!signal.aborted) {
-    return undefined
-  }
-
-  const reason = signal.reason
-  if (isManualSocketCloseReason(reason)) {
-    return createTransportError(ERR_ABORTED)
-  }
-
-  if (isTimeoutReason(reason)) {
-    return createTransportError(ERR_TIMEOUT)
-  }
-
-  return createTransportError(reason ?? ERR_ABORTED)
-}
-
-function isTimeoutReason(value: unknown): boolean {
-  return (
-    value === ERR_TIMEOUT ||
-    (value instanceof Error && value.message === ERR_TIMEOUT.message) ||
-    (value instanceof DOMException && value.name === 'TimeoutError')
-  )
-}
+export { resolveAbortTransportError }

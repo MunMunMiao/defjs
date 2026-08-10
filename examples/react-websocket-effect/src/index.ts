@@ -11,6 +11,7 @@ const shipmentStatusMessages = {
 export type ShipmentStatus = WebSocketIncomingData<typeof shipmentStatusMessages>
 type ShipmentSession = WebSocketSession<ShipmentStatus>
 export const shipmentStatusSocket = defineWebSocket({
+  maxIncomingQueueSize: 16,
   path: '/v1/shipments/ship-204/status',
   incoming: shipmentStatusMessages,
 })

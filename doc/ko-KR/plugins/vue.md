@@ -195,7 +195,7 @@ realtime 작업을 시작한 컴포넌트, composable, route 또는 store는 다
 - 활성 리소스에 `stream.close(...)` 또는 `session.close(...)`를 호출합니다.
 - WebSocket observer를 구독 해제합니다.
 
-무제한 incoming queue를 읽지 않은 채 state listener만 붙이려고 WebSocket을 열지 마세요. 전체 생명주기 규칙은 [SSE](/ko-KR/core/sse)와 [WebSocket](/ko-KR/core/web-socket)을 참고하세요.
+유한 incoming queue를 읽지 않은 채 state listener만 붙이려고 WebSocket을 열지 마세요. overflow는 세션을 fatal 종료합니다. 전체 생명주기 규칙은 [SSE](/ko-KR/core/sse)와 [WebSocket](/ko-KR/core/web-socket)을 참고하세요.
 
 ## API
 

@@ -30,14 +30,14 @@ const result = await client.execute(command)
 
 `defineRequest(...)` は次のフィールドを受け取ります。
 
-| フィールド     | 意味                                                                                             |
-| -------------- | ------------------------------------------------------------------------------------------------ |
-| `method`       | HTTP メソッド文字列。                                                                            |
-| `path`         | 任意の `:name` プレースホルダーを含む相対エンドポイントパス。                                    |
-| `input`        | コマンド入力の構造デコードに使う Struct。                                                        |
-| `build`        | 入力フィールドからリクエスト各部への、スキーマに束縛されたプロジェクション。`input` が必要です。 |
-| `output`       | レスポンスデコードと結果の型推論に使う、ステータスから Struct へのマッピング。                   |
-| `responseType` | 任意のレスポンス形式。`json`、`text`、`blob`、`arraybuffer`。                                    |
+| フィールド     | 意味                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------- |
+| `method`       | HTTP メソッド文字列。                                                                                |
+| `path`         | 任意の `:name` プレースホルダーを含む相対エンドポイントパス。                                        |
+| `input`        | コマンド入力の構造デコードに使う Struct。                                                            |
+| `build`        | 入力フィールドからリクエスト各部への、スキーマに束縛されたプロジェクション。`input` が必要です。     |
+| `output`       | レスポンスデコードと結果の型推論に使う、ステータスから Struct へのマッピング。                       |
+| `responseType` | `output` 宣言時のみ指定できる任意の形式。`json`、`text`、`blob`、`arraybuffer`。未宣言時は禁止です。 |
 
 コマンドフィールドを通信上のセクションへ直接割り当てる場合は、`struct.request(...)` を使います。
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-オブジェクト Struct の入力は型レベルで部分指定を許し、呼び出し側から見ると各プロパティはすべて任意です。リクエストセクションも任意です。構造デコードは optional でない出力フィールドをゼロ値で埋めるため、どちらの形でもビルダーの引数は必須になりません。
+`input` を宣言した場合、必須オブジェクトフィールドと宣言済みの各リクエストセクションを渡す必要があります。省略できるのは optional または nullish のフィールドだけです。エンドポイントが使わないセクションは宣言しません。
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-ビルダーに必ず引数を渡させたい場合は、プリミティブまたは配列の入力を使います。次の例はプリミティブ入力をパスパラメーターへプロジェクションします。
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-これは引数を省略できるかどうかの規則であり、ビジネスルールの検証ではありません。呼び出し側は Struct の入力タイプが受け付ける値を渡せます。オブジェクトフィールドが欠けていればゼロ値になります。
+これは構造上の存在と型を検証するものであり、アプリケーションの認可、範囲、金額、形式、状態遷移を検証するものではありません。
 
 ## リクエストの自動構築
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 HTTP の成功型は、宣言済み 2xx ボディのユニオンです。`error.data` は宣言済みの 2xx 以外のボディをまとめたユニオンです。配列形式では、ステータスリテラルとグループ化した `readonly` 配列を保持するために `as const` が必要です。
 
-`output` を宣言した場合、返されるすべてのステータスに対応する Struct が必要です。未対応の 2xx または 2xx 以外のステータスは `UNDECLARED_STATUS` になります。`output` を省略するとレスポンスボディは無視され、結果は `undefined` です。
+`output` を宣言した場合、返されるすべてのステータスに対応する Struct が必要です。未対応の 2xx または 2xx 以外のステータスは `UNDECLARED_STATUS` になります。`output` を省略するとレスポンスボディは読み取りもデコードもされず、ベストエフォートでキャンセルされ、結果は `undefined` です。
 
 ## SSE と WebSocket の定義
 
@@ -224,6 +209,8 @@ HTTP の成功型は、宣言済み 2xx ボディのユニオンです。`error.
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ const chat = defineWebSocket({
 
 - [Client](/ja-JP/core/client) — `execute` のオーバーロードとオプション合成
 - [HTTP](/ja-JP/core/http) — URL、エンコーディング、レスポンス、キャンセル
-- [Struct](/ja-JP/core/struct) — 構造デコードとゼロ値
+- [Struct](/ja-JP/core/struct) — 厳密な構造デコード

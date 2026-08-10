@@ -11,6 +11,7 @@ const reviewDecisionMessages = {
 export type ReviewDecision = WebSocketIncomingData<typeof reviewDecisionMessages>
 type ReviewSession = WebSocketSession<ReviewDecision>
 export const reviewDecisionSocket = defineWebSocket({
+  maxIncomingQueueSize: 16,
   path: '/v1/fraud/reviews/review-73/decisions',
   incoming: reviewDecisionMessages,
 })

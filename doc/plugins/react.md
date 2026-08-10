@@ -249,7 +249,7 @@ export function LiveNotifications() {
 }
 ```
 
-This fragment assumes `recordRealtimeFailure` is an application telemetry function. It intentionally consumes `session.receive`; leaving that unbounded incoming queue unread is not a valid ownership pattern. Apply the same startup and cleanup discipline to SSE handles.
+This fragment assumes `recordRealtimeFailure` is an application telemetry function. It intentionally consumes `session.receive`; leaving the finite incoming queue unread eventually makes overflow fatal to the session. Apply the same startup and cleanup discipline to SSE handles.
 
 Provider unmount/remount changes client scope. It does not call `dispose`, abort requests, or close handles and sessions because core `Client` has no such lifecycle API.
 

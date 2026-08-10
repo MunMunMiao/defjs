@@ -2,6 +2,7 @@ import type { FnReturn } from '../internal/utility_types'
 import type { HttpRequest } from '../internal/http_request'
 import type { HttpResponse } from '../internal/http_response'
 import type { EventStreamHandle } from '../sse/transport/event_stream'
+import type { WebSocketCloseInfo, WebSocketState } from '../web_socket/web_socket'
 import type {
   HttpInterceptorNext,
   InterceptorFn,
@@ -80,6 +81,13 @@ type WebSocketChainNextCase = Expect<StrictEqual<SecondParameter<FnReturn<typeof
 type HttpChainResultCase = Expect<StrictEqual<FnReturn<FnReturn<typeof makeInterceptorChain>>, Promise<HttpResponse<unknown>>>>
 type SSEChainResultCase = Expect<StrictEqual<FnReturn<FnReturn<typeof makeSSEInterceptorChain>>, Promise<EventStreamHandle<unknown>>>>
 type WebSocketChainResultCase = Expect<StrictEqual<FnReturn<FnReturn<typeof makeWebSocketInterceptorChain>>, Promise<WebSocketSessionLike>>>
+type WebSocketBufferedAmountCase = Expect<StrictEqual<WebSocketSessionLike['bufferedAmount'], number>>
+type WebSocketConnectionCase = Expect<
+  StrictEqual<WebSocketSessionLike['connection'], { extensions?: string; generation: number; protocol?: string; url?: string }>
+>
+type WebSocketClosedCase = Expect<StrictEqual<WebSocketSessionLike['closed'], Promise<WebSocketCloseInfo>>>
+type WebSocketStateCase = Expect<StrictEqual<WebSocketSessionLike['state'], WebSocketState>>
+type WebSocketStateListenerCase = Expect<StrictEqual<Parameters<WebSocketSessionLike['onStateChange']>[0], (state: WebSocketState) => void>>
 
 basicAuthHttpInterceptor(
   () => ({
@@ -122,3 +130,8 @@ export type Cases =
   | WebSocketChainNextCase
   | WebSocketChainParametersCase
   | WebSocketChainResultCase
+  | WebSocketBufferedAmountCase
+  | WebSocketClosedCase
+  | WebSocketConnectionCase
+  | WebSocketStateCase
+  | WebSocketStateListenerCase

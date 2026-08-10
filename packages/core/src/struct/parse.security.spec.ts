@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { decodeJson, encodeJson } from './codec/json'
-import { struct } from './index'
+import { StructError, struct } from './index'
 import { parseStructTuple as parse } from './introspection'
 
 describe('parse.ts prototype pollution defense', () => {
@@ -57,11 +57,9 @@ describe('parse.ts prototype pollution defense', () => {
 
     try {
       const [err, val] = parse(s, {})
-      if (err) {
-        throw err
-      }
-
-      expect(val).toEqual({ pollutedId: '' })
+      expect(err).toBeInstanceOf(StructError)
+      expect(err?.issues[0]?.code).toBe('missing_key')
+      expect(val).toBeUndefined()
     } finally {
       delete (Object.prototype as { [key: string]: unknown })['pollutedId']
     }
@@ -76,11 +74,9 @@ describe('parse.ts prototype pollution defense', () => {
 
     try {
       const [err, val] = parse(s, {})
-      if (err) {
-        throw err
-      }
-
-      expect(val).toEqual({ pollutedId: '' })
+      expect(err).toBeInstanceOf(StructError)
+      expect(err?.issues[0]?.code).toBe('missing_key')
+      expect(val).toBeUndefined()
     } finally {
       delete (Object.prototype as { [key: string]: unknown })['pollutedId']
     }
@@ -92,7 +88,7 @@ describe('parse.ts prototype pollution defense', () => {
     })
     const wire = Object.create({ user_name: 'admin' })
 
-    expect(decodeJson(s, wire)).toEqual({ name: '' })
+    expect(() => decodeJson(s, wire)).toThrow(StructError)
   })
 
   test('JSON aliases for dangerous keys do not pollute prototypes', () => {
@@ -128,5 +124,51 @@ describe('parse.ts prototype pollution defense', () => {
 
     expect(output).toEqual({ proto: 'safe', constructorValue: 'value' })
     expect(({} as { proto?: string }).proto).toBeUndefined()
+  })
+
+  test('reads request sections and discriminators only once', () => {
+    let queryReads = 0
+    const requestInput = {
+      get query() {
+        queryReads += 1
+        if (queryReads > 1) {
+          throw new Error('query reread')
+        }
+        return { page: 1 }
+      },
+    }
+    expect(parse(struct.request({ query: struct.object({ page: struct.number() }) }), requestInput)).toEqual([null, { query: { page: 1 } }])
+
+    let typeReads = 0
+    const Event = struct.discriminatedUnion('type', [struct.object({ payload: struct.string(), type: struct.literal('message') })])
+    const eventInput = {
+      payload: 'hello',
+      get type() {
+        typeReads += 1
+        if (typeReads > 1) {
+          throw new Error('type reread')
+        }
+        return 'message' as const
+      },
+    }
+    expect(parse(Event, eventInput)).toEqual([null, { payload: 'hello', type: 'message' }])
+
+    let kindReads = 0
+    const WireEvent = struct.discriminatedUnion('type', [
+      struct.object({ payload: struct.string().alias('body'), type: struct.literal('message').alias('kind') }),
+      struct.object({ count: struct.number(), type: struct.literal('count').alias('kind') }),
+    ])
+    const wireInput = {
+      body: 'hello',
+      get kind() {
+        kindReads += 1
+        if (kindReads > 1) {
+          throw new Error('kind reread')
+        }
+        return 'message' as const
+      },
+    }
+    expect(decodeJson(WireEvent, wireInput)).toEqual({ payload: 'hello', type: 'message' })
+    expect([queryReads, typeReads, kindReads]).toEqual([1, 1, 1])
   })
 })

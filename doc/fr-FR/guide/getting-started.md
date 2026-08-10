@@ -15,7 +15,7 @@ Ajoutez le package Core à votre application :
 pnpm add @defjs/core
 ```
 
-Utilisez la commande npm, Yarn ou Bun équivalente si votre projet emploie un autre gestionnaire de packages. `@defjs/core` est en ESM. Pour une exécution sous Node.js, les métadonnées actuelles du package exigent Node 26 ou une version plus récente.
+Utilisez la commande npm, Yarn ou Bun équivalente si votre projet emploie un autre gestionnaire de packages. `@defjs/core` est en ESM. Pour une exécution sous Node.js, les métadonnées actuelles du package exigent Node 22 ou une version plus récente.
 
 Ajoutez un adaptateur uniquement si votre application en a besoin :
 
@@ -70,7 +70,7 @@ void loadUser(7)
 ;[error, result, response]
 ```
 
-En cas de succès, `error` vaut `null`, `result` contient la sortie décodée et `response` est un wrapper Defjs `SettledResponse`. En cas d'échec, `result` vaut `undefined`. Le wrapper de réponse vaut également `undefined` si aucune réponse n'est arrivée.
+En cas de succès, `error` vaut `null`, `result` contient la sortie décodée et `response` est un wrapper Defjs `HttpResponse`. En cas d'échec, `result` vaut `undefined`. Le wrapper de réponse vaut également `undefined` si aucune réponse n'est arrivée.
 
 ### Pourquoi `as const` est nécessaire
 

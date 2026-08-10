@@ -13,7 +13,7 @@ const [sseError, stream, startupOpen] = await client.execute(sseCommand)
 const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-- HTTP はデコード済みデータと Defjs の `SettledResponse` ラッパーを返します。
+- HTTP はデコード済みデータと Defjs の `HttpResponse` ラッパーを返します。
 - SSE は論理ストリームハンドルと起動時オープンスナップショットを返します。
 - WebSocket は論理セッションと起動時接続スナップショットを返します。
 
@@ -44,7 +44,7 @@ interface HttpStatusError<TErrorData = unknown> {
   status: number
   message: string
   data: TErrorData
-  response: SettledResponseLike<unknown>
+  response: HttpResponse<unknown>
 }
 ```
 
@@ -75,7 +75,7 @@ interface DefinitionError {
   code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'UNDECLARED_STATUS'
   message: string
   cause?: unknown
-  response?: SettledResponseLike<unknown>
+  response?: HttpResponse<unknown>
 }
 ```
 
@@ -133,7 +133,9 @@ if (!error) {
 
 ## レスポンスの有無
 
-`SettledResponseLike` と `SettledResponse` は Defjs のラッパーであり、ネイティブの `Response` オブジェクトではありません。ステータス、ステータステキスト、ヘッダー、URL、ボディ、任意のエラー情報を公開し、確定済みレスポンスのラッパーには `ok` フラグもあります。`ok` はステータスが 2xx であることだけを表します。
+`HttpResponse` は Defjs のラッパーであり、ネイティブの `Response` ではありません。ステータス、ステータステキスト、ヘッダー、URL、ボディ、`error`、`ok` を公開します。`ok` はステータスが 2xx であることだけを表します。`error` はトランスポートまたはボディ表現の失敗専用で、通常の 2xx 以外のレスポンスでは空です。
+
+宣言済みで有効な 2xx 以外のボディは Struct でデコードされ、型付きの `HttpStatusError.data` として保持されます。不正な表現は代わりに `RESPONSE_VALIDATION_FAILED` となり、元の codec 例外を `cause`、受信済みなら response に保持し、`data` は持ちません。
 
 HTTP では、次の規則になります。
 

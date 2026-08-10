@@ -30,14 +30,14 @@ const result = await client.execute(command)
 
 تقبل `defineRequest(...)` الحقول التالية:
 
-| الحقل          | المعنى                                                                |
-| -------------- | --------------------------------------------------------------------- |
-| `method`       | نص HTTP method.                                                       |
-| `path`         | path نسبي لنقطة النهاية، مع placeholders اختيارية بشكل `:name`.       |
-| `input`        | Struct يُستخدم لفك الترميز البنيوي لمدخل الأمر.                       |
-| `build`        | إسقاط مرتبط بالـ Struct من حقول input إلى أجزاء الطلب. يتطلب `input`. |
-| `output`       | ربط status بـ Struct لفك ترميز response واستنتاج result.              |
-| `responseType` | نمط response اختياري: `json` أو `text` أو `blob` أو `arraybuffer`.    |
+| الحقل          | المعنى                                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------------------------- |
+| `method`       | نص HTTP method.                                                                                            |
+| `path`         | path نسبي لنقطة النهاية، مع placeholders اختيارية بشكل `:name`.                                            |
+| `input`        | Struct يُستخدم لفك الترميز البنيوي لمدخل الأمر.                                                            |
+| `build`        | إسقاط مرتبط بالـ Struct من حقول input إلى أجزاء الطلب. يتطلب `input`.                                      |
+| `output`       | ربط status بـ Struct لفك ترميز response واستنتاج result.                                                   |
+| `responseType` | نمط response اختياري فقط عند إعلان `output`: `json` أو `text` أو `blob` أو `arraybuffer`؛ ويُمنع عند حذفه. |
 
 استخدم `struct.request(...)` عندما ترتبط حقول الأمر مباشرة بأقسام wire:
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-مدخلات Object Struct جزئية على مستوى النوع. كل خاصية في الكائن اختيارية للمستدعي، وأقسام request اختيارية أيضًا. يملأ فك الترميز البنيوي حقول output غير الاختيارية بقيم صفرية، لذلك لا يجعل أي من الشكلين وسيط المنشئ مطلوبًا.
+عند إعلان `input` يجب توفير حقول object المطلوبة وكل request section معلن. لا يمكن حذف إلا الحقول الموسومة optional أو nullish. ولا تعلن section لا يستخدمه endpoint.
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-استخدم input أوليًا أو مصفوفيًا عندما يجب على المنشئ استقبال وسيط. يستخدم هذا المثال قيمة أولية ويسقطها في path parameter:
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-هذه قاعدة تخص اختيارية الوسيط، وليست تحققًا من قواعد العمل. ما زال المستدعي قادرًا على تمرير قيم يقبلها input type الخاص بالـ Struct، وتتلقى حقول الكائن المفقودة قيمًا صفرية.
+هذا تحقق من وجود البنية ونوعها، وليس تحققًا من authorization أو range أو amount أو format أو state transition في التطبيق.
 
 ## بناء الطلب تلقائيًا
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 نوع نجاح HTTP هو اتحاد أجسام 2xx المعلنة. و`error.data` هو اتحاد أجسام non-2xx المعلنة. يحتاج الشكل المصفوفي إلى `as const` للحفاظ على status literals والمصفوفات readonly المجمّعة.
 
-عندما يكون `output` معلنًا، يجب أن يملك كل status معاد Struct مطابقًا. ينتج status غير مطابق، سواء كان 2xx أو non-2xx، خطأ `UNDECLARED_STATUS`. وعند حذف `output` يُتجاهل response body وتكون result مساوية لـ `undefined`.
+عندما يكون `output` معلنًا، يجب أن يملك كل status معاد Struct مطابقًا. ينتج status غير مطابق، سواء كان 2xx أو non-2xx، خطأ `UNDECLARED_STATUS`. وعند حذف `output` لا يُقرأ response body ولا يُفك ترميزه، ويُلغى بأفضل جهد ممكن، وتكون result مساوية لـ `undefined`.
 
 ## تعريفات SSE وWebSocket
 
@@ -224,6 +209,8 @@ const arrayOutput = [
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ const chat = defineWebSocket({
 
 - تغطي [العميل](/ar/core/client) execute overloads وتركيب الخيارات.
 - تملك [HTTP](/ar/core/http) سلوك URL والترميز والاستجابة والإلغاء.
-- تشرح [Struct](/ar/core/struct) فك الترميز البنيوي والقيم الصفرية.
+- تشرح [Struct](/ar/core/struct) فك الترميز البنيوي الصارم.

@@ -1,7 +1,6 @@
 import type { AnyStruct, Infer } from '../struct'
 import { parseStructValue } from '../struct/introspection'
-
-export type StructInput<T> = T extends { readonly _struct: { readonly input: infer TInput } } ? TInput : never
+import type { StructInput } from '../struct/types'
 
 export type EndpointInput<TInput extends AnyStruct | undefined> = TInput extends AnyStruct ? StructInput<TInput> : unknown
 

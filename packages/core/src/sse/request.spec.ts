@@ -41,6 +41,23 @@ describe('createEventStreamRequest', () => {
     expect(request.headers?.get('x-token')).toBe('secret')
   })
 
+  test('encodes a raw path value as one segment', () => {
+    const input = struct.request({
+      path: struct.object({
+        id: struct.string(),
+      }),
+    })
+
+    const request = createEventStreamRequest('GET', '/users/:id/events', { path: { id: 'a/b ?#%猫' } }, undefined, {
+      abort: new AbortController().signal,
+      baseEndpoint: 'https://example.com',
+      input,
+      queryParamsSerializer: (params) => params.toString(),
+    })
+
+    expect(request.endpoint).toBe('/users/a%2Fb%20%3F%23%25%E7%8C%AB/events')
+  })
+
   test('rejects request-shaped missing path params', () => {
     const input = struct.request({
       path: struct.object({

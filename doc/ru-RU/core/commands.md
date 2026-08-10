@@ -30,14 +30,14 @@ const result = await client.execute(command)
 
 `defineRequest(...)` принимает следующие поля:
 
-| Поле           | Значение                                                                        |
-| -------------- | ------------------------------------------------------------------------------- |
-| `method`       | Строка с HTTP-методом.                                                          |
-| `path`         | Относительный путь эндпоинта с необязательными плейсхолдерами `:name`.          |
-| `input`        | Struct для структурного декодирования входных данных команды.                   |
-| `build`        | Проекция входных полей в части запроса, привязанная к схеме. Требует `input`.   |
-| `output`       | Соответствие статусов Struct для декодирования ответа и вывода типа результата. |
-| `responseType` | Необязательный режим ответа: `json`, `text`, `blob` или `arraybuffer`.          |
+| Поле           | Значение                                                                                                        |
+| -------------- | --------------------------------------------------------------------------------------------------------------- |
+| `method`       | Строка с HTTP-методом.                                                                                          |
+| `path`         | Относительный путь эндпоинта с необязательными плейсхолдерами `:name`.                                          |
+| `input`        | Struct для структурного декодирования входных данных команды.                                                   |
+| `build`        | Проекция входных полей в части запроса, привязанная к схеме. Требует `input`.                                   |
+| `output`       | Соответствие статусов Struct для декодирования ответа и вывода типа результата.                                 |
+| `responseType` | Необязательный режим `json`, `text`, `blob` или `arraybuffer`, только при объявленном `output`; иначе запрещён. |
 
 Используйте `struct.request(...)`, когда поля команды напрямую соответствуют частям запроса:
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-На границе типов все свойства входного объектного Struct необязательны для вызывающего кода. Части запроса тоже необязательны. Структурное декодирование заполняет выходные поля, не помеченные `.optional()`, нулевыми значениями, поэтому ни объектная форма, ни `struct.request(...)` не делают аргумент фабрики обязательным.
+Если объявлен `input`, нужно передать обязательные поля объекта и каждую объявленную часть запроса. Пропускать можно только optional- и nullish-поля. Не объявляйте части, которые endpoint не использует.
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-Если фабрика обязана получить аргумент, используйте примитивный Struct или массив. Здесь число проецируется в параметр пути:
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-Речь только о наличии аргумента, а не о бизнес-проверках. Вызывающий код всё равно может передать любое значение, допустимое входным типом Struct, а отсутствующие объектные поля получат нулевые значения.
+Это проверка структурного наличия и типа, а не правил приложения об авторизации, диапазонах, суммах, форматах или переходах состояния.
 
 ## Автоматическое построение запроса
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 Тип успешного HTTP-результата — объединение тел объявленных ответов 2xx. `error.data` — объединение тел объявленных ответов не-2xx. Для массивной формы нужен `as const`, чтобы сохранить литералы статусов и сгруппированные readonly-массивы.
 
-Когда `output` объявлен, каждому полученному статусу должен соответствовать Struct. Любой несовпавший статус, как 2xx, так и не-2xx, приводит к `UNDECLARED_STATUS`. Без `output` тело ответа игнорируется, а результат равен `undefined`.
+Когда `output` объявлен, каждому полученному статусу должен соответствовать Struct. Любой несовпавший статус, как 2xx, так и не-2xx, приводит к `UNDECLARED_STATUS`. Без `output` тело ответа не читается и не декодируется, его отмена выполняется по возможности, а результат равен `undefined`.
 
 ## Описания SSE и WebSocket
 
@@ -224,6 +209,8 @@ const arrayOutput = [
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ const chat = defineWebSocket({
 
 - [Клиент](/ru-RU/core/client) — перегрузки выполнения и композиция опций.
 - [HTTP](/ru-RU/core/http) — URL, кодирование, ответы и отмена.
-- [Struct](/ru-RU/core/struct) — структурное декодирование и нулевые значения.
+- [Struct](/ru-RU/core/struct) — строгое структурное декодирование.

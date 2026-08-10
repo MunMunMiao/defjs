@@ -1,6 +1,7 @@
 import type { HttpRequest } from '../internal/http_request'
 import type { HttpResponse } from '../internal/http_response'
 import type { EventStreamHandle } from '../sse/transport/event_stream'
+import type { WebSocketCloseInfo, WebSocketState } from '../web_socket/web_socket'
 
 // ---------------------------------------------------------------------------
 // HTTP Interceptor
@@ -43,13 +44,14 @@ export function createSSEInterceptor(fn: SSEInterceptorFn): SSEInterceptor {
 // Minimal session interface — structurally compatible with WebSocketSession
 // to avoid circular dependency (interceptor.ts ←→ web_socket.ts).
 export interface WebSocketSessionLike {
-  readonly connection: { extensions?: string; protocol?: string; url?: string }
-  readonly closed: Promise<unknown>
+  readonly bufferedAmount: number
+  readonly connection: { extensions?: string; generation: number; protocol?: string; url?: string }
+  readonly closed: Promise<WebSocketCloseInfo>
   readonly receive: AsyncIterable<unknown>
-  readonly state: string
+  readonly state: WebSocketState
   close(code?: number, reason?: string): void
   onRuntimeError(listener: (error: unknown) => void): () => void
-  onStateChange(listener: (state: string) => void): () => void
+  onStateChange(listener: (state: WebSocketState) => void): () => void
   send(message: unknown): void
 }
 

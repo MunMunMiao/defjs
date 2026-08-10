@@ -152,16 +152,7 @@ Diese Funktion begrenzt Retries und Pufferung, engt die per Struct dekodierte Ev
 
 ```typescript
 // consume-notifications.ts
-import {
-  createClient,
-  defineEventStream,
-  struct,
-  type Infer,
-  withEndpoint,
-  withSSEOnInvalidEvent,
-  withSSEQueue,
-  withSSEReconnect,
-} from '@defjs/core'
+import { createClient, defineEventStream, struct, type Infer, withEndpoint, withSSEOnInvalidEvent, withSSEReconnect } from '@defjs/core'
 
 const notificationStruct = struct.object({
   id: struct.number(),
@@ -175,6 +166,8 @@ interface NotificationHandlers {
 }
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(notificationStruct),
@@ -185,7 +178,6 @@ export async function consumeNotifications(signal: AbortSignal, handlers: Notifi
   const client = createClient(
     withEndpoint('https://api.example.com'),
     withSSEReconnect({ attempts: 5, delayMs: 1_000, maxDelayMs: 10_000 }),
-    withSSEQueue({ maxSize: 100, overflow: 'drop-oldest' }),
     withSSEOnInvalidEvent(({ reason, message }) => {
       handlers.onInvalid({ eventName: message.event, reason })
     }),
@@ -215,19 +207,11 @@ Die Handler sollten schnell und frei von Exceptions sein. Dieses Rezept zeichnet
 
 ## WebSocket-Consumer für einen Raum
 
-Reconnect ist explizit aktiviert. Die Funktion konsumiert die unbegrenzte eingehende Warteschlange während der gesamten Lebenszeit der logischen Session, begrenzt die ausgehende Warteschlange und schließt auf jedem Ausgangspfad.
+Reconnect ist explizit aktiviert. Der Endpunkt besitzt begrenzte Kapazitäten für eingehende und ausgehende Nachrichten, ein Iterator konsumiert die logische Session und jeder Ausgangspfad schließt sie.
 
 ```typescript
 // consume-room.ts
-import {
-  createClient,
-  defineWebSocket,
-  struct,
-  withEndpoint,
-  withWebSocketHeartbeat,
-  withWebSocketQueue,
-  withWebSocketReconnect,
-} from '@defjs/core'
+import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketHeartbeat, withWebSocketReconnect } from '@defjs/core'
 
 interface RoomHandlers {
   onMessage(message: { text: string; userId: number }): void
@@ -235,6 +219,8 @@ interface RoomHandlers {
 }
 
 const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   path: '/rooms/:roomId',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -262,11 +248,9 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
       message: () => ({ type: 'ping' }),
       isAck: (message) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'pong',
     }),
-    withWebSocketQueue({ maxSize: 20, overflow: 'drop-oldest' }),
   )
 
-  const encodedRoomId = encodeURIComponent(roomId)
-  const [error, session] = await client.execute(room({ path: { roomId: encodedRoomId } }), { signal })
+  const [error, session] = await client.execute(room({ path: { roomId } }), { signal })
 
   if (error) {
     throw error
@@ -292,7 +276,7 @@ export async function consumeRoom(roomId: string, signal: AbortSignal, handlers:
 }
 ```
 
-Der Endpunktpfad kodiert Platzhalter nicht. Dieses Rezept kodiert deshalb ein einzelnes Segment, bevor es den Command erzeugt. Es loggt weder die resultierende URL noch Payloads.
+Übergib Platzhalterwerte unverändert. Core kodiert jeden Wert beim Einsetzen in den Pfad genau einmal; kodiere ihn nicht vor, sonst wird `%` erneut kodiert. Dieses Rezept loggt weder die resultierende URL noch Payloads.
 
 ## Authentifizierung und Operationsmetriken
 

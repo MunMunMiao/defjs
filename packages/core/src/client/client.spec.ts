@@ -13,14 +13,12 @@ import {
   withSSEHandle,
   withSSEOnInvalidEvent,
   withSSEOptions,
-  withSSEQueue,
   withSSEReconnect,
   withWebSocketBeforeConnect,
   withWebSocketHandle,
   withWebSocketHeartbeat,
   withWebSocketOptions,
   withWebSocketProtocols,
-  withWebSocketQueue,
   withWebSocketReconnect,
   withXSRF,
 } from './index'
@@ -106,10 +104,6 @@ describe('Client', () => {
         intervalMs: 1_000,
         timeoutMs: 5_000,
       }),
-      withWebSocketQueue({
-        maxSize: 128,
-        overflow: 'drop-oldest',
-      }),
       withWebSocketReconnect({
         attempts: 3,
         delayMs: 1_000,
@@ -135,10 +129,6 @@ describe('Client', () => {
     expect(config.webSocket.heartbeat).toEqual({
       intervalMs: 1_000,
       timeoutMs: 5_000,
-    })
-    expect(config.webSocket.queue).toEqual({
-      maxSize: 128,
-      overflow: 'drop-oldest',
     })
     expect(config.webSocket.reconnect).toEqual({
       attempts: 3,
@@ -166,8 +156,6 @@ describe('Client', () => {
         handle: customFetch,
         onInvalidEvent,
         reconnect: { attempts: 3, delayMs: 2000 },
-        queue: { maxSize: 64, overflow: 'drop-oldest' },
-        maxBufferSize: 8192,
       }),
     )
 
@@ -175,8 +163,6 @@ describe('Client', () => {
     expect(config.handle).toBe(customFetch)
     expect(config.onInvalidEvent).toBe(onInvalidEvent)
     expect(config.reconnect).toEqual({ attempts: 3, delayMs: 2000 })
-    expect(config.queue).toEqual({ maxSize: 64, overflow: 'drop-oldest' })
-    expect(config.maxBufferSize).toBe(8192)
   })
 
   test('should support individual SSE option helpers', () => {
@@ -186,13 +172,11 @@ describe('Client', () => {
       withEndpoint('https://example.com'),
       withSSEOnInvalidEvent(onInvalidEvent),
       withSSEReconnect({ attempts: 5, delayMs: 500 }),
-      withSSEQueue({ maxSize: 32, overflow: 'error' }),
     )
 
     const config = getClientConfig(client).sse
     expect(config.onInvalidEvent).toBe(onInvalidEvent)
     expect(config.reconnect).toEqual({ attempts: 5, delayMs: 500 })
-    expect(config.queue).toEqual({ maxSize: 32, overflow: 'error' })
   })
 
   test('withSSEOptions ignores undefined fields', () => {
@@ -204,8 +188,6 @@ describe('Client', () => {
         handle: undefined,
         onInvalidEvent: undefined,
         reconnect: undefined,
-        queue: undefined,
-        maxBufferSize: undefined,
       } as ClientSSEOptions),
     )
 
@@ -213,8 +195,6 @@ describe('Client', () => {
     expect(config.handle).toBe(before.handle)
     expect(config.onInvalidEvent).toBeUndefined()
     expect(config.reconnect).toBeUndefined()
-    expect(config.queue).toBeUndefined()
-    expect(config.maxBufferSize).toBeUndefined()
   })
 
   test('should support grouped withWebSocketOptions helper', () => {
@@ -234,7 +214,6 @@ describe('Client', () => {
         beforeConnect,
         heartbeat: { intervalMs: 100 },
         protocols: ['json'],
-        queue: { maxSize: 8 },
         reconnect: { attempts: 2 },
       }),
     )
@@ -245,7 +224,6 @@ describe('Client', () => {
     expect(config.beforeConnect).toBe(beforeConnect)
     expect(config.heartbeat).toEqual({ intervalMs: 100 })
     expect(config.protocols).toEqual(['json'])
-    expect(config.queue).toEqual({ maxSize: 8 })
     expect(config.reconnect).toEqual({ attempts: 2 })
   })
 

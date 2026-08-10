@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { struct } from './index'
+import { StructError, struct } from './index'
 import { isStruct } from './guards'
 import { parseStructTuple as parse } from './introspection'
 import {
@@ -37,20 +37,17 @@ describe('facade.ts', () => {
     expect(struct.blob).toBe(createBlobStruct)
     expect(struct.file).toBe(createFileStruct)
     expect(struct.arrayBuffer).toBe(createArrayBufferStruct)
+    expect(struct.parse).toBe(parse)
   })
 
-  test('supports primitive defaults for boolean and exact null struct', () => {
+  test('strictly parses boolean and exact null structs', () => {
     const [boolErr, boolVal] = parse(struct.boolean(), undefined)
-    if (boolErr) {
-      throw boolErr
-    }
-    expect(boolVal).toBe(false)
+    expect(boolErr).toBeInstanceOf(StructError)
+    expect(boolVal).toBeUndefined()
 
     const [nullErr1, nullVal1] = parse(struct.null(), undefined)
-    if (nullErr1) {
-      throw nullErr1
-    }
-    expect(nullVal1).toBeNull()
+    expect(nullErr1).toBeInstanceOf(StructError)
+    expect(nullVal1).toBeUndefined()
 
     const [nullErr2, nullVal2] = parse(struct.null(), null)
     if (nullErr2) {
@@ -71,12 +68,10 @@ describe('facade.ts', () => {
       .map((symbol) => nullStruct[symbol])
       .find((value) => typeof value === 'object' && value !== null && 'kind' in (value as object)) as {
       is: (value: unknown) => boolean
-      zero: () => null
     }
 
     expect(booleanDefinition.is(true)).toBe(true)
     expect(nullDefinition.is(null)).toBe(true)
-    expect(nullDefinition.zero()).toBeNull()
   })
 
   test('exposes struct identity helper', () => {
@@ -97,16 +92,25 @@ describe('facade.ts', () => {
     expect(base).not.toBe(optionalValue)
 
     const [baseErr, baseVal] = parse(base, undefined)
-    if (baseErr) {
-      throw baseErr
-    }
-    expect(baseVal).toBe('')
+    expect(baseErr).toBeInstanceOf(StructError)
+    expect(baseVal).toBeUndefined()
 
     const [optErr, optVal] = parse(optionalValue, undefined)
     if (optErr) {
       throw optErr
     }
     expect(optVal).toBeUndefined()
+  })
+
+  test('exposes an error-first parse tuple without adding an instance parser', () => {
+    const User = struct.object({ id: struct.string() })
+
+    expect(struct.parse(User, { id: 'u_1' })).toEqual([null, { id: 'u_1' }])
+
+    const [error, value] = struct.parse(User, {})
+    expect(error).toBeInstanceOf(StructError)
+    expect(value).toBeUndefined()
+    expect('parse' in User).toBe(false)
   })
 
   test('object struct snapshots the declared shape at construction time', () => {

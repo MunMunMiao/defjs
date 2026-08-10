@@ -4,7 +4,7 @@ import { StructError, struct } from './index'
 import { parseStructTuple as parse } from './introspection'
 
 describe('parse.ts object and composite values', () => {
-  test('supports user profile defaults and optional keys', () => {
+  test('requires ordinary object fields and omits optional keys', () => {
     const profile = struct.object({
       id: struct.string(),
       nickname: struct.string().optional(),
@@ -13,26 +13,24 @@ describe('parse.ts object and composite values', () => {
     })
 
     const [err1, val1] = parse(profile, { id: 'u_1' })
-    if (err1) {
-      throw err1
-    }
-    expect(val1).toEqual({
-      active: false,
-      id: 'u_1',
-      score: 0,
-    })
-    const [err2, val2] = parse(profile, { id: 'u_1', nickname: undefined })
+    expect(err1).toBeInstanceOf(StructError)
+    expect(err1?.issues).toHaveLength(1)
+    expect(err1?.issues[0]?.code).toBe('missing_key')
+    expect(err1?.issues[0]?.path).toEqual(['score'])
+    expect(val1).toBeUndefined()
+
+    const [err2, val2] = parse(profile, { active: true, id: 'u_1', nickname: undefined, score: 7 })
     if (err2) {
       throw err2
     }
     expect(val2).toEqual({
-      active: false,
+      active: true,
       id: 'u_1',
-      score: 0,
+      score: 7,
     })
   })
 
-  test('keeps Go-style missing, optional, nullable, nullish, and zero-value policy', () => {
+  test('applies the strict object modifier matrix', () => {
     const shape = struct.object({
       name: struct.string(),
       age: struct.number(),
@@ -44,33 +42,117 @@ describe('parse.ts object and composite values', () => {
       tags: struct.array(struct.string()),
     })
 
-    const [error, value] = parse(shape, {})
-
-    expect(error).toBeNull()
-    expect(value).toEqual({
-      active: false,
-      age: 0,
-      bio: null,
+    const valid = {
+      active: true,
+      age: 20,
       empty: null,
-      name: '',
+      name: 'Miao',
       nickname: null,
-      tags: [],
+      tags: ['core'],
+    }
+    const [error, value] = parse(shape, valid)
+
+    if (error) {
+      throw error
+    }
+    expect(value).toEqual({
+      active: true,
+      age: 20,
+      empty: null,
+      name: 'Miao',
+      nickname: null,
+      tags: ['core'],
     })
     expect(Object.hasOwn(value, 'note')).toBe(false)
+    expect(Object.hasOwn(value, 'bio')).toBe(false)
+
+    const [missingNullable, missingValue] = parse(shape, { ...valid, nickname: undefined })
+    expect(missingNullable).toBeInstanceOf(StructError)
+    expect(missingNullable?.issues[0]?.code).toBe('missing_key')
+    expect(missingNullable?.issues[0]?.path).toEqual(['nickname'])
+    expect(missingValue).toBeUndefined()
   })
 
-  test('keeps value-type null inputs on the zero-value path', () => {
-    const [stringErr, stringValue] = parse(struct.string(), null)
-    expect(stringErr).toBeNull()
-    expect(stringValue).toBe('')
+  test('applies the strict top-level modifier matrix', () => {
+    const [missingError, missingValue] = parse(struct.string(), undefined)
+    expect(missingError).toBeInstanceOf(StructError)
+    expect(missingValue).toBeUndefined()
 
-    const [bigintErr, bigintValue] = parse(struct.bigint(), null)
-    expect(bigintErr).toBeNull()
-    expect(bigintValue).toBe(0n)
+    expect(parse(struct.string().optional(), undefined)).toEqual([null, undefined])
+
+    const [nullableMissingError, nullableMissingValue] = parse(struct.string().null(), undefined)
+    expect(nullableMissingError).toBeInstanceOf(StructError)
+    expect(nullableMissingValue).toBeUndefined()
+
+    expect(parse(struct.string().nullish(), undefined)).toEqual([null, undefined])
+
+    const [nullError, nullValue] = parse(struct.string(), null)
+    expect(nullError).toBeInstanceOf(StructError)
+    expect(nullValue).toBeUndefined()
+
+    const [optionalNullError, optionalNullValue] = parse(struct.string().optional(), null)
+    expect(optionalNullError).toBeInstanceOf(StructError)
+    expect(optionalNullValue).toBeUndefined()
+
+    expect(parse(struct.string().null(), null)).toEqual([null, null])
+    expect(parse(struct.string().nullish(), null)).toEqual([null, null])
 
     const [numberErr, numberValue] = parse(struct.bigint(), 42)
     expect(numberErr).toBeInstanceOf(StructError)
-    expect(numberValue).toBe(0n)
+    expect(numberValue).toBeUndefined()
+  })
+
+  test('accepts null when literal and composite declarations explicitly allow it', () => {
+    expect(parse(struct.literal(null), null)).toEqual([null, null])
+    expect(parse(struct.or(struct.null(), struct.string()), null)).toEqual([null, null])
+    expect(parse(struct.intersection(struct.null(), struct.null()), null)).toEqual([null, null])
+
+    const Body = struct.request({ body: struct.json(struct.null()) })
+    expect(parse(Body, { body: null })).toEqual([null, { body: null }])
+  })
+
+  test('does not inherit optionality from a request-body inner struct', () => {
+    const Body = struct.json(struct.string().optional())
+    const [bodyError, bodyValue] = parse(Body, undefined)
+    expect(bodyError).toBeInstanceOf(StructError)
+    expect(bodyValue).toBeUndefined()
+    expect(parse(Body, 'hello')).toEqual([null, 'hello'])
+    expect(parse(Body.optional(), undefined)).toEqual([null, undefined])
+
+    const Request = struct.request({ body: Body })
+    const [requestError, requestValue] = parse(Request, { body: undefined })
+    expect(requestError).toBeInstanceOf(StructError)
+    expect(requestError?.issues[0]?.path).toEqual(['body'])
+    expect(requestValue).toBeUndefined()
+  })
+
+  test('does not inspect later union options or the right intersection after an earlier result', () => {
+    let unionLaterReads = 0
+    const unionInput = {
+      kind: 'first' as const,
+      get later() {
+        unionLaterReads += 1
+        throw new Error('later union option was read')
+      },
+    }
+    const Union = struct.or(struct.object({ kind: struct.literal('first') }), struct.object({ later: struct.string() }))
+    expect(parse(Union, unionInput)).toEqual([null, { kind: 'first' }])
+    expect(unionLaterReads).toBe(0)
+
+    let intersectionRightReads = 0
+    const intersectionInput = {
+      first: 1,
+      get later() {
+        intersectionRightReads += 1
+        throw new Error('right intersection was read')
+      },
+    }
+    const Intersection = struct.intersection(struct.object({ first: struct.string() }), struct.object({ later: struct.string() }))
+    const [intersectionError, intersectionValue] = parse(Intersection, intersectionInput)
+    expect(intersectionError).toBeInstanceOf(StructError)
+    expect(intersectionError?.issues[0]?.path).toEqual(['first'])
+    expect(intersectionValue).toBeUndefined()
+    expect(intersectionRightReads).toBe(0)
   })
 
   test('maps tagged json input key without changing output key', () => {
@@ -108,15 +190,11 @@ describe('parse.ts object and composite values', () => {
     const id = struct.or(struct.string(), struct.number())
 
     const [s1err, s1val] = parse(status, undefined)
-    if (s1err) {
-      throw s1err
-    }
-    expect(s1val).toBe('draft')
+    expect(s1err).toBeInstanceOf(StructError)
+    expect(s1val).toBeUndefined()
     const [c1err, c1val] = parse(channel, undefined)
-    if (c1err) {
-      throw c1err
-    }
-    expect(c1val).toBe('web')
+    expect(c1err).toBeInstanceOf(StructError)
+    expect(c1val).toBeUndefined()
     const [i1err, i1val] = parse(id, 'u_123')
     if (i1err) {
       throw i1err
@@ -128,10 +206,8 @@ describe('parse.ts object and composite values', () => {
     }
     expect(i2val).toBe(9)
     const [l1err, l1val] = parse(struct.literal('ok'), undefined)
-    if (l1err) {
-      throw l1err
-    }
-    expect(l1val).toBe('ok')
+    expect(l1err).toBeInstanceOf(StructError)
+    expect(l1val).toBeUndefined()
     const [se] = parse(status, 'archived')
     expect(se).toBeInstanceOf(StructError)
     const [ce] = parse(channel, false)
@@ -170,6 +246,12 @@ describe('parse.ts object and composite values', () => {
     expect(ce1).toBeInstanceOf(StructError)
     const [ce2] = parse(coordinate, [120, 'bad'])
     expect(ce2).toBeInstanceOf(StructError)
+    const [ce3] = parse(coordinate, [120])
+    expect(ce3).toBeInstanceOf(StructError)
+    expect(ce3?.issues[0]?.code).toBe('invalid_type')
+    const [ce4] = parse(coordinate, [120, 30, 10])
+    expect(ce4).toBeInstanceOf(StructError)
+    expect(ce4?.issues[0]?.code).toBe('invalid_type')
     const [he1] = parse(headers, { retry: 1 })
     expect(he1).toBeInstanceOf(StructError)
     const [he2] = parse(headers, [])
@@ -201,20 +283,14 @@ describe('parse.ts object and composite values', () => {
     }
     expect(av1).toBe(avatar)
     const [be2, bv2] = parse(body, undefined)
-    if (be2) {
-      throw be2
-    }
-    expect(bv2).toBeInstanceOf(ArrayBuffer)
+    expect(be2).toBeInstanceOf(StructError)
+    expect(bv2).toBeUndefined()
     const [ce2, cv2] = parse(cover, undefined)
-    if (ce2) {
-      throw ce2
-    }
-    expect(cv2).toBeInstanceOf(Blob)
+    expect(ce2).toBeInstanceOf(StructError)
+    expect(cv2).toBeUndefined()
     const [ae2, av2] = parse(attachment, undefined)
-    if (ae2) {
-      throw ae2
-    }
-    expect(av2).toBeInstanceOf(File)
+    expect(ae2).toBeInstanceOf(StructError)
+    expect(av2).toBeUndefined()
     const [be3] = parse(body, {})
     expect(be3).toBeInstanceOf(StructError)
     const [ce3] = parse(cover, 'bad')
@@ -242,13 +318,63 @@ describe('parse.ts object and composite values', () => {
       body: struct.json(struct.object({ name: struct.string() })),
       headers: struct.object({ trace: struct.string() }),
       path: struct.object({ id: struct.string() }),
-      query: struct.object({ page: struct.number() }),
+      query: struct.object({ page: struct.number().optional() }),
     })
 
-    const [error, value] = parse(Input, {})
+    const [error, value] = parse(Input, {
+      body: { name: 'Miao' },
+      headers: { trace: 'trace-1' },
+      path: { id: 'u_1' },
+      query: {},
+    })
 
-    expect(error).toBeNull()
+    if (error) {
+      throw error
+    }
     expect(Object.keys(value)).toEqual(['path', 'query', 'headers', 'body'])
+
+    const [missingError, missingValue] = parse(Input, {
+      body: { name: 'Miao' },
+      headers: { trace: 'trace-1' },
+      path: { id: 'u_1' },
+    })
+    expect(missingError).toBeInstanceOf(StructError)
+    expect(missingError?.issues[0]?.code).toBe('missing_key')
+    expect(missingError?.issues[0]?.path).toEqual(['query'])
+    expect(missingValue).toBeUndefined()
+  })
+
+  test('stops object, array, and record parsing at the first issue', () => {
+    const objectInput = {
+      first: 1,
+      get second(): string {
+        throw new Error('object parser continued')
+      },
+    }
+    const [objectError] = parse(struct.object({ first: struct.string(), second: struct.string() }), objectInput)
+    expect(objectError?.issues).toHaveLength(1)
+    expect(objectError?.issues[0]?.path).toEqual(['first'])
+
+    const arrayInput = [1, 'unused']
+    Object.defineProperty(arrayInput, 1, {
+      enumerable: true,
+      get() {
+        throw new Error('array parser continued')
+      },
+    })
+    const [arrayError] = parse(struct.array(struct.string()), arrayInput)
+    expect(arrayError?.issues).toHaveLength(1)
+    expect(arrayError?.issues[0]?.path).toEqual([0])
+
+    const recordInput = {
+      first: 1,
+      get second(): string {
+        throw new Error('record parser continued')
+      },
+    }
+    const [recordError] = parse(struct.record(struct.string()), recordInput)
+    expect(recordError?.issues).toHaveLength(1)
+    expect(recordError?.issues[0]?.path).toEqual(['first'])
   })
 
   test('drops unknown keys as the only object parse policy', () => {

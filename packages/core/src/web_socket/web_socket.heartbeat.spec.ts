@@ -20,6 +20,7 @@ describe('web socket runtime heartbeat', () => {
 
   test('should send heartbeat messages automatically when heartbeat.message is provided', async () => {
     const useHeartbeatSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         pong: struct.object({
           ok: struct.boolean(),

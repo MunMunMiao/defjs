@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { makeResponse, toSettledResponse } from './http_response'
+import { makeResponse } from './http_response'
 
 describe('Response', () => {
   test('should make response', () => {
@@ -11,6 +11,7 @@ describe('Response', () => {
     expect(res.status).toBe(200)
     expect(res.statusText).toBe('OK')
     expect(res.body).toBe('Hello World!')
+    expect(res.ok).toBe(true)
   })
 
   test('should make error response', () => {
@@ -22,6 +23,8 @@ describe('Response', () => {
     expect(res.status).toBe(500)
     expect(res.statusText).toBe('Server Error')
     expect(res.body).toBe('Server Error')
+    expect(res.error).toBeUndefined()
+    expect(res.ok).toBe(false)
   })
 
   test('should make network error response', () => {
@@ -33,17 +36,15 @@ describe('Response', () => {
     expect((res.error as Error).message).toContain(': 0')
   })
 
-  test('should auto-generate error for non-2xx status', () => {
+  test('should not treat non-2xx status as a transport or representation error', () => {
     const res = makeResponse({
       status: 404,
       statusText: 'Not Found',
       url: '/api/users',
     })
 
-    expect(res.error).toBeInstanceOf(Error)
-    expect((res.error as Error).message).toContain('/api/users')
-    expect((res.error as Error).message).toContain(': 404')
-    expect((res.error as Error).message).toContain('Not Found')
+    expect(res.error).toBeUndefined()
+    expect(res.ok).toBe(false)
   })
 
   test('should preserve custom error when provided', () => {
@@ -55,20 +56,5 @@ describe('Response', () => {
 
     expect(res.error).toBe(customError)
     expect((res.error as Error).message).toBe('validation failed')
-  })
-
-  test('should create settled responses', () => {
-    const settled = toSettledResponse(
-      makeResponse({
-        body: {
-          ok: true,
-        },
-        status: 200,
-        url: 'https://api.example.com/users',
-      }),
-    )
-
-    expect(settled.ok).toBe(true)
-    expect(settled.body).toEqual({ ok: true })
   })
 })

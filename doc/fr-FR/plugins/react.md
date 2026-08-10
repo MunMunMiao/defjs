@@ -249,7 +249,7 @@ export function LiveNotifications() {
 }
 ```
 
-Ce fragment suppose que `recordRealtimeFailure` est une fonction de télémétrie applicative. Il consomme volontairement `session.receive` : laisser cette file entrante non bornée sans lecteur ne constitue pas une gestion valide de la ressource. Appliquez la même discipline de démarrage et de nettoyage aux handles SSE.
+Ce fragment suppose que `recordRealtimeFailure` est une fonction de télémétrie applicative. Il consomme volontairement `session.receive` : si la file entrante bornée reste sans lecteur, son overflow termine fatalement la session. Appliquez la même discipline de démarrage et de nettoyage aux handles SSE.
 
 Le démontage ou le remontage du provider change la portée du client. Il n'appelle pas `dispose`, n'annule aucune requête et ne ferme ni handle ni session, car le `Client` Core ne possède pas cette API de cycle de vie.
 

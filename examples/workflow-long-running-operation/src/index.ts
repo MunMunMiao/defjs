@@ -38,18 +38,16 @@ export async function runReportExport(client: Client, reportId: string, signal?:
   const workflowSignal = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal
 
   try {
-    const [startError, operation, startResponse] = await client.execute(
-      startReportExport({ path: { reportId: encodeURIComponent(reportId) } }),
-      { signal: workflowSignal },
-    )
+    const [startError, operation, startResponse] = await client.execute(startReportExport({ path: { reportId } }), {
+      signal: workflowSignal,
+    })
     if (startError) throw startError
     if (startResponse.error) throw startResponse.error
 
     for (let poll = 1; poll <= MAX_EXPORT_POLLS; poll++) {
-      const [pollError, state, pollResponse] = await client.execute(
-        readReportExport({ path: { operationId: encodeURIComponent(operation.operationId) } }),
-        { signal: workflowSignal },
-      )
+      const [pollError, state, pollResponse] = await client.execute(readReportExport({ path: { operationId: operation.operationId } }), {
+        signal: workflowSignal,
+      })
       if (pollError) throw pollError
       if (pollResponse.error) throw pollResponse.error
 

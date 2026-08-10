@@ -29,7 +29,7 @@ export const getSupportAgent = defineRequest({
 
 // Step 2: Keep profile lookup agnostic to which source satisfies the command.
 export async function loadSupportAgent(client: Client, agentId: string) {
-  const [error, profile, response] = await client.execute(getSupportAgent({ path: { agentId: encodeURIComponent(agentId) } }))
+  const [error, profile, response] = await client.execute(getSupportAgent({ path: { agentId } }))
   if (error) throw error
   if (response.error) throw response.error
   return profile

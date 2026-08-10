@@ -30,14 +30,14 @@ const result = await client.execute(command)
 
 `defineRequest(...)` 接受以下字段：
 
-| 字段           | 含义                                                                                |
-| -------------- | ----------------------------------------------------------------------------------- |
-| `method`       | HTTP method 字符串。                                                                |
-| `path`         | 相对 endpoint path，可以包含 `:name` placeholder。                                  |
-| `input`        | 对 command input 做结构化解码的 Struct。                                            |
-| `build`        | 把 input 字段投影到 request part 的 schema-bound projection。必须同时提供 `input`。 |
-| `output`       | 用于 response 解码和结果推断的 status-to-Struct 映射。                              |
-| `responseType` | 可选的 `json`、`text`、`blob` 或 `arraybuffer` response mode。                      |
+| 字段           | 含义                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `method`       | HTTP method 字符串。                                                                           |
+| `path`         | 相对 endpoint path，可以包含 `:name` placeholder。                                             |
+| `input`        | 对 command input 做结构化解码的 Struct。                                                       |
+| `build`        | 把 input 字段投影到 request part 的 schema-bound projection。必须同时提供 `input`。            |
+| `output`       | 用于 response 解码和结果推断的 status-to-Struct 映射。                                         |
+| `responseType` | 仅在声明 `output` 时可选用 `json`、`text`、`blob` 或 `arraybuffer`；省略 `output` 时禁止声明。 |
 
 Command 字段直接对应 wire section 时，使用 `struct.request(...)`：
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-Object Struct 的输入属性在类型层面都是可选的，request section 也可选。结构化解码会用零值填充非 optional output 字段，因此这两种 shape 都不会让 builder 参数变成必填。
+声明 `input` 后，必填 object field 和每个已声明 request section 都必须提供。只有 optional 或 nullish field 可以省略；endpoint 不使用的 section 不要声明。
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-如果 builder 必须接收参数，请使用 primitive 或 array input。下面用 primitive，并把它投影到 path parameter：
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-这只是参数可选性，不是业务校验。调用方仍可传入 Struct input type 接受的值；缺失的 object field 会得到零值。
+这只校验结构存在性和类型，不负责应用级 authorization、range、amount、format 或 state transition 规则。
 
 ## 自动构建请求
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 HTTP 成功类型是所有已声明 2xx body 的 union。`error.data` 是所有已声明非 2xx body 的 union。数组形式需要 `as const`，才能保留 status 字面量和分组 readonly 数组。
 
-声明 `output` 后，每个返回的 status 都必须有匹配的 Struct。无论 2xx 还是非 2xx，未匹配都会产生 `UNDECLARED_STATUS`。省略 `output` 时，response body 会被忽略，结果是 `undefined`。
+声明 `output` 后，每个返回的 status 都必须有匹配的 Struct。无论 2xx 还是非 2xx，未匹配都会产生 `UNDECLARED_STATUS`。省略 `output` 时不会读取或解码 response body，并会尽力取消它；结果是 `undefined`。
 
 ## SSE 与 WebSocket 定义
 
@@ -224,6 +209,8 @@ HTTP 成功类型是所有已声明 2xx body 的 union。`error.data` 是所有�
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ Root entry 目前会导出 transport command interface 和低层 executor functi
 
 - [Client](/zh-Hans/core/client)：execution overload 和 option 组合。
 - [HTTP](/zh-Hans/core/http)：URL、编码、response 和取消行为。
-- [Struct](/zh-Hans/core/struct)：结构化解码和零值。
+- [Struct](/zh-Hans/core/struct)：严格结构化解码。

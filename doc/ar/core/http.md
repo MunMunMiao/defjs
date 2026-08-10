@@ -42,7 +42,7 @@ const getUser = defineRequest({
 })
 ```
 
-تُدرج قيم placeholders من دون path-segment encoding. قيّد identifiers أو استدعِ `encodeURIComponent` على segment واحد غير موثوق قبل إنشاء الأمر. قد يغيّر slash غير مرمّز أو dot segment الـ path الناتج، بينما يؤدي إدراج `?` أو `#` إلى رفض الطلب أثناء التحقق من endpoint path.
+مرّر قيم placeholders الخام. يحوّل Defjs كل قيمة scalar إلى نص، ويرفض القيمة الفارغة أو القيمة الكاملة `.` أو `..`، ثم يطبّق `encodeURIComponent` مرة واحدة بالضبط قبل الاستبدال. تبقى `/` و`?` و`#` و`%` والمسافات وUnicode ضمن path segment واحد. لا تُجرِ encoding مسبقًا؛ إذ تُعامل `%` كمدخل خام وتُرمّز إلى `%25`.
 
 ## ترميز الطلب
 
@@ -108,15 +108,15 @@ const getUser = defineRequest({
 
 تعني `response.ok` فقط `status >= 200 && status < 300`. ولا تعني نجاح فك ترميز output أو تحقق قواعد التطبيق أو authorization.
 
-عندما يكون `output` معلنًا ويُحذف `responseType`، يكون parsing الافتراضي للاستجابة `json`. الأنماط الصريحة هي `json` و`text` و`blob` و`arraybuffer`. بعد ذلك يجري Struct المختار فك الترميز البنيوي. وعند حذف `output` تكون result data مساوية لـ `undefined` ويحمل غلاف response المعاد `body: null`.
+عندما يكون `output` معلنًا ويُحذف `responseType`، يكون parsing الافتراضي للاستجابة `json`. الأنماط الصريحة هي `json` و`text` و`blob` و`arraybuffer`. بعد ذلك يجري Struct المختار فك الترميز البنيوي. وعند حذف `output` لا يُقبل `responseType`، وتكون result data مساوية لـ `undefined`، ويحمل غلاف response المعاد `body: null`. يحاول runtime إلغاء body للاستجابة بأفضل جهد بدلًا من قراءته أو فك ترميزه.
 
-### العيب الحالي في JSON غير الصالح
+يتبع تصنيف نتيجة الأمر أولوية ثابتة: فشل transport عند status يساوي 0 → عدم وجود `output` → مطابقة status حرفيًا أو `UNDECLARED_STATUS` → `response.error` → فك Struct. لذلك لا تحدث أخطاء تمثيل body إلا عند إعلان `output`؛ وتظل حالة status غير المعلن متقدمة إذا سجّل Fetch مثل هذا الخطأ.
 
-::: danger قد يبدو JSON غير الصالح ناجحًا
-يخزّن حد Fetch الحالي فشل JSON parsing في `HttpResponse.error` ويترك body مساويًا لـ `null`. لا يفحص تنفيذ أمر HTTP خطأ parse هذا قبل تطبيق output Struct. ولأن `null` غير nullable قد يُفك إلى قيمة Struct صفرية، يستطيع body غير صالح من استجابة 2xx أن ينتج حاليًا `[null, zeroValue, response]`.
+### أخطاء تمثيل body
 
-لا تعتبر نجاحًا بقيم صفرية دليلًا على أن الخادم أرسل JSON صالحًا. يحتاج هذا إلى إصلاح في التنفيذ واختبار regression؛ أما التوثيق فليس سوى تحذير.
-:::
+بالنسبة إلى output معلن ومطابق حرفيًا، إذا فشل JSON أو codec آخر للـ body، يحتفظ Fetch بالاستثناء الأصلي في `HttpResponse.error`. يتوقف تنفيذ الأمر قبل تطبيق output Struct ويعيد `[RESPONSE_VALIDATION_FAILED, undefined, response]`؛ يبقى الاستثناء في `cause` ولا تُنشأ `error.data` typed.
+
+لا تملأ استجابة non-2xx العادية `response.error`؛ يمثلها `status` و`ok`. وعندما يكون status non-2xx وbody معلنين وصالحين، يفك Struct الجسم ويحتفظ خطأ `HTTP_STATUS` الناتج بالبيانات typed داخل `error.data`.
 
 ## نتيجة HTTP
 
@@ -124,7 +124,7 @@ const getUser = defineRequest({
 const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
 ```
 
-عند النجاح تكون `response` غلاف `SettledResponse` من Defjs ويطابق body الخاص بها `data`. وعند الفشل يعتمد توفر response على المرحلة التي بلغها التنفيذ. راجع [الأخطاء](/ar/core/errors) للتصنيف الدقيق.
+عند النجاح تكون `response` غلاف `HttpResponse` من Defjs ويطابق body الخاص بها `data`. وعند الفشل يعتمد توفر response على المرحلة التي بلغها التنفيذ. راجع [الأخطاء](/ar/core/errors) للتصنيف الدقيق.
 
 ## الإلغاء وTimeout
 
@@ -140,6 +140,8 @@ const [error] = await client.execute(command, {
 ```
 
 يُدمج `signal` مع signal الداخلي للعميل ومع timeout موجب. حقل `abort` المنفصل هو إشارة إلغاء بديلة يحتفظ بها الـ API الحالي. لا يمكن تمرير `abort` و`timeout` معًا؛ يؤدي ذلك إلى `REQUEST_VALIDATION_FAILED`. ويمكن دمج `signal` مع أي منهما.
+
+يجب أن تكون قيمة `timeout` لتنفيذ HTTP وSSE وWebSocket عددًا صحيحًا موجبًا وآمنًا ضمن `1..2_147_483_647`؛ وتؤدي القيم `0` أو السالبة أو الكسرية أو `NaN` أو `Infinity` أو التي تتجاوز الحد إلى `REQUEST_VALIDATION_FAILED` قبل إنشاء أي مورد request أو stream أو socket.
 
 ينتج الإلغاء المعروف `ABORTED`. وينتج سبب `AbortSignal.timeout(...)` أو execution timeout الرمز `TIMEOUT`. وتنتج إخفاقات Fetch الأخرى `NETWORK_ERROR`.
 
@@ -205,4 +207,4 @@ const [error, file] = await client.execute(downloadFile(), {
 
 - تغطي [المعترضات](/ar/core/interceptors) نسخ الطلبات وshort-circuit وretry.
 - توثّق [الأخطاء](/ar/core/errors) فشل HTTP status والنقل والتعريف.
-- تشرح [Struct](/ar/core/struct) فك الترميز البنيوي بالقيم الصفرية.
+- تشرح [Struct](/ar/core/struct) فك الترميز البنيوي الصارم.

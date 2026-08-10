@@ -49,6 +49,8 @@ describe('Client.execute', () => {
 
   test('client.execute dispatches event-stream command', async () => {
     const useBasicSse = defineEventStream({
+      maxBufferSize: 1024,
+      maxQueueSize: 16,
       events: {
         message: struct.string(),
       },
@@ -78,6 +80,7 @@ describe('Client.execute', () => {
 
   test('client.execute dispatches web-socket command', async () => {
     const useChatSocket = defineWebSocket({
+      maxIncomingQueueSize: 16,
       incoming: {
         joined: struct.object({
           roomId: struct.string(),

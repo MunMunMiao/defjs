@@ -42,7 +42,7 @@ const getUser = defineRequest({
 })
 ```
 
-Les valeurs de ces paramètres sont insérées sans encodage du segment. Contraignez les identifiants ou appelez `encodeURIComponent` sur chaque segment non fiable avant de créer la commande. Un slash ou un segment composé de points non encodé peut modifier le chemin résolu ; un `?` ou un `#` inséré fait échouer la validation du `path`.
+Transmettez les valeurs brutes des paramètres. Defjs sérialise chaque scalaire, refuse une valeur vide ainsi que les valeurs complètes `.` et `..`, puis applique `encodeURIComponent` exactement une fois avant la substitution. `/`, `?`, `#`, `%`, les espaces et Unicode restent dans un seul segment. Ne préencodez pas les valeurs : `%` est traité comme une entrée brute et encodé en `%25`.
 
 ## Encodage de la requête
 
@@ -108,15 +108,15 @@ L'exécution choisit la Struct correspondant exactement au statut. Tout statut s
 
 `response.ok` signifie uniquement `status >= 200 && status < 300`. Il ne garantit ni le décodage de la sortie, ni la validation applicative, ni la réussite de l'autorisation.
 
-Lorsque `output` est déclaré et que `responseType` est omis, la réponse est analysée en `json` par défaut. Les modes explicites sont `json`, `text`, `blob` et `arraybuffer`. La Struct choisie effectue ensuite le décodage structurel. Si `output` est omis, le résultat vaut `undefined` et le wrapper de réponse contient `body: null`.
+Lorsque `output` est déclaré et que `responseType` est omis, la réponse est analysée en `json` par défaut. Les modes explicites sont `json`, `text`, `blob` et `arraybuffer`. La Struct choisie effectue ensuite le décodage structurel. Si `output` est omis, `responseType` n'est pas accepté, le résultat vaut `undefined` et le wrapper de réponse contient `body: null`. Le runtime tente d'annuler le corps de la réponse en mode best-effort au lieu de le lire ou de le décoder.
 
-### Défaut actuel avec le JSON malformé
+La classification du résultat de la commande suit une priorité fixe : échec de transport avec le statut 0 → absence d'`output` → correspondance exacte du statut ou `UNDECLARED_STATUS` → `response.error` → décodage par la Struct. Une erreur de représentation du corps ne peut donc survenir que si `output` est déclaré ; la branche de statut non déclaré reste prioritaire si Fetch en a enregistré une.
 
-::: danger Un JSON malformé peut sembler réussir
-La frontière Fetch actuelle place l'échec d'analyse JSON dans `HttpResponse.error` et laisse `body` à `null`. L'exécution de la commande HTTP ne vérifie pas cette erreur avant d'appliquer la Struct de sortie. Comme une Struct peut décoder un `null` non nullable en valeur zéro, un corps JSON 2xx malformé peut actuellement produire `[null, zeroValue, response]`.
+### Erreurs de représentation
 
-Ne considérez pas un succès rempli de valeurs zéro comme la preuve que le serveur a envoyé du JSON valide. Ce comportement nécessite une correction de l'implémentation et un test de non-régression ; la documentation ne fait ici que signaler le risque.
-:::
+Pour un output déclaré dont le statut correspond exactement, si JSON ou un autre codec du corps échoue, Fetch conserve l'exception d'origine dans `HttpResponse.error`. L'exécution s'arrête avant d'appliquer la Struct de sortie et renvoie `[RESPONSE_VALIDATION_FAILED, undefined, response]` ; l'exception reste dans `cause` et aucune `error.data` typée n'est produite.
+
+Une réponse non-2xx ordinaire ne remplit pas `response.error` ; son état est représenté par `status` et `ok`. Si le statut non-2xx et le corps sont déclarés et que le corps est valide, la Struct est décodée et l'erreur `HTTP_STATUS` conserve le corps typé dans `error.data`.
 
 ## Résultat HTTP
 
@@ -124,7 +124,7 @@ Ne considérez pas un succès rempli de valeurs zéro comme la preuve que le ser
 const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
 ```
 
-En cas de succès, `response` est un wrapper Defjs `SettledResponse` dont le corps correspond à `data`. En cas d'échec, la présence de la réponse dépend du stade atteint par l'exécution. Consultez [Erreurs](/fr-FR/core/errors) pour la taxonomie exacte.
+En cas de succès, `response` est un wrapper Defjs `HttpResponse` dont le corps correspond à `data`. En cas d'échec, la présence de la réponse dépend du stade atteint par l'exécution. Consultez [Erreurs](/fr-FR/core/errors) pour la taxonomie exacte.
 
 ## Annulation et timeout
 
@@ -140,6 +140,8 @@ const [error] = await client.execute(command, {
 ```
 
 `signal` est fusionné avec le signal interne du client et avec un timeout positif. Le champ distinct `abort` est une autre forme de signal d'annulation conservée par l'API actuelle. `abort` et `timeout` ne peuvent pas être fournis ensemble : cette combinaison renvoie `REQUEST_VALIDATION_FAILED`. `signal` peut être associé à l'un ou l'autre.
+
+Pour l'exécution HTTP, SSE et WebSocket, `timeout` doit être un entier sûr positif compris entre `1` et `2_147_483_647` ; `0`, les valeurs négatives ou fractionnaires, `NaN`, `Infinity` et les valeurs supérieures à cette limite renvoient `REQUEST_VALIDATION_FAILED` avant la création de toute ressource de requête, de flux ou de socket.
 
 Une annulation reconnue produit `ABORTED`. Le motif d'un `AbortSignal.timeout(...)` ou un timeout d'exécution produit `TIMEOUT`. Les autres échecs Fetch produisent `NETWORK_ERROR`.
 
@@ -205,4 +207,4 @@ Il s'agit d'une frontière bas niveau exportée, pas du parcours de commande rec
 
 - [Intercepteurs](/fr-FR/core/interceptors) couvre le clonage des requêtes, le court-circuit et les nouvelles tentatives.
 - [Erreurs](/fr-FR/core/errors) décrit les échecs de statut HTTP, de transport et de définition.
-- [Struct](/fr-FR/core/struct) explique le décodage structurel avec valeurs zéro.
+- [Struct](/fr-FR/core/struct) explique le décodage structurel strict.

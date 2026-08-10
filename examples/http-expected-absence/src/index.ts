@@ -14,7 +14,7 @@ export const readInvoicePdf = defineRequest({
 
 // Step 2: Convert those two expected statuses to null while preserving every other failure.
 export async function getInvoicePdf(client: Client, id: string): Promise<string | null> {
-  const [error, pdf] = await client.execute(readInvoicePdf({ path: { id: encodeURIComponent(id) } }))
+  const [error, pdf] = await client.execute(readInvoicePdf({ path: { id } }))
   if (error) {
     if (error.kind === 'http' && (error.status === 404 || error.status === 410)) return null
     throw error

@@ -13,9 +13,7 @@ export const getDirectoryUser = defineRequest({
 
 // Step 2: Return only the reviewed ID and display name even if the service sends extra fields.
 export async function loadDirectoryUser(client: Client, id: string) {
-  const [error, user] = await client.execute(
-    getDirectoryUser({ path: { id: encodeURIComponent(id) }, query: { fields: 'id,displayName' } }),
-  )
+  const [error, user] = await client.execute(getDirectoryUser({ path: { id }, query: { fields: 'id,displayName' } }))
   if (error) throw error
   return user
 }

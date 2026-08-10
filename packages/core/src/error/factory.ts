@@ -1,4 +1,5 @@
-import type { DefinitionError, HttpStatusError, SettledResponseLike, TransportError } from './types'
+import type { HttpResponse } from '../internal/http_response'
+import type { DefinitionError, HttpStatusError, TransportError } from './types'
 
 export const ERR_ABORTED = new Error('Request was aborted')
 export const ERR_TIMEOUT = new Error('Request timed out')
@@ -30,11 +31,7 @@ export function createTransportError(cause: unknown): TransportError {
   }
 }
 
-export function createDefinitionError(
-  code: DefinitionError['code'],
-  cause: unknown,
-  response?: SettledResponseLike<unknown>,
-): DefinitionError {
+export function createDefinitionError(code: DefinitionError['code'], cause: unknown, response?: HttpResponse<unknown>): DefinitionError {
   return {
     cause,
     code,
@@ -47,7 +44,7 @@ export function createDefinitionError(
 export function createHttpStatusError<TErrorData = unknown>(
   status: number,
   message: string,
-  response: SettledResponseLike<unknown>,
+  response: HttpResponse<unknown>,
   data?: TErrorData,
 ): HttpStatusError<TErrorData> {
   return {

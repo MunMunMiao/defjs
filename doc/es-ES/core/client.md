@@ -34,7 +34,7 @@ La composición sigue tres reglas:
 
 1. Los helpers que asignan un valor sustituyen el anterior. Esto incluye `withEndpoint`, los manejadores de transporte, el serializador de la query, las credenciales, la configuración XSRF y cada opción individual de SSE o WebSocket.
 2. `withInterceptors(...items)` añade elementos. Si lo llamas varias veces, conserva el orden en el que se incorporaron los interceptores.
-3. `withSSEOptions(...)` y `withWebSocketOptions(...)` sustituyen de forma superficial cada propiedad de primer nivel definida. No combinan en profundidad los objetos anidados de reconexión, heartbeat o cola.
+3. `withSSEOptions(...)` y `withWebSocketOptions(...)` sustituyen de forma superficial cada propiedad de primer nivel definida. No combinan en profundidad los objetos anidados de reconexión o heartbeat.
 
 En este ejemplo, el segundo objeto de reconexión sustituye al primero. No conserva `attempts: 5`.
 
@@ -72,6 +72,8 @@ Los helpers individuales de SSE y WebSocket asignan una sola propiedad de primer
 
 `Client.execute` tiene tres sobrecargas. Todas devuelven una tupla de tres elementos con el error en primer lugar.
 
+Para la ejecución HTTP, SSE y WebSocket, `timeout` debe ser un entero seguro positivo dentro de `1..2_147_483_647`; `0`, los valores negativos o fraccionarios, `NaN`, `Infinity` y los valores superiores al límite devuelven `REQUEST_VALIDATION_FAILED` antes de crear cualquier recurso de request, stream o socket.
+
 ### HTTP
 
 ```typescript
@@ -81,7 +83,7 @@ const [error, data, response] = await client.execute(requestCommand, {
 })
 ```
 
-El tercer elemento es un wrapper `SettledResponse` de Defjs cuando hay una respuesta disponible. Las opciones HTTP incluyen `abort` o `timeout`, el alias adicional `signal`, `context` y observadores del progreso de subida y descarga.
+El tercer elemento es un wrapper `HttpResponse` de Defjs cuando hay una respuesta disponible. Las opciones HTTP incluyen `abort` o `timeout`, el alias adicional `signal`, `context` y observadores del progreso de subida y descarga.
 
 ### SSE
 
@@ -91,7 +93,7 @@ const [error, stream, startupOpen] = await client.execute(streamCommand, {
 })
 ```
 
-El tercer elemento es la instantánea validada de la apertura inicial. `stream.open` es otro getter, actualizado, que puede cambiar después de los intentos de reconexión. La ejecución SSE acepta cancelación y `HttpContext`; la reconexión y la cola de eventos se configuran en las opciones del cliente.
+El tercer elemento es la instantánea validada de la apertura inicial. `stream.open` es otro getter, actualizado, que puede cambiar después de los intentos de reconexión. La ejecución SSE acepta cancelación y `HttpContext`; la reconexión se configura en las opciones del cliente. Los límites obligatorios `maxBufferSize` y `maxQueueSize` pertenecen a cada definición de event stream.
 
 ### WebSocket
 
@@ -102,7 +104,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 })
 ```
 
-El tercer elemento es la instantánea de la conexión inicial. `session.connection` es un getter actualizado y puede describir un intento de conexión física posterior. La ejecución WebSocket acepta cancelación, además de opciones por ejecución para `beforeConnect`, `heartbeat`, `protocols`, `queue` y `reconnect`. No acepta `HttpContext`.
+El tercer elemento es la instantánea de la conexión inicial. `session.connection` es un getter actualizado y puede describir un intento de conexión física posterior. La ejecución WebSocket acepta cancelación, además de opciones por ejecución para `beforeConnect`, `heartbeat`, `protocols` y `reconnect`. El límite obligatorio `maxIncomingQueueSize` y el opcional `maxOutgoingQueueSize` pertenecen a cada definición WebSocket. La ejecución no acepta `HttpContext`.
 
 Consulta [Errores](/es-ES/core/errors) para ver las ramas de fallo exactas y [HTTP](/es-ES/core/http), [SSE](/es-ES/core/sse) y [WebSocket](/es-ES/core/web-socket) para conocer el ciclo de vida de cada transporte.
 

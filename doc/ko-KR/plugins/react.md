@@ -249,7 +249,7 @@ export function LiveNotifications() {
 }
 ```
 
-이 fragment는 `recordRealtimeFailure`가 애플리케이션 telemetry 함수라고 가정합니다. 의도적으로 `session.receive`를 소비합니다. 무제한 incoming queue를 읽지 않는 것은 유효한 소유 패턴이 아닙니다. SSE handle에도 같은 시작 및 cleanup 규칙을 적용하세요.
+이 fragment는 `recordRealtimeFailure`가 애플리케이션 telemetry 함수라고 가정합니다. 의도적으로 `session.receive`를 소비합니다. 유한 incoming queue를 읽지 않으면 overflow가 세션을 fatal 종료합니다. SSE handle에도 같은 시작 및 cleanup 규칙을 적용하세요.
 
 provider unmount/remount는 클라이언트 범위를 바꿉니다. core `Client`에는 그런 생명주기 API가 없으므로 `dispose`를 호출하거나 요청을 abort하거나 handle과 session을 닫지는 않습니다.
 

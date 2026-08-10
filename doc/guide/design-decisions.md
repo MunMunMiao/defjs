@@ -31,9 +31,9 @@ The tuple makes expected startup failures explicit without forcing exception-bas
 
 ## Lifecycle Options Belong to Execution
 
-Endpoint definitions describe stable wire contracts. Cancellation, timeout, heartbeat, reconnect, and queue choices belong to the execution that owns the work.
+Endpoint definitions describe stable wire contracts and own bounded transport queue limits. Cancellation, timeout, heartbeat, and reconnect choices belong to the execution that owns the work.
 
-HTTP and SSE accept cancellation options at execution time. WebSocket also accepts per-execution connection, heartbeat, reconnect, protocol, and send-queue options. Client options provide reusable defaults where the transport supports them.
+HTTP and SSE accept cancellation options at execution time. WebSocket also accepts per-execution `beforeConnect`, heartbeat, reconnect, and protocol options. Client options provide reusable defaults where the transport supports them; WebSocket incoming and outgoing capacities remain endpoint-owned.
 
 This split keeps a command reusable. A background job and an interactive screen can execute the same command with different lifetimes without redefining its path or message schema.
 
@@ -47,9 +47,9 @@ This restriction keeps request construction tied to declared Struct fields. Appl
 
 ## Observers Do Not Own Control Flow
 
-SSE `onInvalidEvent` observes dropped events. A thrown or rejected observer result is caught so it does not terminate the stream, although an async observer is awaited and can delay later message processing.
+SSE `onInvalidEvent` observes dropped events. Thrown errors and rejected promises are isolated from stream control flow, so processing continues; an async observer is still awaited and can delay later messages.
 
-WebSocket state and runtime-error listeners are also observers, but the current implementation invokes them directly. Applications should keep them synchronous, non-throwing, and small. Throwing listeners can disrupt lifecycle work and are not a supported control-flow mechanism.
+WebSocket state and runtime-error listeners are observers too. Thrown errors and rejected promises are isolated: state-listener failures are forwarded to runtime-error listeners, runtime-error-listener failures are sent to global `reportError` when available, and remaining listeners and lifecycle work continue.
 
 Use the returned handle or session for lifecycle decisions. Use observers for bounded logging, metrics, or state updates, and remove them when their owner is disposed.
 

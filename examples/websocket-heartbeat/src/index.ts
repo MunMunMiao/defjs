@@ -16,6 +16,7 @@ const dockMonitorIncoming = { pong: struct.object({ monitorId: struct.string() }
 const dockMonitorOutgoing = { ping: struct.object({ monitorId: struct.string() }) }
 type DockMonitorPing = WebSocketOutgoingData<typeof dockMonitorOutgoing>
 export const dockMonitor = defineWebSocket({
+  maxIncomingQueueSize: 8,
   path: '/v1/docks/dock-3/monitor',
   incoming: dockMonitorIncoming,
   outgoing: dockMonitorOutgoing,
@@ -39,7 +40,8 @@ export async function monitorDock(client: Client, monitorId: string) {
   })
   try {
     const close = await session.closed
-    return { closeCode: close.code, runtimeError }
+    if (close.kind === 'closed') return { closeCode: close.code, runtimeError }
+    return { runtimeError }
   } finally {
     stopRuntimeErrors()
     session.close(1000, 'monitor complete')

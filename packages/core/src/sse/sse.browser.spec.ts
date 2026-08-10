@@ -14,6 +14,8 @@ describe('sse browser runtime', () => {
 
   test('should consume event streams in real browsers', async () => {
     const useBasicStream = defineEventStream({
+      maxBufferSize: 1024,
+      maxQueueSize: 16,
       events: {
         message: struct.string(),
       },
@@ -37,8 +39,29 @@ describe('sse browser runtime', () => {
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
   })
 
+  test('should return the fixed error tuple for non-2xx open responses in real browsers', async () => {
+    const useFailedStream = defineEventStream({
+      maxBufferSize: 1024,
+      maxQueueSize: 16,
+      events: {
+        message: struct.string(),
+      },
+      path: '/500',
+    })
+
+    const [error, stream, open] = await baseClient.execute(useFailedStream())
+
+    expect(error?.kind).toBe('http')
+    expect(error?.code).toBe('HTTP_STATUS')
+    expect(stream).toBeUndefined()
+    expect(open?.response?.status).toBe(500)
+    expect(open?.response?.error).toBeUndefined()
+  })
+
   test('should skip unexpected events in real browsers', async () => {
     const useStream = defineEventStream({
+      maxBufferSize: 1024,
+      maxQueueSize: 16,
       events: {
         message: struct.number(),
       },

@@ -249,7 +249,7 @@ export function LiveNotifications() {
 }
 ```
 
-يفترض هذا fragment أن `recordRealtimeFailure` دالة telemetry يملكها التطبيق. وهو يستهلك `session.receive` عمدًا؛ ترك incoming queue غير المحدودة بلا قراءة ليس نمط ملكية صالحًا. طبّق الانضباط نفسه في startup وcleanup على مقابض SSE.
+يفترض هذا fragment أن `recordRealtimeFailure` دالة telemetry يملكها التطبيق. وهو يستهلك `session.receive` عمدًا؛ ترك incoming queue المحدودة بلا قراءة يجعل overflow النهائي خطأً قاتلًا للجلسة. طبّق الانضباط نفسه في startup وcleanup على مقابض SSE.
 
 يغيّر provider unmount/remount نطاق العميل. لكنه لا يستدعي `dispose` ولا يلغي requests ولا يغلق handles أو sessions، لأن core `Client` لا يملك lifecycle API من هذا النوع.
 

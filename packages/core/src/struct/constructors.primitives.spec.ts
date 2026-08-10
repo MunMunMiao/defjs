@@ -29,10 +29,8 @@ describe('constructors.ts bigint and date primitives', () => {
     expect(v3).toBe(9007199254740993n)
 
     const [e4, v4] = parse(struct.bigint(), undefined)
-    if (e4) {
-      throw e4
-    }
-    expect(v4).toBe(0n)
+    expect(e4).toBeInstanceOf(StructError)
+    expect(v4).toBeUndefined()
 
     const [e5] = parse(struct.bigint(), 42)
     expect(e5).toBeInstanceOf(StructError)
@@ -72,12 +70,9 @@ describe('constructors.ts bigint and date primitives', () => {
     }
     expect((v3 as Date).getTime()).toBe(d.getTime())
 
-    const [e4, zero] = parse(struct.date(), undefined)
-    if (e4) {
-      throw e4
-    }
-    expect(zero).toBeInstanceOf(Date)
-    expect((zero as Date).getTime()).toBe(0)
+    const [e4, value] = parse(struct.date(), undefined)
+    expect(e4).toBeInstanceOf(StructError)
+    expect(value).toBeUndefined()
   })
 
   test('date rejects invalid wire input with invalid_type code', () => {

@@ -54,7 +54,7 @@ export async function listAllOpenIssues(client: Client, apiOrigin: string, repos
     pages++
     const [error, currentIssues, response] = await client.execute(
       listOpenRepositoryIssues({
-        path: { repository: encodeURIComponent(repository) },
+        path: { repository },
         query: { page, perPage: ISSUE_PAGE_SIZE, state: 'open' },
       }),
     )

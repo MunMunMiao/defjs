@@ -195,7 +195,7 @@ The component, composable, route, or store that starts realtime work must:
 - call `stream.close(...)` or `session.close(...)` for an active resource;
 - unsubscribe WebSocket observers.
 
-Do not open a WebSocket merely to attach a state listener while leaving its unbounded incoming queue unread. See [SSE](/core/sse) and [WebSocket](/core/web-socket) for complete lifecycle rules.
+Do not open a WebSocket merely to attach a state listener while leaving its finite incoming queue unread; overflow is fatal to the session. See [SSE](/core/sse) and [WebSocket](/core/web-socket) for complete lifecycle rules.
 
 ## API
 

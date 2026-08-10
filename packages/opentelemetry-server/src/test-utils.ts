@@ -1,4 +1,4 @@
-import type { EventStreamHandle, HttpRequest, HttpResponse, WebSocketSessionLike } from '@defjs/core'
+import type { EventStreamHandle, HttpRequest, HttpResponse, WebSocketCloseInfo, WebSocketSessionLike } from '@defjs/core'
 import { makeResponse } from '@defjs/core'
 import type {
   Context,
@@ -19,13 +19,6 @@ import { vi } from 'vitest'
 
 type MockFn = ReturnType<typeof vi.fn>
 type SSECloseCode = 'eof' | 'error' | 'aborted'
-interface WebSocketCloseInfo {
-  cause?: unknown
-  code?: number
-  reason?: string
-  wasClean?: boolean
-}
-
 function noop(): void {
   return undefined
 }
@@ -260,14 +253,14 @@ export function makeWsRequest(queryParams?: URLSearchParams, headers?: Headers):
 }
 
 export function makeWsSession(): WebSocketSessionLike {
-  return createWsSession(Promise.resolve())
+  return createWsSession(Promise.resolve({ kind: 'closed' }))
 }
 
 export function makeDeferredWsSession() {
-  const closed = createDeferred<WebSocketCloseInfo | undefined>()
+  const closed = createDeferred<WebSocketCloseInfo>()
   return {
     session: createWsSession(closed.promise),
-    close(info?: WebSocketCloseInfo) {
+    close(info: WebSocketCloseInfo = { kind: 'closed' }) {
       closed.resolve(info)
     },
     reject(error: unknown) {
@@ -300,9 +293,10 @@ function createDeferred<T>(): Deferred<T> {
   }
 }
 
-function createWsSession(closed: Promise<unknown>): WebSocketSessionLike {
+function createWsSession(closed: Promise<WebSocketCloseInfo>): WebSocketSessionLike {
   return {
-    connection: {},
+    bufferedAmount: 0,
+    connection: { generation: 1 },
     closed,
     receive: emptyAsyncIterable(),
     state: 'open',

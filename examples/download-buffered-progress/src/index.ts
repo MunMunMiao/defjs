@@ -15,7 +15,7 @@ export const MAX_BUFFERED_TEMPLATE_BYTES = 64 * 1024
 export async function downloadCarrierTemplate(client: Client, id: string, onProgress: (loadedBytes: number) => void) {
   const limit = new AbortController()
   let limitFailure: RangeError | undefined
-  const [error, bytes] = await client.execute(getCarrierTemplate({ path: { id: encodeURIComponent(id) } }), {
+  const [error, bytes] = await client.execute(getCarrierTemplate({ path: { id } }), {
     signal: limit.signal,
     onDownloadProgress(progress) {
       onProgress(progress.loaded)

@@ -48,6 +48,8 @@ const second = createHttpInterceptor(async (request, next) => {
 createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
+لا يجوز لـ WebSocket interceptor استدعاء `next` أكثر من مرة. إذا فشلت chain بعد إنشاء session، يسوي Core تلك session غير المسلّمة قبل إعادة خطأ interceptor الأصلي. وإذا نجحت chain مع short-circuit session أخرى، يغلق Core الـ session المنشأة؛ ويحافظ wrapper على الارتباط بتمرير Promise `closed` الأصلية.
+
 ## انسخ الطلبات بأمان
 
 تعامل مع الطلب الوارد على أنه مملوك للسلسلة. أنشئ كائن `Headers` جديدًا قبل تعديل headers:
@@ -106,6 +108,9 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
+    get bufferedAmount() {
+      return session.bufferedAmount
+    },
     get connection() {
       return session.connection
     },
@@ -255,7 +260,7 @@ const client = createClient(
 
 ## سلامة المراقبين وCallbacks
 
-تستطيع معترضات SSE وWebSocket ربط lifecycle observers بالمقابض المعادة. ألغِ اشتراك WebSocket listeners عند انتهاء مالكها. اجعل listeners وpredicates غير راميين؛ لا تعزل تطبيقات realtime الحالية كل فشل محتمل في listener أو reconnect predicate.
+تستطيع معترضات SSE وWebSocket ربط lifecycle observers بالمقابض المعادة. ألغِ اشتراك WebSocket listeners عند انتهاء مالكها. يعزل WebSocket فشل state listener عبر runtime-error observers، ويمرر فشل runtime-error observer إلى `reportError`، ويعامل رمي reconnect predicate كخطأ نهائي للجلسة.
 
 قد يرمي المعترض أو يرفض Promise. قد تطبّع وسيلة النقل عالية المستوى بعض الإخفاقات إلى `RequestError`، لكن لا ينبغي لكود المعترض الاعتماد على ضمان شامل بأن Promise لن تُرفض أبدًا.
 

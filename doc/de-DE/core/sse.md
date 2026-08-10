@@ -1,6 +1,6 @@
 ---
 title: SSE
-description: Definiere und dekodiere Server-Sent Events, behandle den Start, konsumiere die gemeinsame Eventwarteschlange, konfiguriere Reconnect und schließe eigene Streams.
+description: Definiere und dekodiere begrenzte Server-Sent Events, konfiguriere Reconnect und schließe eigene Streams.
 ---
 
 # SSE
@@ -11,6 +11,8 @@ description: Definiere und dekodiere Server-Sent Events, behandle den Start, kon
 import { defineEventStream, struct } from '@defjs/core'
 
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(
@@ -43,6 +45,8 @@ Ein `default`-Struct behandelt ansonsten nicht deklarierte Namen:
 
 ```typescript
 const events = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/events',
   events: {
     update: struct.json(struct.object({ version: struct.number() })),
@@ -59,6 +63,8 @@ Verwende `struct.request(...)` für Pfad-, Query- und Header-Abschnitte:
 
 ```typescript
 const roomEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/rooms/:roomId/events',
   input: struct.request({
     path: struct.object({ roomId: struct.string() }),
@@ -81,6 +87,8 @@ const [error, stream, startupOpen] = await client.execute(
   }),
 )
 ```
+
+Für die Ausführung von HTTP, SSE und WebSocket muss `timeout` eine positive sichere Ganzzahl im Bereich `1..2_147_483_647` sein; `0`, negative oder gebrochene Werte, `NaN`, `Infinity` und Werte oberhalb der Grenze liefern `REQUEST_VALIDATION_FAILED`, bevor eine Request-, Stream- oder Socket-Ressource erzeugt wird.
 
 SSE liefert:
 
@@ -148,7 +156,8 @@ Konfiguriere `onInvalidEvent` mit `withSSEOnInvalidEvent(...)` oder `withSSEOpti
 ```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message }) => {
+  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+    if (signal.aborted) return
     recordInvalidEvent({ eventName: message.event, reason })
   }),
 )
@@ -157,10 +166,11 @@ const client = createClient(
 Der Beobachter erhält:
 
 - `reason: 'missing-struct' | 'validation-failed'`;
-- rohe Werte für Event-`id`, Name, Datentext und optionalen Retry-Wert;
+- rohe Werte für Event-`id`, Name und Datentext;
 - bei Validierungsfehlern `cause`.
+- das `signal` des aktiven Versuchs.
 
-Das Event wird verworfen; ein späteres gültiges Event kann weiterhin zugestellt werden. Geworfene Fehler und abgelehnte Promises des Beobachters werden abgefangen. Ein asynchroner Beobachter wird jedoch vor der Verarbeitung späterer Nachrichten abgewartet. Halte ihn schnell. Prüfe und maskiere rohe `id`-, `data`- und `cause`-Werte, bevor du sie aufzeichnest.
+Das Event wird verworfen; ein späteres gültiges Event kann weiterhin zugestellt werden. Fehler und abgelehnte Promises des Beobachters sind isoliert, während Abort einen wartenden Beobachter über `signal` unterbricht. Halte ihn schnell und maskiere rohe `id`-, `data`- und `cause`-Werte.
 
 ## Reconnect
 
@@ -194,44 +204,26 @@ withSSEReconnect({
 })
 ```
 
-Der Transport sendet die letzte Event-ID bei späteren Versuchen als `Last-Event-ID`. Halte `shouldReconnect` frei von Exceptions. Für ein geworfenes Prädikat oder eine abgelehnte Promise ist derzeit nicht garantiert, dass jeder wartende Iterator und jeder Pfad von `stream.closed` beendet wird.
+Der Transport sendet die letzte Event-ID bei späteren Versuchen als `Last-Event-ID`. Wirft `shouldReconnect` oder lehnt es ab, endet Retry und der wartende Start oder Stream wird mit diesem Policy-Fehler beendet. Abort unterbricht ein wartendes Prädikat über das Signal des aktiven Versuchs.
 
 HTTP- oder Open-Validierungsfehler, schwerwiegende Fehler bei der Nachrichtenverarbeitung und normales EOF sind nicht dasselbe wie wiederholbare Netzwerk- oder Lesefehler. Gehe nicht davon aus, dass jeder endgültige Pfad einen Reconnect auslöst.
 
-## Die gemeinsame Arbeitswarteschlange
+## Endpunkteigene Limits
 
-Das asynchrone Iterable ist eine gemeinsam genutzte Arbeitswarteschlange für den logischen Stream. Es ist weder Subscription noch Broadcast oder Backpressure-Mechanismus.
+Ein Stream erlaubt genau einen Async-Iterator-Consumer. Ein zweiter Iterator löst einen Fehler aus; nach einem `break` muss weiterhin ausdrücklich `stream.close(...)` aufgerufen werden.
 
-Standardmäßig ist die Warteschlange unbegrenzt. Begrenze sie mit `withSSEQueue(...)` oder `withSSEOptions({ queue })`:
-
-```typescript
-withSSEQueue({
-  maxSize: 100,
-  overflow: 'drop-oldest',
-})
-```
-
-| Overflow      | Verhalten am Limit                                              |
-| ------------- | --------------------------------------------------------------- |
-| `drop-newest` | Verwirft das neu eintreffende Event.                            |
-| `drop-oldest` | Entfernt das älteste gepufferte Event und reiht das neue ein.   |
-| `error`       | Wirft einen Queue-Overflow-Fehler und beendet die Verarbeitung. |
-
-Mehrere Iteratoren konkurrieren um Werte; sie erhalten nicht jeweils eine Kopie. Das Verlassen einer `for await`-Schleife schließt den Transport nicht, weil der Iterator keine lebenszyklusbewusste `return()`-Implementierung hat. Rufe `stream.close(...)` ausdrücklich auf.
-
-Beim Schließen wird die Warteschlange als beendet markiert, bereits gepufferte Werte werden aber nicht verworfen. Ein Consumer kann diese Werte noch leeren, bevor die nächste Iteration `done: true` meldet.
-
-### Limit des Parser-Puffers
-
-Eventwarteschlange und Parser-Puffer sind getrennt. Setze über `withSSEOptions(...)` einen positiven Wert für `maxBufferSize`, um die Bytes einer unvollständigen SSE-Zeile zu begrenzen:
+Jede Definition benötigt positive sichere Ganzzahlen für `maxBufferSize` und `maxQueueSize`. Das Buffer-Limit gilt je SSE-Zeile und für die Daten des aktuellen Events; das Queue-Limit begrenzt geparste, wartende Events. Ein Queue-Overflow ist fatal und verwirft niemals still ein Event.
 
 ```typescript
-withSSEOptions({
+const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.json(notificationStruct) },
 })
 ```
 
-Wird dieses Limit nach dem Start überschritten, lehnt der Iterator ab und der Stream schließt mit `code: 'error'`. Ohne Angabe bleibt dieser Parser-Puffer unbegrenzt.
+Bei normalem EOF können gepufferte Events geleert werden. Ein fataler Parser-, Transform- oder Overflow-Fehler leert den Buffer, bricht den aktiven Body ab, lehnt die Iteration ab und beendet `stream.closed` mit `code: 'error'`.
 
 ## Endgültiges Schließen
 

@@ -50,6 +50,12 @@ describe('web socket build helpers', () => {
     )
   })
 
+  test('should encode each raw path value exactly once in the final WebSocket URL', () => {
+    expect(
+      createWebSocketUrl('https://api.example.com/v1', '/rooms/:roomId', { roomId: 'a/b ?#%猫' }, undefined, (params) => params.toString()),
+    ).toBe('wss://api.example.com/v1/rooms/a%2Fb%20%3F%23%25%E7%8C%AB')
+  })
+
   test('should convert http to ws and https to wss', () => {
     expect(createWebSocketUrl('http://localhost', '/ws', undefined, undefined, (p) => p.toString())).toBe('ws://localhost/ws')
     expect(createWebSocketUrl('https://localhost', '/ws', undefined, undefined, (p) => p.toString())).toBe('wss://localhost/ws')

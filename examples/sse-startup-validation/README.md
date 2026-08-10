@@ -12,7 +12,7 @@ The local fulfillment fixture returns two responses for `GET https://fulfillment
 
 ## Approach
 
-Disable automatic startup retry, execute the same stream command against the wrong and correct media types, and transfer iterator ownership only for the successfully validated SSE response.
+Enable two bounded retries, execute the same stream command against the wrong and correct media types, and assert that the invalid media type remains fatal after one request. Transfer iterator ownership only for the successfully validated SSE response.
 
 ## Source map
 
@@ -26,20 +26,21 @@ From the repository root, with workspace dependencies installed:
 pnpm --silent --filter @defjs/example-sse-startup-validation start
 ```
 
-The command is local and offline. Reconnect is disabled so each fixture response is observed once.
+The command is local and offline. Reconnect allows two retries, but fatal startup validation still consumes the invalid fixture response only once.
 
 ## Expected result
 
 ```text
-{"order":{"orderId":"order-741","state":"packed"},"rejectedStartup":"RESPONSE_VALIDATION_FAILED"}
+{"order":{"orderId":"order-741","state":"packed"},"rejectedStartup":"RESPONSE_VALIDATION_FAILED","requests":2}
 ```
 
-The first field comes from the valid event stream. `rejectedStartup` shows that status `200` alone did not transfer stream ownership.
+The first field comes from the valid event stream. `rejectedStartup` shows that status `200` alone did not transfer stream ownership. Two total requests mean one rejected startup and one later successful execution; the runner fails if the rejected startup consumes more than one.
 
 ## Key points
 
 - HTTP success and SSE media-type validity are separate startup conditions.
 - Failed startup returns an error tuple and no stream handle to clean up.
+- Fatal startup validation does not reconnect even when bounded retry is enabled.
 - The `order-status` case returns its Struct-derived packed-order payload while the opened branch owns cleanup.
 
 ## Production notes

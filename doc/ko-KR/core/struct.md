@@ -1,11 +1,11 @@
 ---
 title: Struct
-description: 구조적 디코딩, 제로 값, partial 객체 입력, alias, StructError 처리를 설명합니다.
+description: 엄격한 구조 디코딩, 필수·선택 입력, alias, StructError 처리를 설명합니다.
 ---
 
 # Struct
 
-Struct는 구조적 디코딩과 wire 형식 인코딩을 설명합니다. 일부 제로 값 동작은 Go에서 영감을 받았지만 Go의 `encoding/json` 의미 전체를 구현한 것은 아닙니다.
+Struct는 엄격한 구조 디코딩과 wire 형식 인코딩을 설명합니다. 필수 값이 누락되거나 값이 유효하지 않으면 기본값을 만들지 않고 실패합니다.
 
 root entry에서 `struct` facade와 `Infer<T>`를 사용하세요.
 
@@ -47,7 +47,7 @@ struct.discriminatedUnion('kind', [
 ])
 ```
 
-`struct.any()`와 `struct.unknown()`은 제한 없이 값을 받습니다. 바이너리 constructor로는 `struct.blob()`, `struct.file()`, `struct.arrayBuffer()`가 있습니다.
+`struct.any()`와 `struct.unknown()`은 `null`과 `undefined`를 제외한 모든 값을 받으며, 두 값을 허용할 때도 같은 modifier를 사용합니다. 바이너리 constructor로는 `struct.blob()`, `struct.file()`, `struct.arrayBuffer()`가 있습니다.
 
 모든 Struct는 다음 modifier를 지원합니다.
 
@@ -58,57 +58,54 @@ struct.string().nullish()
 struct.string().alias('wire_name')
 ```
 
-## 제로 값
+## 엄격한 파싱
 
-Struct가 optional이 아니라면 누락되거나 `undefined`인 값은 제로 값으로 디코딩됩니다. nullable이 아닌 `null`도 같은 제로 값 경로를 따릅니다. nullable Struct는 누락, `undefined`, `null`을 `null`로 디코딩합니다.
-
-주요 제로 값은 다음과 같습니다.
-
-| Struct                        | 제로 값                            |
-| ----------------------------- | ---------------------------------- |
-| `string`                      | `''`                               |
-| `number`                      | `0`                                |
-| `boolean`                     | `false`                            |
-| `bigint`                      | `0n`                               |
-| `date`                        | `new Date(0)`                      |
-| array                         | `[]`                               |
-| object                        | 각 필드에 제로 값이 들어 있는 객체 |
-| tuple                         | 각 항목에 제로 값이 들어 있는 튜플 |
-| enum                          | 처음 선언한 값                     |
-| literal                       | 선언한 literal                     |
-| `blob`, `file`, `arrayBuffer` | 대응하는 빈 값                     |
-| `any`, `unknown`              | `undefined`                        |
-
-객체 안에서 `.optional()`만 지정한 필드가 누락되면 디코딩된 출력에서 생략됩니다. `.nullish()`는 optional이면서 nullable이고, 누락된 값에는 nullable 처리가 우선하므로 현재 `null`로 디코딩됩니다.
+커맨드 밖에서 디코딩하려면 `struct.parse(schema, input)`를 사용하세요. 고정된 error-first 튜플을 반환합니다.
 
 ```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
   biography: struct.string().null(),
+  note: struct.string().nullish(),
 })
 
-// Decoding {} produces an object equivalent to:
-// { name: '', biography: null }
+const [error, profile] = struct.parse(Profile, input)
+
+if (error) {
+  // profile is undefined
+  return
+}
 ```
-
-알 수 없는 객체 key는 버립니다. parse한 object와 record 출력은 null prototype을 사용합니다. `Object.prototype` method에 의존하는 코드는 `Object.keys`, `Object.entries`를 사용하거나 의도적으로 일반 객체에 복사해야 합니다.
-
-## Partial 입력은 의도된 동작입니다
-
-디코딩된 출력 property가 존재하더라도 TypeScript 경계에서는 객체 입력 property가 선택 사항입니다. `struct.request(...)`의 request section도 선택 사항입니다.
 
 ```typescript
-const Point = struct.object({
-  x: struct.number(),
-  y: struct.number(),
-})
-
-// A command using Point as input accepts {}.
-// Structural decoding produces { x: 0, y: 0 }.
+type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
 ```
 
-이 필드를 필수 필드라고 설명하지 마세요. Struct는 애플리케이션 수준의 필수 입력, 인가, 범위, 금액, 형식 또는 상태 전이 검증을 제공하지 않습니다. 공개 API에는 refine/range/format DSL도 없습니다.
+모든 modifier에는 같은 규칙이 적용됩니다. 누락 값과 `undefined`는 `.optional()` 또는 `.nullish()`에서만, 명시적 `null`은 `.null()` 또는 `.nullish()`에서만 허용됩니다. `.null()`은 값을 optional로 만들지 않습니다.
+
+누락된 optional 및 nullish 객체 필드는 출력에서 생략되고, 최상위에서는 `undefined`로 디코딩됩니다. 알 수 없는 key는 버리며, 디코딩한 object와 record 출력은 null prototype을 사용합니다.
+
+## 필수 Object 및 Request 입력
+
+Struct가 optional 또는 nullish가 아니면 객체 property는 TypeScript와 런타임 모두에서 필수입니다. `struct.request(...)`에 선언한 각 section도 필수이며, 선언하지 않은 section은 입력 타입에 나타나지 않습니다.
+
+```typescript
+const Input = struct.request({
+  path: struct.object({ id: struct.string() }),
+  query: struct.object({ page: struct.number().optional() }),
+})
+
+// { path: { id: string }; query: { page?: number } }
+```
+
+`query`를 생략하면 오류이고 `query: {}`는 유효합니다. 필수 필드 누락, 명시적 `undefined`, 금지된 `null`, 잘못된 런타임 타입은 부분 값을 반환하지 않고 전체 파싱을 실패시킵니다.
+
+복합 Struct는 첫 번째로 확정된 issue에서 중단합니다. 튜플 입력 길이는 선언과 정확히 같아야 합니다. `struct.or(...)`는 계속 순서대로 대안을 시도하고 `struct.discriminatedUnion(...)`은 선언된 분기를 선택합니다.
+
+discriminator 필드가 alias를 사용하면 `struct.discriminatedUnion(...)`은 option 선언 순서에 따라 실제로 존재하는 첫 wire discriminator를 읽습니다. 분기를 선택한 뒤에는 이후 option의 alias를 읽지 않습니다.
+
+Struct는 선언한 구조만 강제하며 애플리케이션 인가, 범위, 금액, 형식, 상태 전이 규칙은 검증하지 않습니다. 공개 refine/range/format DSL도 없습니다.
 
 `struct.number()`는 양수와 음수 `Infinity`를 허용하고 JavaScript number 중 `NaN`만 제외합니다. 커맨드를 만들기 전에 애플리케이션 코드에서 finite, range, domain 검사를 적용하세요. `build`는 호출자 런타임 값이 아닌 스키마에 결합된 프로젝션을 받으므로 이런 검사를 `build`에 넣지 마세요.
 
@@ -203,4 +200,4 @@ setErrorMap((issue) => {
 
 - [커맨드](/ko-KR/core/commands)에서는 Struct 필드를 요청과 메시지에 매핑합니다.
 - [오류](/ko-KR/core/errors)에서는 Struct 실패가 실행 튜플에 나타나는 방식을 설명합니다.
-- [HTTP](/ko-KR/core/http)에서는 응답 디코딩과 현재 malformed JSON 제한을 설명합니다.
+- [HTTP](/ko-KR/core/http)에서는 응답 디코딩과 표현 오류를 설명합니다.

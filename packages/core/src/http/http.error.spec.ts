@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, inject, test } from 'vitest'
-import { createClient, withEndpoint, withInterceptors } from '../client'
+import { beforeEach, describe, expect, inject, test, vi } from 'vitest'
+import { createClient, withEndpoint, withHTTPHandle, withInterceptors } from '../client'
 import type { Client } from '../client'
 import { ERR_ABORTED } from '../error'
 import { createHttpInterceptor } from '../interceptor'
+import type { HttpResponse } from '../internal/http_response'
 import { makeResponse } from '../internal/http_response'
 import { struct } from '../struct'
 import { defineRequest } from './index'
+import type { HttpExecuteOptions } from './http'
 
 describe('request http runtime errors', () => {
   let client: Client
@@ -31,6 +33,7 @@ describe('request http runtime errors', () => {
     expect(result).toBeUndefined()
     expect(response?.ok).toBe(false)
     expect(response?.status).toBe(404)
+    expect(response?.error).toBeUndefined()
     expect(error?.kind).toBe('http')
 
     if (error?.kind !== 'http') {
@@ -69,6 +72,38 @@ describe('request http runtime errors', () => {
     expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
   })
 
+  test('should stop before build and transport when a declared request section is missing', async () => {
+    let buildCalls = 0
+    let transportCalls = 0
+    const guardedClient = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () => {
+          transportCalls += 1
+          return makeResponse({ status: 200 })
+        }),
+      ),
+    )
+    const useRequest = defineRequest({
+      build() {
+        buildCalls += 1
+      },
+      input: struct.request({
+        query: struct.object({ page: struct.number().optional() }),
+      }),
+      method: 'GET',
+      path: '/search',
+    })
+
+    const [error, result, response] = await guardedClient.execute(useRequest({} as never))
+
+    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+    expect(buildCalls).toBe(0)
+    expect(transportCalls).toBe(0)
+  })
+
   test('should return response validation failures as definition errors', async () => {
     const useBadResponse = defineRequest({
       method: 'GET',
@@ -91,6 +126,51 @@ describe('request http runtime errors', () => {
     }
 
     expect(error.code).toBe('RESPONSE_VALIDATION_FAILED')
+  })
+
+  test.each([
+    { path: '/text', status: 200 },
+    { path: '/json/malformed-error', status: 500 },
+  ])('should stop on a declared response representation error for status $status', async ({ path, status }) => {
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: {
+        200: struct.object({ id: struct.number() }),
+        500: struct.object({ code: struct.string() }),
+      },
+      path,
+    })
+
+    const [error, result, response] = await client.execute(useRequest())
+
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(status)
+    expect(response?.error).toBeInstanceOf(SyntaxError)
+    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('RESPONSE_VALIDATION_FAILED')
+    if (error?.kind !== 'definition') {
+      throw new Error('Expected definition error')
+    }
+    expect(error.cause).toBe(response?.error)
+    expect(error && 'data' in error).toBe(false)
+  })
+
+  test('should prefer undeclared status over a response representation error', async () => {
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: { 200: struct.null() },
+      path: '/json/malformed-error',
+    })
+
+    const [error, result, response] = await client.execute(useRequest())
+
+    expect(result).toBeUndefined()
+    expect(response?.error).toBeInstanceOf(SyntaxError)
+    expect(error?.code).toBe('UNDECLARED_STATUS')
+    if (error?.kind !== 'definition') {
+      throw new Error('Expected definition error')
+    }
+    expect(error.cause).not.toBe(response?.error)
   })
 
   test('should return undeclared status failures as definition errors', async () => {
@@ -166,25 +246,154 @@ describe('request http runtime errors', () => {
     expect(error.code).toBe('NETWORK_ERROR')
   })
 
-  test('should return aborted error when signal is already aborted', async () => {
+  test.each([
+    ['abort', 'ABORTED'],
+    ['timeout', 'TIMEOUT'],
+  ] as const)('should cancel a hanging interceptor on %s', async (mode, expectedCode) => {
     const controller = new AbortController()
-    controller.abort(ERR_ABORTED)
-
-    const useRequest = defineRequest({
-      method: 'GET',
-      output: {
-        200: struct.null(),
-      },
-      path: '/null',
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
     })
+    const guardedClient = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () => {
+          markStarted()
+          return await new Promise(() => undefined)
+        }),
+      ),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/hanging-interceptor' })
+    const pending = guardedClient.execute(useRequest(), mode === 'abort' ? { signal: controller.signal } : { timeout: 1 })
 
-    const [error, result, response] = await client.execute(useRequest(), { signal: controller.signal })
+    await started
+    if (mode === 'abort') {
+      controller.abort('caller stopped')
+    }
+    const result = await Promise.race([pending, new Promise<false>((resolve) => setTimeout(() => resolve(false), 100))])
 
+    expect(result).not.toBe(false)
+    if (result === false) {
+      throw new Error('Expected interceptor cancellation to settle')
+    }
+    expect(result[0]).toMatchObject({ code: expectedCode, kind: 'transport' })
+  })
+
+  test('should prefer cancellation when an interceptor aborts and returns a response', async () => {
+    const controller = new AbortController()
+    const guardedClient = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () => {
+          controller.abort('caller stopped')
+          return makeResponse({ status: 200 })
+        }),
+      ),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/cached' })
+
+    const [error, result, response] = await guardedClient.execute(useRequest(), { signal: controller.signal })
+
+    expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
-    expect(error?.kind).toBe('transport')
-    expect(error?.code).toBe('ABORTED')
   })
+
+  test.each(['return', 'throw'] as const)('should abort a hidden transport when an interceptor chain settles by %s', async (mode) => {
+    const interceptorError = new Error('interceptor failed')
+    let hiddenResponse: Promise<HttpResponse<unknown>> | undefined
+    let transportSignal: AbortSignal | undefined
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    const fetchMock = vi.fn(async (request: Request) => {
+      transportSignal = request.signal
+      markStarted()
+      return await new Promise<Response>(() => undefined)
+    }) as unknown as typeof fetch
+    const guardedClient = createClient(
+      withEndpoint('https://example.com'),
+      withHTTPHandle(fetchMock),
+      withInterceptors(
+        createHttpInterceptor(async (request, next) => {
+          hiddenResponse = next(request)
+          await started
+          if (mode === 'throw') {
+            throw interceptorError
+          }
+          return makeResponse({ status: 204 })
+        }),
+      ),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/hidden' })
+
+    const [error, result, response] = await guardedClient.execute(useRequest())
+
+    expect(transportSignal?.aborted).toBe(true)
+    await expect(hiddenResponse).resolves.toMatchObject({ error: ERR_ABORTED, status: 0 })
+    if (mode === 'throw') {
+      expect(error).toMatchObject({ cause: interceptorError, code: 'NETWORK_ERROR' })
+      expect(response).toBeUndefined()
+    } else {
+      expect(error).toBeNull()
+      expect(response?.status).toBe(204)
+    }
+    expect(result).toBeUndefined()
+  })
+
+  test('should reject interceptor next calls after the HTTP chain settles', async () => {
+    let lateResponse: Promise<HttpResponse<unknown>> | undefined
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
+    const guardedClient = createClient(
+      withEndpoint('https://example.com'),
+      withHTTPHandle(fetchMock as unknown as typeof fetch),
+      withInterceptors(
+        createHttpInterceptor(async (request, next) => {
+          setTimeout(() => {
+            lateResponse = next(request)
+            void lateResponse.catch(() => undefined)
+          }, 0)
+          return makeResponse({ status: 204 })
+        }),
+      ),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/cached' })
+
+    const [error] = await guardedClient.execute(useRequest())
+    await vi.waitFor(() => expect(lateResponse).toBeDefined())
+
+    expect(error).toBeNull()
+    await expect(lateResponse).rejects.toThrow('HTTP interceptor next() cannot be called after the chain has settled')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test.each([ERR_ABORTED, 'caller stopped', new Error('Request timed out')])(
+    'should return aborted error when signal is already aborted with %s',
+    async (reason) => {
+      const controller = new AbortController()
+      controller.abort(reason)
+      const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
+      const guardedClient = createClient(withEndpoint('https://example.com'), withHTTPHandle(fetchMock as unknown as typeof fetch))
+
+      const useRequest = defineRequest({
+        method: 'GET',
+        output: {
+          200: struct.null(),
+        },
+        path: '/null',
+      })
+
+      const [error, result, response] = await guardedClient.execute(useRequest(), { signal: controller.signal })
+
+      expect(result).toBeUndefined()
+      expect(response).toBeUndefined()
+      expect(error?.kind).toBe('transport')
+      expect(error?.code).toBe('ABORTED')
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
 
   test('should reject with.abort and with.timeout before parsing HTTP input', async () => {
     const controller = new AbortController()
@@ -231,6 +440,68 @@ describe('request http runtime errors', () => {
     expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
   })
 
+  test.each([-1, 0, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
+    'should reject invalid timeout %s before HTTP transport',
+    async (timeout) => {
+      const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
+      const guardedClient = createClient(withEndpoint('https://example.com'), withHTTPHandle(fetchMock as unknown as typeof fetch))
+      const useRequest = defineRequest({ method: 'GET', path: '/timeout' })
+
+      const [error, result, response] = await guardedClient.execute(useRequest(), { timeout })
+
+      expect(error).toMatchObject({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+      expect(result).toBeUndefined()
+      expect(response).toBeUndefined()
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  test('should prefer invalid timeout over an already aborted HTTP signal alias', async () => {
+    const controller = new AbortController()
+    controller.abort('caller stopped')
+    const useRequest = defineRequest({ method: 'GET', path: '/timeout' })
+
+    const [error] = await client.execute(useRequest(), { signal: controller.signal, timeout: 0 })
+
+    expect(error).toMatchObject({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+  })
+
+  test('should snapshot HTTP cancellation options before asynchronous work', async () => {
+    let timeoutReads = 0
+    const options = {
+      get timeout() {
+        timeoutReads += 1
+        return timeoutReads === 1 ? undefined : Number.POSITIVE_INFINITY
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
+    const guardedClient = createClient(withEndpoint('https://example.com'), withHTTPHandle(fetchMock as unknown as typeof fetch))
+    const useRequest = defineRequest({ method: 'GET', path: '/snapshot' })
+
+    const [error, result, response] = await guardedClient.execute(useRequest(), options as HttpExecuteOptions)
+
+    expect(error).toBeNull()
+    expect(result).toBeUndefined()
+    expect(response?.status).toBe(204)
+    expect(timeoutReads).toBe(1)
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  test('should return a definition error when reading HTTP cancellation options throws', async () => {
+    const options = Object.defineProperty({}, 'abort', {
+      get() {
+        throw new Error('abort getter failed')
+      },
+    })
+    const useRequest = defineRequest({ method: 'GET', path: '/snapshot' })
+
+    const [error, result, response] = await client.execute(useRequest(), options as HttpExecuteOptions)
+
+    expect(error).toMatchObject({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+  })
+
   test('should return ABORTED when signal is aborted with explicit undefined reason', async () => {
     const signal = { aborted: true, reason: undefined } as AbortSignal
 
@@ -248,6 +519,44 @@ describe('request http runtime errors', () => {
     expect(response).toBeUndefined()
     expect(error?.kind).toBe('transport')
     expect(error?.code).toBe('ABORTED')
+  })
+
+  test('should classify a status-zero interceptor response as a transport error', async () => {
+    const guardedClient = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(createHttpInterceptor(async () => makeResponse({ error: ERR_ABORTED }))),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/transport-error' })
+
+    const [error, result, response] = await guardedClient.execute(useRequest())
+
+    expect(error).toMatchObject({ cause: ERR_ABORTED, code: 'ABORTED', kind: 'transport' })
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+  })
+
+  test('should classify an async download observer rejection as a transport error', async () => {
+    const observerError = new Error('download observer failed')
+    const guardedClient = createClient(
+      withEndpoint('https://example.com'),
+      withHTTPHandle(async () => new Response('ok', { headers: { 'content-type': 'text/plain' } })),
+    )
+    const useRequest = defineRequest({
+      method: 'GET',
+      output: { 200: struct.string() },
+      path: '/download',
+      responseType: 'text',
+    })
+
+    const [error, result, response] = await guardedClient.execute(useRequest(), {
+      async onDownloadProgress() {
+        throw observerError
+      },
+    })
+
+    expect(error).toMatchObject({ cause: observerError, code: 'NETWORK_ERROR', kind: 'transport' })
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
   })
 
   test('should use HTTP status message when response.error is undefined without output', async () => {
@@ -399,7 +708,7 @@ describe('request http runtime errors', () => {
     expect(error?.code).toBe('ABORTED')
   })
 
-  test('should use string error for non-ok response without output', async () => {
+  test('should ignore a representation error when output is not declared', async () => {
     const client = createClient(
       withEndpoint('https://example.com'),
       withInterceptors(
@@ -426,10 +735,10 @@ describe('request http runtime errors', () => {
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
     expect(error?.kind).toBe('http')
-    expect(error?.message).toBe('custom string error')
+    expect(error?.message).toBe('Http failure response for https://example.com/test: 500 - Server Error')
   })
 
-  test('should use string error for non-ok response with output struct', async () => {
+  test('should classify an explicit response error before parsing a declared output struct', async () => {
     const client = createClient(
       withEndpoint('https://example.com'),
       withInterceptors(
@@ -458,11 +767,14 @@ describe('request http runtime errors', () => {
 
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
-    expect(error?.kind).toBe('http')
+    expect(error?.kind).toBe('definition')
     expect(error?.message).toBe('custom string error')
-    if (error?.kind === 'http') {
-      expect(error.data).toEqual({ code: 'ERR' })
+    expect(error?.code).toBe('RESPONSE_VALIDATION_FAILED')
+    if (error?.kind !== 'definition') {
+      throw new Error('Expected definition error')
     }
+    expect(error.cause).toBe('custom string error')
+    expect(error && 'data' in error).toBe(false)
   })
 
   test('should return success for ok response without output', async () => {

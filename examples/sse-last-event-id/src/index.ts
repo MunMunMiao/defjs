@@ -2,6 +2,8 @@ import { createClient, defineEventStream, struct, withEndpoint, withSSEHandle, w
 
 // Step 1: Type shipment status events and their path before cursor-backed replay.
 export const shipmentEvents = defineEventStream({
+  maxBufferSize: 1024,
+  maxQueueSize: 8,
   path: '/v1/shipments/:shipmentId/events',
   input: struct.request({ path: struct.object({ shipmentId: struct.string() }) }),
   events: {
@@ -24,7 +26,7 @@ function createShipmentClient(handle: typeof fetch) {
 
 // Step 3: Own the logical feed across replay and settle it after collecting ordered states.
 export async function followShipment(client: ReturnType<typeof createShipmentClient>, shipmentId: string): Promise<string[]> {
-  const [error, stream] = await client.execute(shipmentEvents({ path: { shipmentId: encodeURIComponent(shipmentId) } }))
+  const [error, stream] = await client.execute(shipmentEvents({ path: { shipmentId } }))
   if (error) throw error
 
   const states: string[] = []

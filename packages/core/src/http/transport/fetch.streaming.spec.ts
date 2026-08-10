@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
+import { ERR_ABORTED } from '../../error'
 import type { HttpRequest } from '../../http'
 import {
   __resetStreamingRequestBodySupportForTests,
   createFetchRequest,
+  createFetchRequestInit,
   ERR_STREAMING_REQUEST_UNSUPPORTED,
   fetchHandler,
   supportsStreamingRequestBody,
@@ -44,6 +46,7 @@ describe('Fetch handler streaming', () => {
   })
 
   test('should call uploadProgress for ReadableStream body', async () => {
+    const controller = new AbortController()
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new Uint8Array([1, 2]))
@@ -90,6 +93,7 @@ describe('Fetch handler streaming', () => {
 
     try {
       const response = await fetchHandler({
+        abort: controller.signal,
         body: stream,
         endpoint: '/upload',
         baseEndpoint: 'https://example.com',
@@ -111,8 +115,308 @@ describe('Fetch handler streaming', () => {
       expect(progressEvents.every((event) => event.lengthComputable === false && event.total === 0)).toBe(true)
       expect(progressEvents.map((event) => event.loaded)).toEqual([2, 5])
       expect(progressEvents.at(-1)?.total).toBe(0)
+      expect(stream.locked).toBe(false)
     } finally {
       vi.unstubAllGlobals()
     }
   })
+
+  test('should preserve an async upload observer error and unlock without waiting for cancellation', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const observerError = new Error('observer failed')
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const stream = new ReadableStream<Uint8Array>({
+      cancel,
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]))
+      },
+    })
+    const init = createFetchRequestInit({
+      baseEndpoint: 'https://example.com',
+      body: stream,
+      endpoint: '/upload',
+      method: 'POST',
+      async uploadProgress() {
+        await Promise.resolve()
+        throw observerError
+      },
+    })
+    const reader = (init.body as ReadableStream<Uint8Array>).getReader()
+
+    await expect(settleWithin(reader.read())).rejects.toBe(observerError)
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(observerError)
+    expect(stream.locked).toBe(false)
+  })
+
+  test('should unlock an upload body without waiting for consumer cancellation', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const stream = new ReadableStream<Uint8Array>({ cancel })
+    const init = createFetchRequestInit({
+      baseEndpoint: 'https://example.com',
+      body: stream,
+      endpoint: '/upload',
+      method: 'POST',
+      uploadProgress: vi.fn(),
+    })
+    const reader = (init.body as ReadableStream<Uint8Array>).getReader()
+
+    await expect(settleWithin(reader.cancel('consumer canceled'))).resolves.toBeUndefined()
+    expect(cancel).toHaveBeenCalledExactlyOnceWith('consumer canceled')
+    expect(stream.locked).toBe(false)
+  })
+
+  test('should clean up a wrapped upload body when Request construction fails', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const stream = new ReadableStream<Uint8Array>({ cancel })
+    const fetchMock = vi.fn<typeof fetch>()
+    const response = await settleWithin(
+      fetchHandler(
+        {
+          baseEndpoint: 'https://example.com',
+          body: stream,
+          endpoint: '/upload',
+          method: 'GET',
+          uploadProgress: vi.fn(),
+        },
+        fetchMock,
+      ),
+    )
+
+    expect(response.error).toBeInstanceOf(TypeError)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(response.error)
+    expect(stream.locked).toBe(false)
+  })
+
+  test('should clean up a wrapped upload body when fetch rejects', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const networkError = new Error('network failed')
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const stream = new ReadableStream<Uint8Array>({ cancel })
+    const fetchMock = vi.fn(async () => {
+      throw networkError
+    })
+    const response = await settleWithin(
+      fetchHandler(
+        {
+          baseEndpoint: 'https://example.com',
+          body: stream,
+          endpoint: '/upload',
+          method: 'POST',
+          uploadProgress: vi.fn(),
+        },
+        fetchMock,
+      ),
+    )
+
+    expect(response.error).toBe(networkError)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(networkError)
+    expect(stream.locked).toBe(false)
+  })
+
+  test('should clean up an upload body for a pre-aborted signal', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const controller = new AbortController()
+    controller.abort()
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const stream = new ReadableStream<Uint8Array>({ cancel })
+    const fetchMock = vi.fn<typeof fetch>()
+    const response = await settleWithin(
+      fetchHandler(
+        {
+          abort: controller.signal,
+          baseEndpoint: 'https://example.com',
+          body: stream,
+          endpoint: '/upload',
+          method: 'POST',
+          uploadProgress: vi.fn(),
+        },
+        fetchMock,
+      ),
+    )
+
+    expect(response.error).toBe(ERR_ABORTED)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
+    expect(stream.locked).toBe(false)
+  })
+
+  test('should unlock an upload body when a custom fetch ignores abort', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const controller = new AbortController()
+    const cancel = vi.fn()
+    const stream = new ReadableStream<Uint8Array>({ cancel })
+    const fetchMock = vi.fn(() => new Promise<Response>(() => undefined))
+    const pending = fetchHandler(
+      {
+        abort: controller.signal,
+        baseEndpoint: 'https://example.com',
+        body: stream,
+        endpoint: '/upload',
+        method: 'POST',
+        uploadProgress: vi.fn(),
+      },
+      fetchMock as unknown as typeof fetch,
+    )
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    controller.abort()
+
+    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
+    expect(stream.locked).toBe(false)
+  })
+
+  test('should unlock an upload body when a custom fetch consumes it and ignores abort', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const controller = new AbortController()
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    let startPull!: () => void
+    const pullStarted = new Promise<void>((resolve) => {
+      startPull = resolve
+    })
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        cancel,
+        pull() {
+          startPull()
+          return new Promise<void>(() => undefined)
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    let startConsuming!: () => void
+    const consumingStarted = new Promise<void>((resolve) => {
+      startConsuming = resolve
+    })
+    const fetchMock = vi.fn(async (request: Request) => {
+      const consuming = request.arrayBuffer()
+      startConsuming()
+      await consuming
+      return new Response()
+    })
+    const pending = fetchHandler(
+      {
+        abort: controller.signal,
+        baseEndpoint: 'https://example.com',
+        body: stream,
+        endpoint: '/upload',
+        method: 'POST',
+        uploadProgress: vi.fn(),
+      },
+      fetchMock as unknown as typeof fetch,
+    )
+
+    await consumingStarted
+    await pullStarted
+    controller.abort()
+
+    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
+    expect(stream.locked).toBe(false)
+  })
+
+  test.each([false, true])('should clean up once when upload progress cancels its consumer (throw: %s)', async (throwAfterCancel) => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const stream = new ReadableStream<Uint8Array>({
+      cancel,
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]))
+      },
+    })
+    const observerError = new Error('observer failed after cancel')
+    let reader: ReadableStreamDefaultReader<Uint8Array>
+    const init = createFetchRequestInit({
+      baseEndpoint: 'https://example.com',
+      body: stream,
+      endpoint: '/upload',
+      method: 'POST',
+      uploadProgress() {
+        void reader.cancel('observer canceled')
+        if (throwAfterCancel) {
+          throw observerError
+        }
+      },
+    })
+    reader = (init.body as ReadableStream<Uint8Array>).getReader()
+
+    await expect(settleWithin(reader.read())).resolves.toEqual({ done: true, value: undefined })
+    expect(cancel).toHaveBeenCalledExactlyOnceWith('observer canceled')
+    expect(stream.locked).toBe(false)
+  })
+
+  test('should preserve a fetch error when its request body is already locked', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const networkError = new Error('network failed')
+    const cancel = vi.fn()
+    const stream = new ReadableStream<Uint8Array>({ cancel })
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    const fetchMock = vi.fn(async (request: Request) => {
+      reader = request.body?.getReader()
+      throw networkError
+    })
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        body: stream,
+        endpoint: '/upload',
+        method: 'POST',
+        uploadProgress: vi.fn(),
+      },
+      fetchMock as unknown as typeof fetch,
+    )
+
+    expect(response.error).toBe(networkError)
+    expect(cancel).not.toHaveBeenCalled()
+    await expect(reader?.cancel(networkError)).resolves.toBeUndefined()
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(networkError)
+    expect(stream.locked).toBe(false)
+  })
 })
+
+function settleWithin<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('operation did not settle')), 100)
+    promise.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
+}

@@ -30,14 +30,14 @@ Das Objekt für `defineRequest` ist die Endpunktdefinition, `getUser` der Comman
 
 `defineRequest(...)` akzeptiert diese Felder:
 
-| Feld           | Bedeutung                                                                                 |
-| -------------- | ----------------------------------------------------------------------------------------- |
-| `method`       | String mit der HTTP-Methode.                                                              |
-| `path`         | Relativer Endpunktpfad mit optionalen Platzhaltern der Form `:name`.                      |
-| `input`        | Struct zur strukturellen Dekodierung der Command-Eingabe.                                 |
-| `build`        | Schemagebundene Projektion von Eingabefeldern auf Request-Bestandteile. Benötigt `input`. |
-| `output`       | Zuordnung von Status zu Struct für Response-Dekodierung und Ergebnisableitung.            |
-| `responseType` | Optionaler Response-Modus `json`, `text`, `blob` oder `arraybuffer`.                      |
+| Feld           | Bedeutung                                                                                                             |
+| -------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `method`       | String mit der HTTP-Methode.                                                                                          |
+| `path`         | Relativer Endpunktpfad mit optionalen Platzhaltern der Form `:name`.                                                  |
+| `input`        | Struct zur strukturellen Dekodierung der Command-Eingabe.                                                             |
+| `build`        | Schemagebundene Projektion von Eingabefeldern auf Request-Bestandteile. Benötigt `input`.                             |
+| `output`       | Zuordnung von Status zu Struct für Response-Dekodierung und Ergebnisableitung.                                        |
+| `responseType` | Optionaler Modus `json`, `text`, `blob` oder `arraybuffer`, nur mit deklariertem `output`; andernfalls nicht erlaubt. |
 
 Verwende `struct.request(...)`, wenn sich Command-Felder direkt auf Wire-Abschnitte abbilden lassen:
 
@@ -88,7 +88,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-Eingaben aus Objekt-Structs sind im TypeScript-Typsystem partiell. Jede Objekteigenschaft ist für den Aufrufer optional. Auch Request-Abschnitte sind optional. Die strukturelle Dekodierung füllt nicht optionale Ausgabefelder mit Zero Values. Deshalb macht keine dieser Formen das Builder-Argument verpflichtend.
+Wenn `input` deklariert ist, müssen Pflichtfelder des Objekts und jeder deklarierte Request-Abschnitt angegeben werden. Nur optional oder nullish markierte Felder dürfen fehlen. Abschnitte, die der Endpoint nicht verwendet, sollten nicht deklariert werden.
 
 ```typescript
 const search = defineRequest({
@@ -99,27 +99,12 @@ const search = defineRequest({
   }),
 })
 
-search() // Accepted. The decoded q value is ''.
 search({ query: { q: 'docs' } })
+// search() // TypeScript error: an argument is required.
+// search({ query: {} }) // TypeScript and runtime error: q is required.
 ```
 
-Verwende eine primitive oder Array-Eingabe, wenn der Builder ein Argument verlangen soll. Dieses Beispiel projiziert eine primitive Eingabe auf einen Pfadparameter:
-
-```typescript
-const getUserById = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.number(),
-  build(request, input) {
-    request.setPathParams({ id: input })
-  },
-})
-
-// getUserById() // TypeScript error: an argument is required.
-getUserById(42)
-```
-
-Dabei geht es um die Optionalität des Arguments, nicht um fachliche Validierung. Ein Aufrufer kann weiterhin alle Werte übergeben, die der Eingabetyp des Structs akzeptiert; fehlende Objektfelder erhalten Zero Values.
+Dies prüft strukturelle Anwesenheit und Typen, nicht fachliche Autorisierung, Wertebereiche, Beträge, Formate oder Zustandsübergänge.
 
 ## Automatischer Request-Aufbau
 
@@ -216,7 +201,7 @@ const arrayOutput = [
 
 Der HTTP-Erfolgstyp ist die Union der deklarierten 2xx-Bodies. `error.data` ist die Union der deklarierten Nicht-2xx-Bodies. Die Array-Form benötigt `as const`, damit Statusliterale und gruppierte readonly Arrays erhalten bleiben.
 
-Sobald `output` deklariert ist, braucht jeder zurückgegebene Status ein passendes Struct. Ein nicht zugeordneter 2xx- oder Nicht-2xx-Status erzeugt `UNDECLARED_STATUS`. Ohne `output` wird der Response-Body ignoriert und das Ergebnis ist `undefined`.
+Sobald `output` deklariert ist, braucht jeder zurückgegebene Status ein passendes Struct. Ein nicht zugeordneter 2xx- oder Nicht-2xx-Status erzeugt `UNDECLARED_STATUS`. Ohne `output` wird der Response-Body nicht gelesen oder dekodiert und nach bestem Bemühen abgebrochen; das Ergebnis ist `undefined`.
 
 ## SSE- und WebSocket-Definitionen
 
@@ -224,6 +209,8 @@ Sobald `output` deklariert ist, braucht jeder zurückgegebene Status ein passend
 
 ```typescript
 const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/notifications',
   events: {
     message: struct.json(struct.object({ text: struct.string() })),
@@ -236,6 +223,7 @@ const notifications = defineEventStream({
 
 ```typescript
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: {
     message: struct.object({ text: struct.string() }),
@@ -258,4 +246,4 @@ Der zentrale Paketeinstieg exportiert derzeit Transport-Command-Interfaces und L
 
 - [Client](/de-DE/core/client) behandelt Ausführungs-Overloads und Optionskomposition.
 - [HTTP](/de-DE/core/http) ist die Referenz für URLs, Kodierung, Responses und Abbruch.
-- [Struct](/de-DE/core/struct) erklärt strukturelle Dekodierung und Zero Values.
+- [Struct](/de-DE/core/struct) erklärt strikte strukturelle Dekodierung.

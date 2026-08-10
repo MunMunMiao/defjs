@@ -13,7 +13,7 @@ const [sseError, stream, startupOpen] = await client.execute(sseCommand)
 const [socketError, session, startupConnection] = await client.execute(socketCommand)
 ```
 
-- HTTP возвращает декодированные данные и обёртку Defjs `SettledResponse`.
+- HTTP возвращает декодированные данные и обёртку Defjs `HttpResponse`.
 - SSE возвращает логический хендл потока и снимок открытия при запуске.
 - WebSocket возвращает логический сеанс и снимок подключения при запуске.
 
@@ -44,7 +44,7 @@ interface HttpStatusError<TErrorData = unknown> {
   status: number
   message: string
   data: TErrorData
-  response: SettledResponseLike<unknown>
+  response: HttpResponse<unknown>
 }
 ```
 
@@ -75,7 +75,7 @@ interface DefinitionError {
   code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'UNDECLARED_STATUS'
   message: string
   cause?: unknown
-  response?: SettledResponseLike<unknown>
+  response?: HttpResponse<unknown>
 }
 ```
 
@@ -133,7 +133,9 @@ if (!error) {
 
 ## Доступность ответа
 
-`SettledResponseLike` и `SettledResponse` — обёртки Defjs, а не нативные объекты `Response`. Они предоставляют статус, текст статуса, заголовки, URL, тело, необязательную информацию об ошибке, а settled-обёртки — ещё и флаг `ok`. `ok` означает только статус из диапазона 2xx.
+`HttpResponse` — обёртка Defjs, а не нативный объект `Response`. Она предоставляет статус, текст статуса, заголовки, URL, тело, `error` и `ok`. `ok` означает только статус из диапазона 2xx. `error` предназначен для ошибок транспорта или представления тела; у обычного ответа не-2xx он пуст.
+
+Корректное объявленное тело не-2xx декодируется Struct и сохраняется с типом в `HttpStatusError.data`. Некорректное представление вместо этого создаёт `RESPONSE_VALIDATION_FAILED` с исходным исключением codec в `cause`, ответом, если он был получен, и без `data`.
 
 Для HTTP:
 

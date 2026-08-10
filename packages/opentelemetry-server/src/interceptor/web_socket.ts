@@ -1,5 +1,5 @@
 import type { HttpRequest, WebSocketSessionLike } from '@defjs/core'
-import { createWebSocketInterceptor } from '@defjs/core'
+import { createWebSocketInterceptor, ERR_ABORTED } from '@defjs/core'
 import type { Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
 import { context, trace } from '@opentelemetry/api'
 import { headersGetter, queryStringSetter } from '../propagation/carrier'
@@ -19,15 +19,15 @@ export interface WebSocketInterceptorOptions {
   metrics?: WebSocketClientMetrics
   requireParentSpan?: boolean
   queryPropagation?: boolean
-  requestHook?: (span: Span, req: HttpRequest) => void
-  responseHook?: (span: Span, session: WebSocketSessionLike) => void
+  requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
+  responseHook?: (span: Span, session: WebSocketSessionLike) => Promise<void> | void
 }
 
 export function createOpenTelemetryWebSocketInterceptor(
   options: WebSocketInterceptorOptions,
 ): ReturnType<typeof createWebSocketInterceptor> {
   return createWebSocketInterceptor(async (req, next) => {
-    const { tracer, propagator, metrics, requireParentSpan, queryPropagation = true, requestHook, responseHook } = options
+    const { tracer, propagator, metrics, requireParentSpan, queryPropagation = false, requestHook, responseHook } = options
 
     if (requireParentSpan && !trace.getActiveSpan()) {
       return next(req)
@@ -72,14 +72,19 @@ export function createOpenTelemetryWebSocketInterceptor(
       session.closed.then(
         (closeInfo: unknown) => {
           closeActiveConnection()
-          const closeCause = getCloseCause(closeInfo)
-          if (typeof closeCause !== 'undefined') {
-            addSpanEvent(span, 'websocket.error', createErrorMetricAttributes(closeCause))
+          const runtimeCloseInfo =
+            typeof closeInfo === 'object' && closeInfo !== null ? (closeInfo as { cause?: unknown; kind?: unknown }) : {}
+          const closeKind = runtimeCloseInfo.kind
+          const closeCause = runtimeCloseInfo.cause
+          const failed = typeof closeKind === 'string' ? closeKind !== 'closed' : typeof closeCause !== 'undefined'
+          if (failed) {
+            const error = typeof closeKind === 'string' ? (closeKind === 'error' ? closeCause : (closeCause ?? ERR_ABORTED)) : closeCause
+            addSpanEvent(span, 'websocket.error', createErrorMetricAttributes(error))
             metrics?.connectionDuration.record(
               durationSeconds(connectedAtMs),
-              createConnectionMetricAttributes(req, 'error', createErrorMetricAttributes(closeCause)),
+              createConnectionMetricAttributes(req, 'error', createErrorMetricAttributes(error)),
             )
-            setSpanError(span, closeCause)
+            setSpanError(span, error)
             return
           }
 
@@ -128,12 +133,4 @@ function appendInjectedQueryString(queryString: string | undefined, originalPara
     return injectedQueryString
   }
   return `${queryString}&${injectedQueryString}`
-}
-
-function getCloseCause(closeInfo: unknown): unknown {
-  if (typeof closeInfo !== 'object' || closeInfo === null || !('cause' in closeInfo)) {
-    return undefined
-  }
-
-  return (closeInfo as { cause?: unknown }).cause
 }

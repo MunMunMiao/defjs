@@ -574,6 +574,8 @@ const [error, data, response] = await getUserInfo({
 
 `timeout` 与 `abort` 互斥。`timeout` 是便捷超时入口；`abort` 接收外部 `AbortSignal`。如果需要组合外部取消和超时，请自行构造组合后的 `AbortSignal` 并只传 `abort`。
 
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
+
 ### 返回值
 
 HTTP 固定返回：
@@ -647,6 +649,8 @@ import { defineEventStream, struct } from '@defjs/core'
 
 const watchUserInfo = defineEventStream({
   path: '/user/:id/events',
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   input: struct.request({
     path: struct.object({
       id: struct.number(),
@@ -706,6 +710,8 @@ const [error, stream, open] = await watchUserInfo({
 
 `timeout` 与 `abort` 互斥。SSE 的 `fetch` 只在 client 的 `sse` 配置中设置；需要动态切换 fetch 时，创建或 clone 对应 client，然后通过 `.with({ client })` 切换。
 
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
+
 ### 返回值
 
 SSE 固定返回：
@@ -737,6 +743,8 @@ import { defineWebSocket, struct } from '@defjs/core'
 
 const chatSocket = defineWebSocket({
   path: '/ws/chat',
+  maxIncomingQueueSize: 100,
+  maxOutgoingQueueSize: 20,
   input: struct.request({
     query: struct.object({
       roomId: struct.string(),
@@ -781,7 +789,9 @@ const [error, socket, connection] = await chatSocket({
 }).with({
   client,
   protocols: ['json'],
-  beforeConnect: async () => {},
+  beforeConnect: async ({ attempt, signal }) => {
+    await refreshConnectionState({ attempt, signal })
+  },
   reconnect: {
     attempts: 1,
   },
@@ -791,9 +801,6 @@ const [error, socket, connection] = await chatSocket({
       type: 'ping',
     }),
   },
-  queue: {
-    maxSize: 100,
-  },
   timeout: 10_000,
 })
 ```
@@ -802,14 +809,15 @@ const [error, socket, connection] = await chatSocket({
 
 1. `client?: Client`
 2. `protocols?: readonly string[]`
-3. `beforeConnect?: () => void | Promise<void>`
+3. `beforeConnect?: (context: { attempt: number; signal: AbortSignal }) => void | Promise<void>`
 4. `reconnect?: WebSocketReconnectOptions`
 5. `heartbeat?: WebSocketHeartbeatOptions`
-6. `queue?: WebSocketQueueOptions`
-7. `timeout?: number`
-8. `abort?: AbortSignal`
+6. `timeout?: number`
+7. `abort?: AbortSignal`
 
 `timeout` 与 `abort` 互斥。需要组合多个取消来源时，请自行构造组合后的 `AbortSignal` 并只传 `abort`。
+
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
 
 ### 返回值
 
@@ -821,20 +829,23 @@ WebSocket 固定返回：
 
 其中：
 
-1. `connection` 包含 `url / protocol / extensions`
-2. `socket.receive` 是 `AsyncIterable`
-3. `socket.send(...)` 会按 outgoing struct 校验
-4. `socket.closed` 提供关闭信息
+1. `connection` 是首次物理连接的快照，包含 `generation / url / protocol / extensions`
+2. `socket.connection` 是最新物理连接的 live snapshot；`socket.bufferedAmount` 是当前 native backlog
+3. `socket.receive` 是只能由一个 iterator 消费的有界 `AsyncIterable`
+4. `socket.send(...)` 先检查逻辑可写性，再按 outgoing struct 校验；transport 不自动 replay 已发送 frame
+5. `socket.closed` 提供 `closed / aborted / error` discriminated union
 
 ### WebSocket 规则
 
 1. 当前只对齐标准 WebSocket Web API
 2. 不支持自定义握手 headers
 3. `protocols` 是覆盖型字段
-4. `beforeConnect` 是无参通知 hook，不消费返回值
+4. `beforeConnect` 接收 `{ attempt, signal }`；取消和 timeout 会与 hook race，late result 不会再创建 socket
 5. `heartbeat.message` 是可选函数；不提供时不会主动发 heartbeat 消息
 6. 未声明消息直接跳过
-7. 已声明但 payload 校验失败的消息也直接跳过
+7. 无效 JSON 与已声明但 payload 校验失败的消息会通知 runtime-error observer、丢弃该 frame，session 继续
+8. queue limit 属于 endpoint：`maxIncomingQueueSize` 必填且 overflow fatal；`maxOutgoingQueueSize` 默认 `0`，只在 reconnecting 时保留 FIFO frame
+9. state/runtime observer failure 被隔离；reconnect predicate throw 是 terminal `error`，明确返回 `false` 是 terminal `closed`
 
 ## `context + interceptor`
 

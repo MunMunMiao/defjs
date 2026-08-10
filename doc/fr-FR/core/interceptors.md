@@ -48,6 +48,8 @@ Plusieurs appels à `withInterceptors(...)` ajoutent les intercepteurs à la sui
 createClient(withInterceptors(first), withInterceptors(second, third))
 ```
 
+Un intercepteur WebSocket ne peut appeler `next` qu'une seule fois. Si la chaîne échoue après avoir créé une session, Core règle cette session non livrée avant de renvoyer l'erreur originale de l'intercepteur. Si la chaîne réussit avec une autre session short-circuit, Core ferme la session créée ; un wrapper reste associé en déléguant la Promise `closed` originale.
+
 ## Cloner les requêtes correctement
 
 Considérez la requête reçue comme appartenant à la chaîne. Créez un nouvel objet `Headers` avant de modifier les en-têtes :
@@ -106,6 +108,9 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
+    get bufferedAmount() {
+      return session.bufferedAmount
+    },
     get connection() {
       return session.connection
     },
@@ -255,7 +260,7 @@ Les fournisseurs d'identifiants s'exécutent lorsqu'une requête traverse l'inte
 
 ## Sécurité des observateurs et callbacks
 
-Les intercepteurs SSE et WebSocket peuvent attacher des observateurs de cycle de vie aux handles renvoyés. Désinscrivez les listeners WebSocket lorsque leur propriétaire disparaît. Gardez les listeners et les prédicats sans exception : les implémentations temps réel actuelles n'isolent pas tous leurs échecs.
+Les intercepteurs SSE et WebSocket peuvent attacher des observateurs de cycle de vie aux handles renvoyés. Désinscrivez les listeners WebSocket lorsque leur propriétaire disparaît. WebSocket dirige l'échec d'un listener d'état vers les observateurs d'erreur, transmet à `reportError` l'échec d'un de ces observateurs et traite un prédicat de reconnexion qui lève comme une erreur terminale de session.
 
 Un intercepteur peut lever une exception ou rejeter une promesse. Le transport haut niveau peut normaliser certains échecs en `RequestError`, mais le code d'un intercepteur ne doit pas supposer que l'exécution ne rejettera jamais.
 

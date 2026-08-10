@@ -16,7 +16,7 @@ export const getCustomer = defineRequest({
 
 // Step 2: Map only the declared 404 to a missing result while preserving every other failure.
 export async function lookupCustomer(client: Client, id: string) {
-  const [error, customer] = await client.execute(getCustomer({ path: { id: encodeURIComponent(id) } }))
+  const [error, customer] = await client.execute(getCustomer({ path: { id } }))
   if (error) {
     if (error.kind === 'http' && error.status === 404) {
       return { kind: 'missing' as const, code: error.data.code }

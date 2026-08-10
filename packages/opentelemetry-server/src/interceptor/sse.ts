@@ -26,8 +26,8 @@ export interface SSEInterceptorOptions {
   propagator: TextMapPropagator
   metrics?: SSEClientMetrics
   requireParentSpan?: boolean
-  requestHook?: (span: Span, req: HttpRequest) => void
-  responseHook?: (span: Span, stream: EventStreamHandle<unknown>) => void
+  requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
+  responseHook?: (span: Span, stream: EventStreamHandle<unknown>) => Promise<void> | void
 }
 
 export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions): ReturnType<typeof createSSEInterceptor> {
