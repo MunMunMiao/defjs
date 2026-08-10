@@ -68,7 +68,8 @@ if (error) {
 
 The full guides live in `doc/` and cover HTTP, SSE, WebSocket, Structs, interceptors, errors, React, Vue, and server-side OpenTelemetry integration.
 
-- Start with `doc/guide/getting-started.md`.
+- Published packages bundle the matching English guides, so installed documentation stays aligned with the package artifact.
+- Contributors working from the current checkout can start with `doc/guide/getting-started.md`; these source docs can describe unreleased changes.
 - Choose one of the 11 language tracks from the documentation site.
 - Match the documentation to the package version installed in your application.
 

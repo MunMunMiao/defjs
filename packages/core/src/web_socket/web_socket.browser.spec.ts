@@ -16,7 +16,7 @@ describe('web socket browser runtime', () => {
   })
 
   async function run(command: unknown, options?: unknown): Promise<SocketAwaitResult<unknown, unknown>> {
-    return client.execute(command as never, options) as Promise<SocketAwaitResult<unknown, unknown>>
+    return client.execute(command as never, options as never) as Promise<SocketAwaitResult<unknown, unknown>>
   }
 
   test('should connect and exchange typed messages in real browsers', async () => {

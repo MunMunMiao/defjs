@@ -5,7 +5,7 @@ description: Build HTTP URLs and bodies, dispatch response Structs, cancel work,
 
 # HTTP
 
-`defineRequest(...)` creates an HTTP command builder. [Commands](/core/commands) covers definitions and input projections; this page owns HTTP wire and lifecycle behavior.
+`defineRequest(...)` creates an HTTP command builder. [Commands](./commands.md) covers definitions and input projections; this page owns HTTP wire and lifecycle behavior.
 
 ## URL Construction
 
@@ -124,7 +124,7 @@ An ordinary non-2xx response does not populate `response.error`. Its status is r
 const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
 ```
 
-On success, `response` is a Defjs `HttpResponse` wrapper whose body matches `data`. On failure, response availability depends on how far execution progressed. See [Errors](/core/errors) for the exact taxonomy.
+On success, `response` is a Defjs `HttpResponse` wrapper whose body matches `data`. On failure, response availability depends on how far execution progressed. See [Errors](./errors.md) for the exact taxonomy.
 
 ## Cancellation and Timeout
 
@@ -145,6 +145,8 @@ For HTTP, SSE, and WebSocket execution, `timeout` must be a positive safe intege
 
 A recognized cancellation produces `ABORTED`. An `AbortSignal.timeout(...)` reason or an execution timeout produces `TIMEOUT`. Other Fetch failures produce `NETWORK_ERROR`.
 
+Those outcomes describe what the caller observed; they do not prove that the server did not receive or commit a request. A write can time out after delivery and before its response reaches the caller. Do not retry a write as a new operation merely because its first tuple reported `TIMEOUT`, `ABORTED`, or `NETWORK_ERROR`. Preserve one operation identity across allowed replays and make the receiver reserve that identity, bind it to the authenticated scope and request bytes, and persist the result atomically with the side effect. The `examples/resilience-idempotency-key` project demonstrates the contract with an in-memory receiver; production deduplication must use durable atomic storage.
+
 ## Credentials and XSRF
 
 `withCredentials(true)` sets Fetch `credentials: 'include'` for HTTP and SSE. `false` leaves the Fetch option unspecified; it does not force `omit`. This setting does not add an `Authorization` header and does not configure WebSocket authentication.
@@ -158,7 +160,7 @@ withXSRF({
 })
 ```
 
-Injection is attempted only for `POST`, `PUT`, `PATCH`, and `DELETE`. An existing configured header is preserved. Browser cookie lookup is limited to same-origin requests. Outside a browser, provide a synchronous `tokenProvider`; it takes precedence over cookie lookup.
+Injection is skipped for the RFC safe methods `GET`, `HEAD`, `OPTIONS`, and `TRACE`. Every other method, including custom unsafe methods such as `PROPPATCH`, uses the same existing-header, same-origin, and token guards before injection. An existing configured header is preserved. Browser cookie lookup is limited to same-origin requests. Outside a browser, provide a synchronous `tokenProvider`; it takes precedence over cookie lookup.
 
 ```typescript
 import type { HttpRequest } from '@defjs/core'
@@ -170,7 +172,7 @@ withXSRF({
 })
 ```
 
-Keep server token providers request-scoped. `withCredentials(true)` does not make cross-origin browser cookies readable to JavaScript and does not cause cross-origin XSRF header injection.
+Keep server token providers request-scoped. `withCredentials(true)` does not make cross-origin browser cookies readable to JavaScript and does not cause cross-origin XSRF header injection. Keep the server fail-closed when the token is missing or invalid; client-side header injection is only one part of server-side XSRF validation.
 
 ## Progress Observers
 
@@ -205,6 +207,6 @@ It is an exported low-level boundary, not the recommended command workflow. Its 
 
 ## Next
 
-- [Interceptors](/core/interceptors) covers request cloning, short-circuiting, and retry.
-- [Errors](/core/errors) documents HTTP status, transport, and definition failures.
-- [Struct](/core/struct) explains strict structural decoding.
+- [Interceptors](./interceptors.md) covers request cloning, short-circuiting, and retry.
+- [Errors](./errors.md) documents HTTP status, transport, and definition failures.
+- [Struct](./struct.md) explains strict structural decoding.

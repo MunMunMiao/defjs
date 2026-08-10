@@ -1,5 +1,6 @@
 import type { Attributes, Context } from '@opentelemetry/api'
 import type { Span, Tracer } from '@opentelemetry/api'
+import { createTransportError } from '@defjs/core'
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api'
 
 const spanStatusSet = new WeakMap<Span, boolean>()
@@ -10,7 +11,7 @@ function markSpanStatusSet(span: Span): void {
 
 export function createHttpSpan(tracer: Tracer, method: string, url: string, parentCtx: Context): Span {
   return tracer.startSpan(
-    `HTTP ${method}`,
+    method,
     {
       kind: SpanKind.CLIENT,
       attributes: {
@@ -44,15 +45,24 @@ export function createWebSocketSpan(tracer: Tracer, url: string, parentCtx: Cont
   )
 }
 
-export function setSpanHttpResponse(span: Span, status: number): void {
-  span.setAttribute('http.response.status_code', status)
-  span.setStatus({ code: status >= 500 ? SpanStatusCode.ERROR : SpanStatusCode.OK })
+export function setSpanHttpResponse(span: Span, status: number, error?: unknown): void {
+  if (status !== 0) {
+    span.setAttribute('http.response.status_code', status)
+  }
+
+  const errorType = getHttpResponseErrorType(status, error)
+  if (errorType) {
+    span.setAttribute('error.type', errorType)
+    span.setStatus({ code: SpanStatusCode.ERROR })
+  }
+
   markSpanStatusSet(span)
   span.end()
 }
 
 export function setSpanError(span: Span, error: unknown): void {
   span.recordException(toError(error))
+  span.setAttribute('error.type', getErrorType(error))
   span.setStatus({ code: SpanStatusCode.ERROR })
   markSpanStatusSet(span)
   span.end()
@@ -105,12 +115,23 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-function getErrorType(error: unknown): string {
+export function getHttpResponseErrorType(status: number, error?: unknown): string | undefined {
+  if (status === 0) {
+    const errorCode = createTransportError(error).code
+    return errorCode === 'ABORTED' ? undefined : errorCode
+  }
+  if (status >= 400) {
+    return String(status)
+  }
+  return undefined
+}
+
+export function getErrorType(error: unknown): string {
   if (error instanceof Error) {
     return error.name || 'Error'
   }
-  if (typeof error === 'string') {
-    return error
+  if (error === undefined || error === null) {
+    return '_OTHER'
   }
   return typeof error
 }

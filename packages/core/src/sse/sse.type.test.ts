@@ -13,6 +13,7 @@ import type { FetchEventStreamErrorContext } from '../index'
 import type { FetchEventStreamOptions } from '../index'
 
 import { createClient, defineEventStream, struct, type EventStreamData, type EventStructs } from '../index'
+import type { EventStreamOpenInfo } from './transport/event_stream'
 
 // @ts-expect-error SSE definitions require an endpoint-owned queue limit.
 defineEventStream({ maxBufferSize: 1024, path: '/missing-queue-limit', events: { message: struct.string() } })
@@ -85,6 +86,18 @@ async function assertNamedEventNarrowing(): Promise<void> {
 }
 
 void assertNamedEventNarrowing
+
+async function assertRequiredStartupOpenInfo(): Promise<void> {
+  const [error, stream, open] = await createClient().execute(useEvents())
+  if (error) return
+
+  expectTypeOf(open).toEqualTypeOf<EventStreamOpenInfo>()
+  expectTypeOf(open.response.status).toEqualTypeOf<number>()
+  expectTypeOf(open.url).toEqualTypeOf<string>()
+  stream.close()
+}
+
+void assertRequiredStartupOpenInfo
 
 type CatalogEvent = EventStreamData<typeof catalogEventStructs>
 declare const catalogEvent: CatalogEvent

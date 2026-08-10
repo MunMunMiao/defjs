@@ -38,8 +38,6 @@ export type Client = {
     command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
     options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
-
-  execute(command: Command, options?: unknown): Promise<unknown>
 }
 
 export function isClient(value: unknown): value is Client {
@@ -87,7 +85,6 @@ export function createClient(...options: ClientOption[]): Client {
     command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
     options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
-  function execute(command: Command, options?: unknown): Promise<unknown>
   function execute(command: Command, options?: unknown): Promise<unknown> {
     if (isHttpCommand(command)) {
       return executeHttpCommand(conf, command, options as HttpExecuteOptions | undefined)

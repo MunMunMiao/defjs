@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { defineConfig, type UserConfig } from 'tsdown'
+import { copyPackageDocs } from '../../scripts/copy-package-docs.mjs'
 
 const entry = 'src/public_api.ts'
 
@@ -25,6 +26,7 @@ async function writeDistPackageJson(): Promise<void> {
   delete packageJson['publishConfig']
 
   await writeFile(new URL('./dist/package.json', import.meta.url), `${JSON.stringify(packageJson, undefined, 2)}\n`)
+  await copyPackageDocs(new URL('.', import.meta.url))
 }
 
 export default defineConfig([

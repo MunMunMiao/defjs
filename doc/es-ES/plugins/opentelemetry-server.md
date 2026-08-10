@@ -118,23 +118,24 @@ Utiliza atributos permitidos explícitamente y de baja cardinalidad. No adjuntes
 
 El interceptor HTTP crea un span `SpanKind.CLIENT` y registra:
 
+- el método de la petición como nombre del span, ya que Defjs no proporciona una plantilla de URL de baja cardinalidad;
 - `http.request.method`;
 - `url.full`;
 - `server.address` y, si existe, `server.port`;
-- `http.response.status_code` después de recibir una respuesta.
+- `http.response.status_code` solo cuando se ha recibido un estado de respuesta real.
 
 Esto no supone que cumpla por completo las convenciones semánticas HTTP.
 
-El comportamiento actual de los estados es más limitado de lo que esperan muchas aplicaciones:
+El estado del span HTTP y `error.type` siguen estas reglas:
 
-- un estado `500` o superior marca el span como `ERROR`;
-- los estados entre `400` y `499` lo marcan como `OK`;
-- una respuesta de transporte Defjs con estado 0 lo marca como `OK`;
-- un error lanzado a través del interceptor lo marca como `ERROR` y registra una excepción.
+- los estados entre `100` y `399` dejan sin establecer el estado del span y no definen `error.type`;
+- un estado `400` o superior marca el span de cliente como `ERROR` y establece `error.type` en la cadena del código de estado;
+- un resultado de transporte Defjs con estado 0 no establece `http.response.status_code`; una cancelación del llamador deja el estado sin establecer y no define `error.type`, un timeout usa `ERROR` / `TIMEOUT` y los demás fallos de transporte usan `ERROR` / `NETWORK_ERROR`;
+- un error lanzado a través del interceptor marca el span como `ERROR`, registra la excepción y usa su `Error.name` u otro valor alternativo de baja cardinalidad como `error.type`.
 
 El span HTTP termina cuando el interceptor HTTP recibe el `HttpResponse` de Defjs. La selección de salida de alto nivel por estado y la decodificación Struct se producen después de que el interceptor haya devuelto el control. Por tanto, un `RESPONSE_VALIDATION_FAILED` o `UNDECLARED_STATUS` posterior no puede actualizar el span ya terminado.
 
-Cuando proporcionas un Meter, HTTP registra `http.client.request.duration` en segundos. Los atributos incluyen el método, la dirección y el puerto del servidor, el estado opcional de la respuesta y un `error.type` opcional para errores lanzados.
+Cuando proporcionas un Meter, HTTP registra `http.client.request.duration` en segundos. Los atributos incluyen el método, la dirección y el puerto del servidor, el estado opcional de la respuesta y un `error.type` opcional. La métrica aplica la misma clasificación de estado de respuesta y `error.type` que el span HTTP.
 
 ## Semántica SSE
 

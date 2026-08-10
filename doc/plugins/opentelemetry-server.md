@@ -118,23 +118,50 @@ Use allowlisted, low-cardinality attributes. Do not attach raw headers, query st
 
 The HTTP interceptor creates a `SpanKind.CLIENT` span and records:
 
+- the request method as the span name because Defjs does not provide a low-cardinality URL template;
 - `http.request.method`;
 - `url.full`;
 - `server.address` and optional `server.port`;
-- `http.response.status_code` after a response.
+- `http.response.status_code` only when a response status was received.
 
-This is not a claim of complete HTTP semantic-convention compliance.
+The adapter uses stable HTTP client attribute and metric names. This is not a claim of complete HTTP semantic-convention compliance.
 
-Current status behavior is narrower than many applications expect:
+HTTP span status and `error.type` follow these rules:
 
-- status `500` and above marks the span `ERROR`;
-- status `400` through `499` marks it `OK`;
-- a Defjs status-0 transport response marks it `OK`;
-- an error thrown through the interceptor marks it `ERROR` and records an exception.
+- status `100` through `399` leaves span status unset and does not set `error.type`;
+- status `400` and above marks the client span `ERROR` and sets `error.type` to the status code string;
+- a Defjs status-0 transport result does not set `http.response.status_code`; caller cancellation leaves status unset, timeout uses `ERROR` / `TIMEOUT`, and other transport failures use `ERROR` / `NETWORK_ERROR`;
+- an error thrown through the interceptor marks the span `ERROR`, records the exception, and uses its `Error.name` or another low-cardinality type fallback as `error.type`.
 
 The HTTP span ends when the HTTP interceptor receives the Defjs `HttpResponse`. High-level output status dispatch and Struct decoding happen after that interceptor returns. A later `RESPONSE_VALIDATION_FAILED` or `UNDECLARED_STATUS` therefore cannot update the ended span.
 
-When a Meter is supplied, HTTP records `http.client.request.duration` in seconds. Attributes include the method, server address/port, optional response status, and optional `error.type` for thrown errors.
+When telemetry must represent the final command outcome, create an application span around `client.execute(...)` and classify the returned tuple:
+
+```ts
+import { SpanStatusCode } from '@opentelemetry/api'
+
+const outcome = await tracer.startActiveSpan('defjs.command', async (span) => {
+  try {
+    const outcome = await client.execute(command)
+    const [error] = outcome
+    if (error) {
+      span.setAttribute('error.type', error.code)
+      span.setStatus({ code: SpanStatusCode.ERROR })
+    }
+    return outcome
+  } catch (error) {
+    span.setAttribute('error.type', error instanceof Error ? error.name : typeof error)
+    span.setStatus({ code: SpanStatusCode.ERROR })
+    throw error
+  } finally {
+    span.end()
+  }
+})
+```
+
+This outer span is application-owned command telemetry; the plugin continues to emit only its lower-level transport span.
+
+When a Meter is supplied, HTTP records `http.client.request.duration` in seconds. Attributes include the method, server address/port, optional response status, and optional `error.type`. The metric applies the same response-status and `error.type` classification as the HTTP span.
 
 ## SSE Semantics
 
@@ -176,5 +203,5 @@ Before deploying, validate this adapter with the SDK, exporters, processors, con
 
 ## Next
 
-- [Interceptors](/core/interceptors) explains ordering around other client interceptors.
-- [SSE](/core/sse) and [WebSocket](/core/web-socket) explain the logical handle/session lifetimes counted here.
+- [Interceptors](../core/interceptors.md) explains ordering around other client interceptors.
+- [SSE](../core/sse.md) and [WebSocket](../core/web-socket.md) explain the logical handle/session lifetimes counted here.

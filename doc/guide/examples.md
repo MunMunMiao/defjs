@@ -456,6 +456,6 @@ Provider teardown does not cancel work by itself. Each component still owns the 
 
 ## Next
 
-- [Commands](/core/commands) explains the definitions used by these recipes.
-- [Interceptors](/core/interceptors) owns retry and authentication policy details.
-- [Vue](/plugins/vue) and [React](/plugins/react) cover adapter-specific scope and SSR boundaries.
+- [Commands](../core/commands.md) explains the definitions used by these recipes.
+- [Interceptors](../core/interceptors.md) owns retry and authentication policy details.
+- [Vue](../plugins/vue.md) and [React](../plugins/react.md) cover adapter-specific scope and SSR boundaries.

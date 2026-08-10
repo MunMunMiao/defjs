@@ -234,7 +234,7 @@ const chat = defineWebSocket({
 })
 ```
 
-See [SSE](/core/sse) and [WebSocket](/core/web-socket) for decoding, queues, reconnect, and closure ownership.
+See [SSE](./sse.md) and [WebSocket](./web-socket.md) for decoding, queues, reconnect, and closure ownership.
 
 ## Treat Commands as Opaque
 
@@ -244,6 +244,6 @@ The root entry currently exports transport command interfaces and low-level exec
 
 ## Next
 
-- [Client](/core/client) covers execution overloads and option composition.
-- [HTTP](/core/http) owns URL, encoding, response, and cancellation behavior.
-- [Struct](/core/struct) explains strict structural decoding.
+- [Client](./client.md) covers execution overloads and option composition.
+- [HTTP](./http.md) owns URL, encoding, response, and cancellation behavior.
+- [Struct](./struct.md) explains strict structural decoding.

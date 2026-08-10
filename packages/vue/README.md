@@ -4,17 +4,21 @@ Thin Vue 3 adapter for `@defjs/core`. It provides Vue plugin and inject wiring s
 
 Supports Vue 3+.
 
-## Package and repository setup
+## Install
 
-Install `@defjs/vue` with compatible `@defjs/core` and `vue` releases. Inside this repository, those package names resolve to the workspace source packages at `packages/vue` and `packages/core`.
+Install `@defjs/vue` with compatible `@defjs/core` and Vue releases:
 
-Repository development uses Node 26 or newer with `pnpm@11.6.0` and `engine-strict=true`. The published package manifest supports Node 22 or newer, and CI verifies the same packed artifact on Node 22, 24, and 26.
+```sh
+npm install @defjs/core @defjs/vue vue
+```
+
+The package is ESM and requires Node.js 22 or newer when run in Node.
 
 ## What this package does
 
 `provideClient(...)` creates a Vue plugin that builds one `@defjs/core` client during app installation and provides it to the application context. `injectClient()` reads that client inside setup functions or composables. `withEndpoint` and `withInterceptors` are Vue-specific option glue for plugin setup.
 
-This package is a thin adapter over `@defjs/core`. It does not implement a Nuxt module, a Pinia plugin, a query cache, retry policy, or application state management. Compose those pieces in your own app code by calling `client.execute(...)` from composables, stores, route handlers, or framework integrations.
+This package is a thin adapter over `@defjs/core`. It does not implement a Nuxt module, a Pinia plugin, a query cache, retry policy, GraphQL client or protocol handling, or application state management. Compose those pieces in your own app code by calling `client.execute(...)` from composables, stores, route handlers, or framework integrations.
 
 ## Quick Start
 
@@ -64,33 +68,58 @@ app.use(provideClient(withEndpoint('https://api.example.com')))
 app.mount('#app')
 ```
 
-Use the injected client inside a component or composable and handle the error-first tuple yourself:
+Use the injected client inside a component or composable. Tie work to the reactive input that starts it, abort superseded requests, and ignore completion after cleanup:
 
 ```vue
 <!-- UserCard.vue -->
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { ref, watch } from 'vue'
 import { injectClient } from '@defjs/vue'
 import { getUser } from './api'
 
 const props = defineProps<{ id: number }>()
 const client = injectClient()
-const name = ref('loading...')
+const name = ref('')
+const errorMessage = ref('')
 
-onMounted(async () => {
-  const [error, user] = await client.execute(getUser({ path: { id: props.id } }))
+watch(
+  () => props.id,
+  (id, _previousId, onCleanup) => {
+    const abort = new AbortController()
+    let current = true
 
-  if (error) {
-    name.value = error.message
-    return
-  }
+    onCleanup(() => {
+      current = false
+      abort.abort()
+    })
 
-  name.value = user.name
-})
+    void client
+      .execute(getUser({ path: { id } }), { signal: abort.signal })
+      .then(([error, user]) => {
+        if (!current) {
+          return
+        }
+
+        if (error) {
+          errorMessage.value = error.message
+          return
+        }
+
+        errorMessage.value = ''
+        name.value = user.name
+      })
+      .catch((error) => {
+        if (current) {
+          errorMessage.value = error instanceof Error ? error.message : String(error)
+        }
+      })
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
-  <div>{{ name }}</div>
+  <div>{{ errorMessage || name }}</div>
 </template>
 ```
 
@@ -135,7 +164,7 @@ The application owns token retrieval and storage. Keep default logs bounded: raw
 
 ## Cookbook
 
-When browsing this repository, see `doc/plugins/vue.md` for recipes covering Nuxt server/client boundaries, application-owned header and cookie forwarding, Pinia actions, SSE and WebSocket cleanup, and SSR safety notes.
+See the bundled [Vue guide](docs/plugins/vue.md) for reactive request cleanup, request-scoped SSR boundaries, TanStack Query composition, and SSE/WebSocket ownership.
 
 ## API
 

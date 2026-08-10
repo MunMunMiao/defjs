@@ -5,8 +5,27 @@ export type QueryParamsSerializer = (params: URLSearchParams, rawParams?: { [key
 
 export const DEFAULT_QUERY_PARAMS_SERIALIZER: QueryParamsSerializer = (params) => params.toString()
 
+export type WebSocketHandle = Omit<
+  WebSocket,
+  | 'binaryType'
+  | 'CLOSED'
+  | 'CLOSING'
+  | 'CONNECTING'
+  | 'dispatchEvent'
+  | 'onclose'
+  | 'onerror'
+  | 'onmessage'
+  | 'onopen'
+  | 'OPEN'
+  | 'readyState'
+> & { readonly readyState: number }
+
+export type WebSocketHandleConstructor = {
+  readonly OPEN: number
+} & (new (...args: never[]) => WebSocketHandle)
+
 export interface ClientWebSocketOptions {
-  handle?: typeof WebSocket
+  handle?: WebSocketHandleConstructor
   beforeConnect?: (context: { attempt: number; signal: AbortSignal }) => void | Promise<void>
   heartbeat?: {
     intervalMs: number
@@ -32,7 +51,7 @@ export interface ClientSSEOptions {
     message: { id: string; event: string; data: string }
     cause?: unknown
     signal: AbortSignal
-  }) => void | Promise<void>
+  }) => unknown
   reconnect?: {
     attempts?: number
     delayMs?: number

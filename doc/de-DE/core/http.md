@@ -158,7 +158,7 @@ withXSRF({
 })
 ```
 
-Die Injektion wird nur für `POST`, `PUT`, `PATCH` und `DELETE` versucht. Ein bereits gesetzter konfigurierter Header bleibt erhalten. Im Browser ist die Cookie-Suche auf Requests derselben Origin beschränkt. Außerhalb eines Browsers musst du einen synchronen `tokenProvider` angeben; er hat Vorrang vor der Cookie-Suche.
+Die Injektion wird für die nach RFC sicheren Methoden `GET`, `HEAD`, `OPTIONS` und `TRACE` übersprungen. Bei jeder anderen Methode, einschließlich benutzerdefinierter unsicherer Methoden wie `PROPPATCH`, gelten vor der Injektion dieselben Prüfungen auf einen bereits vorhandenen Header, dieselbe Origin und ein Token. Ein bereits gesetzter konfigurierter Header bleibt erhalten. Im Browser ist die Cookie-Suche auf Requests derselben Origin beschränkt. Außerhalb eines Browsers musst du einen synchronen `tokenProvider` angeben; er hat Vorrang vor der Cookie-Suche.
 
 ```typescript
 import type { HttpRequest } from '@defjs/core'

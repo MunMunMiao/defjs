@@ -1,6 +1,6 @@
 import { COMMAND_TYPE, WEB_SOCKET_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
-import type { ClientConfig, ClientWebSocketOptions } from '../client/config'
+import type { ClientConfig, ClientWebSocketOptions, WebSocketHandle } from '../client/config'
 
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
@@ -376,6 +376,7 @@ async function runWebSocketCommand<
     setSocketState(state, 'error')
     return [transportError, undefined, undefined]
   }
+  const WebSocketImpl = WebSocketCtor as unknown as new (url: string | URL, protocols?: string | string[]) => WebSocketHandle
 
   let startupConnection: WebSocketConnectionInfo | undefined
   const undeliveredSessions = new Set<WebSocketSessionLike>()
@@ -401,7 +402,7 @@ async function runWebSocketCommand<
       })
       const closedDeferred = createDeferred<WebSocketCloseInfo>()
       const sessionController = {
-        currentSocket: undefined as WebSocket | undefined,
+        currentSocket: undefined as WebSocketHandle | undefined,
         heartbeat: undefined as HeartbeatRuntime<WebSocketIncomingData<TIncoming>> | undefined,
       }
       const sendQueue = createSendQueue(endpoint.maxOutgoingQueueSize ?? 0)
@@ -594,9 +595,9 @@ async function runWebSocketCommand<
       }
 
       async function connectOnce(url: string, protocols: readonly string[]): Promise<SocketLifecycleOutcome> {
-        let socket: WebSocket
+        let socket: WebSocketHandle
         try {
-          socket = protocols.length > 0 ? new WebSocketCtor(url, [...protocols]) : new WebSocketCtor(url)
+          socket = protocols.length > 0 ? new WebSocketImpl(url, [...protocols]) : new WebSocketImpl(url)
           /* istanbul ignore else -- @preserve defensive: binaryType may not exist on injected nonstandard WebSocket handles */
           if ('binaryType' in socket) {
             socket.binaryType = 'arraybuffer'
@@ -1046,7 +1047,7 @@ export type SocketLifecycleOutcome = {
 
 type ActiveSocketAttempt = {
   cancel(keepCurrentSocket?: boolean): void
-  socket: WebSocket
+  socket: WebSocketHandle
 }
 
 type FinishOptions = {
@@ -1064,7 +1065,7 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | und
   closed: Promise<WebSocketCloseInfo>,
   state: SocketRefState,
   sessionController: {
-    currentSocket: WebSocket | undefined
+    currentSocket: WebSocketHandle | undefined
     heartbeat: HeartbeatRuntime<TIncoming> | undefined
   },
   sendQueue: SendQueue,
@@ -1134,8 +1135,8 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | und
       }
 
       if (destination === 'socket') {
-        // Type boundary: the socket destination is selected only when the captured readyState equals the numeric open state.
-        const openSocket = socket as WebSocket
+        // Type boundary: destination is "socket" only when the captured socket readyState equals the numeric open state.
+        const openSocket = socket as WebSocketHandle
         openSocket.send(serialized)
         return
       }
@@ -1144,7 +1145,7 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | und
   }
 }
 
-function flushSendQueue(socket: WebSocket, queue: SendQueue, openState: number): void {
+function flushSendQueue(socket: WebSocketHandle, queue: SendQueue, openState: number): void {
   while (socket.readyState === openState) {
     const next = queue.shift()
     if (!next) {
@@ -1232,7 +1233,7 @@ function validateWebSocketClose(code: number | undefined, reason: string | undef
   }
 }
 
-function requestNativeCloseBestEffort(socket: WebSocket): void {
+function requestNativeCloseBestEffort(socket: WebSocketHandle): void {
   try {
     socket.close()
   } catch {
@@ -1240,7 +1241,7 @@ function requestNativeCloseBestEffort(socket: WebSocket): void {
   }
 }
 
-function installPhysicalCleanup(socket: WebSocket, sessionController: { currentSocket: WebSocket | undefined }): void {
+function installPhysicalCleanup(socket: WebSocketHandle, sessionController: { currentSocket: WebSocketHandle | undefined }): void {
   const cleanup = () => {
     socket.removeEventListener('close', cleanup)
     /* istanbul ignore else -- @preserve invariant: no replacement socket is created while physical cleanup is pending */

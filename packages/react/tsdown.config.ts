@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { defineConfig, type UserConfig } from 'tsdown'
+import { copyPackageDocs } from '../../scripts/copy-package-docs.mjs'
 
 async function writeDistPackageJson(): Promise<void> {
   const packageJson = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8')) as Record<string, unknown>
@@ -21,6 +22,7 @@ async function writeDistPackageJson(): Promise<void> {
   delete packageJson['publishConfig']
 
   await writeFile(new URL('./dist/package.json', import.meta.url), `${JSON.stringify(packageJson, undefined, 2)}\n`)
+  await copyPackageDocs(new URL('.', import.meta.url))
 }
 
 export default defineConfig({

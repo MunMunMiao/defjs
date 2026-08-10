@@ -288,6 +288,12 @@ Manual close, cause-free remote close, and an explicitly declined reconnect poli
 
 Unsubscribe listeners and close at the component, route, job, or service boundary that opened the session. Provider unmount alone does not do this work.
 
+## GraphQL over WebSocket
+
+Core WebSocket commands validate application frames and manage one logical socket session. They do not implement the `graphql-transport-ws` protocol: connection initialization and acknowledgement, operation IDs, multiplexed `next`/`error`/`complete` frames, subscription disposal, and reconnect resubscription remain application-owned.
+
+For a GraphQL-first application, prefer a protocol implementation such as `graphql-ws` and provide the WebSocket constructor required by that library and runtime. Use Defjs WebSocket commands when the wire protocol itself is your typed application contract. Do not treat Core reconnect as automatic GraphQL operation replay, especially for mutations.
+
 ## URL and Authentication Safety
 
 HTTP base URLs are converted to WebSocket schemes: `http:` becomes `ws:` and `https:` becomes `wss:`. Supply raw path-placeholder values: Core segment-encodes each exactly once, `%` becomes `%25`, and empty, `.` or `..` values are rejected. Query values use the configured serializer.
@@ -298,6 +304,6 @@ Browser WebSocket APIs cannot set arbitrary handshake headers. Do not treat quer
 
 ## Next
 
-- [SSE](/core/sse) contrasts stream retry and queue behavior.
-- [Interceptors](/core/interceptors) shows how to preserve live session getters.
-- [Errors](/core/errors) covers startup tuple failures.
+- [SSE](./sse.md) contrasts stream retry and queue behavior.
+- [Interceptors](./interceptors.md) shows how to preserve live session getters.
+- [Errors](./errors.md) covers startup tuple failures.

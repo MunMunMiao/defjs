@@ -76,7 +76,7 @@ describe('Fetch handler XSRF injection', () => {
     expect(cookieGetter).toHaveBeenCalledTimes(1)
   })
 
-  test.each(['GET', 'HEAD'] as const)('should not inject xsrf header for %s requests', (method) => {
+  test.each(['GET', 'HEAD', 'OPTIONS', 'TRACE'] as const)('should not inject xsrf header for safe %s requests', (method) => {
     const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
     const requestConfig: HttpRequest = {
       baseEndpoint: 'https://example.com',
@@ -89,6 +89,21 @@ describe('Fetch handler XSRF injection', () => {
 
     expect((init.headers as Headers).has('X-XSRF-TOKEN')).toBe(false)
     expect(cookieGetter).not.toHaveBeenCalled()
+  })
+
+  test('should inject xsrf header for custom unsafe methods', () => {
+    const { cookieGetter } = stubXsrfBrowserEnvironment('https://example.com', 'XSRF-TOKEN=cookie-token')
+    const requestConfig: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/resource',
+      method: 'PROPPATCH',
+      xsrf: createXsrfConfig(),
+    }
+
+    const init = createFetchRequestInit(requestConfig)
+
+    expect((init.headers as Headers).get('X-XSRF-TOKEN')).toBe('cookie-token')
+    expect(cookieGetter).toHaveBeenCalledTimes(1)
   })
 
   test('should not inject xsrf header for cross-origin requests', () => {

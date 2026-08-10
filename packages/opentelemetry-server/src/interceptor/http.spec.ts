@@ -1,4 +1,5 @@
-import type { HttpRequest } from '@defjs/core'
+import { ERR_ABORTED, ERR_TIMEOUT, type HttpRequest } from '@defjs/core'
+import { SpanStatusCode } from '@opentelemetry/api'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { activeSpans, createMockMetrics, createMockPropagator, createMockTracer, makeHttpRequest, makeHttpResponse } from '../test-utils'
 import { createOpenTelemetryHttpInterceptor } from './http'
@@ -32,7 +33,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     await interceptor.fn(makeHttpRequest(), async () => makeHttpResponse())
 
     expect(activeSpans).toHaveLength(1)
-    expect(activeSpans[0]?.name).toBe('HTTP GET')
+    expect(activeSpans[0]?.name).toBe('GET')
   })
 
   test('should set span attributes', async () => {
@@ -45,14 +46,14 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     expect(activeSpans[0]?.attributes['url.full']).toBe('https://api.example.com/test')
   })
 
-  test('should end span on success with OK status', async () => {
+  test('should leave span status unset on success', async () => {
     const { tracer } = createMockTracer()
     const interceptor = createOpenTelemetryHttpInterceptor({ tracer, propagator: mockPropagator })
 
     await interceptor.fn(makeHttpRequest(), async () => makeHttpResponse())
 
     expect(activeSpans[0]?.ended).toBe(true)
-    expect(activeSpans[0]?.status?.code).toBe(1) // OK
+    expect(activeSpans[0]?.status).toBeUndefined()
   })
 
   test('should end span on 5xx status with ERROR', async () => {
@@ -62,17 +63,46 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     await interceptor.fn(makeHttpRequest(), async () => ({ ...makeHttpResponse(), status: 500 }))
 
     expect(activeSpans[0]?.ended).toBe(true)
-    expect(activeSpans[0]?.status?.code).toBe(2) // ERROR
+    expect(activeSpans[0]?.attributes['error.type']).toBe('500')
+    expect(activeSpans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
   })
 
-  test('should end span on 4xx status with OK', async () => {
+  test('should end client span on 4xx status with ERROR', async () => {
     const { tracer } = createMockTracer()
     const interceptor = createOpenTelemetryHttpInterceptor({ tracer, propagator: mockPropagator })
 
     await interceptor.fn(makeHttpRequest(), async () => ({ ...makeHttpResponse(), status: 404 }))
 
     expect(activeSpans[0]?.ended).toBe(true)
-    expect(activeSpans[0]?.status?.code).toBe(1) // OK
+    expect(activeSpans[0]?.attributes['error.type']).toBe('404')
+    expect(activeSpans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
+  })
+
+  test.each([
+    { error: new TypeError('fetch failed'), errorType: 'NETWORK_ERROR', status: SpanStatusCode.ERROR },
+    { error: ERR_TIMEOUT, errorType: 'TIMEOUT', status: SpanStatusCode.ERROR },
+    { error: ERR_ABORTED, errorType: undefined, status: undefined },
+  ])('should classify status-0 $errorType response consistently for spans and metrics', async ({ error, errorType, status }) => {
+    const { tracer } = createMockTracer()
+    const metrics = createMockMetrics()
+    const interceptor = createOpenTelemetryHttpInterceptor({
+      tracer,
+      propagator: mockPropagator,
+      metrics,
+    })
+    const response = { ...makeHttpResponse(), error, status: 0 }
+
+    await expect(interceptor.fn(makeHttpRequest(), async () => response)).resolves.toBe(response)
+
+    expect(activeSpans[0]?.attributes['http.response.status_code']).toBeUndefined()
+    expect(activeSpans[0]?.attributes['error.type']).toBe(errorType)
+    expect(activeSpans[0]?.status?.code).toBe(status)
+    expect(activeSpans[0]?.ended).toBe(true)
+    expect(metrics.requestDuration.record).toHaveBeenCalledWith(expect.any(Number), {
+      ...(errorType ? { 'error.type': errorType } : {}),
+      'http.request.method': 'GET',
+      'server.address': 'api.example.com',
+    })
   })
 
   test('should record error on exception', async () => {
@@ -86,7 +116,8 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     ).rejects.toThrow('network error')
 
     expect(activeSpans[0]?.ended).toBe(true)
-    expect(activeSpans[0]?.status?.code).toBe(2) // ERROR
+    expect(activeSpans[0]?.attributes['error.type']).toBe('Error')
+    expect(activeSpans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
     expect(activeSpans[0]?.recordException).toHaveBeenCalled()
   })
 
@@ -171,7 +202,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     expect(result).toBe(response)
     expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', expect.objectContaining({ 'hook.name': 'requestHook' }))
     expect(activeSpans[0]?.recordException).toHaveBeenCalled()
-    expect(activeSpans[0]?.status?.code).toBe(1)
+    expect(activeSpans[0]?.status).toBeUndefined()
     expect(activeSpans[0]?.ended).toBe(true)
   })
 
@@ -194,7 +225,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     expect(result).toBe(response)
     expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', expect.objectContaining({ 'hook.name': 'responseHook' }))
     expect(metrics.requestDuration.record).toHaveBeenCalled()
-    expect(activeSpans[0]?.status?.code).toBe(1)
+    expect(activeSpans[0]?.status).toBeUndefined()
     expect(activeSpans[0]?.ended).toBe(true)
   })
 
@@ -233,6 +264,7 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     expect(metrics.requestDuration.record).toHaveBeenCalledWith(
       expect.any(Number),
       expect.objectContaining({
+        'error.type': '500',
         'http.response.status_code': 500,
       }),
     )

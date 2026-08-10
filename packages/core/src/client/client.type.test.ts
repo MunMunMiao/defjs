@@ -11,6 +11,7 @@ import {
   withHTTPHandle,
   withQueryParamsSerializer,
   withSSEHandle,
+  withSSEOnInvalidEvent,
   withWebSocketBeforeConnect,
   withWebSocketHandle,
   withWebSocketHeartbeat,
@@ -55,6 +56,11 @@ class MockWebSocket extends EventTarget {
   static CLOSED = 3
 }
 
+declare const NodeWebSocket: {
+  readonly OPEN: 1
+  new (address: string | URL, protocols?: string | string[]): Omit<WebSocket, 'dispatchEvent'>
+}
+
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withCredentials(true),
@@ -83,6 +89,11 @@ const client = createClient(
 )
 
 type ClientCases = Expect<Equal<typeof client, Client>>
+
+createClient(withWebSocketHandle(NodeWebSocket))
+
+const invalidReasons: string[] = []
+createClient(withSSEOnInvalidEvent(({ reason }) => invalidReasons.push(reason)))
 
 const options = {
   endpoint: 'https://api.example.com',

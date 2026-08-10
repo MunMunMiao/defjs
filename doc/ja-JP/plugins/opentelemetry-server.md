@@ -118,23 +118,24 @@ withOpenTelemetryServer({
 
 HTTP インターセプターは `SpanKind.CLIENT` スパンを作り、次を記録します。
 
+- Defjs は低カーディナリティの URL テンプレートを提供しないため、リクエストメソッドをスパン名として使用
 - `http.request.method`
 - `url.full`
 - `server.address` と任意の `server.port`
-- レスポンス後の `http.response.status_code`
+- 実際のレスポンスステータスを受信した場合のみ `http.response.status_code`
 
 HTTP セマンティック規約への完全な準拠を示すものではありません。
 
-現在のステータス動作は、多くのアプリケーションが期待するものより限定的です。
+HTTP スパンステータスと `error.type` には次のルールが適用されます。
 
-- ステータス `500` 以上はスパンを `ERROR` にします。
-- ステータス `400` から `499` は `OK` にします。
-- Defjs のステータス 0 トランスポートレスポンスは `OK` にします。
-- インターセプターを通ってエラーが送出されると `ERROR` にし、例外を記録します。
+- ステータス `100` から `399` はスパンステータスを未設定のままにし、`error.type` を設定しません。
+- ステータス `400` 以上はクライアントスパンを `ERROR` にし、`error.type` にステータスコードの文字列を設定します。
+- Defjs のステータス 0 トランスポート結果は `http.response.status_code` を設定しません。呼び出し側による中止はステータスを未設定のままにし、`error.type` も設定しません。タイムアウトは `ERROR` / `TIMEOUT`、その他のトランスポート障害は `ERROR` / `NETWORK_ERROR` を使用します。
+- インターセプターを通ってエラーが送出されると、スパンを `ERROR` にし、例外を記録し、その `Error.name` または別の低カーディナリティのフォールバックを `error.type` として使用します。
 
 HTTP スパンは、HTTP インターセプターが Defjs `HttpResponse` を受け取った時点で終了します。高レベル出力のステータスディスパッチと Struct デコードは、インターセプターから戻った後に行われます。そのため、後から発生した `RESPONSE_VALIDATION_FAILED` や `UNDECLARED_STATUS` は終了済みスパンを更新できません。
 
-Meter がある場合、HTTP は `http.client.request.duration` を秒単位で記録します。属性にはメソッド、サーバーアドレスとポート、任意のレスポンスステータス、送出されたエラーの任意の `error.type` が含まれます。
+Meter がある場合、HTTP は `http.client.request.duration` を秒単位で記録します。属性にはメソッド、サーバーアドレスとポート、任意のレスポンスステータス、任意の `error.type` が含まれます。このメトリクスは HTTP スパンと同じレスポンスステータスと `error.type` の分類を適用します。
 
 ## SSE セマンティクス
 

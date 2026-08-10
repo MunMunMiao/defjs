@@ -118,23 +118,24 @@ allowlist로 관리하는 low-cardinality attribute만 사용하세요. 원본 h
 
 HTTP 인터셉터는 `SpanKind.CLIENT` span을 만들고 다음 항목을 기록합니다.
 
+- Defjs가 low-cardinality URL template을 제공하지 않으므로 요청 method를 span 이름으로 사용
 - `http.request.method`
 - `url.full`
 - `server.address`와 선택적인 `server.port`
-- 응답 이후 `http.response.status_code`
+- 실제 response status를 받았을 때만 `http.response.status_code`
 
 HTTP semantic convention 전체를 준수한다는 의미는 아닙니다.
 
-현재 status 동작은 많은 애플리케이션의 기대보다 좁습니다.
+HTTP span status와 `error.type`은 다음 규칙을 따릅니다.
 
-- status `500` 이상만 span을 `ERROR`로 표시합니다.
-- status `400`부터 `499`까지는 `OK`로 표시합니다.
-- Defjs status 0 트랜스포트 응답은 `OK`로 표시합니다.
-- 인터셉터를 통해 throw된 오류는 `ERROR`로 표시하고 exception을 기록합니다.
+- status `100`부터 `399`까지는 span status를 설정하지 않고 `error.type`도 설정하지 않습니다.
+- status `400` 이상은 client span을 `ERROR`로 표시하고 `error.type`을 status code 문자열로 설정합니다.
+- Defjs status 0 transport 결과는 `http.response.status_code`를 설정하지 않습니다. caller 취소는 status와 `error.type`을 설정하지 않고, timeout은 `ERROR` / `TIMEOUT`을, 그 밖의 transport 실패는 `ERROR` / `NETWORK_ERROR`를 사용합니다.
+- 인터셉터를 통해 throw된 오류는 span을 `ERROR`로 표시하고 exception을 기록하며, 해당 `Error.name` 또는 다른 low-cardinality fallback을 `error.type`으로 사용합니다.
 
 HTTP 인터셉터가 Defjs `HttpResponse`를 받으면 HTTP span이 끝납니다. high-level output status dispatch와 Struct 디코딩은 인터셉터가 반환한 뒤 일어납니다. 이후 발생하는 `RESPONSE_VALIDATION_FAILED` 또는 `UNDECLARED_STATUS`는 이미 끝난 span을 갱신할 수 없습니다.
 
-Meter를 전달하면 HTTP는 `http.client.request.duration`을 초 단위로 기록합니다. attribute에는 method, server address/port, 선택적인 response status, throw된 오류의 선택적인 `error.type`이 포함됩니다.
+Meter를 전달하면 HTTP는 `http.client.request.duration`을 초 단위로 기록합니다. attribute에는 method, server address/port, 선택적인 response status와 `error.type`이 포함됩니다. metric은 HTTP span과 동일한 response status 및 `error.type` 분류를 적용합니다.
 
 ## SSE 의미
 

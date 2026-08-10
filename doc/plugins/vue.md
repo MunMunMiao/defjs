@@ -161,6 +161,40 @@ watch(
 
 The imported `getUser` command builder owns the endpoint contract. This component owns cancellation when `id` changes or the component unmounts.
 
+## Query and GraphQL Boundaries
+
+When TanStack Query owns caching, retry, stale-result suppression, and component cleanup, put the Defjs command inside its `queryFn`, keep the key reactive, forward the supplied signal, and convert the tuple error to a throw at that boundary:
+
+```vue
+<script setup lang="ts">
+import { toRef } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
+import { injectClient } from '@defjs/vue'
+import { getUser } from './api'
+
+const props = defineProps<{ id: number }>()
+const client = injectClient()
+const id = toRef(props, 'id')
+
+const query = useQuery({
+  queryKey: ['user', id],
+  queryFn: async ({ signal }) => {
+    const [error, user] = await client.execute(getUser({ path: { id: id.value } }), { signal })
+    if (error) {
+      throw error
+    }
+    return user
+  },
+})
+</script>
+
+<template>
+  <p>{{ query.data.value?.name ?? (query.error.value ? 'Unable to load user.' : 'Loading...') }}</p>
+</template>
+```
+
+Do not wrap the same request in a second watcher; let one lifecycle owner control cancellation and stale results. `@defjs/vue` also does not provide GraphQL composables, a normalized GraphQL cache, generated operation types, or the GraphQL WebSocket protocol. A GraphQL-first application should compose a dedicated GraphQL client and, for subscriptions, follow the [GraphQL WebSocket boundary](../core/web-socket.md#graphql-over-websocket).
+
 ## SSR Boundaries
 
 A browser app can install one plugin client when its configuration is browser-safe and request-independent.
@@ -195,7 +229,7 @@ The component, composable, route, or store that starts realtime work must:
 - call `stream.close(...)` or `session.close(...)` for an active resource;
 - unsubscribe WebSocket observers.
 
-Do not open a WebSocket merely to attach a state listener while leaving its finite incoming queue unread; overflow is fatal to the session. See [SSE](/core/sse) and [WebSocket](/core/web-socket) for complete lifecycle rules.
+Do not open a WebSocket merely to attach a state listener while leaving its finite incoming queue unread; overflow is fatal to the session. See [SSE](../core/sse.md) and [WebSocket](../core/web-socket.md) for complete lifecycle rules.
 
 ## API
 
@@ -212,6 +246,6 @@ declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOp
 
 ## Next
 
-- [Client](/core/client) covers core option composition and client scope.
-- [Commands](/core/commands) covers endpoint definitions and command input.
-- [Interceptors](/core/interceptors) covers the core interceptor contract.
+- [Client](../core/client.md) covers core option composition and client scope.
+- [Commands](../core/commands.md) covers endpoint definitions and command input.
+- [Interceptors](../core/interceptors.md) covers the core interceptor contract.

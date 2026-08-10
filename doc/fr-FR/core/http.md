@@ -158,7 +158,7 @@ withXSRF({
 })
 ```
 
-L'injection n'est tentée que pour `POST`, `PUT`, `PATCH` et `DELETE`. Un en-tête configuré déjà présent est conservé. Dans le navigateur, la lecture du cookie se limite aux requêtes same-origin. Hors navigateur, fournissez un `tokenProvider` synchrone ; il prend la priorité sur la lecture du cookie.
+L'injection est ignorée pour les méthodes sûres selon la RFC `GET`, `HEAD`, `OPTIONS` et `TRACE`. Toute autre méthode, y compris une méthode non sûre personnalisée comme `PROPPATCH`, passe par les mêmes contrôles d'en-tête existant, de même origine et de token avant l'injection. Un en-tête configuré déjà présent est conservé. Dans le navigateur, la lecture du cookie se limite aux requêtes same-origin. Hors navigateur, fournissez un `tokenProvider` synchrone ; il prend la priorité sur la lecture du cookie.
 
 ```typescript
 import type { HttpRequest } from '@defjs/core'

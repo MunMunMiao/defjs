@@ -158,7 +158,7 @@ withXSRF({
 })
 ```
 
-只有 `POST`、`PUT`、`PATCH` 與 `DELETE` 會嘗試注入。已存在的設定 header 會保留。瀏覽器 cookie lookup 只限 same-origin request；瀏覽器以外的環境請提供同步 `tokenProvider`，而且它的優先權高於 cookie lookup。
+RFC 安全方法 `GET`、`HEAD`、`OPTIONS` 與 `TRACE` 會跳過注入。其他所有方法，包括 `PROPPATCH` 這類自訂非安全方法，都會在注入前使用相同的已存在 header、same-origin 與 token guard。已存在的設定 header 會保留。瀏覽器 cookie lookup 只限 same-origin request；瀏覽器以外的環境請提供同步 `tokenProvider`，而且它的優先權高於 cookie lookup。
 
 ```typescript
 import type { HttpRequest } from '@defjs/core'

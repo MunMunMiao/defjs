@@ -132,13 +132,20 @@ With the safe default, trace context does not ride on the WebSocket URL. Use ano
 
 ## HTTP Semantic Conventions and Metrics
 
-HTTP tracing follows stable OpenTelemetry HTTP client semantic conventions. By default, it records `SpanKind.CLIENT` spans with these core attributes:
+HTTP tracing uses stable OpenTelemetry HTTP client attribute and metric names. This is not a claim of complete semantic-convention compliance. The interceptor creates a `SpanKind.CLIENT` span named after the request method because Defjs does not provide a low-cardinality URL template. It records these core attributes:
 
 - `http.request.method`
 - `url.full`
 - `server.address`
 - `server.port`
-- `http.response.status_code`
+- `http.response.status_code` only when a response status was received
+
+HTTP span status and `error.type` follow these rules:
+
+- status `100` through `399` leaves span status unset and does not set `error.type`;
+- status `400` and above marks the client span `ERROR` and sets `error.type` to the status code string;
+- a Defjs status-0 transport result does not set `http.response.status_code`; caller cancellation leaves status unset, timeout uses `ERROR` / `TIMEOUT`, and other transport failures use `ERROR` / `NETWORK_ERROR`;
+- an error thrown through the interceptor marks the span `ERROR`, records the exception, and uses its `Error.name` or another low-cardinality type fallback as `error.type`.
 
 In the current implementation, `url.full` is resolved from `req.endpoint` and the optional `req.baseEndpoint`; it does not append `req.queryString`. This is an implementation boundary, not a guarantee that URLs are safe: endpoint fields and WebSocket propagation can still contain sensitive or high-cardinality values.
 
@@ -147,6 +154,38 @@ When `meter` is provided, the following stable metrics are collected:
 | Metric                         | Unit | Attributes                                                                                                          |
 | ------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------- |
 | `http.client.request.duration` | `s`  | `http.request.method`, `server.address`, `server.port`, optional `http.response.status_code`, optional `error.type` |
+
+The metric applies the same response-status and `error.type` classification as the HTTP span.
+
+### Transport span boundary
+
+The HTTP span ends when the interceptor receives the Defjs `HttpResponse`. Exact output-status dispatch and Struct decoding happen afterward, so a later `RESPONSE_VALIDATION_FAILED` or `UNDECLARED_STATUS` cannot update that transport span.
+
+When telemetry must represent the final command outcome, create an application span around `client.execute(...)` and classify the returned tuple:
+
+```ts
+import { SpanStatusCode } from '@opentelemetry/api'
+
+const outcome = await tracer.startActiveSpan('defjs.command', async (span) => {
+  try {
+    const outcome = await client.execute(command)
+    const [error] = outcome
+    if (error) {
+      span.setAttribute('error.type', error.code)
+      span.setStatus({ code: SpanStatusCode.ERROR })
+    }
+    return outcome
+  } catch (error) {
+    span.setAttribute('error.type', error instanceof Error ? error.name : typeof error)
+    span.setStatus({ code: SpanStatusCode.ERROR })
+    throw error
+  } finally {
+    span.end()
+  }
+})
+```
+
+This outer span is application-owned command telemetry; the plugin continues to emit only its lower-level transport span.
 
 This package does not add request or response bodies, full headers, baggage values, payload sizes, or message payloads as default custom telemetry fields. It also does not create separate span attributes or metrics for raw query strings.
 
@@ -203,6 +242,7 @@ By default, **per-message spans are not created**, and **message payloads, messa
 
 ## What's Next
 
-- [Client](../../doc/core/client.md) — `createClient` and full transport configuration
-- [SSE](../../doc/core/sse.md) — `defineEventStream` and streaming event consumption
-- [WebSocket](../../doc/core/web-socket.md) — `defineWebSocket` and real-time communication
+- [OpenTelemetry guide](docs/plugins/opentelemetry-server.md) — complete plugin boundaries and examples
+- [Client](docs/core/client.md) — `createClient` and full transport configuration
+- [SSE](docs/core/sse.md) — `defineEventStream` and streaming event consumption
+- [WebSocket](docs/core/web-socket.md) — `defineWebSocket` and real-time communication

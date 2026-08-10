@@ -68,6 +68,77 @@ The grouped option helpers ignore properties whose value is `undefined`. Every o
 
 Individual SSE and WebSocket helpers set one corresponding top-level field. The transport pages list their defaults and lifecycle consequences.
 
+## Test Through a Client-Local Fetch
+
+`withHTTPHandle(...)` accepts a `typeof fetch` implementation. It replaces HTTP transport only for that client, so tests can exercise real command projection, interceptors, status dispatch, response decoding, and cancellation without patching global Fetch or adopting a process-wide mocking framework.
+
+Build a native `Request` inside the fixture. That captures the final URL, headers, body, credentials, and signal after Defjs request building and HTTP interceptors:
+
+```typescript
+import { createClient, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+export function createHttpFixture() {
+  const requests: Request[] = []
+  const pending = new Set<() => void>()
+  let closed = false
+
+  const handle: typeof fetch = async (input, init) => {
+    if (closed) {
+      throw new Error('HTTP fixture is closed')
+    }
+
+    const request = new Request(input, init)
+    requests.push(request.clone())
+    const path = new URL(request.url).pathname
+
+    if (path === '/network-error') {
+      throw new TypeError('fixture network failure')
+    }
+    if (path === '/malformed') {
+      return new Response('{"id":', { headers: { 'content-type': 'application/json' }, status: 200 })
+    }
+    if (path === '/missing') {
+      return Response.json({ code: 'NOT_FOUND' }, { status: 404 })
+    }
+    if (path === '/slow') {
+      return new Promise<Response>((_resolve, reject) => {
+        const rejectPending = () => {
+          request.signal.removeEventListener('abort', rejectPending)
+          pending.delete(rejectPending)
+          reject(request.signal.reason ?? new DOMException('Fixture closed', 'AbortError'))
+        }
+
+        pending.add(rejectPending)
+        if (request.signal.aborted) {
+          rejectPending()
+        } else {
+          request.signal.addEventListener('abort', rejectPending, { once: true })
+        }
+      })
+    }
+
+    return Response.json({ id: 1, name: 'Ada' })
+  }
+
+  return {
+    client: createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(handle)),
+    requests,
+    reset() {
+      requests.length = 0
+    },
+    close() {
+      closed = true
+      for (const rejectPending of pending) {
+        rejectPending()
+      }
+      requests.length = 0
+    },
+  }
+}
+```
+
+Create a fresh fixture per test or call `reset()` between cases, and always call `close()` in `finally`. Define commands with the success and error statuses under test, add interceptors to the client normally, then assert the captured native request and the returned high-level tuple. The `/slow` branch must be aborted or closed so no pending promise or abort listener leaks into the next test. A separate loopback test using native Fetch is still useful when DNS, sockets, proxies, CORS, or other real network behavior matters.
+
 ## Execute Commands
 
 `Client.execute` has three overloads. Each returns an error-first three-item tuple.
@@ -106,7 +177,7 @@ const [error, session, startupConnection] = await client.execute(socketCommand, 
 
 The third item is the startup-connection snapshot. `session.connection` is a live getter and can describe a later physical connection attempt. WebSocket execution accepts cancellation plus per-execution `beforeConnect`, `heartbeat`, `protocols`, and `reconnect`. The required `maxIncomingQueueSize` and optional `maxOutgoingQueueSize` limits belong to each WebSocket definition. WebSocket execution does not accept `HttpContext`.
 
-See [Errors](/core/errors) for exact failure branches and [HTTP](/core/http), [SSE](/core/sse), and [WebSocket](/core/web-socket) for transport lifecycle details.
+See [Errors](./errors.md) for exact failure branches and [HTTP](./http.md), [SSE](./sse.md), and [WebSocket](./web-socket.md) for transport lifecycle details.
 
 ## Client Scope
 
@@ -146,6 +217,6 @@ Mutating this object changes later executions and bypasses normal option composi
 
 ## Next
 
-- [Commands](/core/commands) defines the values passed to `execute`.
-- [Interceptors](/core/interceptors) explains filtering and onion order.
-- [Context](/core/context) covers request-scoped metadata for HTTP and SSE.
+- [Commands](./commands.md) defines the values passed to `execute`.
+- [Interceptors](./interceptors.md) explains filtering and onion order.
+- [Context](./context.md) covers request-scoped metadata for HTTP and SSE.

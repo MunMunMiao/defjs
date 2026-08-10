@@ -118,23 +118,24 @@ Attribute 請使用 allowlist 並保持低 cardinality。不要附加 raw header
 
 HTTP interceptor 會建立 `SpanKind.CLIENT` span，並記錄：
 
+- request method 作為 span name，因為 Defjs 不提供低 cardinality URL template；
 - `http.request.method`；
 - `url.full`；
 - `server.address` 與選用的 `server.port`；
-- 收到 response 後的 `http.response.status_code`。
+- 只在收到真實 response status 時記錄 `http.response.status_code`。
 
 這不代表完整遵循 HTTP semantic convention。
 
-目前 status 行為比許多應用程式預期的更窄：
+HTTP span status 與 `error.type` 遵循以下規則：
 
-- status `500` 以上會把 span 標成 `ERROR`；
-- status `400` 到 `499` 會標成 `OK`；
-- Defjs status 0 transport response 會標成 `OK`；
-- 經由 interceptor throw 的 error 會標成 `ERROR` 並記錄 exception。
+- status `100` 到 `399` 保持 span status 未設定，也不設定 `error.type`；
+- status `400` 以上會把 client span 標成 `ERROR`，並把 `error.type` 設為 status code 字串；
+- Defjs status 0 transport result 不設定 `http.response.status_code`；caller cancellation 保持 status 未設定，也不設定 `error.type`；timeout 使用 `ERROR` / `TIMEOUT`，其他 transport failure 使用 `ERROR` / `NETWORK_ERROR`；
+- 經由 interceptor throw 的 error 會把 span 標成 `ERROR`，記錄 exception，並使用它的 `Error.name` 或其他低 cardinality fallback 作為 `error.type`。
 
 HTTP interceptor 收到 Defjs `HttpResponse` 時，HTTP span 就會結束。High-level output status dispatch 與 Struct decoding 發生在 interceptor return 之後，因此稍後產生的 `RESPONSE_VALIDATION_FAILED` 或 `UNDECLARED_STATUS` 無法更新已結束的 span。
 
-提供 Meter 時，HTTP 會以秒為單位記錄 `http.client.request.duration`。Attribute 包含 method、server address/port、選用的 response status，以及 thrown error 的選用 `error.type`。
+提供 Meter 時，HTTP 會以秒為單位記錄 `http.client.request.duration`。Attribute 包含 method、server address/port、選用的 response status 與選用的 `error.type`。Metric 使用與 HTTP span 相同的 response status 和 `error.type` 分類。
 
 ## SSE 語意
 

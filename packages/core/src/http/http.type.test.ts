@@ -1,8 +1,9 @@
 import { expectTypeOf } from 'vitest'
 import type { HTTP_COMMAND } from '../client/command'
 import { COMMAND_TYPE } from '../client/command'
+import { createClient } from '../client'
 import type { HttpResponse } from './public_api'
-import type { HttpAwaitResult } from './http'
+import type { HttpAwaitResult, HttpExecuteOptions } from './http'
 import { defineRequest } from './http'
 import { struct } from '../struct'
 
@@ -15,6 +16,21 @@ const useGetUser = defineRequest({
 
 const command = useGetUser({ id: 1 })
 expectTypeOf(command[COMMAND_TYPE]).toEqualTypeOf<typeof HTTP_COMMAND>()
+
+const structuralExecuteOptions: { signal?: AbortSignal; timeout?: number } = {}
+const acceptedExecuteOptions: HttpExecuteOptions = structuralExecuteOptions
+void acceptedExecuteOptions
+
+async function assertStructuralExecuteOptions(): Promise<void> {
+  const [error, result] = await createClient().execute(command, structuralExecuteOptions)
+  void error
+  void result
+}
+
+void assertStructuralExecuteOptions
+
+// @ts-expect-error execute rejects conflicting cancellation options instead of falling through to a catch-all overload.
+createClient().execute(command, { abort: new AbortController().signal, timeout: 1 })
 
 // Optional input builder should allow no argument
 const useList = defineRequest({ method: 'GET', path: '/users', output: { 200: struct.object({ items: struct.object({}) }) } })

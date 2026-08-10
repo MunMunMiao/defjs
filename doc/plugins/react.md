@@ -147,6 +147,34 @@ export function UserProfile({ id }: { id: number }) {
 
 Defjs returns expected request failures in tuples. Convert an error to a thrown value only at an integration boundary that expects exceptions, such as a query library's `queryFn`.
 
+## Query and GraphQL Boundaries
+
+When TanStack Query owns caching, retry, stale-result suppression, and component cleanup, put the Defjs command inside its `queryFn`, forward the supplied signal, and convert the tuple error to a throw at that boundary:
+
+```tsx
+import { useQuery } from '@tanstack/react-query'
+import { useClient } from '@defjs/react'
+import { getUser } from './api'
+
+export function UserProfile({ id }: { id: number }) {
+  const client = useClient()
+  const query = useQuery({
+    queryKey: ['user', id],
+    queryFn: async ({ signal }) => {
+      const [error, user] = await client.execute(getUser({ path: { id } }), { signal })
+      if (error) {
+        throw error
+      }
+      return user
+    },
+  })
+
+  return <p>{query.data?.name ?? (query.error ? 'Unable to load user.' : 'Loading...')}</p>
+}
+```
+
+Do not wrap the same request in a second application effect; let one lifecycle owner control cancellation and stale results. `@defjs/react` also does not provide GraphQL hooks, a normalized GraphQL cache, generated operation types, or the GraphQL WebSocket protocol. A GraphQL-first application should compose a dedicated GraphQL client and, for subscriptions, follow the [GraphQL WebSocket boundary](../core/web-socket.md#graphql-over-websocket).
+
 ## Client Component Boundary
 
 The package does not establish a React Server Component client boundary for your application. Put `ClientProvider` behind an application-owned module that starts with `'use client'`.
@@ -272,6 +300,6 @@ declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOp
 
 ## Next
 
-- [Client](/core/client) covers core option composition and scope.
-- [Errors](/core/errors) covers tuple-to-exception integration boundaries.
-- [SSE](/core/sse) and [WebSocket](/core/web-socket) cover realtime ownership.
+- [Client](../core/client.md) covers core option composition and scope.
+- [Errors](../core/errors.md) covers tuple-to-exception integration boundaries.
+- [SSE](../core/sse.md) and [WebSocket](../core/web-socket.md) cover realtime ownership.

@@ -131,6 +131,32 @@ if (!error) {
 
 Do not log `cause`, `data`, response headers, bodies, or URLs without an explicit redaction and retention policy.
 
+## Adapt a Tuple at the Domain Boundary
+
+Keep transport details at a narrow application boundary instead of teaching every component the full error taxonomy. A small use-case-specific adapter is usually enough:
+
+```typescript
+export async function loadUser(id: number) {
+  const [error, user] = await client.execute(getUser({ path: { id } }))
+
+  if (!error) {
+    return { ok: true as const, user }
+  }
+  if (error.kind === 'http' && error.status === 404) {
+    return { ok: false as const, reason: 'not-found' as const }
+  }
+  if (error.kind === 'transport') {
+    return { ok: false as const, reason: 'unavailable' as const }
+  }
+  if (error.kind === 'definition') {
+    return { ok: false as const, reason: 'contract-error' as const }
+  }
+  return { ok: false as const, reason: 'request-failed' as const }
+}
+```
+
+The inferred return type is a domain discriminated union. Here `request-failed` retains declared HTTP failures other than `404`; a real application can map specific statuses more precisely. Keep mappings like `404` to `not-found` close to the use case; do not introduce a global normalizer that erases typed `error.data`, status, or transport distinctions needed elsewhere. If the consumer expects thrown failures, such as a query library's `queryFn`, throw at that integration boundary instead.
+
 ## Response Availability
 
 `HttpResponse` is a Defjs wrapper, not a native `Response`. It exposes status, status text, headers, URL, body, `error`, and `ok`. `ok` means only that the status is in the 2xx range. `error` is reserved for transport or body-representation failures; an ordinary non-2xx response leaves it empty.
@@ -142,6 +168,8 @@ For HTTP:
 - a declared HTTP status error has `error.response`;
 - response-output validation errors and undeclared statuses can have `error.response`;
 - request validation, cancellation before a response, interceptor throws, and status-0 transport failures can have no tuple response.
+
+A browser CORS rejection is exposed at this high-level boundary like a network failure: expect `NETWORK_ERROR`, `undefined` data, and potentially no tuple response. The browser can hide the server response even when the server received the request. Branch on `error.kind` and `error.code` first; do not require `response.status === 0` to recognize CORS or network failure.
 
 For SSE, a failed startup can still return a third-item open snapshot when a response arrived before content or status validation failed. For WebSocket, a failed startup can return a connection snapshot only when one was captured.
 
@@ -164,6 +192,6 @@ Built-in command paths convert their expected startup failures into tuples. Tupl
 
 ## Next
 
-- [HTTP](/core/http) explains status dispatch and response decoding.
-- [SSE](/core/sse) distinguishes startup failure from errors after open.
-- [WebSocket](/core/web-socket) covers runtime errors and terminal close.
+- [HTTP](./http.md) explains status dispatch and response decoding.
+- [SSE](./sse.md) distinguishes startup failure from errors after open.
+- [WebSocket](./web-socket.md) covers runtime errors and terminal close.

@@ -1,5 +1,6 @@
 import type { HttpRequest, HttpResponse } from '@defjs/core'
 import type { Attributes, Histogram, Meter, UpDownCounter } from '@opentelemetry/api'
+import { getErrorType, getHttpResponseErrorType } from './trace'
 import { resolveHttpUrl } from './url'
 
 const DURATION_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]
@@ -76,10 +77,14 @@ export function createHttpMetricAttributes(req: HttpRequest, response?: HttpResp
   const attributes: Attributes = {
     ...createServerMetricAttributes(req),
     'http.request.method': req.method,
-    ...createErrorMetricAttributes(error),
   }
 
-  if (response) {
+  const errorType = response ? getHttpResponseErrorType(response.status, response.error) : createErrorMetricAttributes(error)['error.type']
+  if (errorType) {
+    attributes['error.type'] = errorType
+  }
+
+  if (response && response.status !== 0) {
     attributes['http.response.status_code'] = response.status
   }
 
@@ -113,11 +118,4 @@ export function createErrorMetricAttributes(error: unknown): Attributes {
     return {}
   }
   return { 'error.type': getErrorType(error) }
-}
-
-function getErrorType(error: unknown): string {
-  if (error instanceof Error) {
-    return error.name || 'Error'
-  }
-  return typeof error
 }

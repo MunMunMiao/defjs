@@ -1,6 +1,6 @@
 import { COMMAND_TYPE, EVENT_STREAM_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
-import type { ClientConfig } from '../client/config'
+import type { ClientConfig, ClientSSEOptions } from '../client/config'
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError } from '../error'
 import type { SSEHandler } from '../interceptor/interceptor'
@@ -91,10 +91,7 @@ export type EventStreamDefinition<TInput extends AnyStruct | undefined = undefin
   | EventStreamDefinitionWithoutBuild<TInput, TEvents>
   | (TInput extends AnyStruct ? EventStreamDefinitionWithBuild<TInput, TEvents> : never)
 
-export interface StreamOpenInfo {
-  response?: HttpResponse<null>
-  url?: string
-}
+export type StreamOpenInfo = EventStreamOpenInfo
 
 export type StreamAwaitResult<TEvent> =
   | [error: null, stream: EventStreamHandle<TEvent>, open: StreamOpenInfo]
@@ -277,7 +274,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
     >
     chainSettled = true
 
-    const open = normalizeOpenInfo(stream.open) as StreamOpenInfo
+    const open = stream.open
 
     discardOwnedStreams(new Error('SSE interceptor discarded an opened stream'), stream)
 
@@ -286,7 +283,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
     chainSettled = true
     discardOwnedStreams(error)
 
-    const openInfo = normalizeOpenInfo(extractOpenInfo(error))
+    const openInfo = extractOpenInfo(error)
     const normalizedError = requestSignal.aborted
       ? resolveAbortedTransportError(requestSignal)
       : createEventStreamRuntimeError(error, openInfo?.response)
@@ -308,14 +305,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
 async function transformStreamMessage<TEvents extends EventStructs>(
   events: TEvents,
   message: EventStreamMessage,
-  onInvalidEvent:
-    | ((context: {
-        reason: 'missing-struct' | 'validation-failed'
-        message: { id: string; event: string; data: string }
-        cause?: unknown
-        signal: AbortSignal
-      }) => void | Promise<void>)
-    | undefined,
+  onInvalidEvent: ClientSSEOptions['onInvalidEvent'],
   signal: AbortSignal,
 ): Promise<EventStreamData<TEvents> | undefined> {
   const eventName = message.event || 'message'
@@ -357,14 +347,7 @@ async function transformStreamMessage<TEvents extends EventStructs>(
 }
 
 async function notifyInvalidEvent(
-  onInvalidEvent:
-    | ((context: {
-        reason: 'missing-struct' | 'validation-failed'
-        message: { id: string; event: string; data: string }
-        cause?: unknown
-        signal: AbortSignal
-      }) => void | Promise<void>)
-    | undefined,
+  onInvalidEvent: ClientSSEOptions['onInvalidEvent'],
   context: {
     reason: 'missing-struct' | 'validation-failed'
     message: { id: string; event: string; data: string }
@@ -474,17 +457,6 @@ function parseSSEBoolean(data: string): boolean {
 
 function parseSSEJsonBody(struct: RuntimeStruct, data: string): unknown {
   return decodeJson(struct, JSON.parse(data) as unknown)
-}
-
-function normalizeOpenInfo(open?: EventStreamOpenInfo): StreamOpenInfo | undefined {
-  if (!open) {
-    return undefined
-  }
-
-  return {
-    response: open.response,
-    url: open.url,
-  }
 }
 
 function extractOpenInfo(error: unknown): EventStreamOpenInfo | undefined {

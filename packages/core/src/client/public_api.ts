@@ -6,6 +6,8 @@ export type {
   ClientSSEOptions,
   ClientWebSocketOptions,
   QueryParamsSerializer,
+  WebSocketHandle,
+  WebSocketHandleConstructor,
 } from './config'
 export type { ClientOption } from './option'
 export {

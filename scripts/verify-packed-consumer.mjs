@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -197,5 +197,59 @@ async function verifyInstalledPackages(directory) {
     const manifest = await readFile(join(packageRoot, 'package.json'), 'utf8')
     assert.equal(/(?:workspace|link):/.test(manifest), false, `${packageName} retains a workspace-only dependency`)
     assert.equal(JSON.parse(manifest).engines?.node, '>=22', `${packageName} must declare Node >=22`)
+
+    const readme = await readFile(join(packageRoot, 'README.md'), 'utf8')
+    for (const phrase of ['source/workspace', 'workspace source', 'public npm provides']) {
+      assert.equal(readme.toLowerCase().includes(phrase), false, `${packageName} README retains consumer-hostile ${phrase} context`)
+    }
+    assert.equal(/`packages\/[^`]+`/.test(readme), false, `${packageName} README points at an unpacked workspace path`)
+    for (const requiredPath of [
+      'docs/core/http.md',
+      'docs/plugins/opentelemetry-server.md',
+      'docs/plugins/react.md',
+      'docs/plugins/vue.md',
+    ]) {
+      await stat(join(packageRoot, requiredPath))
+    }
+
+    const packageFiles = await readdir(packageRoot, { recursive: true })
+    assert.equal(
+      packageFiles.some((file) => file.split(/[\\/]/u).includes('node_modules')),
+      false,
+      `${packageName} contains a nested node_modules tree`,
+    )
+    for (const file of packageFiles) {
+      assert.equal((await lstat(join(packageRoot, file))).isSymbolicLink(), false, `${packageName} contains a symbolic link: ${file}`)
+    }
+
+    const markdownFiles = packageFiles.filter((file) => file.endsWith('.md'))
+    for (const file of markdownFiles) {
+      const markdown = await readFile(join(packageRoot, file), 'utf8')
+      assert.equal(
+        /https?:\/\/github\.com\/(?:defjs|MunMunMiao)\/defjs\/(?:blob|tree)\//iu.test(markdown),
+        false,
+        `${packageName} ${file} relies on repository-only documentation`,
+      )
+      await verifyMarkdownLinks(packageName, packageRoot, file, markdown)
+    }
+  }
+}
+
+async function verifyMarkdownLinks(packageName, packageRoot, file, markdown) {
+  for (const match of markdown.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+    const href = match[1].trim().split(/\s+/u, 1)[0]
+    if (!href || /^(?:#|https?:|mailto:)/u.test(href)) {
+      continue
+    }
+
+    assert.equal(href.startsWith('/'), false, `${packageName} ${file} uses a site-root-only link: ${href}`)
+    const relativeTarget = decodeURIComponent(href.split('#', 1)[0])
+    const target = resolve(dirname(join(packageRoot, file)), relativeTarget)
+    assert.equal(isInside(packageRoot, target), true, `${packageName} ${file} link escapes the installed package: ${href}`)
+    try {
+      await stat(target)
+    } catch {
+      assert.fail(`${packageName} ${file} link is missing from the installed package: ${href}`)
+    }
   }
 }

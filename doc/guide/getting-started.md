@@ -17,6 +17,16 @@ pnpm add @defjs/core
 
 Use the equivalent `npm`, Yarn, or Bun command if your project uses another package manager. `@defjs/core` is ESM. When you run it in Node.js, the current package metadata requires Node 22 or newer.
 
+Packed ESM HTTP consumers were exercised with Node.js 22, 24, and 26, Bun 1.3.14, and Deno 2.9.5. After compiling your application, the corresponding command shapes are:
+
+```sh
+node dist/index.js
+bun run dist/index.js
+deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+```
+
+The Deno command uses packages already installed in `node_modules`; replace the network permission with the exact API hosts your application needs. The Bun and Deno checks cover the documented HTTP slice, not every platform API or transport. Browser builds use their normal bundler and the required platform Fetch and WebSocket capabilities.
+
 Add an adapter only when your application needs it:
 
 | Application setup         | Packages                                                                                  |
@@ -26,7 +36,7 @@ Add an adapter only when your application needs it:
 | Server-side OpenTelemetry | `@defjs/core`, `@defjs/opentelemetry-server`, `@opentelemetry/api`, `@opentelemetry/core` |
 
 ::: tip Match the docs to your installed version
-These pages describe the API shown in this documentation release. Check the version installed in your application. If an export or option differs, use the documentation and release notes for that installed version instead of mixing examples across versions.
+These pages describe the current documentation source. Published packages bundle the matching English guides. Check the version installed in your application and do not mix examples across releases.
 :::
 
 ## Define Your First Request
@@ -95,7 +105,7 @@ Keep endpoint definitions in modules that describe your service API. Reuse their
 
 ## Next Steps
 
-- [Commands](/core/commands) explains automatic request mapping and custom schema-bound projections.
-- [Errors](/core/errors) shows how to handle transport and HTTP failures in application code.
-- [HTTP](/core/http) covers URL resolution, request bodies, output decoding, cancellation, and XSRF behavior.
-- [Examples](/guide/examples) provides complete recipes you can adapt to your own API and application boundaries.
+- [Commands](../core/commands.md) explains automatic request mapping and custom schema-bound projections.
+- [Errors](../core/errors.md) shows how to handle transport and HTTP failures in application code.
+- [HTTP](../core/http.md) covers URL resolution, request bodies, output decoding, cancellation, and XSRF behavior.
+- [Examples](./examples.md) provides complete recipes you can adapt to your own API and application boundaries.

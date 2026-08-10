@@ -158,7 +158,7 @@ withXSRF({
 })
 ```
 
-주입은 `POST`, `PUT`, `PATCH`, `DELETE`에서만 시도합니다. 설정된 header가 이미 있으면 유지합니다. 브라우저 cookie 조회는 same-origin 요청으로 제한됩니다. 브라우저 밖에서는 동기 `tokenProvider`를 제공하세요. cookie 조회보다 우선합니다.
+RFC 안전 메서드인 `GET`, `HEAD`, `OPTIONS`, `TRACE`에서는 주입을 건너뜁니다. `PROPPATCH`와 같은 사용자 정의 비안전 메서드를 포함한 그 밖의 모든 메서드에서는 주입 전에 기존 header, same-origin, token에 대한 동일한 guard를 적용합니다. 설정된 header가 이미 있으면 유지합니다. 브라우저 cookie 조회는 same-origin 요청으로 제한됩니다. 브라우저 밖에서는 동기 `tokenProvider`를 제공하세요. cookie 조회보다 우선합니다.
 
 ```typescript
 import type { HttpRequest } from '@defjs/core'

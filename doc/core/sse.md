@@ -247,6 +247,6 @@ The application boundary that opens the stream owns closing it. A client or fram
 
 ## Next
 
-- [WebSocket](/core/web-socket) covers bidirectional sessions and opt-in reconnect.
-- [Interceptors](/core/interceptors) covers SSE header changes and lifecycle observation.
-- [Errors](/core/errors) explains startup response availability.
+- [WebSocket](./web-socket.md) covers bidirectional sessions and opt-in reconnect.
+- [Interceptors](./interceptors.md) covers SSE header changes and lifecycle observation.
+- [Errors](./errors.md) explains startup response availability.

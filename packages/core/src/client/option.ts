@@ -1,5 +1,12 @@
 import type { Interceptor } from '../interceptor/interceptor'
-import type { ClientConfig, ClientOptions, ClientSSEOptions, ClientWebSocketOptions, QueryParamsSerializer } from './config'
+import type {
+  ClientConfig,
+  ClientOptions,
+  ClientSSEOptions,
+  ClientWebSocketOptions,
+  QueryParamsSerializer,
+  WebSocketHandleConstructor,
+} from './config'
 
 export type ClientOption = (config: ClientConfig) => void
 
@@ -42,7 +49,7 @@ export function withSSEHandle(fetchImpl: typeof fetch): ClientOption {
   }
 }
 
-export function withWebSocketHandle(WebSocketImpl: typeof WebSocket): ClientOption {
+export function withWebSocketHandle(WebSocketImpl: WebSocketHandleConstructor): ClientOption {
   return (config) => {
     config.webSocket.handle = WebSocketImpl
   }

@@ -158,7 +158,7 @@ withXSRF({
 })
 ```
 
-Solo se intenta inyectar el token para `POST`, `PUT`, `PATCH` y `DELETE`. Si la cabecera configurada ya existe, se conserva. En navegador, la lectura de cookies se limita a peticiones del mismo origen. Fuera del navegador, proporciona un `tokenProvider` síncrono; tiene prioridad sobre la lectura de cookies.
+La inyección se omite para los métodos seguros según RFC `GET`, `HEAD`, `OPTIONS` y `TRACE`. Para cualquier otro método, incluidos métodos personalizados no seguros como `PROPPATCH`, se aplican las mismas comprobaciones de cabecera existente, mismo origen y token antes de la inyección. Si la cabecera configurada ya existe, se conserva. En navegador, la lectura de cookies se limita a peticiones del mismo origen. Fuera del navegador, proporciona un `tokenProvider` síncrono; tiene prioridad sobre la lectura de cookies.
 
 ```typescript
 import type { HttpRequest } from '@defjs/core'

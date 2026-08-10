@@ -20,13 +20,17 @@ Freeze one payment command with its key and serialized body, execute that same c
 
 - [`src/index.ts`](./src/index.ts): Payment request, operation factory, local idempotency receiver, and runner.
 
-## Run
+## Run in a Repository Checkout
 
 From the repository root:
 
 ```sh
 pnpm --silent --filter @defjs/example-resilience-idempotency-key start
 ```
+
+## Use the Bundled Reference
+
+Published `@defjs/*` packages include this README and `src/index.ts` as source-only reference material; they intentionally do not include the workspace manifest or runner. Copy `src/index.ts` into an application that already installs `@defjs/core`, then compile and run it with that application's TypeScript toolchain.
 
 ## Expected result
 

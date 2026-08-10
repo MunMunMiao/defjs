@@ -158,7 +158,7 @@ withXSRF({
 })
 ```
 
-تُحاول عملية الحقن فقط مع `POST` و`PUT` و`PATCH` و`DELETE`. ويُحفظ configured header موجود مسبقًا. يقتصر البحث في browser cookies على طلبات same-origin. خارج المتصفح، قدّم `tokenProvider` متزامنًا؛ وله الأولوية على cookie lookup.
+يُتخطى الحقن لطرق RFC الآمنة `GET` و`HEAD` و`OPTIONS` و`TRACE`. تستخدم كل الطرق الأخرى، بما فيها الطرق المخصصة غير الآمنة مثل `PROPPATCH`، حواجز التحقق نفسها من وجود header مسبقًا وsame-origin وtoken قبل الحقن. ويُحفظ configured header موجود مسبقًا. يقتصر البحث في browser cookies على طلبات same-origin. خارج المتصفح، قدّم `tokenProvider` متزامنًا؛ وله الأولوية على cookie lookup.
 
 ```typescript
 import type { HttpRequest } from '@defjs/core'

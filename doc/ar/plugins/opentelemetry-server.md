@@ -118,23 +118,24 @@ withOpenTelemetryServer({
 
 ينشئ HTTP interceptor span من نوع `SpanKind.CLIENT` ويسجل:
 
+- method الطلب كاسم span لأن Defjs لا يوفر قالب URL منخفض cardinality؛
 - `http.request.method`؛
 - `url.full`؛
 - `server.address` و`server.port` الاختياري؛
-- `http.response.status_code` بعد response.
+- `http.response.status_code` فقط عند استلام status فعلي لـ response.
 
 لا يعني هذا توافقًا كاملًا مع HTTP semantic conventions.
 
-سلوك status الحالي أضيق مما تتوقعه تطبيقات كثيرة:
+يتبع status لـ HTTP span و`error.type` القواعد التالية:
 
-- status من `500` فما فوق يضع span في `ERROR`؛
-- status من `400` إلى `499` يضعه في `OK`؛
-- response من Defjs ذات status يساوي 0 تضعه في `OK`؛
-- error يمر مرميًا عبر interceptor يضعه في `ERROR` ويسجل exception.
+- status من `100` إلى `399` يترك status لـ span غير معيّن ولا يضبط `error.type`؛
+- status من `400` فما فوق يضع client span في `ERROR` ويضبط `error.type` على نص status code؛
+- نتيجة transport من Defjs ذات status 0 لا تضبط `http.response.status_code`؛ يترك إلغاء caller الـ status غير معيّن ولا يضبط `error.type`، ويستخدم timeout القيمتين `ERROR` / `TIMEOUT`، وتستخدم إخفاقات transport الأخرى `ERROR` / `NETWORK_ERROR`؛
+- error يُرمى عبر interceptor يضع span في `ERROR`، ويسجل exception، ويستخدم `Error.name` أو fallback آخر منخفض cardinality كـ `error.type`.
 
 ينتهي HTTP span عندما يستقبل HTTP interceptor كائن `HttpResponse` من Defjs. يحدث توزيع output status عالي المستوى وفك Struct بعد عودة interceptor. لذلك لا يستطيع `RESPONSE_VALIDATION_FAILED` أو `UNDECLARED_STATUS` لاحق تحديث span الذي انتهى.
 
-عند توفير Meter، تسجل HTTP المقياس `http.client.request.duration` بالثواني. تشمل attributes الـ method وserver address/port وresponse status الاختياري و`error.type` الاختياري للأخطاء المرمية.
+عند توفير Meter، تسجل HTTP المقياس `http.client.request.duration` بالثواني. تشمل attributes الـ method وserver address/port وresponse status الاختياري و`error.type` الاختياري. يطبق المقياس تصنيف response status و`error.type` نفسه الذي يطبقه HTTP span.
 
 ## دلالات SSE
 

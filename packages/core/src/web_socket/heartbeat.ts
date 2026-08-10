@@ -1,3 +1,4 @@
+import type { WebSocketHandle } from '../client/config'
 import type { FnReturn } from '../internal/utility_types'
 import { serializeOutgoingWebSocketMessage } from './codec'
 import type { SocketStructs, WebSocketHeartbeatConfig, WebSocketOutgoingData } from './web_socket'
@@ -11,12 +12,12 @@ export type HeartbeatRuntime<TIncoming> = {
 }
 
 export type HeartbeatSession<TIncoming> = {
-  currentSocket: WebSocket | undefined
+  currentSocket: WebSocketHandle | undefined
   heartbeat: HeartbeatRuntime<TIncoming> | undefined
 }
 
 export function startHeartbeat<TIncoming, TOutgoing extends SocketStructs | undefined>(
-  socket: WebSocket,
+  socket: WebSocketHandle,
   sessionController: HeartbeatSession<TIncoming>,
   config: WebSocketHeartbeatConfig<TIncoming, WebSocketOutgoingData<TOutgoing>> | undefined,
   outgoing: TOutgoing,

@@ -1,3 +1,4 @@
+import { ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
 import { describe, expect, test, vi } from 'vitest'
 import { makeHttpRequest, makeHttpResponse } from '../test-utils'
 import {
@@ -70,6 +71,27 @@ describe('metrics helpers', () => {
     expect(createHttpMetricAttributes(makeHttpRequest(), makeHttpResponse())).toEqual({
       'http.request.method': 'GET',
       'http.response.status_code': 200,
+      'server.address': 'api.example.com',
+    })
+  })
+
+  test.each([404, 503])('createHttpMetricAttributes classifies client error status %i', (status) => {
+    expect(createHttpMetricAttributes(makeHttpRequest(), { ...makeHttpResponse(), status })).toEqual({
+      'error.type': String(status),
+      'http.request.method': 'GET',
+      'http.response.status_code': status,
+      'server.address': 'api.example.com',
+    })
+  })
+
+  test.each([
+    { error: new TypeError('fetch failed'), errorType: 'NETWORK_ERROR' },
+    { error: ERR_TIMEOUT, errorType: 'TIMEOUT' },
+    { error: ERR_ABORTED, errorType: undefined },
+  ])('createHttpMetricAttributes omits response status for status-0 $errorType result', ({ error, errorType }) => {
+    expect(createHttpMetricAttributes(makeHttpRequest(), { ...makeHttpResponse(), error, status: 0 })).toEqual({
+      ...(errorType ? { 'error.type': errorType } : {}),
+      'http.request.method': 'GET',
       'server.address': 'api.example.com',
     })
   })

@@ -43,7 +43,7 @@ Custom `build(request, input)` receives a declarative binding view derived from 
 
 The view records how source fields map to path, query, headers, and body targets. That model supports field projection, explicit wire keys, and one-to-one array projection. It deliberately prevents value-dependent branching, arbitrary transforms, and injected literal projection values.
 
-This restriction keeps request construction tied to declared Struct fields. Application-level normalization and business validation should happen before creating a command. See [Commands](/core/commands) for the supported projection forms.
+This restriction keeps request construction tied to declared Struct fields. Application-level normalization and business validation should happen before creating a command. See [Commands](../core/commands.md) for the supported projection forms.
 
 ## Observers Do Not Own Control Flow
 
@@ -55,6 +55,6 @@ Use the returned handle or session for lifecycle decisions. Use observers for bo
 
 ## Related Reference
 
-- [Client](/core/client) documents option composition and client scope.
-- [Errors](/core/errors) documents tuple failures and response availability.
-- [SSE](/core/sse) and [WebSocket](/core/web-socket) document logical handles, physical attempts, and terminal close.
+- [Client](../core/client.md) documents option composition and client scope.
+- [Errors](../core/errors.md) documents tuple failures and response availability.
+- [SSE](../core/sse.md) and [WebSocket](../core/web-socket.md) document logical handles, physical attempts, and terminal close.

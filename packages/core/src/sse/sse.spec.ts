@@ -82,11 +82,12 @@ describe('request event stream runtime', () => {
     const [error, stream, open] = await baseClient.execute(useBasicStream())
 
     expect(error).toBeNull()
-    expect(open?.response?.ok).toBe(true)
-    expect(open?.response?.headers.get('x-request-id')).toBe('trace-sse-basic')
     if (!stream) {
       throw new Error('Expected stream open result')
     }
+    expect(open).toBe(stream.open)
+    expect(open.response.ok).toBe(true)
+    expect(open.response.headers.get('x-request-id')).toBe('trace-sse-basic')
 
     const messages: Array<{ data: string; event: string; id?: string }> = []
     for await (const event of stream) {
@@ -1420,9 +1421,7 @@ describe('request event stream runtime', () => {
           )) as unknown as typeof fetch,
       ),
       withSSEOptions({
-        onInvalidEvent: async (context) => {
-          captured.push({ id: context.message.id, reason: context.reason })
-        },
+        onInvalidEvent: (context) => captured.push({ id: context.message.id, reason: context.reason }),
       }),
     )
 

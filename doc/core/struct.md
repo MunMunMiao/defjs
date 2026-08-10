@@ -97,6 +97,19 @@ Missing optional and nullish object fields are omitted from the output. At the t
 
 Unknown object keys are dropped. Parsed object and record outputs use a null prototype. Code that depends on `Object.prototype` methods should use `Object.keys`, `Object.entries`, or copy into a normal object deliberately.
 
+Node's strict deep equality checks prototypes, so a parsed Struct object is intentionally not deeply equal to an otherwise identical object literal. Assert that boundary explicitly or compare the fields needed by the test:
+
+```typescript
+import assert from 'node:assert/strict'
+
+const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
+assert.equal(error, null)
+assert.equal(Object.getPrototypeOf(profile), null)
+assert.deepEqual({ ...profile }, { name: 'Ada' })
+```
+
+The spread is an assertion-local shallow copy. Nested Struct objects also have null prototypes, so compare nested fields deliberately rather than adding a production normalization or clone layer solely for a test matcher.
+
 ## Required Object and Request Input
 
 Object properties are required at the TypeScript and runtime boundaries unless their Struct is optional or nullish. Every section declared in `struct.request(...)` is also required; sections that are not declared do not exist in the input type.
@@ -149,7 +162,7 @@ Body boundaries are:
 | `struct.blob()`            | `Blob`            |
 | `struct.arrayBuffer()`     | `ArrayBuffer`     |
 
-See [Commands](/core/commands) for automatic request mapping and transport restrictions.
+See [Commands](./commands.md) for automatic request mapping and transport restrictions.
 
 ## Aliases
 
@@ -210,6 +223,6 @@ The map is global, not client-scoped. Changing it affects later Struct issues in
 
 ## Next
 
-- [Commands](/core/commands) maps Struct fields to requests and messages.
-- [Errors](/core/errors) explains how Struct failures appear in execution tuples.
-- [HTTP](/core/http) covers response decoding and representation errors.
+- [Commands](./commands.md) maps Struct fields to requests and messages.
+- [Errors](./errors.md) explains how Struct failures appear in execution tuples.
+- [HTTP](./http.md) covers response decoding and representation errors.

@@ -4,17 +4,21 @@ Thin React adapter for `@defjs/core`. It provides `ClientProvider`, `useClient`,
 
 Supports React 18+.
 
-## Package and repository setup
+## Install
 
-Install `@defjs/react` with a compatible `@defjs/core` release. Inside this repository, those package names resolve to the workspace source packages at `packages/react` and `packages/core`.
+Install `@defjs/react` with a compatible `@defjs/core` release and React:
 
-Repository development uses Node 26 or newer with `pnpm@11.6.0` and `engine-strict=true`. The published package manifest supports Node 22 or newer, and CI verifies the same packed artifact on Node 22, 24, and 26.
+```sh
+npm install @defjs/core @defjs/react react
+```
+
+The package is ESM and requires Node.js 22 or newer when run in Node.
 
 ## What this package does
 
 `ClientProvider` creates one `@defjs/core` client for a mounted provider instance and exposes it through React Context. Ordinary rerenders keep that initial client and do not reapply a changed `options` array. `useClient()` reads the nearest provided client. `withEndpoint` and `withInterceptors` are React-specific option glue for provider setup.
 
-This package is a thin adapter over `@defjs/core`. It does not add a query layer, data cache, Suspense integration, or application state management. Compose those patterns in your own React code by calling `client.execute(...)` from hooks, loaders, or third-party libraries.
+This package is a thin adapter over `@defjs/core`. It does not add a query layer, data cache, Suspense integration, GraphQL client or protocol handling, or application state management. Compose those patterns in your own React code by calling `client.execute(...)` from hooks, loaders, or third-party libraries.
 
 ## Quick Start
 
@@ -108,7 +112,7 @@ export function UserProfile({ id }: { id: number }) {
 
 ## Cookbook
 
-When browsing this repository, see `doc/plugins/react.md` for recipes covering Next.js App Router request boundaries, application-owned header and cookie forwarding, TanStack Query integration, hydration boundaries, `ClientProvider` lifecycle, and SSE/WebSocket effect cleanup. Long-lived transports must be closed when their UI owner unmounts, including a successful handle that arrives after cleanup has started.
+See the bundled [React guide](docs/plugins/react.md) for request-scoped SSR boundaries, TanStack Query composition, `ClientProvider` lifecycle, and SSE/WebSocket effect cleanup. Long-lived transports must be closed when their UI owner unmounts, including a successful handle that arrives after cleanup has started.
 
 ## API
 

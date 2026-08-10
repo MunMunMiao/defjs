@@ -118,23 +118,24 @@ Hook 可以返回 `void` 或 `Promise<void>`，但保持非阻塞 observer 语�
 
 HTTP interceptor 创建 `SpanKind.CLIENT` span，并记录：
 
+- request method 作为 span name，因为 Defjs 不提供低基数 URL template；
 - `http.request.method`；
 - `url.full`；
 - `server.address` 和可选 `server.port`；
-- 收到 response 后的 `http.response.status_code`。
+- 仅在收到真实 response status 时记录 `http.response.status_code`。
 
 这不代表完整支持 HTTP semantic convention。
 
-当前 status 行为比很多应用预期的范围更窄：
+HTTP span status 和 `error.type` 遵循以下规则：
 
-- status `500` 及以上会把 span 标记为 `ERROR`；
-- status `400` 到 `499` 会标记为 `OK`；
-- Defjs status-0 transport response 会标记为 `OK`；
-- 经过 interceptor 抛出的错误会标记为 `ERROR`，并记录 exception。
+- status `100` 到 `399` 保持 span status 未设置，也不设置 `error.type`；
+- status `400` 及以上会把 client span 标记为 `ERROR`，并把 `error.type` 设为 status code 字符串；
+- Defjs status-0 transport result 不设置 `http.response.status_code`；caller cancellation 保持 status 未设置，也不设置 `error.type`；timeout 使用 `ERROR` / `TIMEOUT`，其他 transport failure 使用 `ERROR` / `NETWORK_ERROR`；
+- 经过 interceptor 抛出的错误会把 span 标记为 `ERROR`，记录 exception，并使用它的 `Error.name` 或其他低基数 fallback 作为 `error.type`。
 
 HTTP interceptor 收到 Defjs `HttpResponse` 时就会结束 span。高层 output status dispatch 和 Struct 解码发生在 interceptor 返回之后。因此，后续 `RESPONSE_VALIDATION_FAILED` 或 `UNDECLARED_STATUS` 无法更新已经结束的 span。
 
-提供 Meter 时，HTTP 会以秒为单位记录 `http.client.request.duration`。Attribute 包括 method、server address/port、可选 response status，以及 thrown error 的可选 `error.type`。
+提供 Meter 时，HTTP 会以秒为单位记录 `http.client.request.duration`。Attribute 包括 method、server address/port、可选 response status 和可选 `error.type`。Metric 使用与 HTTP span 相同的 response status 和 `error.type` 分类。
 
 ## SSE 语义
 

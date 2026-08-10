@@ -8,7 +8,7 @@ The Defjs OTel interceptor should inject W3C trace context and create a client s
 
 ## Scenario
 
-The worker executes `GET https://warehouse.invalid/v1/fulfillment/jobs/job-204`. A local Fetch fixture observes a `traceparent` header and returns the typed ready-for-pick job. The in-memory exporter receives an `HTTP GET` span whose `url.full` attribute names the warehouse request.
+The worker executes `GET https://warehouse.invalid/v1/fulfillment/jobs/job-204`. A local Fetch fixture observes a `traceparent` header and returns the typed ready-for-pick job. The in-memory exporter receives a `GET` span whose `url.full` attribute names the warehouse request.
 
 The fixture providers are isolated, export nothing externally, and shut down in `finally`.
 
@@ -32,7 +32,7 @@ pnpm --silent --filter @defjs/example-observability-otel-http start
 ## Expected result
 
 ```text
-{"job":{"jobId":"job-204","status":"ready-for-pick"},"span":{"name":"HTTP GET","url":"https://warehouse.invalid/v1/fulfillment/jobs/job-204"},"traceparentInjected":true}
+{"job":{"jobId":"job-204","status":"ready-for-pick"},"span":{"name":"GET","url":"https://warehouse.invalid/v1/fulfillment/jobs/job-204"},"traceparentInjected":true}
 ```
 
 `job` is the Struct-validated response. `span` is read from the local in-memory exporter, and `traceparentInjected` reflects the header observed by the Fetch fixture. Random trace identifiers are not emitted.

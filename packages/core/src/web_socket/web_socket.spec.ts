@@ -17,7 +17,7 @@ describe('web socket runtime', () => {
   })
 
   async function run(command: unknown, options?: unknown): Promise<SocketAwaitResult<unknown, unknown>> {
-    return client.execute(command as never, options) as Promise<SocketAwaitResult<unknown, unknown>>
+    return client.execute(command as never, options as never) as Promise<SocketAwaitResult<unknown, unknown>>
   }
 
   test('should return transport error with invalid client', async () => {

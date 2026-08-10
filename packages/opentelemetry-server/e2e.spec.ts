@@ -1,6 +1,9 @@
 import { createClient, defineEventStream, defineRequest, defineWebSocket, struct, withEndpoint } from '@defjs/core'
+import { SpanStatusCode } from '@opentelemetry/api'
 import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
+import { Hono } from 'hono'
 import { describe, expect, inject, test } from 'vitest'
+import { startHonoTestServer } from '../../test/hono-test-server'
 import { withOpenTelemetryServer } from './src/option'
 import type { MockSpan } from './src/test-utils'
 import { createMockTracer } from './src/test-utils'
@@ -68,11 +71,11 @@ describe('e2e: opentelemetry-server with real test server', () => {
     expect(result.headers['traceparent']).toMatch(TRACE_PARENT_REGEX)
 
     const span = onlySpan(spans)
-    expect(span.name).toBe('HTTP POST')
+    expect(span.name).toBe('POST')
     expect(span.attributes['http.request.method']).toBe('POST')
     expect(span.attributes['url.full']).toMatch(/\/echo-headers$/)
     expect(span.ended).toBe(true)
-    expect(span.status?.code).toBe(1) // OK
+    expect(span.status).toBeUndefined()
   })
 
   test('HTTP error records span with ERROR status', async () => {
@@ -91,8 +94,32 @@ describe('e2e: opentelemetry-server with real test server', () => {
 
     expect(error).not.toBeNull()
     const span = onlySpan(spans)
-    expect(span.name).toBe('HTTP GET')
-    expect(span.status?.code).toBe(2) // ERROR
+    expect(span.name).toBe('GET')
+    expect(span.attributes['error.type']).toBe('500')
+    expect(span.status?.code).toBe(SpanStatusCode.ERROR)
+    expect(span.ended).toBe(true)
+  })
+
+  test('HTTP TCP refusal returns NETWORK_ERROR and records a response-less error span', async () => {
+    const refusedServer = await startHonoTestServer(new Hono())
+    const host = refusedServer.host
+    await refusedServer.close()
+
+    const { tracer, spans } = createMockTracer()
+    const client = createClient(withEndpoint(host), withOpenTelemetryServer({ tracer, propagator: createPropagator() }))
+    const useUnavailable = defineRequest({ method: 'GET', path: '/unavailable' })
+
+    const [error, result, response] = await client.execute(useUnavailable())
+
+    expect(error).toMatchObject({ code: 'NETWORK_ERROR', kind: 'transport' })
+    expect(result).toBeUndefined()
+    expect(response).toBeUndefined()
+
+    const span = onlySpan(spans)
+    expect(span.name).toBe('GET')
+    expect(span.attributes['http.response.status_code']).toBeUndefined()
+    expect(span.attributes['error.type']).toBe('NETWORK_ERROR')
+    expect(span.status?.code).toBe(SpanStatusCode.ERROR)
     expect(span.ended).toBe(true)
   })
 

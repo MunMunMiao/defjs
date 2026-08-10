@@ -1,3 +1,4 @@
+import { ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode } from '@opentelemetry/api'
 import { describe, expect, test, vi } from 'vitest'
 import { createMockTracer } from '../test-utils'
@@ -18,7 +19,7 @@ describe('trace helpers', () => {
     createHttpSpan(tracer, 'POST', 'https://api.example.com/test', ROOT_CONTEXT)
 
     expect(spans).toHaveLength(1)
-    expect(spans[0]?.name).toBe('HTTP POST')
+    expect(spans[0]?.name).toBe('POST')
     expect(spans[0]?.kind).toBe(SpanKind.CLIENT)
     expect(spans[0]?.attributes['http.request.method']).toBe('POST')
     expect(spans[0]?.attributes['url.full']).toBe('https://api.example.com/test')
@@ -50,16 +51,51 @@ describe('trace helpers', () => {
     setSpanHttpResponse(span, 200)
 
     expect(spans[0]?.attributes['http.response.status_code']).toBe(200)
-    expect(spans[0]?.status?.code).toBe(SpanStatusCode.OK)
+    expect(spans[0]?.attributes['error.type']).toBeUndefined()
+    expect(spans[0]?.status).toBeUndefined()
     expect(spans[0]?.ended).toBe(true)
   })
 
-  test('setSpanHttpResponse with non-2xx status', () => {
+  test.each([400, 404, 500, 599])('setSpanHttpResponse with error status %i', (status) => {
     const { tracer, spans } = createMockTracer()
     const span = tracer.startSpan('test')
-    setSpanHttpResponse(span, 500)
+    setSpanHttpResponse(span, status)
 
-    expect(spans[0]?.attributes['http.response.status_code']).toBe(500)
+    expect(spans[0]?.attributes['http.response.status_code']).toBe(status)
+    expect(spans[0]?.attributes['error.type']).toBe(String(status))
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('setSpanHttpResponse treats status 0 as a response-less transport error', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanHttpResponse(span, 0, new TypeError('fetch failed'))
+
+    expect(spans[0]?.attributes['http.response.status_code']).toBeUndefined()
+    expect(spans[0]?.attributes['error.type']).toBe('NETWORK_ERROR')
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('setSpanHttpResponse leaves intentional cancellation unset', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanHttpResponse(span, 0, ERR_ABORTED)
+
+    expect(spans[0]?.attributes['http.response.status_code']).toBeUndefined()
+    expect(spans[0]?.attributes['error.type']).toBeUndefined()
+    expect(spans[0]?.status).toBeUndefined()
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('setSpanHttpResponse records a timeout transport error', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanHttpResponse(span, 0, ERR_TIMEOUT)
+
+    expect(spans[0]?.attributes['http.response.status_code']).toBeUndefined()
+    expect(spans[0]?.attributes['error.type']).toBe('TIMEOUT')
     expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
     expect(spans[0]?.ended).toBe(true)
   })
@@ -69,6 +105,7 @@ describe('trace helpers', () => {
     const span = tracer.startSpan('test')
     setSpanError(span, new Error('boom'))
 
+    expect(spans[0]?.attributes['error.type']).toBe('Error')
     expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
     expect(spans[0]?.ended).toBe(true)
   })
@@ -78,6 +115,7 @@ describe('trace helpers', () => {
     const span = tracer.startSpan('test')
     setSpanError(span, 'string error')
 
+    expect(spans[0]?.attributes['error.type']).toBe('string')
     expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
     expect(spans[0]?.ended).toBe(true)
   })
@@ -87,6 +125,17 @@ describe('trace helpers', () => {
     const span = tracer.startSpan('test')
     setSpanError(span, undefined)
 
+    expect(spans[0]?.attributes['error.type']).toBe('_OTHER')
+    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
+    expect(spans[0]?.ended).toBe(true)
+  })
+
+  test('setSpanError uses the fallback error type for null', () => {
+    const { tracer, spans } = createMockTracer()
+    const span = tracer.startSpan('test')
+    setSpanError(span, null)
+
+    expect(spans[0]?.attributes['error.type']).toBe('_OTHER')
     expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
     expect(spans[0]?.ended).toBe(true)
   })
@@ -120,7 +169,7 @@ describe('trace helpers', () => {
 
   test.each([
     { error: new Error('async hook failed'), errorType: 'Error' },
-    { error: 'async hook failed', errorType: 'async hook failed' },
+    { error: 'async hook failed', errorType: 'string' },
   ])('runSpanHook records async $errorType hook failures without an unhandled rejection', async ({ error, errorType }) => {
     const { tracer, spans } = createMockTracer()
     const span = tracer.startSpan('test')
@@ -194,7 +243,7 @@ describe('trace helpers', () => {
     })
 
     expect(spans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', {
-      'error.type': 'boom',
+      'error.type': 'string',
       'hook.name': 'requestHook',
     })
     expect(spans[0]?.recordException).toHaveBeenCalledWith(new Error('boom'))

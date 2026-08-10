@@ -158,7 +158,7 @@ withXSRF({
 })
 ```
 
-注入を試みるメソッドは `POST`、`PUT`、`PATCH`、`DELETE` だけです。設定対象のヘッダーがすでにあれば維持します。ブラウザーでの Cookie 参照は同一オリジンのリクエストに限られます。ブラウザー以外では同期 `tokenProvider` を指定してください。Cookie の参照より優先されます。
+RFC で安全とされるメソッド `GET`、`HEAD`、`OPTIONS`、`TRACE` では注入をスキップします。`PROPPATCH` のようなカスタムの安全でないメソッドを含むそれ以外のすべてのメソッドでは、注入前に既存ヘッダー、同一オリジン、トークンに関する同じガードが適用されます。設定対象のヘッダーがすでにあれば維持します。ブラウザーでの Cookie 参照は同一オリジンのリクエストに限られます。ブラウザー以外では同期 `tokenProvider` を指定してください。Cookie の参照より優先されます。
 
 ```typescript
 import type { HttpRequest } from '@defjs/core'

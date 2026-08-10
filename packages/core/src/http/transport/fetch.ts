@@ -15,10 +15,10 @@ import { concatChunks, getContentLength, getContentType, parseBytesBody } from '
 
 export { __resetStreamingRequestBodySupportForTests, ERR_STREAMING_REQUEST_UNSUPPORTED, isReadableStreamBody, supportsStreamingRequestBody }
 
-const XSRF_MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+const XSRF_SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE'])
 
-function isMutatingMethod(method: string): boolean {
-  return XSRF_MUTATING_METHODS.has(method.toUpperCase())
+function isSafeMethod(method: string): boolean {
+  return XSRF_SAFE_METHODS.has(method.toUpperCase())
 }
 
 function isBrowserRuntime(): boolean {
@@ -90,7 +90,7 @@ function applyXSRFHeaderIfNeeded(request: HttpRequest, headers: Headers): void {
     return
   }
 
-  if (!isMutatingMethod(request.method)) {
+  if (isSafeMethod(request.method)) {
     return
   }
 

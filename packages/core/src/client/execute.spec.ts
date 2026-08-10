@@ -6,7 +6,6 @@ import { defineRequest } from '../http'
 import { defineEventStream } from '../sse'
 import { defineWebSocket } from '../web_socket'
 import { createClient } from './client'
-import type { Command } from './command'
 import { withEndpoint, withInterceptors } from './option'
 
 describe('Client.execute', () => {
@@ -17,7 +16,7 @@ describe('Client.execute', () => {
 
   test('execute rejects for unsupported command kind', async () => {
     const client = createClient(withEndpoint('https://example.com'))
-    await expect(client.execute({ kind: 'test' } as unknown as Command)).rejects.toThrow('Unsupported command')
+    await expect(client.execute({ kind: 'test' } as never)).rejects.toThrow('Unsupported command')
   })
 
   test('client.execute dispatches http command', async () => {

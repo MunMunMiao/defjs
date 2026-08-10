@@ -2,21 +2,17 @@
 
 Type-safe HTTP, SSE, and WebSocket commands for TypeScript.
 
-## Quick start context
+This README describes the package version that contains it. Defjs is still pre-1.0, so use the documentation and release notes shipped for the exact version installed in your application.
 
-This README follows the current repository source/workspace API for `@defjs/core`.
+## Install
 
-Install the workspace dependencies before running this source/workspace example:
-
-```bash
-pnpm install
+```sh
+npm install @defjs/core
 ```
 
-To experiment with the snippet inside this repository, place it in a workspace package that resolves `@defjs/core` from source.
+The package is ESM and declares no runtime dependencies.
 
-> Published package users: as checked on July 20, 2026, public npm provides `@defjs/core@0.3.3`, which predates the source/workspace API shown here. Check the installed package metadata and release notes before copying this example into an external app.
-
-## Quick start
+## Quick Start
 
 ```typescript
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
@@ -38,19 +34,51 @@ const getUser = defineRequest({
 const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
 
 if (error) {
-  console.error(error.code, error.message)
+  console.error(error.kind, error.code)
 } else {
   console.log(user.id, user.name)
 }
 ```
 
-## Core ideas
+## Core Boundaries
 
-- **Commands** are type-safe objects created by `defineRequest`, `defineEventStream`, and `defineWebSocket`.
-- **Struct** declares request and response shapes, including request-shaped inputs via `struct.request({ path, query, headers, body })` and field wire names via `.alias(name)`.
-- **Build** lets you manually map parsed input to request parts via `build(ctx, input)` when the public input shape differs from the wire shape.
-- **Client** executes commands and dispatches to the right transport.
+- Commands are typed values created by `defineRequest`, `defineEventStream`, and `defineWebSocket`.
+- Structs validate request input and response data at runtime. `struct.request({ path, query, headers, body })` maps each request part explicitly.
+- Expected HTTP, transport, and definition failures are returned in an error-first tuple; custom interceptors and application callbacks can still throw.
+- Server clients that capture cookies, authorization, tenant data, or user data must be created inside the owning request scope.
+- The code that starts HTTP, SSE, or WebSocket work owns cancellation and transport cleanup. A client has no global `dispose()` lifecycle.
+- A timeout or cancellation does not prove that a server did not receive a write. Preserve operation identity and use an application/server idempotency contract before replaying writes.
+- OpenAPI generation, full SDK generation, query caching, and GraphQL protocol handling are not included in this release. Define contracts by hand or compose purpose-built tools at the application boundary.
 
-Repository browser tests cover HTTP, SSE, and WebSocket flows. Repository development requires Node.js 26 or newer, while packed `@defjs/core` consumers are checked on Node.js 22, 24, and 26. Other runtimes require separate compatibility verification. The current core manifest declares no runtime dependencies.
+For client-local tests, inject a Fetch-compatible function with `withHTTPHandle(...)`. This keeps request interception scoped to one client and still exercises command building, interceptors, status dispatch, and response validation.
 
-See `packages/core/design.md` for the full implementation boundary.
+## Runtime Notes
+
+The package manifest requires Node.js 22 or newer. Packed consumers have been checked on Node.js 22, 24, and 26. The same ESM HTTP consumer was also exercised on Bun 1.3.14 and Deno 2.9.5; those HTTP checks are not a blanket guarantee for every transport or future runtime version.
+
+After compiling an application to ESM, the tested command shapes are:
+
+```sh
+node dist/index.js
+bun run dist/index.js
+deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+```
+
+The Deno command assumes dependencies were installed into `node_modules`; scope `--allow-net` to the real API hosts. Browser applications use their bundler and the platform Fetch, EventSource-compatible Fetch stream, and WebSocket capabilities required by the transports they enable.
+
+## Documentation
+
+The package includes the matching English guides and idempotency reference source, so these links stay usable from an installed tarball without repository access.
+
+- [Getting started](docs/guide/getting-started.md)
+- [Client scope and transport-injection testing](docs/core/client.md)
+- [Commands and request mapping](docs/core/commands.md)
+- [HTTP, cancellation, credentials, and XSRF](docs/core/http.md)
+- [Error tuples and application adapters](docs/core/errors.md)
+- [Interceptors, retry, and resilience boundaries](docs/core/interceptors.md)
+- [Struct decoding](docs/core/struct.md)
+- [SSE lifecycle](docs/core/sse.md)
+- [WebSocket lifecycle and GraphQL boundary](docs/core/web-socket.md)
+- [React adapter and SSR scope](docs/plugins/react.md)
+- [Vue adapter and SSR scope](docs/plugins/vue.md)
+- [Idempotent write example](examples/resilience-idempotency-key/README.md)

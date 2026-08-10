@@ -109,4 +109,4 @@ Passing only one context still returns a copy. Passing neither returns an empty 
 
 `isHttpContext(...)` and `isHttpContextToken(...)` are available when code needs runtime guards.
 
-Request mapping is a separate concern. See [Commands](/core/commands) for automatic request sections and schema-bound projections, and [Interceptors](/core/interceptors) for chain behavior.
+Request mapping is a separate concern. See [Commands](./commands.md) for automatic request sections and schema-bound projections, and [Interceptors](./interceptors.md) for chain behavior.

@@ -169,7 +169,7 @@ describe('web socket runtime environment edge cases', () => {
   })
 
   async function run(client: Client, command: unknown, options?: unknown): Promise<SocketAwaitResult<unknown, unknown>> {
-    return client.execute(command as never, options) as Promise<SocketAwaitResult<unknown, unknown>>
+    return client.execute(command as never, options as never) as Promise<SocketAwaitResult<unknown, unknown>>
   }
 
   test('should return transport error when WebSocket constructor throws', async () => {
@@ -641,7 +641,7 @@ describe('web socket runtime environment edge cases', () => {
       outgoing: { ping: struct.object({}) },
       path: '/ws/test',
     })
-    const client = createClient(withEndpoint('http://localhost'), withWebSocketHandle(InjectedWebSocket as unknown as typeof WebSocket))
+    const client = createClient(withEndpoint('http://localhost'), withWebSocketHandle(InjectedWebSocket))
     const [, socket] = await run(client, useSocket(), {
       heartbeat: { intervalMs: 5, message: () => ({ type: 'ping' }) },
     })

@@ -266,6 +266,6 @@ An interceptor can throw or reject. The high-level transport may normalize some 
 
 ## Next
 
-- [Client](/core/client) explains registration and option composition.
-- [HTTP](/core/http) documents the Fetch wrapper and status-0 behavior.
-- [SSE](/core/sse) and [WebSocket](/core/web-socket) own transport lifecycle details.
+- [Client](./client.md) explains registration and option composition.
+- [HTTP](./http.md) documents the Fetch wrapper and status-0 behavior.
+- [SSE](./sse.md) and [WebSocket](./web-socket.md) own transport lifecycle details.
