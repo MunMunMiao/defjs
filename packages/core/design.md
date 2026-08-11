@@ -257,7 +257,7 @@ request-time:
 1. **request-shaped input**：`input` 使用 `struct.request(...)`，由 `path/query/headers/body` 分区直接描述 request shape。没有 `build` 时按这个 shape 构建 request。
 2. **`ctx.bindXXX(...)` 编排路径**：复杂协议写 `build(ctx, input)`，只编排当前 endpoint input tree 中的 struct 字段，不接收 raw runtime value。
 
-完整 build 合同见 `packages/core/research/defjs-build-options.md`；实践规则见 `packages/core/research/go-style-endpoint-practices.md`。
+完整 build 合同和实践规则以本节描述、源码类型与测试为准。
 
 ### Request-shaped input
 
