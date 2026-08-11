@@ -67,7 +67,7 @@ export default defineConfig([
     target: false,
     tsconfig: 'tsconfig.build.json',
     clean: false,
-    dts: true,
+    dts: false,
     entry: {
       http: entries.http,
     },
@@ -76,6 +76,7 @@ export default defineConfig([
         mainFields: ['module', 'main'],
       },
     },
+    copy: ['./http.d.ts'],
   } satisfies UserConfig,
   {
     format: 'esm',

@@ -12,3 +12,4 @@ Improve runtime safety, type inference, transport ownership, framework injection
 - Require callers to provide an existing client to the React provider and Vue plugin, keeping client creation and lifetime outside the framework adapters.
 - Pass the original request to OpenTelemetry response hooks and use explicit operation identities for low-cardinality span names, attributes, and metrics.
 - Correct the bundled 204 response contract and ship the updated executable lifecycle, reliability, diagnostics, runtime, and package-consumer guidance.
+- Point workspace package manifests at built entries, share the HTTP-only declaration contract with the root entry, and verify packed consumers across available Node, Bun, and Deno runtimes.

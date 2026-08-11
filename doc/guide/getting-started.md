@@ -17,6 +17,17 @@ pnpm add @defjs/core
 
 Use the equivalent `npm`, Yarn, or Bun command if your project uses another package manager. `@defjs/core` is ESM. When you run it in Node.js, the current package metadata requires Node 22 or newer.
 
+If you link a package from a Defjs checkout with `file:` or a workspace link, build the packages before compiling or running an external consumer:
+
+```sh
+pnpm install
+pnpm build
+```
+
+The checkout package entry points to the generated `dist/` JavaScript and declaration files. Raw `src/*.ts` files are for the repository's TypeScript/bundler workflow; they are not a Node.js or Deno runtime entry. Published packages already contain the generated entries.
+
+In an isolated pnpm consumer, the package manager may block native build scripts or lack offline package metadata. Approve only the build dependency that the consumer actually needs with `pnpm approve-builds`, and retry installation with network access when metadata is unavailable; these are package-manager conditions, not Defjs runtime behavior.
+
 Packed ESM HTTP consumers were exercised with Node.js 22, 24, and 26, Bun 1.3.14, and Deno 2.9.5. After compiling your application, the corresponding command shapes are:
 
 ```sh
@@ -84,6 +95,13 @@ void loadUser(7)
 
 On success, `error` is `null`, `result` is decoded output data, and `response` is a Defjs `HttpResponse` wrapper. On failure, `result` is `undefined`; the response wrapper is also `undefined` when no response was received.
 
+Before adding a framework adapter, keep one owner for each piece of work:
+
+- forward the owner's `AbortSignal` and abort it when the request becomes stale or its scope ends;
+- handle the tuple at the application boundary, preserving `error.kind` and `error.code` for stable UI and logs;
+- close every SSE stream or WebSocket session that the owner opens, including a resource that arrives after disposal;
+- retry only replayable operations, and require an idempotency contract before replaying a write.
+
 ### Status Literals Are Preserved Automatically
 
 `defineRequest(...)` uses a const generic for `output`, so inline array entries and grouped status arrays retain their literal values automatically. You do not need `as const` to separate inferred 2xx success bodies from non-2xx error bodies.
@@ -104,6 +122,8 @@ Keep endpoint definitions in modules that describe your service API. Reuse their
 - a browser application can usually share one client;
 - server rendering should create a request-scoped client when headers, cookies, users, or tenants differ per request;
 - code that opens SSE or WebSocket resources must also consume and close them.
+
+For discoverability, keep a predictable service layout such as `api/users.ts` for endpoint builders and names such as `getUser`, `listUsers`, and `createUser`. The uniform `client.execute(command)` API stays easy to search when command names and modules describe the service operation.
 
 ## Next Steps
 

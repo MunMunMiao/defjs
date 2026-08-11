@@ -9,6 +9,19 @@ Use these recipes as starting points in your own application. Replace endpoint p
 
 Each recipe is a complete module or file fragment. Network examples expect your server to implement the shown contract. Your application owns endpoint values, credentials, UI state, logging policy, cancellation, and transport cleanup.
 
+## Choose a Recipe by Problem
+
+| Need                                                              | Start here                                                                                                                                       |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Map 404/422 responses, reject malformed 200 bodies, or handle 204 | [HTTP status and output decoding](../core/http.md#status-and-output-decoding)                                                                    |
+| Prevent stale React or Vue results after a prop/query change      | [React lifecycle](../plugins/react.md#own-http-effects) or [Vue lifecycle](../plugins/vue.md#react-to-input-changes)                             |
+| Retry a safe read or replay a write                               | [Bounded retry](../core/interceptors.md#retry-http-conservatively) and [HTTP cancellation and timeout](../core/http.md#cancellation-and-timeout) |
+| Bound SSE memory or close a stream                                | [SSE lifecycle](../core/sse.md#endpoint-owned-limits)                                                                                            |
+| Reconnect a WebSocket, bound queues, or close late sessions       | [WebSocket lifecycle](../core/web-socket.md#reconnect-is-opt-in)                                                                                 |
+| Add correlation and tracing without leaking payloads              | [OpenTelemetry integration](../plugins/opentelemetry-server.md) and [bounded logging](../core/interceptors.md#bounded-logging)                   |
+
+These links deliberately keep caching, retry policy, application state, and telemetry SDK initialization at the application boundary. Defjs supplies the transport contract and lifecycle primitives; it does not silently choose those policies for you.
+
 ## REST CRUD Module
 
 This module declares its core dependency, maps every body through a body Struct, handles tuple failures, and accepts an owner-supplied cancellation signal.

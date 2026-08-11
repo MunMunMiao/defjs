@@ -24,7 +24,15 @@ const realtimeSentinels = [
   ['text/event-stream', 'text/event-stream'],
 ]
 
-const indexSource = `import { defineEventStream, defineRequest, defineWebSocket, struct } from '@defjs/core'
+const indexSource = `import {
+  createHttpInterceptor,
+  defineEventStream,
+  defineRequest,
+  defineWebSocket,
+  struct,
+  withEndpoint,
+  withInterceptors,
+} from '@defjs/core'
 import { createHttpClient } from '@defjs/core/http'
 
 const inventoryPath = struct.request({ path: struct.object({ sku: struct.string() }) })
@@ -64,7 +72,8 @@ optionalQuery({})
 // @ts-expect-error exactOptionalPropertyTypes rejects an explicitly undefined optional section
 optionalQuery({ query: undefined })
 
-export const httpOnlyClient = createHttpClient()
+const httpInterceptor = createHttpInterceptor((request, next) => next(request))
+export const httpOnlyClient = createHttpClient(withEndpoint('https://example.test'), withInterceptors(httpInterceptor))
 `
 
 const runtimeSource = `import assert from 'node:assert/strict'
@@ -315,6 +324,8 @@ try {
   await run(process.execPath, ['node_modules/typescript/bin/tsc', '--project', 'tsconfig.json'], consumerDirectory)
   await verifyDeclarations(join(consumerDirectory, 'dist'), [repositoryRoot, packageDirectory])
   await run(process.execPath, ['runtime.mjs'], consumerDirectory)
+  await runOptional('bun', ['run', 'runtime.mjs'], consumerDirectory)
+  await runOptional('deno', ['run', '--node-modules-dir=manual', '--allow-env=NODE_ENV', 'runtime.mjs'], consumerDirectory)
   await run(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--mode', 'root'], consumerDirectory)
   await run(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--mode', 'http'], consumerDirectory)
   await verifyViteHttpEntries(consumerDirectory)
@@ -344,6 +355,18 @@ function run(command, args, cwd) {
       reject(new Error(`${command} exited with ${code ?? `signal ${signal}`}`))
     })
   })
+}
+
+async function runOptional(command, args, cwd) {
+  try {
+    await run(command, args, cwd)
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      console.log(`Optional runtime skipped: ${command} is not installed`)
+      return
+    }
+    throw error
+  }
 }
 
 async function verifyViteHttpEntries(directory) {
@@ -395,8 +418,12 @@ async function verifyInstalledPackages(directory) {
     const packageRoot = await realpath(join(directory, 'node_modules', packageName))
     assert.equal(isInside(directory, packageRoot), true, `${packageName} resolved outside the temporary consumer`)
     const manifest = await readFile(join(packageRoot, 'package.json'), 'utf8')
+    const packageManifest = JSON.parse(manifest)
     assert.equal(/(?:workspace|link):/.test(manifest), false, `${packageName} retains a workspace-only dependency`)
-    assert.equal(JSON.parse(manifest).engines?.node, '>=22', `${packageName} must declare Node >=22`)
+    assert.equal(packageManifest.engines?.node, '>=22', `${packageName} must declare Node >=22`)
+    assert.equal(packageManifest.main, './index.js', `${packageName} must expose a built runtime entry`)
+    assert.equal(packageManifest.types, './index.d.ts', `${packageName} must expose built declarations`)
+    assert.equal(JSON.stringify(packageManifest.exports).includes('/src/'), false, `${packageName} exports a source runtime entry`)
 
     const readme = await readFile(join(packageRoot, 'README.md'), 'utf8')
     for (const phrase of ['source/workspace', 'workspace source', 'public npm provides']) {

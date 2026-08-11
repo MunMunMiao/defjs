@@ -72,6 +72,8 @@ For client-local tests, inject a Fetch-compatible function with `withHTTPHandle(
 
 The package manifest requires Node.js 22 or newer. Packed consumers have been checked on Node.js 22, 24, and 26. The same ESM HTTP consumer was also exercised on Bun 1.3.14 and Deno 2.9.5; those HTTP checks are not a blanket guarantee for every transport or future runtime version.
 
+When using a checkout through `file:` or a workspace link, run `pnpm build` in the checkout before compiling or running the external consumer. The checkout manifest points to generated `dist/` files so Node.js and Deno do not load TypeScript from `node_modules`; published packages already contain those files.
+
 After compiling an application to ESM, the tested command shapes are:
 
 ```sh
