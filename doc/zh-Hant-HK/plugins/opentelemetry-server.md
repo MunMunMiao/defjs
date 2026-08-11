@@ -20,7 +20,7 @@ description: 以應用程式提供的 OpenTelemetry Tracer 與 optional Meter，
 ## 設定 Client
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
@@ -41,6 +41,21 @@ const client = createClient(
 ```
 
 Adapter 會為每個已啟用 transport 加入一個 interceptor。Option 按一般 client order 執行，所以它相對其他 interceptor 的位置，會決定 span 包裹哪些工作。
+
+### Operation Identity
+
+在每個 endpoint definition 靜態設定 `operation`。它是 span 和 metric 使用的 low-cardinality identity：
+
+```typescript
+const readOrder = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders/:id',
+  // input and output omitted
+})
+```
+
+有 operation 時，span name 分別是 `GET orders.read`、`SSE orders.watch` 或 `WebSocket orders.connect`，並記錄 `defjs.operation`。沒有 operation 時維持舊 fallback：名稱只用 HTTP method、`SSE` 或 `WebSocket`，且不記錄 operation attribute。不得從 resolved URL 或含 identifier 的 path 推斷 identity，亦不要把 resolved URL 複製到 telemetry 或 log。
 
 ## Options
 
@@ -103,12 +118,15 @@ withOpenTelemetryServer({
     requestHook(span, request) {
       span.setAttribute('app.operation', 'list-orders')
     },
-    responseHook(span, response) {
+    responseHook(span, response, request) {
+      span.setAttribute('app.operation', request.operation ?? 'unclassified')
       span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
     },
   },
 })
 ```
+
+第三個參數是原始 transport `HttpRequest`。請讀取明確的 `operation`，不要根據 `request.endpoint`、resolved URL 或 path 重建 identity。
 
 Hook 可以回傳 `void` 或 `Promise<void>`，但維持非阻塞 observer 語義。同步 throw 與非同步 rejection 都會被捕捉並記錄成 `defjs.otel.hook.error`，不會中斷 client operation；記錄 telemetry 本身的失敗亦會被隔離。
 
@@ -118,7 +136,8 @@ Hook 可以回傳 `void` 或 `Promise<void>`，但維持非阻塞 observer 語�
 
 HTTP interceptor 建立 `SpanKind.CLIENT` span，並記錄：
 
-- request method 作為 span name，因為 Defjs 沒有提供低 cardinality URL template；
+- endpoint 聲明 static operation 時，使用 `${method} ${operation}` 作為 span name，並記錄 `defjs.operation`；
+- 未聲明 operation 時，維持舊 fallback，只使用 request method；
 - `http.request.method`；
 - `url.full`；
 - `server.address` 和可選 `server.port`；
@@ -169,7 +188,7 @@ Metric 名稱雖然寫 connection，實作統計的是 logical session，包括 
 
 ## Sensitive Data 與 Coverage Limit
 
-預設 `url.full` 由 request endpoint 與 base endpoint resolve，不是由 serialized query string 產生；但 resolved path 仍可能含 sensitive identifier。WebSocket propagation 會另外把欄位追加至實際 query string。
+預設 `url.full` 由 request endpoint 與 base endpoint resolve，不是由 serialized query string 產生；但 resolved path 仍可能含 sensitive identifier。它只是 transport metadata，絕不是 operation identity 來源。請保持 `operation` static，不要把 resolved URL 複製到 telemetry 或 log，並在 export URL attribute 前設定 SDK/exporter redaction。WebSocket propagation 會另外把欄位追加至實際 query string。
 
 `recordException(...)` 會收到 thrown error 與部分 close cause。Error message 及 stack 可能洩漏 sensitive data。請設定 SDK-level processor 與 exporter 敏感資料遮罩；adapter 不會替應用程式 sanitize exception。
 

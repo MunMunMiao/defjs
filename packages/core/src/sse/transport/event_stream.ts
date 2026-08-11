@@ -19,11 +19,23 @@ export interface EventStreamOpenInfo {
   url: string
 }
 
-export interface EventStreamCloseInfo {
-  code: 'eof' | 'aborted' | 'error'
+export type EventStreamErrorCode =
+  | 'INVALID_RESPONSE'
+  | 'MESSAGE_PROCESSING_FAILED'
+  | 'PARSER_LIMIT_EXCEEDED'
+  | 'QUEUE_OVERFLOW'
+  | 'TIMEOUT'
+  | 'TRANSPORT_ERROR'
+
+interface EventStreamCloseInfoBase {
   reason?: string
   cause?: unknown
 }
+
+export type EventStreamCloseInfo =
+  | (EventStreamCloseInfoBase & { code: 'eof' })
+  | (EventStreamCloseInfoBase & { code: 'aborted' })
+  | (EventStreamCloseInfoBase & { code: 'error'; errorCode: EventStreamErrorCode })
 
 export interface EventStreamHandle<TEvent = EventStreamMessage> extends AsyncIterable<TEvent> {
   readonly open: EventStreamOpenInfo
@@ -64,7 +76,7 @@ export interface FetchEventStreamErrorContext {
   open?: EventStreamOpenInfo
 }
 
-type EventStreamFatalCode = 'INVALID_RESPONSE' | 'MESSAGE_PROCESSING_FAILED' | 'PARSER_LIMIT_EXCEEDED'
+type EventStreamFatalCode = Exclude<EventStreamErrorCode, 'TIMEOUT' | 'TRANSPORT_ERROR'>
 
 class EventStreamFatalError extends Error {
   readonly code: EventStreamFatalCode
@@ -137,7 +149,20 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       })
     },
     [Symbol.asyncIterator]() {
-      return queue[Symbol.asyncIterator]()
+      const iterator = queue[Symbol.asyncIterator]()
+      let returned = false
+      return {
+        next() {
+          return returned ? Promise.resolve({ done: true, value: undefined }) : iterator.next()
+        },
+        return() {
+          if (!returned) {
+            returned = true
+            handle.close('iterator-return')
+          }
+          return Promise.resolve({ done: true, value: undefined })
+        },
+      }
     },
   }
 
@@ -252,19 +277,27 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
         retryInterval = retry
       },
       async (message) => {
+        let transformed: TEvent | undefined
         try {
-          const transformed = options.transformMessage
+          transformed = options.transformMessage
             ? await awaitWithSignal(() => options.transformMessage?.(message, signal), signal)
             : (message as TEvent)
-
-          if (typeof transformed !== 'undefined') {
-            queue.push(transformed)
-          }
         } catch (error) {
           if (signal.aborted) {
             throw error
           }
           throw new EventStreamFatalError('MESSAGE_PROCESSING_FAILED', 'Failed to process event stream message', { cause: error })
+        }
+
+        if (typeof transformed !== 'undefined') {
+          try {
+            queue.push(transformed)
+          } catch (error) {
+            // AsyncQueue.push has one failure mode: exceeding its configured bound.
+            throw new EventStreamFatalError('QUEUE_OVERFLOW', 'Event stream queue exceeded maxQueueSize', {
+              cause: error,
+            })
+          }
         }
       },
       { maxBufferSize: options.maxBufferSize },
@@ -418,6 +451,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
 
     settleClosed({
       code: 'error',
+      errorCode: getEventStreamErrorCode(error),
       reason: toCloseReason(error),
       cause: error,
     })
@@ -431,6 +465,10 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
     settledClosed = true
     closedDeferred.resolve(info)
   }
+}
+
+function getEventStreamErrorCode(error: unknown): EventStreamErrorCode {
+  return getEventStreamFatalCode(error) ?? (error === ERR_TIMEOUT ? 'TIMEOUT' : 'TRANSPORT_ERROR')
 }
 
 function cloneHeaders(headers?: Headers): Headers {

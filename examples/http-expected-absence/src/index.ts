@@ -8,8 +8,8 @@ export const readInvoicePdf = defineRequest({
   input: struct.request({ path: struct.object({ id: struct.string() }) }),
   output: [
     { status: 200, body: struct.string() },
-    { status: [404, 410] as const, body: struct.string() },
-  ] as const,
+    { status: [404, 410], body: struct.string() },
+  ],
 })
 
 // Step 2: Convert those two expected statuses to null while preserving every other failure.

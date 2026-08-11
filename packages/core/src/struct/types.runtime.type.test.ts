@@ -198,6 +198,38 @@ expectTypeOf<(typeof OptionalJsonBody)['_struct']['input']>().toEqualTypeOf<stri
 const RequestWithOptionalInnerBody = struct.request({ body: OptionalInnerJsonBody })
 expectTypeOf<(typeof RequestWithOptionalInnerBody)['_struct']['input']>().toEqualTypeOf<{ body: string }>()
 
+const RequestWithOptionalSections = struct.request({
+  headers: struct.object({ traceId: struct.string().optional() }),
+  path: struct.object({ locale: struct.string().optional() }),
+  query: struct.object({ page: struct.number().optional() }),
+})
+expectTypeOf<(typeof RequestWithOptionalSections)['_struct']['input']>().toEqualTypeOf<{
+  headers?: { traceId?: string }
+  path?: { locale?: string }
+  query?: { page?: number }
+}>()
+expectTypeOf<(typeof RequestWithOptionalSections)['_struct']['output']>().toEqualTypeOf<{
+  headers: { traceId?: string }
+  path: { locale?: string }
+  query: { page?: number }
+}>()
+const omittedOptionalSections: (typeof RequestWithOptionalSections)['_struct']['input'] = {}
+void omittedOptionalSections
+
+const RequestWithMixedSection = struct.request({
+  query: struct.object({ page: struct.number().optional(), q: struct.string() }),
+})
+// @ts-expect-error a request section with a required field cannot be omitted.
+const omittedMixedSection: (typeof RequestWithMixedSection)['_struct']['input'] = {}
+void omittedMixedSection
+
+const RequestWithOptionalBodyFields = struct.request({
+  body: struct.json(struct.object({ note: struct.string().optional() })),
+})
+// @ts-expect-error request bodies remain required even when every body field is optional.
+const omittedOptionalBody: (typeof RequestWithOptionalBodyFields)['_struct']['input'] = {}
+void omittedOptionalBody
+
 const FormDataBody = struct.formData({
   file: struct.blob(),
   title: struct.string(),

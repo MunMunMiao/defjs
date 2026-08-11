@@ -53,6 +53,24 @@ WebSocket の状態リスナーとランタイムエラーリスナーもオブ�
 
 ライフサイクルの判断には、返されたハンドルまたはセッションを使ってください。オブザーバーは範囲を限定したログ、メトリクス、状態更新に使い、所有者を破棄するときに解除します。
 
+## Sourcemap のデプロイ
+
+production sourcemap policy は明示的に選択します。
+
+- **public**: map を bundle と一緒に deploy します。map には `sourcesContent` が含まれるため、source path が相対でも application と dependency の source を公開することになります。
+
+- **hidden**: bundle から source-map reference を削除し、map を error platform へ private upload して、public deploy しません。map file 自体には sensitive path と `sourcesContent` が残り、「hidden」でも安全にはなりません。
+
+- **disabled**: production map を生成しません。map disclosure は避けられますが、production stack の source-level symbolication を失い、debugging が難しくなります。
+
+private map の access と retention は他の debugging artifact と同様に制限してください。relative path だけでは confidentiality boundary になりません。
+
+## OpenAPI の境界
+
+authoritative contract source を 1 つ選びます。既存の OpenAPI workflow がある組織は、それを維持して mature generator と明示的な runtime validator を application boundary で使ってください。生成された TypeScript type だけでは runtime response を検証できません。greenfield Defjs service では Defjs Struct と endpoint definition で wire contract を直接定義します。
+
+Core に OpenAPI generator/exporter を追加したり、OpenAPI と Defjs を同期対象の 2 source として維持したりしません。dual-source drift より、明確な boundary で既存 tool を組み合わせる方が安全です。
+
 ## 関連リファレンス
 
 - [Client](/ja-JP/core/client) — オプションの合成とクライアントスコープ

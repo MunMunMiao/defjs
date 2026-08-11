@@ -15,7 +15,7 @@ export const requestActionsIDToken = defineRequest({
   method: 'GET',
   path: '/oidc',
   input: struct.request({ query: struct.object({ audience: struct.string() }) }),
-  output: [{ status: 200, body: struct.object({ value: struct.string() }) }] as const,
+  output: [{ status: 200, body: struct.object({ value: struct.string() }) }],
 })
 
 // Step 2: Keep deployment code dependent on a validated opaque token rather than runner headers.

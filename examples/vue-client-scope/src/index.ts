@@ -1,5 +1,5 @@
-import { createClient, defineRequest, struct, type Infer, withHTTPHandle } from '@defjs/core'
-import { HTTP_CLIENT, injectClient, provideClient, withEndpoint } from '@defjs/vue'
+import { createClient, defineRequest, struct, type Infer, withEndpoint, withHTTPHandle } from '@defjs/core'
+import { createClientPlugin, HTTP_CLIENT, injectClient } from '@defjs/vue'
 import { defineComponent, h, nextTick, onMounted, onUnmounted, provide, type PropType } from 'vue'
 import { createHostRoot, hostRenderer } from './renderer'
 
@@ -10,7 +10,7 @@ export const loadLogisticsSummary = defineRequest({
   method: 'GET',
   path: '/v1/summary',
   input: struct.request({ query: struct.object({ view: struct.string() }) }),
-  output: [{ status: 200, body: scopeSummaryStruct }] as const,
+  output: [{ status: 200, body: scopeSummaryStruct }],
 })
 
 // Step 2: Let each view own an abortable request while the nearest Vue provider selects its endpoint.
@@ -96,7 +96,8 @@ export async function main(): Promise<void> {
     onError: ready.reject,
     onSummary,
   })
-  app.use(provideClient(withEndpoint('https://logistics.fixture.invalid'), withHTTPHandle(fixtureFetch)))
+  const client = createClient(withEndpoint('https://logistics.fixture.invalid'), withHTTPHandle(fixtureFetch))
+  app.use(createClientPlugin(client))
   app.mount(root)
   try {
     await ready.promise

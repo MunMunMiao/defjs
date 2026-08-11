@@ -11,7 +11,7 @@ export const getCustomer = defineRequest({
       status: 404,
       body: struct.object({ code: struct.literal('customer_not_found'), message: struct.string() }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Map only the declared 404 to a missing result while preserving every other failure.

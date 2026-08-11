@@ -5,13 +5,14 @@ import { createTelemetryFixture } from './telemetry'
 // Step 1: Type the fulfillment job allowed into application code from the warehouse call.
 export const readFulfillmentJob = defineRequest({
   method: 'GET',
-  path: '/v1/fulfillment/jobs/job-204',
+  operation: 'fulfillment.job.read',
+  path: '/v1/fulfillment/jobs/current',
   output: [
     {
       status: 200,
       body: struct.object({ jobId: struct.literal('job-204'), status: struct.literal('ready-for-pick') }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Keep the job read independent of telemetry while returning only validated data.
@@ -48,11 +49,11 @@ export async function main(): Promise<void> {
     const job = await loadFulfillmentJob(client)
     const span = telemetry.exporter.getFinishedSpans()[0]
     if (!span) throw new Error('HTTP span did not finish')
-    const url = span.attributes['url.full']
-    if (typeof url !== 'string') throw new Error('HTTP span URL is missing')
+    const operation = span.attributes['defjs.operation']
+    if (operation !== 'fulfillment.job.read') throw new Error('HTTP span operation is missing')
 
-    // Step 5: Emit the validated job and finished span attributes.
-    console.log(JSON.stringify({ job, span: { name: span.name, url }, traceparentInjected }))
+    // Step 5: Emit only the validated job and stable operation identity, never the resolved URL.
+    console.log(JSON.stringify({ job, span: { name: span.name, operation }, traceparentInjected }))
   } finally {
     // Step 6: Shut down both local providers after span completion.
     await telemetry.shutdown()

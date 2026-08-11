@@ -29,7 +29,7 @@ export const requestMachineToken = defineRequest({
       }),
     },
     { status: 401, body: struct.object({ error: struct.literal('invalid_client') }) },
-  ] as const,
+  ],
 })
 
 // Step 2: Return only a Struct-validated token document while client authentication remains client-owned.

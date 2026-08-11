@@ -53,6 +53,24 @@ WebSocket 狀態與 runtime error 監聽器也是觀察器。它們 throw 的錯
 
 生命週期決策請使用回傳的 handle 或 session。觀察器適合做範圍明確的記錄、metrics 或狀態更新，擁有者釋放時也要移除它們。
 
+## Sourcemap 部署
+
+必須明確選擇 production sourcemap policy：
+
+- **public**：隨 bundle 公開部署 map。Map 包含 `sourcesContent`；即使 source path 是相對路徑，應用程式與 dependency source 仍可被公開取得。
+
+- **hidden**：只移除 bundle 中的 source-map reference；應把 map 私下上傳到 error platform，而且不可公開部署。Map file 本身仍含敏感 path 與 `sourcesContent`，「hidden」不代表安全。
+
+- **disabled**：不產生 production map。這能避免 map disclosure，但會犧牲 production stack 的 source-level symbolication，debugging 更困難。
+
+Private map 的 access 與 retention 應像其他 debugging artifact 一樣受限。Relative path 本身不是 confidentiality boundary。
+
+## OpenAPI 邊界
+
+只選一個 authoritative contract source。已有組織級 OpenAPI workflow 時，應繼續使用 mature generator，並在 application boundary 明確設定 runtime validator；只產生 TypeScript type 並不能執行 runtime response validation。Greenfield Defjs service 則直接用 Defjs Struct 與 endpoint definition 描述 wire contract。
+
+Core 不會新增 OpenAPI generator/exporter，也不會把 OpenAPI 與 Defjs 維護成需要同步的 dual source。Dual-source drift 比在清楚 boundary 組合成熟工具更糟。
+
 ## 相關參考
 
 - [Client](/zh-Hant-TW/core/client)說明選項組合與用戶端範圍。

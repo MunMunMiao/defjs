@@ -5,100 +5,73 @@ description: 透過 React Context 共用 Defjs client、按自己的 API 設定�
 
 # `@defjs/react`
 
-`@defjs/react` 是 `@defjs/core` 的輕量 context adapter，匯出：
-
-- `ClientProvider`：建立並提供 core client；
-- `useClient()`：回傳 nearest provided client；
-- adapter `withEndpoint(...)` 與 interceptor-factory `withInterceptors(...)` helper。
-
-它不會加入 cache、Suspense integration、query retry 或 server data serialization。請連同 `@defjs/core`、React 一起安裝，這些上層責任則留在自己的 application code。
+此套件是 `@defjs/core` 的輕量 Context adapter。`ClientProvider` 提供由應用程式建立的 client，`useClient()` 回傳最近的 instance；它不加入 client factory、cache、retry policy 或 resource lifecycle。
 
 ## 提供 Client
 
+使用 `@defjs/core` 建立並設定 client，再明確傳入該 instance：
+
 ```tsx
-import { ClientProvider, withEndpoint } from '@defjs/react'
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import { UserProfile } from './UserProfile'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+    <ClientProvider client={client}>
       <UserProfile id={7} />
     </ClientProvider>
   )
 }
 ```
 
-Provider mount commit 後會保留一個 client。一般 rerender 不會重新套用已改變的 `options` array，亦不會取代 client。
-
-實作使用 lazy `useState` initializer。不要依賴 initializer 在 development 恰好只執行一次：React Strict Mode 可能在 commit 前重複執行 render-time initialization。真正的 lifecycle guarantee 是，一個 committed provider mount 對外提供一個 retained client。
-
-應用程式確實需要新 client 時，請 remount provider：
-
-```tsx
-<ClientProvider key={tenantId} options={[withEndpoint(endpoint)]}>
-  <TenantApplication />
-</ClientProvider>
-```
+`ClientProvider` 提供的就是傳入的同一個 instance。呼叫方決定何時建立或替換，並繼續負責由它啟動的 request 和 realtime resource。
 
 ## 讀取 Nearest Client
 
-在 React component 或 custom Hook 內呼叫 `useClient()`：
+在 React component 或 custom Hook 內呼叫 `useClient()`。缺少 provider 時會拋錯；巢狀 provider 遵循 React Context 的 nearest-provider 規則。
 
 ```tsx
 import { useClient } from '@defjs/react'
 
-export function UserProfile({ id }: { id: number }) {
+export function UserProfile() {
   const client = useClient()
-  // Execute commands from effects, event handlers, or application integrations.
   return null
 }
 ```
 
-在 provider 外呼叫會拋錯。Nested provider 遵循一般 React Context behavior；descendant 會取得 nearest provider 的 client。
-
-`ClientProvider` 接受任何 core `ClientOption`：
+所有設定 option 都來自 `@defjs/core`：
 
 ```tsx
-import { withCredentials } from '@defjs/core'
-import { ClientProvider, withEndpoint } from '@defjs/react'
-import { Application } from './Application'
+import { createClient, withCredentials, withEndpoint } from '@defjs/core'
 
-;<ClientProvider options={[withEndpoint('https://api.example.com'), withCredentials(true)]}>
-  <Application />
-</ClientProvider>
+const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
 ```
 
 ## Interceptor Factory
 
-Adapter `withInterceptors(...)` 接受 factory。Provider 建立 client 時會執行 factory，並按 option order 追加結果。
+先建立 interceptor value，並用 core 的 `withInterceptors(...)` 組合，再把 client 傳給 React：
 
 ```tsx
-import type { ReactNode } from 'react'
-import { createHttpInterceptor } from '@defjs/core'
-import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
 
-export function ApiBoundary({ children }: { children: ReactNode }) {
-  return (
-    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)]}>{children}</ClientProvider>
-  )
+export function ApiBoundary({ children }: { children: React.ReactNode }) {
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-Core `withInterceptors(...)` 接受 interceptor value。Server 端 credential factory 必須留在擁有該 credentials 的 request boundary。
+如果 interceptor factory 捕捉 request-scoped credential，應在建立該 client 的 request boundary 內呼叫。
 
 ## 管理 HTTP Effect
 
@@ -149,25 +122,24 @@ Defjs 透過 tuple 回傳預期內的 request failure。只有 integration bound
 
 ## Client Component Boundary
 
-Package 不會替應用程式建立 React Server Component client boundary。請把 `ClientProvider` 放在應用程式自己維護、以 `'use client'` 開頭的 module 後面。
-
-請建立由應用程式擁有的 Client Component：
+套件入口是 Client Component boundary。應用程式自己的 wrapper 可建立 browser client 並明確提供：
 
 ```tsx
 // app/ApiProvider.tsx
 'use client'
 
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
-import { ClientProvider, withEndpoint } from '@defjs/react'
+
+const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
-  return <ClientProvider options={[withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!)]}>{children}</ClientProvider>
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-攜帶 request header、cookie、tenant state 或 user credentials 的伺服器端程式碼，必須在每個 server request boundary 內建立 core client。不要讓這些值被 capture 到 module-level provider option 或 cross-request singleton。Adapter 不提供 concurrent SSR isolation。
-
-React Server Component、Next.js、hydration、Strict Mode 同 concurrent SSR 都有各自的 framework lifecycle boundary。請用應用程式的實際設定測試，尤其要覆蓋 request-scoped credentials 同 provider remount。
+攜帶 header、cookie、tenant state 或 credential 的 server code 應在每個 request boundary 建立獨立 client。adapter 不會隔離並行 SSR，也不會替 client 清理工作。
 
 ## 管理 Realtime Effect
 
@@ -256,19 +228,21 @@ Provider unmount/remount 會改變 client scope，但不會呼叫 `dispose`、ab
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { JSX, ReactNode } from 'react'
 
 interface ClientProviderProps {
+  client: Client
   children?: ReactNode
-  options?: ClientOption[]
 }
 
 declare function ClientProvider(props: ClientProviderProps): JSX.Element
 declare function useClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+向後代提供傳入的 client；`children` 可選。
+
+回傳最近的 client；沒有 provider 時拋錯。
 
 ## 下一步
 

@@ -53,6 +53,24 @@ WebSocket 상태 및 런타임 오류 listener도 observer입니다. throw된 �
 
 생명주기 결정에는 반환된 핸들이나 세션을 사용하세요. observer는 제한된 로깅, metric, 상태 업데이트에만 사용하고 소유 범위가 끝날 때 제거하세요.
 
+## Sourcemap 배포
+
+production sourcemap policy를 명시적으로 선택하세요.
+
+- **public**: map을 bundle과 함께 배포합니다. map에는 `sourcesContent`가 들어 있으므로 source path가 상대 경로여도 애플리케이션과 dependency source가 공개됩니다.
+
+- **hidden**: bundle의 source-map reference를 제거하고 map을 error platform에 private upload한 뒤 공개 배포하지 않습니다. map file 자체에는 민감한 path와 `sourcesContent`가 남으며 “hidden”이라고 안전해지는 것은 아닙니다.
+
+- **disabled**: production map을 생성하지 않습니다. map disclosure는 막지만 production stack의 source-level symbolication을 포기해 debugging이 어려워집니다.
+
+private map access와 retention을 다른 debugging artifact처럼 제한하세요. relative path만으로 confidentiality boundary가 되지 않습니다.
+
+## OpenAPI 경계
+
+authoritative contract source 하나를 선택하세요. 기존 OpenAPI workflow가 있는 조직은 이를 유지하고 mature generator와 명시적 runtime validator를 application boundary에서 사용해야 합니다. 생성된 TypeScript type만으로 runtime response를 검증할 수 없습니다. greenfield Defjs service에서는 Defjs Struct와 endpoint definition으로 wire contract를 직접 정의합니다.
+
+Core에는 OpenAPI generator/exporter를 추가하지 않으며 OpenAPI와 Defjs를 동기화할 두 source로 유지하지 않습니다. dual-source drift보다 명확한 boundary에서 기존 tool을 조합하는 편이 낫습니다.
+
 ## 관련 reference
 
 - [클라이언트](/ko-KR/core/client)에서는 옵션 조합과 클라이언트 범위를 설명합니다.

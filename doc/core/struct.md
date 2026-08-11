@@ -10,7 +10,7 @@ Structs describe strict structural decoding and wire encoding. Missing required 
 Use the `struct` facade and `Infer<T>` from the root entry:
 
 ```typescript
-import { struct, type Infer } from '@defjs/core'
+import { struct, type Infer, type StructInput } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -95,6 +95,22 @@ Parsing follows one modifier contract:
 
 Missing optional and nullish object fields are omitted from the output. At the top level they decode to `undefined`. `.null()` accepts explicit `null` but does not make a value optional.
 
+With `exactOptionalPropertyTypes`, inferred object inputs use exact optional properties. Omit an optional or nullish key instead of assigning `undefined`:
+
+```typescript
+const OptionalProfile = struct.object({
+  nickname: struct.string().optional(),
+})
+
+type OptionalProfileInput = StructInput<typeof OptionalProfile>
+
+const omitted: OptionalProfileInput = {}
+// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
+const explicitUndefined: OptionalProfileInput = { nickname: undefined }
+```
+
+At runtime, `struct.parse` defensively accepts an explicit `undefined` from unknown input and omits the key. That normalization does not widen the statically inferred caller input.
+
 Unknown object keys are dropped. Parsed object and record outputs use a null prototype. Code that depends on `Object.prototype` methods should use `Object.keys`, `Object.entries`, or copy into a normal object deliberately.
 
 Node's strict deep equality checks prototypes, so a parsed Struct object is intentionally not deeply equal to an otherwise identical object literal. Assert that boundary explicitly or compare the fields needed by the test:
@@ -169,16 +185,41 @@ See [Commands](./commands.md) for automatic request mapping and transport restri
 `.alias(name)` changes the wire key without changing the logical TypeScript key.
 
 ```typescript
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
 const UserBody = struct.object({
   id: struct.number().alias('user_id'),
   displayName: struct.string().alias('display_name'),
 })
 
-// Caller input uses { id, displayName }.
-// JSON wire data uses { user_id, display_name }.
+const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
+if (logicalError) throw logicalError
+
+const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
+if (!wireKeyError) throw new Error('struct.parse must read logical keys')
+
+let requestWireBody: unknown
+const echoUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({ body: struct.json(UserBody) }),
+  output: { 200: UserBody },
+})
+const client = createClient(
+  withEndpoint('https://example.test'),
+  withHTTPHandle(async (input, init) => {
+    requestWireBody = await new Request(input, init).json()
+    return Response.json({ user_id: 1, display_name: 'Ada' })
+  }),
+)
+
+const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
+if (requestError) throw requestError
 ```
 
-Aliases decode and encode JSON keys. Automatic request building also uses them for outbound path, query, header, URL-encoded, and multipart keys. Callers continue to use logical keys. Explicit target keys in a custom `build` projection remain explicit.
+`logicalUser` and `responseUser` use `{ id, displayName }`. `wireKeyError` points to the missing logical `id`, while `requestWireBody` is `{ user_id, display_name }`. Public `struct.parse` reads logical values; transport JSON encoding and decoding apply wire aliases.
+
+Automatic request building also uses aliases for outbound path, query, header, URL-encoded, and multipart keys. Explicit target keys in a custom `build` projection remain explicit.
 
 ## `StructError`
 

@@ -119,6 +119,13 @@ describe('metrics helpers', () => {
     })
   })
 
+  test('uses only the explicit operation as the metric identity', () => {
+    expect(createServerMetricAttributes({ ...makeHttpRequest(), endpoint: '/users/42', operation: 'users.read' })).toEqual({
+      'defjs.operation': 'users.read',
+      'server.address': 'api.example.com',
+    })
+  })
+
   test('createServerMetricAttributes returns empty object for relative URL without base', () => {
     expect(createServerMetricAttributes({ ...makeHttpRequest(), baseEndpoint: undefined })).toEqual({})
   })

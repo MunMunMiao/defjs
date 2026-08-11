@@ -21,7 +21,7 @@ export const readInvoiceAging = defineRequest({
   output: [
     { status: 200, body: struct.object({ overdueInvoices: struct.number(), tenant: struct.string() }) },
     { status: 401, body: struct.object({ code: struct.literal('expired_token') }) },
-  ] as const,
+  ],
 })
 
 // Step 2: Expose invoice aging without leaking refresh or replay mechanics into callers.

@@ -141,13 +141,14 @@ async function consumeNotifications(signal: AbortSignal) {
       }
     }
   } finally {
-    stream.close('consumer-finished')
     await stream.closed
   }
 }
 ```
 
 `execute` 成功代表啟動完成。啟動後發生的錯誤會透過 iterator rejection 與 `stream.closed` 出現，不會回頭改變原始 tuple 的 `error` 項目。
+
+透過 `break`、`return` 或 throw 提早離開 `for await` 迴圈時，會呼叫 iterator 的 `return()`。Stream 會自動以 `{ code: 'aborted', reason: 'iterator-return' }` 關閉；await `stream.closed` 即可觀察這個終止狀態。只有 owner 需要從活動 iteration 外部關閉時，才明確呼叫 `stream.close(...)`。
 
 ## 無效事件
 
@@ -210,7 +211,7 @@ HTTP/open validation failure、message-processing fatal error 與正常 EOF，�
 
 ## 端點自有資源上限
 
-一個 stream 只允許一個 async iterator consumer；建立第二個 iterator 會拋錯。離開迴圈時仍須明確呼叫 `stream.close(...)`。
+一個 stream 只允許一個 async iterator consumer；建立第二個 iterator 會拋錯。Iterator return（包括提早 `break` 離開 `for await`）會自動以 reason `iterator-return` 關閉 stream。
 
 每個定義都必須提供正安全整數 `maxBufferSize` 與 `maxQueueSize`。前者限制每條 SSE line 與目前 event 的累計 data，後者限制等待 consumer 的已解析 event。Queue overflow 是 fatal error，不會靜默丟棄 event。
 
@@ -227,21 +228,33 @@ const notifications = defineEventStream({
 
 ## 終止關閉
 
-`stream.closed` 會 resolve：
+`stream.closed` 會 resolve 為 discriminated union：
 
 ```typescript
-interface EventStreamCloseInfo {
-  code: 'eof' | 'aborted' | 'error'
-  reason?: string
-  cause?: unknown
-}
+type EventStreamCloseInfo =
+  | { code: 'eof'; reason?: string; cause?: unknown }
+  | { code: 'aborted'; reason?: string; cause?: unknown }
+  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
 ```
 
 - `eof` 代表 response body 正常結束。
 - `aborted` 包含明確呼叫 `stream.close(...)` 或取消路徑。
-- `error` 代表停止重試或發生終止 stream error。
+- `error` 代表停止重試或發生終止 stream error；該分支一定包含公開的 `errorCode`。
 
-`stream.close(reason)` 是 idempotent。它會中止進行中的傳輸工作、停止讓新值進入 queue，並 settle `stream.closed`。單純 `break` 不會做這些事。
+`EventStreamErrorCode` 有六個穩定值：
+
+| Error code                  | 含義                                                         |
+| --------------------------- | ------------------------------------------------------------ |
+| `INVALID_RESPONSE`          | Status、content type、response error 或 response body 無效。 |
+| `MESSAGE_PROCESSING_FAILED` | Event transform 或 lifecycle callback 失敗。                 |
+| `PARSER_LIMIT_EXCEEDED`     | 超出端點自有的 parser buffer limit。                         |
+| `QUEUE_OVERFLOW`            | 已解析 event 超出端點自有的 queue bound。                    |
+| `TIMEOUT`                   | Transport attempt 達到設定的 timeout。                       |
+| `TRANSPORT_ERROR`           | 發生其他終止 network、stream read 或 retry policy failure。  |
+
+`stream.close(reason)` 是 idempotent。它會中止進行中的傳輸工作、停止讓新值進入 queue，並 settle `stream.closed`。Iterator `return()` 會以 reason `iterator-return` 使用相同 close path。
+
+一般日誌只應記錄 `close.code`，以及 `error` 分支中的 `close.errorCode`。沒有明確的遮罩與保存政策時，不要記錄 `reason`、`cause`、raw event 或 stream URL。
 
 開啟 stream 的應用程式邊界負責關閉它。Client 或 framework provider 不會自動關閉。
 

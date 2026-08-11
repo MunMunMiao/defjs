@@ -22,7 +22,7 @@ export const readOrderSummary = defineRequest({
       status: 200,
       body: struct.object({ id: struct.literal('order-1042'), status: struct.literal('packed') }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Copy only the current execution's correlation ID into the downstream header at dispatch.

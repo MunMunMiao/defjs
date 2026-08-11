@@ -15,7 +15,7 @@ export const readCatalogProduct = defineRequest({
       body: catalogProductStruct,
     },
     { status: 304, body: struct.null() },
-  ] as const,
+  ],
 })
 
 type CatalogProduct = Infer<typeof catalogProductStruct>

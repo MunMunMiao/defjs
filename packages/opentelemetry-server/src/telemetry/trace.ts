@@ -9,12 +9,13 @@ function markSpanStatusSet(span: Span): void {
   spanStatusSet.set(span, true)
 }
 
-export function createHttpSpan(tracer: Tracer, method: string, url: string, parentCtx: Context): Span {
+export function createHttpSpan(tracer: Tracer, method: string, url: string, parentCtx: Context, operation?: string): Span {
   return tracer.startSpan(
-    method,
+    operation ? `${method} ${operation}` : method,
     {
       kind: SpanKind.CLIENT,
       attributes: {
+        ...(operation ? { 'defjs.operation': operation } : {}),
         'http.request.method': method,
         'url.full': url,
       },
@@ -23,23 +24,23 @@ export function createHttpSpan(tracer: Tracer, method: string, url: string, pare
   )
 }
 
-export function createSSESpan(tracer: Tracer, url: string, parentCtx: Context): Span {
+export function createSSESpan(tracer: Tracer, url: string, parentCtx: Context, operation?: string): Span {
   return tracer.startSpan(
-    'SSE',
+    operation ? `SSE ${operation}` : 'SSE',
     {
       kind: SpanKind.CLIENT,
-      attributes: { 'url.full': url },
+      attributes: { ...(operation ? { 'defjs.operation': operation } : {}), 'url.full': url },
     },
     parentCtx,
   )
 }
 
-export function createWebSocketSpan(tracer: Tracer, url: string, parentCtx: Context): Span {
+export function createWebSocketSpan(tracer: Tracer, url: string, parentCtx: Context, operation?: string): Span {
   return tracer.startSpan(
-    'WebSocket',
+    operation ? `WebSocket ${operation}` : 'WebSocket',
     {
       kind: SpanKind.CLIENT,
-      attributes: { 'url.full': url },
+      attributes: { ...(operation ? { 'defjs.operation': operation } : {}), 'url.full': url },
     },
     parentCtx,
   )

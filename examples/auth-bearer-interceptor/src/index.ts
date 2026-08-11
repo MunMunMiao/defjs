@@ -18,7 +18,7 @@ export const readPayrollSummary = defineRequest({
   output: [
     { status: 200, body: struct.object({ employeeCount: struct.number(), period: struct.string() }) },
     { status: 401, body: struct.object({ code: struct.literal('invalid_payroll_token') }) },
-  ] as const,
+  ],
 })
 
 // Step 2: Keep payroll reads unaware of token rotation and authorization headers.

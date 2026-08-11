@@ -8,7 +8,7 @@ export const deleteExportJob = defineRequest({
   output: [
     { status: 200, body: struct.object({ deleted: struct.boolean() }) },
     { status: 204, body: struct.null() },
-  ] as const,
+  ],
 })
 
 // Step 2: Normalize both successful branches without decoding content from 204.

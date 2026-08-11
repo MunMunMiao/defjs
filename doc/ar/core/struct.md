@@ -10,7 +10,7 @@ description: صف فك الترميز البنيوي الصارم والمدخل
 استخدم واجهة `struct` و`Infer<T>` من root entry:
 
 ```typescript
-import { struct, type Infer } from '@defjs/core'
+import { struct, type Infer, type StructInput } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -86,6 +86,35 @@ type ParseResult<T> = [error: null, value: T] | [error: StructError, value: unde
 
 تُحذف حقول object المفقودة من نوع optional أو nullish من output؛ وعلى المستوى الأعلى تُفك إلى `undefined`. تُسقط مفاتيح object غير المعروفة، وتستخدم مخرجات object وrecord prototype مساويًا لـ null.
 
+تقارن المساواة العميقة الصارمة في Node الـ prototype أيضًا، لذلك لا يتساوى object حلله Struct بعمق مع object literal يملك الحقول نفسها. اختبر هذا الحد صراحة أو أنشئ shallow copy داخل assertion فقط:
+
+```typescript
+import assert from 'node:assert/strict'
+
+const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
+assert.equal(error, null)
+assert.equal(Object.getPrototypeOf(profile), null)
+assert.deepEqual({ ...profile }, { name: 'Ada' })
+```
+
+ينشئ spread هنا نسخة سطحية خاصة بهذا assertion. وتظل كائنات Struct المتداخلة ذات prototype مساويًا لـ null. لا تضف normalization أو clone عامًا إلى مسار production لمجرد إرضاء test matcher.
+
+عند تفعيل `exactOptionalPropertyTypes`، تستخدم مدخلات object المستنتجة خصائص optional دقيقة. احذف المفتاح optional أو nullish بدل إسناد `undefined` إليه:
+
+```typescript
+const OptionalProfile = struct.object({
+  nickname: struct.string().optional(),
+})
+
+type OptionalProfileInput = StructInput<typeof OptionalProfile>
+
+const omitted: OptionalProfileInput = {}
+// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
+const explicitUndefined: OptionalProfileInput = { nickname: undefined }
+```
+
+في runtime، يقبل `struct.parse` بصورة دفاعية قيمة `undefined` صريحة من input مجهول ويحذف المفتاح. ولا توسّع هذه normalization نوع input المستنتج ساكنًا للمنادي.
+
 ## مدخلات Object وRequest المطلوبة
 
 تكون خصائص object مطلوبة في TypeScript وruntime ما لم تكن optional أو nullish. وكل section معلن داخل `struct.request(...)` مطلوب أيضًا؛ أما الأقسام غير المعلنة فلا تظهر في input type.
@@ -149,11 +178,40 @@ const UserBody = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-// Caller input uses { id, displayName }.
-// JSON wire data uses { user_id, display_name }.
+const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
+if (logicalError) throw logicalError
+
+const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
+if (!wireKeyError) throw new Error('struct.parse must read logical keys')
 ```
 
-تفك aliases مفاتيح JSON وترمّزها. ويستخدمها بناء الطلب التلقائي أيضًا لمفاتيح path وquery وheader وURL-encoded وmultipart الصادرة. يستمر المستدعون في استخدام المفاتيح المنطقية. أما target keys الصريحة في إسقاط `build` مخصص فتبقى صريحة.
+يستخدم `logicalUser` المفاتيح `{ id, displayName }`، بينما يشير `wireKeyError` إلى غياب المفتاح المنطقي `id`. يقرأ `struct.parse` العام القيم المنطقية فقط، ولا يعامل مفاتيح wire كمدخل مستقل.
+
+يُطبّق alias الخاص بالـ wire عند ترميز JSON وفكّه داخل transport:
+
+```typescript
+import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+let requestWireBody: unknown
+const echoUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({ body: struct.json(UserBody) }),
+  output: { 200: UserBody },
+})
+const client = createClient(
+  withEndpoint('https://example.test'),
+  withHTTPHandle(async (input, init) => {
+    requestWireBody = await new Request(input, init).json()
+    return Response.json({ user_id: 1, display_name: 'Ada' })
+  }),
+)
+
+const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
+if (requestError) throw requestError
+```
+
+يكون `requestWireBody` هو `{ user_id, display_name }`، بينما يعود `responseUser` إلى `{ id, displayName }`. ويستخدم بناء الطلب التلقائي aliases أيضًا لمفاتيح path وquery وheader وURL-encoded وmultipart الصادرة. أما target keys الصريحة في إسقاط `build` مخصص فتبقى كما هي.
 
 ## `StructError`
 

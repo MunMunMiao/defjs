@@ -16,7 +16,7 @@ export const readOrderFulfillment = defineRequest({
       status: 200,
       body: fulfillmentStruct,
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Cap active reads with two workers while preserving caller order by index.

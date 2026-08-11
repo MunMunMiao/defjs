@@ -5,64 +5,39 @@ description: Partagez un client Defjs par injection Vue, configurez-le pour votr
 
 # `@defjs/vue`
 
-`@defjs/vue` est un adaptateur d'injection léger pour `@defjs/core`. Il exporte :
-
-- `provideClient(...)`, un plugin Vue qui crée et fournit un client Core ;
-- `injectClient()`, qui renvoie le client injecté le plus proche ;
-- `HTTP_CLIENT`, la clé d'injection utilisée pour les remplacements locaux ;
-- les helpers d'adaptateur `withEndpoint(...)` et `withInterceptors(...)`, ce dernier acceptant des fabriques d'intercepteurs.
-
-Il n'ajoute ni comportement de transport, ni cache, ni gestion d'état, ni relance, ni module Nuxt. Installez-le avec `@defjs/core` et Vue, puis gardez ces responsabilités dans les composables, stores et intégrations de votre application.
+Ce paquet est un adaptateur d’injection minimal pour `@defjs/core`. `createClientPlugin(client)` fournit un client créé par l’application, `injectClient()` renvoie l’instance la plus proche et `HTTP_CLIENT` permet les overrides natifs d’un sous-arbre. Il n’ajoute ni fabrique, ni cache, ni retry, ni cycle de vie des ressources.
 
 ## Installer le plugin
 
-Chaque installation du plugin crée un client :
+Créez et configurez le client avec `@defjs/core`, puis installez un plugin pour cette instance exacte :
 
 ```typescript
 // main.ts
+import { createClient, withEndpoint } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
-import { provideClient, withEndpoint } from '@defjs/vue'
 import App from './App.vue'
 
+const client = createClient(withEndpoint('https://api.example.com'))
 const app = createApp(App)
 
-app.use(provideClient(withEndpoint('https://api.example.com')))
-
+app.use(createClientPlugin(client))
 app.mount('#app')
 ```
 
-`provideClient(...options)` accepte tout `ClientOption` de `@defjs/core`, pas uniquement les options réexportées ou recréées par l'adaptateur Vue :
-
-```typescript
-import { withCredentials, withSSEReconnect } from '@defjs/core'
-import { provideClient, withEndpoint } from '@defjs/vue'
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEReconnect({ attempts: 3 })))
-```
-
-Les options s'exécutent à l'installation du plugin, au moment où il crée le client. Installer le même objet plugin dans une autre application crée un autre client.
+Le plugin ne fait que fournir l’instance reçue ; il ne crée, clone, remplace ou libère pas le client.
 
 ## Injecter le client le plus proche
 
-Appelez `injectClient()` dans le `setup` d'un composant, dans `<script setup>` ou dans un contexte de composable/injection actif :
+Appelez `injectClient()` dans `setup`, `<script setup>` ou un contexte d’injection actif. Un appel sans `HTTP_CLIENT` lève une erreur et la règle Vue du provider le plus proche s’applique.
+
+Utilisez la clé publique avec le `provide` natif de Vue pour remplacer le client d’un sous-arbre :
 
 ```vue
 <script setup lang="ts">
-import { injectClient } from '@defjs/vue'
-
-const client = injectClient()
-</script>
-```
-
-La fonction lève une exception si aucun `HTTP_CLIENT` n'est disponible. Ne l'appelez pas arbitrairement au niveau d'un module.
-
-La règle Vue du provider le plus proche s'applique. Un composant peut fournir un client différent à ses descendants :
-
-```vue
-<script setup lang="ts">
-import { provide } from 'vue'
 import { createClient, withEndpoint } from '@defjs/core'
 import { HTTP_CLIENT } from '@defjs/vue'
+import { provide } from 'vue'
 
 const scopedClient = createClient(withEndpoint('https://preview.example.com'))
 provide(HTTP_CLIENT, scopedClient)
@@ -73,34 +48,25 @@ provide(HTTP_CLIENT, scopedClient)
 </template>
 ```
 
-Les descendants qui appellent `injectClient()` reçoivent `scopedClient` ; les composants voisins hors de ce sous-arbre conservent le client de l'application.
-
 ## Fabriques d'intercepteurs
 
-Le `withInterceptors(...)` de l'adaptateur accepte des fabriques, pas des instances d'intercepteur. Il les évalue lors de la création du client et ajoute leurs résultats dans l'ordre des options.
+Créez les valeurs interceptor et composez-les avec le `withInterceptors(...)` du core avant d’installer le plugin :
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)))
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
+app.use(createClientPlugin(client))
 ```
 
-Ce comportement diffère du `withInterceptors(...)` Core, qui accepte des intercepteurs déjà créés. Gardez les fabriques qui capturent des identifiants serveur dans la portée de la requête.
+Si une fabrique capture des identifiants propres à une requête, appelez-la dans la frontière de requête qui crée ce client.
 
 ## Réagir aux changements d'entrée
 
@@ -163,30 +129,22 @@ Le constructeur de commande `getUser` importé possède le contrat de l'endpoint
 
 ## Frontières SSR
 
-Une application navigateur peut installer un unique client avec le plugin si sa configuration convient au navigateur et ne dépend pas d'une requête.
-
-Pour le SSR, ne capturez pas les en-têtes, cookies, données utilisateur ou données de tenant dans un singleton partagé entre les requêtes. Créez un client Core dans la portée de chaque requête serveur, puis transmettez-le uniquement à l'arbre de rendu correspondant.
-
-L'adaptateur n'isole pas les fonctions applicatives qui capturent un état entre des requêtes SSR concurrentes. Il ne décide pas non plus quels en-têtes ou cookies entrants peuvent être transmis sans risque.
-
-Un plugin client Nuxt peut installer l'adaptateur Vue pour les consommateurs du navigateur :
+Une application navigateur peut installer un client sûr pour le navigateur. En SSR, créez un core client distinct dans chaque frontière de requête et ne fournissez que cette instance à l’application correspondante ; ne partagez ni headers, ni cookies, ni état de tenant, ni identifiants.
 
 ```typescript
 // plugins/defjs.client.ts
-import { provideClient, withEndpoint } from '@defjs/vue'
+import { createClient, withEndpoint } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 
 export default defineNuxtPlugin((nuxtApp) => {
-  nuxtApp.vueApp.use(provideClient(withEndpoint(useRuntimeConfig().public.apiBase)))
+  const client = createClient(withEndpoint(useRuntimeConfig().public.apiBase))
+  nuxtApp.vueApp.use(createClientPlugin(client))
 })
 ```
 
-Le suffixe `.client.ts` réserve ce code au navigateur. Ce client n'appartient pas à une requête serveur et ne doit pas transmettre d'identifiants SSR. Dans une application Nuxt, testez cette frontière avec vos plugins, route handlers et votre configuration d'hydratation réels.
-
 ## Responsabilité des ressources
 
-Installer ou démonter un provider Vue n'annule aucune requête HTTP et ne ferme aucune ressource SSE ou WebSocket. L'adaptateur crée un client, et un client Core n'a pas de méthode `dispose()`.
-
-Le composant, composable, route ou store qui démarre un travail temps réel doit :
+Installer ou démonter le plugin n’annule pas les travaux HTTP et ne ferme pas les ressources SSE ou WebSocket. L’appelant qui crée le client possède tout le travail démarré avec lui.
 
 - enregistrer le nettoyage avant ou en même temps que le démarrage asynchrone ;
 - annuler le démarrage lorsque sa portée prend fin ;
@@ -200,15 +158,19 @@ N'ouvrez pas une WebSocket uniquement pour attacher un listener d'état tout en 
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { InjectionKey, Plugin } from 'vue'
 
 declare const HTTP_CLIENT: InjectionKey<Client>
-declare function provideClient(...options: ClientOption[]): Plugin
+declare function createClientPlugin(client: Client): Plugin
 declare function injectClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+Crée un plugin Vue qui fournit l’instance client reçue.
+
+Renvoie le client le plus proche et lève une erreur s’il n’existe pas.
+
+Clé d’injection publique pour les providers natifs de sous-arbre.
 
 ## Étapes suivantes
 

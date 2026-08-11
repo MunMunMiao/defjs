@@ -1,5 +1,5 @@
-import { defineRequest, struct, type Infer, withHTTPHandle } from '@defjs/core'
-import { ClientProvider, useClient, withEndpoint } from '@defjs/react'
+import { createClient, defineRequest, struct, type Client, type Infer, withEndpoint, withHTTPHandle } from '@defjs/core'
+import { ClientProvider, useClient } from '@defjs/react'
 import { createElement, useEffect } from 'react'
 import { mountReactFixture } from './renderer'
 
@@ -10,7 +10,7 @@ export const loadSupportSummary = defineRequest({
   method: 'GET',
   path: '/v1/summary',
   input: struct.request({ query: struct.object({ view: struct.string() }) }),
-  output: [{ status: 200, body: scopeSummaryStruct }] as const,
+  output: [{ status: 200, body: scopeSummaryStruct }],
 })
 
 // Step 2: Bind each view's abortable request to the nearest provider-resolved Defjs client.
@@ -47,23 +47,21 @@ function SummaryView({
   return null
 }
 export function SupportWorkspace({
-  handle,
   onError,
   onSummary,
+  refundsClient,
+  supportClient,
 }: {
-  handle: typeof fetch
   onError: (error: unknown) => void
   onSummary: (summary: ScopeSummary) => void
+  refundsClient: Client
+  supportClient: Client
 }) {
   return createElement(
     ClientProvider,
-    { options: [withEndpoint('https://support.fixture.invalid'), withHTTPHandle(handle)] },
+    { client: supportClient },
     createElement(SummaryView, { onError, onSummary, view: 'case-queue' }),
-    createElement(
-      ClientProvider,
-      { options: [withEndpoint('https://refunds.fixture.invalid'), withHTTPHandle(handle)] },
-      createElement(SummaryView, { onError, onSummary, view: 'refund-review' }),
-    ),
+    createElement(ClientProvider, { client: refundsClient }, createElement(SummaryView, { onError, onSummary, view: 'refund-review' })),
   )
 }
 
@@ -88,7 +86,11 @@ export async function main(): Promise<void> {
   }
 
   // Step 4: Mount the provider tree and wait for both scoped views.
-  const renderer = await mountReactFixture(createElement(SupportWorkspace, { handle: fixtureFetch, onError: ready.reject, onSummary }))
+  const supportClient = createClient(withEndpoint('https://support.fixture.invalid'), withHTTPHandle(fixtureFetch))
+  const refundsClient = createClient(withEndpoint('https://refunds.fixture.invalid'), withHTTPHandle(fixtureFetch))
+  const renderer = await mountReactFixture(
+    createElement(SupportWorkspace, { onError: ready.reject, onSummary, refundsClient, supportClient }),
+  )
   try {
     await ready.promise
   } finally {

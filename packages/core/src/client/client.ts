@@ -1,9 +1,9 @@
 import type { Command } from './command'
 import { isEventStreamCommand, isHttpCommand, isWebSocketCommand } from './command'
 import type { ClientConfig } from './config'
-import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
+import { applyClientOptions, createClientConfig } from './config'
 import type { ClientOption } from './option'
-import type { HttpAwaitResult, HttpCommand, HttpExecuteOptions, RequestErrorData, RequestSuccessData } from '../http/http'
+import type { HttpCommand, HttpExecuteOptions } from '../http/http'
 import { executeHttpCommand } from '../http/http'
 import type { RequestOutputShape } from '../http/request'
 import type { EventStructs, EventStreamCommand, EventStreamData, EventStreamExecuteOptions, StreamAwaitResult } from '../sse/sse'
@@ -27,7 +27,7 @@ export type Client = {
   execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
     command: HttpCommand<TInput, TOutput>,
     options?: HttpExecuteOptions,
-  ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>>
+  ): ReturnType<typeof executeHttpCommand<TInput, TOutput>>
 
   execute<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
     command: EventStreamCommand<TInput, TEvents>,
@@ -53,30 +53,12 @@ export function getClientConfig(client: Client): ClientConfig {
 }
 
 export function createClient(...options: ClientOption[]): Client {
-  const conf: ClientConfig = {
-    endpoint: '',
-    http: { ...DEFAULT_HTTP_OPTIONS },
-    interceptors: [],
-    queryParamsSerializer: DEFAULT_QUERY_PARAMS_SERIALIZER,
-    sse: { ...DEFAULT_SSE_OPTIONS },
-    webSocket: {
-      handle: globalThis.WebSocket,
-      beforeConnect: undefined,
-      heartbeat: undefined,
-      protocols: undefined,
-      reconnect: undefined,
-    },
-    xsrf: undefined,
-  }
-
-  for (const option of options) {
-    option(conf)
-  }
+  const conf = applyClientOptions(createClientConfig(), options)
 
   function execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
     command: HttpCommand<TInput, TOutput>,
     options?: HttpExecuteOptions,
-  ): Promise<HttpAwaitResult<RequestSuccessData<TOutput>, RequestErrorData<TOutput>>>
+  ): ReturnType<typeof executeHttpCommand<TInput, TOutput>>
   function execute<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
     command: EventStreamCommand<TInput, TEvents>,
     options?: EventStreamExecuteOptions,

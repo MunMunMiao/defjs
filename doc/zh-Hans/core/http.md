@@ -7,6 +7,18 @@ description: 构建 HTTP URL 和 body，分派 response Struct，取消请求，
 
 `defineRequest(...)` 创建 HTTP command builder。[Commands](/zh-Hans/core/commands) 负责端点定义和 input projection；本页只讲 HTTP wire 和生命周期行为。
 
+## HTTP-Only Client Entry
+
+`@defjs/core/http` 是额外提供的 HTTP-only entry，导出 `createHttpClient(...)`、HTTP command 和兼容 HTTP 的 client option：
+
+```typescript
+import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
+
+const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
+```
+
+当 consumer 明确只支持 HTTP 时使用它。它不会替代 root entry：`@defjs/core` 的 `createClient(...)` 仍是支持 HTTP、SSE 和 WebSocket command 的完整 client。
+
 ## URL 构建
 
 `withEndpoint(...)` 必须提供 absolute base URL。它的 path 会作为目录保留：
@@ -100,11 +112,25 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+    { status: 409, body: struct.object({ conflict: struct.string() }) },
+  ],
 })
 ```
 
-Runtime 按精确 status 选择 Struct。声明了 `output` 时，任何未匹配 status 都会产生 `UNDECLARED_STATUS`。已声明 2xx body 组成 success-data union；已声明非 2xx body 组成 `error.data`。
+Runtime 按精确 status 选择 Struct。声明了 `output` 时，任何未匹配 status 都会产生 `UNDECLARED_STATUS`。已声明 2xx body 组成 success-data union。`defineRequest(...)` 使用 const generic，因此 inline status 无需 `as const` 即可保留 literal；HTTP error union 会保持每个非 2xx status 与对应 `error.data` body 的关联。
+
+```typescript
+const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+
+if (statusError?.kind === 'http') {
+  if (statusError.status === 404) {
+    console.error(statusError.data.message)
+  } else {
+    // status 是 409，data 是已声明的 conflict body。
+    console.error(statusError.data.conflict)
+  }
+}
+```
 
 `response.ok` 只表示 `status >= 200 && status < 300`，不代表 output 解码、应用校验或 authorization 成功。
 

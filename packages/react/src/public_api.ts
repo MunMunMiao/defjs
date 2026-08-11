@@ -1,2 +1,2 @@
-export { ClientProvider, useClient, withEndpoint, withInterceptors } from './core'
+export { ClientProvider, useClient } from './core'
 export type { ClientProviderProps } from './core'

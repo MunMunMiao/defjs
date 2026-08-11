@@ -141,13 +141,14 @@ async function consumeNotifications(signal: AbortSignal) {
       }
     }
   } finally {
-    stream.close('consumer-finished')
     await stream.closed
   }
 }
 ```
 
 A successful `execute` means startup completed. Errors after startup appear through iterator rejection and `stream.closed`, not by changing the original tuple's `error` item.
+
+Leaving a `for await` loop early through `break`, `return`, or a thrown error calls the iterator's `return()` method. The stream closes automatically with `{ code: 'aborted', reason: 'iterator-return' }`; awaiting `stream.closed` observes that terminal state. Call `stream.close(...)` explicitly only when the owner must close the stream from outside active iteration.
 
 ## Invalid Events
 
@@ -210,7 +211,7 @@ HTTP/open validation failures, message-processing fatal errors, and normal EOF a
 
 ## Endpoint-Owned Limits
 
-A stream has exactly one async-iterator consumer. Creating a second iterator throws; breaking the loop still requires an explicit `stream.close(...)`.
+A stream has exactly one async-iterator consumer. Creating a second iterator throws. Returning from the iterator, including an early `break` from `for await`, automatically closes the stream with reason `iterator-return`.
 
 Every definition requires positive safe-integer `maxBufferSize` and `maxQueueSize`. The buffer limit applies to each SSE line and the current event data, while the queue limit bounds parsed events waiting for the consumer. Queue overflow is fatal and never silently drops an event.
 
@@ -227,21 +228,33 @@ Normal EOF lets the consumer drain buffered events. A fatal parser, transform, o
 
 ## Terminal Close
 
-`stream.closed` resolves with:
+`stream.closed` resolves with a discriminated union:
 
 ```typescript
-interface EventStreamCloseInfo {
-  code: 'eof' | 'aborted' | 'error'
-  reason?: string
-  cause?: unknown
-}
+type EventStreamCloseInfo =
+  | { code: 'eof'; reason?: string; cause?: unknown }
+  | { code: 'aborted'; reason?: string; cause?: unknown }
+  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
 ```
 
 - `eof` means the response body ended normally.
 - `aborted` includes an explicit `stream.close(...)` or cancellation path.
-- `error` means retry stopped or a terminal stream error occurred.
+- `error` means retry stopped or a terminal stream error occurred. This branch always includes a public `errorCode`.
 
-`stream.close(reason)` is idempotent. It aborts active transport work, closes the queue for new pushes, and settles `stream.closed`. A `break` does none of those things.
+`EventStreamErrorCode` has six stable values:
+
+| Error code                  | Meaning                                                                  |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `INVALID_RESPONSE`          | Status, content type, response error, or response body was invalid.      |
+| `MESSAGE_PROCESSING_FAILED` | Event transformation or a lifecycle callback failed.                     |
+| `PARSER_LIMIT_EXCEEDED`     | An endpoint-owned parser buffer limit was exceeded.                      |
+| `QUEUE_OVERFLOW`            | Parsed events exceeded the endpoint-owned queue bound.                   |
+| `TIMEOUT`                   | The transport attempt reached its configured timeout.                    |
+| `TRANSPORT_ERROR`           | Another terminal network, stream-read, or retry-policy failure occurred. |
+
+`stream.close(reason)` is idempotent. It aborts active transport work, closes the queue for new pushes, and settles `stream.closed`. Iterator `return()` uses that same close path with reason `iterator-return`.
+
+Routine logs should record only `close.code` and, for the `error` branch, `close.errorCode`. Do not log `reason`, `cause`, raw events, or stream URLs without an explicit redaction and retention policy.
 
 The application boundary that opens the stream owns closing it. A client or framework provider does not close it automatically.
 

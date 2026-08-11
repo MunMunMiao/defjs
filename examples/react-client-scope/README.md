@@ -39,7 +39,7 @@ The case queue resolves through the outer provider, while refund review resolves
 
 ## Key points
 
-- `ClientProvider` creates one client for its committed mount.
+- `ClientProvider` exposes the exact client instance created by the application.
 - React context resolves the nearest matching provider.
 - Service authorization and dynamic endpoint replacement remain application policy.
 

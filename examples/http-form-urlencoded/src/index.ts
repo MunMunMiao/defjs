@@ -11,7 +11,7 @@ export const createDeliveryMessage = defineRequest({
       mediaUrls: struct.array(struct.string()).alias('MediaUrl'),
     }),
   }),
-  output: [{ status: 201, body: struct.object({ id: struct.string() }) }] as const,
+  output: [{ status: 201, body: struct.object({ id: struct.string() }) }],
 })
 
 // Step 2: Return the message ID only after the form operation receives its typed 201.

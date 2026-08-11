@@ -94,6 +94,12 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
 
 接続 URL はログへ出さないでください。パス識別子、アプリケーションのクエリデータ、テレメトリー伝播フィールドを含む可能性があります。
 
+## 失敗診断
+
+browser WebSocket API、または standard WebSocket event surface だけを公開する injected constructor では、transport-level handshake failure から通常得られる安定情報は `RequestError` の `kind: 'transport'` と `NETWORK_ERROR`、`ABORTED`、`TIMEOUT` などの `code` だけです。HTTP `401`、別の handshake status、response headers/body、Node 固有の `unexpected-response` detail は保証できません。runtime 固有 constructor が独自 adapter で追加情報を公開しても、それは portable Core contract ではありません。
+
+startup 後は `session.closed` を待ち、`kind`、任意の close `code`、任意の `wasClean` を主要な terminal diagnostic として使います。close code は WebSocket code であり HTTP status ではありません。routine log にはレビュー済みの low-cardinality context とこれらの field だけを残し、connection URL、query、ticket、raw `cause`、`reason` は記録しないでください。明示的な redaction、access、retention policy がある場合だけ拡張します。
+
 ## ライブセッション
 
 `WebSocketSession` は、複数の物理接続試行にまたがる 1 つの論理セッションです。

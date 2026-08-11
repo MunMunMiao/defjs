@@ -141,13 +141,14 @@ async function consumeNotifications(signal: AbortSignal) {
       }
     }
   } finally {
-    stream.close('consumer-finished')
     await stream.closed
   }
 }
 ```
 
 성공한 `execute`는 시작이 완료됐다는 뜻입니다. 시작 이후 오류는 원래 튜플의 `error`를 바꾸지 않고 iterator rejection과 `stream.closed`를 통해 나타납니다.
+
+`break`, `return`, throw된 오류로 `for await` 루프를 일찍 벗어나면 iterator의 `return()`이 호출됩니다. 스트림은 `{ code: 'aborted', reason: 'iterator-return' }`으로 자동 종료되며, `stream.closed`를 기다리면 이 최종 상태를 확인할 수 있습니다. 활성 iteration 외부에서 소유자가 스트림을 닫아야 할 때만 `stream.close(...)`를 명시적으로 호출하세요.
 
 ## 유효하지 않은 이벤트
 
@@ -210,7 +211,7 @@ HTTP/open 검증 실패, 메시지 처리의 fatal 오류, 정상 EOF는 재시�
 
 ## 엔드포인트 소유 제한
 
-스트림에는 async iterator consumer가 정확히 하나만 허용됩니다. 두 번째 iterator 생성은 오류를 던지며, 루프를 빠져나갈 때도 `stream.close(...)`를 명시적으로 호출해야 합니다.
+스트림에는 async iterator consumer가 정확히 하나만 허용됩니다. 두 번째 iterator 생성은 오류를 던집니다. `for await`의 조기 `break`를 포함한 iterator return은 reason `iterator-return`으로 스트림을 자동 종료합니다.
 
 모든 정의에는 양의 안전한 정수 `maxBufferSize`와 `maxQueueSize`가 필요합니다. 전자는 각 SSE line과 현재 event data를, 후자는 소비 대기 중인 파싱된 event를 제한합니다. Queue overflow는 fatal이며 event를 조용히 버리지 않습니다.
 
@@ -227,21 +228,33 @@ const notifications = defineEventStream({
 
 ## 최종 종료
 
-`stream.closed`는 다음 값으로 resolve됩니다.
+`stream.closed`는 판별 union으로 resolve됩니다.
 
 ```typescript
-interface EventStreamCloseInfo {
-  code: 'eof' | 'aborted' | 'error'
-  reason?: string
-  cause?: unknown
-}
+type EventStreamCloseInfo =
+  | { code: 'eof'; reason?: string; cause?: unknown }
+  | { code: 'aborted'; reason?: string; cause?: unknown }
+  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
 ```
 
 - `eof`는 응답 body가 정상적으로 끝났다는 뜻입니다.
 - `aborted`에는 명시적인 `stream.close(...)` 또는 취소 경로가 포함됩니다.
-- `error`는 재시도가 중단됐거나 최종 stream 오류가 발생했다는 뜻입니다.
+- `error`는 재시도가 중단됐거나 최종 stream 오류가 발생했다는 뜻입니다. 이 branch에는 공개 `errorCode`가 항상 포함됩니다.
 
-`stream.close(reason)`은 idempotent합니다. 활성 트랜스포트 작업을 abort하고 새 push에 대해 큐를 닫으며 `stream.closed`를 settle합니다. `break`는 이 작업을 전혀 하지 않습니다.
+`EventStreamErrorCode`에는 안정적인 값 여섯 개가 있습니다.
+
+| Error code                  | 의미                                                                    |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `INVALID_RESPONSE`          | status, content type, response error 또는 response body가 잘못됐습니다. |
+| `MESSAGE_PROCESSING_FAILED` | event transform 또는 lifecycle callback이 실패했습니다.                 |
+| `PARSER_LIMIT_EXCEEDED`     | endpoint 소유 parser buffer limit을 초과했습니다.                       |
+| `QUEUE_OVERFLOW`            | 파싱된 event가 endpoint 소유 queue bound를 초과했습니다.                |
+| `TIMEOUT`                   | transport attempt가 설정된 timeout에 도달했습니다.                      |
+| `TRANSPORT_ERROR`           | 기타 최종 네트워크, stream read 또는 retry policy failure입니다.        |
+
+`stream.close(reason)`은 idempotent합니다. 활성 트랜스포트 작업을 abort하고 새 push에 대해 큐를 닫으며 `stream.closed`를 settle합니다. Iterator `return()`은 reason `iterator-return`으로 같은 close path를 사용합니다.
+
+일반 로그에는 `close.code`와 `error` branch의 `close.errorCode`만 기록하세요. 명시적인 redaction 및 보존 정책 없이 `reason`, `cause`, raw event, stream URL을 기록하지 마세요.
 
 스트림을 연 애플리케이션 경계가 종료도 소유합니다. 클라이언트나 framework 프로바이더가 자동으로 닫아 주지 않습니다.
 

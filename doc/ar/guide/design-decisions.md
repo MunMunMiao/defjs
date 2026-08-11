@@ -53,6 +53,24 @@ const [socketError, session, startupConnection] = await client.execute(socketCom
 
 استخدم المقبض أو الجلسة المعادة لاتخاذ قرارات دورة الحياة. واستخدم المراقبين لتسجيل محدود أو metrics أو تحديث حالة، وأزلهم عندما ينتهي مالكهم.
 
+## نشر Sourcemap
+
+اختر sourcemap policy للإنتاج صراحةً:
+
+- **public**: انشر map مع bundle. يحتوي map على `sourcesContent`، ولذلك يصبح source التطبيق والاعتماديات متاحًا للعامة حتى مع relative source paths.
+
+- **hidden**: أزل source-map reference من bundle، وارفع map بشكل خاص إلى error platform، ولا تنشره للعامة. يظل ملف map نفسه محتويًا على paths حساسة و`sourcesContent`؛ كلمة “hidden” لا تجعله آمنًا.
+
+- **disabled**: لا تنتج production map. يمنع ذلك كشف map لكنه يضحي بـ source-level production stack symbolication ويصعّب debugging.
+
+قيّد وصول map الخاص ومدة الاحتفاظ به مثل أي debugging artifact. Relative paths وحدها ليست confidentiality boundary.
+
+## حدود OpenAPI
+
+اختر مصدر contract موثوقًا واحدًا. على المؤسسة التي لديها OpenAPI workflow قائم أن تبقيه وتستخدم mature generator مع explicit runtime validator عند application boundary؛ TypeScript types المولدة وحدها لا تتحقق من response وقت التشغيل. في greenfield Defjs service، عرّف wire contract مباشرة باستخدام Defjs Structs وendpoint definitions.
+
+لن يضيف Core OpenAPI generator/exporter ولن يحافظ على OpenAPI وDefjs كمصدرين متزامنين. Dual-source drift أسوأ من تركيب الأدوات الناضجة عند boundary واضحة.
+
 ## مرجع مرتبط
 
 - توثّق [العميل](/ar/core/client) تركيب الخيارات ونطاق العميل.

@@ -27,6 +27,8 @@ deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
 
 The Deno command uses packages already installed in `node_modules`; replace the network permission with the exact API hosts your application needs. The Bun and Deno checks cover the documented HTTP slice, not every platform API or transport. Browser builds use their normal bundler and the required platform Fetch and WebSocket capabilities.
 
+Cross-runtime tests should assert stable Defjs fields such as `error.kind` and `error.code`. Do not depend on engine-specific native `Error` messages or JSON parse text; Node.js, Bun, and Deno can format those details differently.
+
 Add an adapter only when your application needs it:
 
 | Application setup         | Packages                                                                                  |
@@ -57,7 +59,7 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 async function loadUser(id: number) {
@@ -82,9 +84,9 @@ void loadUser(7)
 
 On success, `error` is `null`, `result` is decoded output data, and `response` is a Defjs `HttpResponse` wrapper. On failure, `result` is `undefined`; the response wrapper is also `undefined` when no response was received.
 
-### Why `as const` Matters
+### Status Literals Are Preserved Automatically
 
-Array-form `output` uses status literals to separate 2xx success bodies from non-2xx error bodies. `as const` preserves those status values and any grouped status arrays as readonly literals. Without it, TypeScript can widen them to `number` or `number[]`, which weakens the inferred success and error branches.
+`defineRequest(...)` uses a const generic for `output`, so inline array entries and grouped status arrays retain their literal values automatically. You do not need `as const` to separate inferred 2xx success bodies from non-2xx error bodies.
 
 Object-form output is also supported:
 

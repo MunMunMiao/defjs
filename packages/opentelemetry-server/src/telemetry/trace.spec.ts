@@ -45,6 +45,17 @@ describe('trace helpers', () => {
     expect(spans[0]?.attributes['url.full']).toBe('wss://api.example.com/ws')
   })
 
+  test('uses an explicit static operation without deriving identity from the URL', () => {
+    const { tracer, spans } = createMockTracer()
+
+    createHttpSpan(tracer, 'GET', 'https://api.example.com/users/42', ROOT_CONTEXT, 'users.read')
+    createSSESpan(tracer, 'https://api.example.com/users/42/events', ROOT_CONTEXT, 'users.watch')
+    createWebSocketSpan(tracer, 'wss://api.example.com/users/42/socket', ROOT_CONTEXT, 'users.connect')
+
+    expect(spans.map(({ name }) => name)).toEqual(['GET users.read', 'SSE users.watch', 'WebSocket users.connect'])
+    expect(spans.map(({ attributes }) => attributes['defjs.operation'])).toEqual(['users.read', 'users.watch', 'users.connect'])
+  })
+
   test('setSpanHttpResponse with 2xx status', () => {
     const { tracer, spans } = createMockTracer()
     const span = tracer.startSpan('test')

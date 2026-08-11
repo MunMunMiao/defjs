@@ -19,7 +19,7 @@ export const replaceCheckoutConfig = defineRequest({
   output: [
     { status: 200, body: struct.object({ metadata: struct.object({ resourceVersion: struct.string() }) }) },
     { status: 409, body: struct.object({ code: struct.literal('Conflict') }) },
-  ] as const,
+  ],
 })
 
 // Step 2: Publish the server's next version or a conflict result without replaying stale configuration.

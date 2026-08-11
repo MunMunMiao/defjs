@@ -21,7 +21,7 @@ export const readFulfillmentEvent = defineRequest({
         }),
       ]),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Summarize only fields belonging to the Struct-selected event branch.

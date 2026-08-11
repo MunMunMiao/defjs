@@ -10,7 +10,7 @@ Struct は厳密な構造デコードと通信時のエンコーディングを�
 ルートエントリーの `struct` ファサードと `Infer<T>` を使います。
 
 ```typescript
-import { struct, type Infer } from '@defjs/core'
+import { struct, type Infer, type StructInput } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -86,6 +86,35 @@ type ParseResult<T> = [error: null, value: T] | [error: StructError, value: unde
 
 欠損した optional と nullish のオブジェクトフィールドは出力から省かれ、トップレベルでは `undefined` になります。未知のキーは破棄され、デコード後のオブジェクトと record は null prototype を使います。
 
+Node の strict deep equality は prototype も比較するため、Struct で解析したオブジェクトは同じフィールドを持つオブジェクトリテラルと深く等価にはなりません。この境界を明示的に検証するか、アサーション内だけで shallow copy を作成してください。
+
+```typescript
+import assert from 'node:assert/strict'
+
+const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
+assert.equal(error, null)
+assert.equal(Object.getPrototypeOf(profile), null)
+assert.deepEqual({ ...profile }, { name: 'Ada' })
+```
+
+この spread はアサーション専用の浅いコピーです。ネストした Struct オブジェクトも null prototype のままです。テスト matcher に合わせるためだけに、本番経路へ全体的な normalize や clone を追加しないでください。
+
+`exactOptionalPropertyTypes` を有効にすると、推論されたオブジェクト入力は正確な optional property を使います。optional または nullish のキーに `undefined` を代入せず、そのキー自体を省略してください。
+
+```typescript
+const OptionalProfile = struct.object({
+  nickname: struct.string().optional(),
+})
+
+type OptionalProfileInput = StructInput<typeof OptionalProfile>
+
+const omitted: OptionalProfileInput = {}
+// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
+const explicitUndefined: OptionalProfileInput = { nickname: undefined }
+```
+
+実行時の `struct.parse` は unknown 入力に含まれる明示的な `undefined` を防御的に受け入れ、そのキーを省略します。この正規化によって、静的に推論された呼び出し側の入力型が広がることはありません。
+
 ## 必須のオブジェクト・リクエスト入力
 
 Struct が optional または nullish でない限り、オブジェクトプロパティは TypeScript と実行時の両方で必須です。`struct.request(...)` で宣言した各セクションも必須です。宣言しないセクションは入力型に現れません。
@@ -149,11 +178,40 @@ const UserBody = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-// Caller input uses { id, displayName }.
-// JSON wire data uses { user_id, display_name }.
+const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
+if (logicalError) throw logicalError
+
+const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
+if (!wireKeyError) throw new Error('struct.parse must read logical keys')
 ```
 
-エイリアスは JSON キーのデコードとエンコードに使われます。リクエストの自動構築では、送信時のパス、クエリ、ヘッダー、URL エンコード、multipart のキーにも使います。呼び出し側は論理キーを使い続けます。カスタム `build` プロジェクションで明示した出力先キーは、その指定どおりです。
+`logicalUser` は `{ id, displayName }` を使い、`wireKeyError` は論理キー `id` の欠落を示します。公開 `struct.parse` は論理値だけを読み、wire key を単独 parse の入力として扱いません。
+
+transport の JSON エンコードとデコードでのみ wire alias が適用されます。
+
+```typescript
+import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+let requestWireBody: unknown
+const echoUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({ body: struct.json(UserBody) }),
+  output: { 200: UserBody },
+})
+const client = createClient(
+  withEndpoint('https://example.test'),
+  withHTTPHandle(async (input, init) => {
+    requestWireBody = await new Request(input, init).json()
+    return Response.json({ user_id: 1, display_name: 'Ada' })
+  }),
+)
+
+const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
+if (requestError) throw requestError
+```
+
+`requestWireBody` は `{ user_id, display_name }`、`responseUser` は再び `{ id, displayName }` になります。リクエストの自動構築でも送信時の path、query、header、URL-encoded、multipart のキーに alias を使います。カスタム `build` プロジェクションで明示した出力先キーは変わりません。
 
 ## `StructError`
 

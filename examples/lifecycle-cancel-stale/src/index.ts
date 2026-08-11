@@ -5,7 +5,7 @@ export const searchWarehouseCatalog = defineRequest({
   method: 'GET',
   path: '/catalog/search',
   input: struct.request({ query: struct.object({ query: struct.string() }) }),
-  output: [{ status: 200, body: struct.array(struct.string()) }] as const,
+  output: [{ status: 200, body: struct.array(struct.string()) }],
 })
 
 // Step 2: Give one latest-search owner authority to abort superseded work and reject late completion.

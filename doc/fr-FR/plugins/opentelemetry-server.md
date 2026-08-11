@@ -20,7 +20,7 @@ Transmettez un `Tracer` fourni par l'application et, facultativement, un `Meter`
 ## Configurer le client
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
@@ -41,6 +41,21 @@ const client = createClient(
 ```
 
 L'adaptateur ajoute un intercepteur par transport activé. Les options suivent l'ordre normal du client : la position de l'adaptateur par rapport aux autres intercepteurs détermine donc le travail couvert par les spans.
+
+### Identité d’opération
+
+Définissez `operation` statiquement dans chaque endpoint. C’est l’identité à faible cardinalité utilisée par les spans et métriques :
+
+```typescript
+const readOrder = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders/:id',
+  // input and output omitted
+})
+```
+
+Avec une operation, les spans se nomment `GET orders.read`, `SSE orders.watch` ou `WebSocket orders.connect`, et `defjs.operation` est enregistré. Sans elle, le fallback précédent reste inchangé : méthode HTTP, `SSE` ou `WebSocket`, sans attribut d’opération. Ne déduisez jamais l’identité d’une URL résolue ou d’un chemin avec identifiants et ne copiez pas les URLs résolues dans la télémétrie ou les logs.
 
 ## Options
 
@@ -103,12 +118,15 @@ withOpenTelemetryServer({
     requestHook(span, request) {
       span.setAttribute('app.operation', 'list-orders')
     },
-    responseHook(span, response) {
+    responseHook(span, response, request) {
+      span.setAttribute('app.operation', request.operation ?? 'unclassified')
       span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
     },
   },
 })
 ```
+
+Le troisième argument est le `HttpRequest` de transport d’origine. Utilisez son `operation` explicite ; ne reconstruisez pas l’identité depuis `request.endpoint`, une URL résolue ou un chemin.
 
 Les hooks peuvent renvoyer `void` ou `Promise<void>` et restent non bloquants. Les exceptions synchrones et les rejets asynchrones sont interceptés et enregistrés dans `defjs.otel.hook.error` sans interrompre l'opération du client ; les erreurs produites par cet enregistrement de télémétrie sont également isolées.
 
@@ -118,7 +136,8 @@ Limitez les attributs à une liste autorisée de faible cardinalité. N'attachez
 
 L'intercepteur HTTP crée un span `SpanKind.CLIENT` et enregistre :
 
-- la méthode de la requête comme nom du span, car Defjs ne fournit pas de modèle d'URL à faible cardinalité ;
+- `${method} ${operation}` comme nom de span et `defjs.operation` lorsque l’endpoint déclare une opération statique ;
+- la méthode de requête seule comme fallback historique inchangé en l’absence d’operation ;
 - `http.request.method` ;
 - `url.full` ;
 - `server.address` et, facultativement, `server.port` ;
@@ -169,7 +188,7 @@ Les conventions sémantiques WebSocket génériques ne sont pas stables ici. Par
 
 ## Données sensibles et limites de couverture
 
-Par défaut, `url.full` est résolue à partir de l'endpoint de requête et de l'endpoint de base, pas de la query sérialisée. Le chemin résolu peut néanmoins contenir des identifiants sensibles. La propagation WebSocket ajoute séparément des champs à la query réelle.
+Par défaut, `url.full` est résolue depuis l’endpoint et l’endpoint de base, pas depuis la query sérialisée, mais le chemin peut encore contenir des identifiants sensibles. C’est une métadonnée de transport, jamais une source d’identité d’opération. Gardez `operation` statique, ne copiez pas les URLs résolues dans la télémétrie ou les logs et configurez la redaction du SDK/exporter avant d’exporter les attributs URL. La propagation WebSocket ajoute séparément les champs à la query réelle.
 
 `recordException(...)` reçoit les erreurs levées et certaines causes de fermeture. Leurs messages et leurs stacks peuvent exposer des données sensibles. Configurez le masquage dans les processors et exporters du SDK ; l'adaptateur ne nettoie pas les exceptions à la place de l'application.
 

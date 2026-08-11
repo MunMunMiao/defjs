@@ -22,6 +22,7 @@ export function createWebSocketRequest(params: {
   abort: AbortSignal
   baseEndpoint: string
   build: RequestBuild
+  operation?: string
   path: string
   queryParamsSerializer: QueryParamsSerializer
   withCredentials?: boolean
@@ -33,6 +34,7 @@ export function createWebSocketRequest(params: {
     endpoint: fillUrl(params.path, params.build.params),
     headers: new Headers(),
     method: 'GET',
+    operation: params.operation,
     queryParams,
     queryString: params.queryParamsSerializer(queryParams, params.build.query),
     withCredentials: params.withCredentials ?? false,

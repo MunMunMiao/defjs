@@ -10,7 +10,7 @@ export const createRefundEvidence = defineRequest({
       purpose: struct.literal('refund_evidence'),
     }),
   }),
-  output: [{ status: 201, body: struct.object({ id: struct.string() }) }] as const,
+  output: [{ status: 201, body: struct.object({ id: struct.string() }) }],
 })
 
 export const MAX_REFUND_EVIDENCE_BYTES = 5 * 1024 * 1024

@@ -7,6 +7,18 @@ description: Build HTTP URLs and bodies, dispatch response Structs, cancel work,
 
 `defineRequest(...)` creates an HTTP command builder. [Commands](./commands.md) covers definitions and input projections; this page owns HTTP wire and lifecycle behavior.
 
+## HTTP-Only Client Entry
+
+`@defjs/core/http` is an additive HTTP-only entry point. It exports `createHttpClient(...)` with HTTP commands and HTTP-compatible client options:
+
+```typescript
+import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
+
+const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
+```
+
+Use it when a consumer intentionally supports HTTP only. It does not replace the root entry: `createClient(...)` from `@defjs/core` remains the client for HTTP, SSE, and WebSocket commands.
+
 ## URL Construction
 
 `withEndpoint(...)` must provide an absolute base URL. Its path is kept as a directory:
@@ -100,11 +112,25 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+    { status: 409, body: struct.object({ conflict: struct.string() }) },
+  ],
 })
 ```
 
-The runtime chooses the Struct by the exact status. Any unmatched status produces `UNDECLARED_STATUS` when `output` is declared. Declared 2xx bodies form the success-data union; declared non-2xx bodies form `error.data`.
+The runtime chooses the Struct by the exact status. Any unmatched status produces `UNDECLARED_STATUS` when `output` is declared. Declared 2xx bodies form the success-data union. `defineRequest(...)` uses a const generic, so inline statuses retain their literals without `as const`; the HTTP error union keeps each non-2xx status correlated with its `error.data` body.
+
+```typescript
+const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+
+if (statusError?.kind === 'http') {
+  if (statusError.status === 404) {
+    console.error(statusError.data.message)
+  } else {
+    // status is 409 and data is the declared conflict body.
+    console.error(statusError.data.conflict)
+  }
+}
+```
 
 `response.ok` means only `status >= 200 && status < 300`. It does not mean output decoding, application validation, or authorization succeeded.
 

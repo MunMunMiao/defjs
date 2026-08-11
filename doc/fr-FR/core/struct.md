@@ -10,7 +10,7 @@ Les Structs décrivent le décodage structurel strict et l'encodage du format d'
 Utilisez la façade `struct` et `Infer<T>` depuis l'entrée racine :
 
 ```typescript
-import { struct, type Infer } from '@defjs/core'
+import { struct, type Infer, type StructInput } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -86,6 +86,35 @@ Un seul contrat s'applique aux modificateurs : une valeur absente ou `undefined`
 
 Les champs optional et nullish absents sont omis de l'objet de sortie ; au niveau racine, ils deviennent `undefined`. Les clés inconnues sont supprimées. Les objets et records décodés ont un prototype nul.
 
+L'égalité profonde stricte de Node compare les prototypes. Un objet analysé par Struct n'est donc pas profondément égal à un littéral possédant les mêmes champs. Vérifiez explicitement cette limite ou créez une copie superficielle uniquement dans l'assertion :
+
+```typescript
+import assert from 'node:assert/strict'
+
+const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
+assert.equal(error, null)
+assert.equal(Object.getPrototypeOf(profile), null)
+assert.deepEqual({ ...profile }, { name: 'Ada' })
+```
+
+Le spread est une copie superficielle réservée à cette assertion. Les objets Struct imbriqués ont eux aussi un prototype nul. N'ajoutez pas une normalisation ou un clonage global au chemin de production uniquement pour satisfaire un matcher de test.
+
+Avec `exactOptionalPropertyTypes`, les entrées d'objet inférées utilisent des propriétés facultatives exactes. Omettez une clé optional ou nullish au lieu de lui affecter `undefined` :
+
+```typescript
+const OptionalProfile = struct.object({
+  nickname: struct.string().optional(),
+})
+
+type OptionalProfileInput = StructInput<typeof OptionalProfile>
+
+const omitted: OptionalProfileInput = {}
+// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
+const explicitUndefined: OptionalProfileInput = { nickname: undefined }
+```
+
+À l'exécution, `struct.parse` accepte par précaution un `undefined` explicite provenant d'une entrée inconnue et omet la clé. Cette normalisation n'élargit pas le type d'entrée inféré statiquement pour l'appelant.
+
 ## Entrées d'objet et de requête obligatoires
 
 Les propriétés d'objet sont obligatoires en TypeScript et à l'exécution, sauf si leur Struct est optional ou nullish. Chaque section déclarée dans `struct.request(...)` est elle aussi obligatoire ; une section non déclarée n'appartient pas au type d'entrée.
@@ -149,11 +178,40 @@ const UserBody = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-// Caller input uses { id, displayName }.
-// JSON wire data uses { user_id, display_name }.
+const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
+if (logicalError) throw logicalError
+
+const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
+if (!wireKeyError) throw new Error('struct.parse must read logical keys')
 ```
 
-Les alias décodent et encodent les clés JSON. La construction automatique les applique aussi aux clés sortantes de `path`, `query`, `headers`, ainsi qu'aux données URL-encoded et multipart. L'appelant continue d'utiliser les clés logiques. Une projection `build` personnalisée conserve ses clés cibles explicites.
+`logicalUser` utilise `{ id, displayName }` ; `wireKeyError` signale l'absence de la clé logique `id`. Le `struct.parse` public lit uniquement les valeurs logiques et ne traite pas les clés d'échange comme entrée d'un parse autonome.
+
+Seuls l'encodage et le décodage JSON du transport appliquent les alias d'échange :
+
+```typescript
+import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+let requestWireBody: unknown
+const echoUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({ body: struct.json(UserBody) }),
+  output: { 200: UserBody },
+})
+const client = createClient(
+  withEndpoint('https://example.test'),
+  withHTTPHandle(async (input, init) => {
+    requestWireBody = await new Request(input, init).json()
+    return Response.json({ user_id: 1, display_name: 'Ada' })
+  }),
+)
+
+const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
+if (requestError) throw requestError
+```
+
+`requestWireBody` vaut `{ user_id, display_name }`, tandis que `responseUser` redevient `{ id, displayName }`. La construction automatique applique aussi les alias aux clés sortantes de path, query, headers, URL-encoded et multipart ; les clés cibles explicites d'une projection `build` personnalisée restent inchangées.
 
 ## `StructError`
 

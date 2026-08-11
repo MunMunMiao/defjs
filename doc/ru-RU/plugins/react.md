@@ -5,100 +5,73 @@ description: Передавайте клиент Defjs через React Context,
 
 # `@defjs/react`
 
-`@defjs/react` — тонкий Context-адаптер для `@defjs/core`. Он экспортирует:
-
-- `ClientProvider`, который создаёт и предоставляет core-клиент;
-- `useClient()`, который возвращает ближайший предоставленный клиент;
-- адаптерные функции `withEndpoint(...)` и `withInterceptors(...)`, последняя принимает фабрики перехватчиков.
-
-Адаптер не добавляет кэширование, интеграцию с Suspense, повторы запросов или сериализацию серверных данных. Установите его вместе с `@defjs/core` и React, а эти обязанности приложения оставьте в своём коде.
+Этот пакет — тонкий Context-адаптер для `@defjs/core`. `ClientProvider` предоставляет созданный приложением клиент, а `useClient()` возвращает ближайший экземпляр. Пакет не добавляет фабрику клиентов, кеш, retry или управление ресурсами.
 
 ## Предоставление клиента
 
+Создайте и настройте клиент через `@defjs/core`, затем явно передайте этот экземпляр:
+
 ```tsx
-import { ClientProvider, withEndpoint } from '@defjs/react'
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import { UserProfile } from './UserProfile'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+    <ClientProvider client={client}>
       <UserProfile id={7} />
     </ClientProvider>
   )
 }
 ```
 
-После commit-фазы одного монтирования провайдер сохраняет один клиент. Обычный повторный рендер не применяет заново изменившийся массив `options` и не заменяет клиент.
-
-Реализация использует ленивую функцию инициализации `useState`. Не рассчитывайте, что в режиме разработки она выполнится строго один раз: React Strict Mode может несколько раз вычислить начальное состояние во время рендера до commit-фазы. Существенная гарантия жизненного цикла: каждое монтирование провайдера, дошедшее до commit-фазы, предоставляет один сохранённый клиент.
-
-Перемонтируйте провайдер, когда приложению намеренно нужен новый клиент:
-
-```tsx
-<ClientProvider key={tenantId} options={[withEndpoint(endpoint)]}>
-  <TenantApplication />
-</ClientProvider>
-```
+`ClientProvider` предоставляет именно переданный экземпляр. Вызывающий код решает, когда создавать или заменять его, и отвечает за запросы и realtime-ресурсы.
 
 ## Чтение ближайшего клиента
 
-Вызывайте `useClient()` внутри React-компонента или пользовательского хука:
+Вызывайте `useClient()` внутри React-компонента или собственного Hook. Вне provider функция бросает ошибку; вложенные providers следуют обычному правилу ближайшего React Context.
 
 ```tsx
 import { useClient } from '@defjs/react'
 
-export function UserProfile({ id }: { id: number }) {
+export function UserProfile() {
   const client = useClient()
-  // Execute commands from effects, event handlers, or application integrations.
   return null
 }
 ```
 
-Вне провайдера функция выбрасывает ошибку. Вложенные провайдеры подчиняются обычному поведению React Context: потомки получают клиент ближайшего провайдера.
-
-`ClientProvider` принимает любые core `ClientOption`:
+Все параметры конфигурации берутся из `@defjs/core`:
 
 ```tsx
-import { withCredentials } from '@defjs/core'
-import { ClientProvider, withEndpoint } from '@defjs/react'
-import { Application } from './Application'
+import { createClient, withCredentials, withEndpoint } from '@defjs/core'
 
-;<ClientProvider options={[withEndpoint('https://api.example.com'), withCredentials(true)]}>
-  <Application />
-</ClientProvider>
+const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
 ```
 
 ## Фабрики перехватчиков
 
-Адаптерный `withInterceptors(...)` принимает фабрики. Он вызывает их при создании клиента провайдером и добавляет результаты в порядке опций.
+Создайте значения interceptor и скомпонуйте их core-функцией `withInterceptors(...)` до передачи клиента в React:
 
 ```tsx
-import type { ReactNode } from 'react'
-import { createHttpInterceptor } from '@defjs/core'
-import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
 
-export function ApiBoundary({ children }: { children: ReactNode }) {
-  return (
-    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)]}>{children}</ClientProvider>
-  )
+export function ApiBoundary({ children }: { children: React.ReactNode }) {
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-Core `withInterceptors(...)` принимает готовые перехватчики. На сервере держите фабрики с учётными данными внутри границы запроса, которому принадлежат эти данные.
+Если фабрика захватывает учетные данные запроса, вызывайте её внутри границы запроса, создающей этот клиент.
 
 ## Управление жизненным циклом HTTP-эффектов
 
@@ -149,25 +122,24 @@ export function UserProfile({ id }: { id: number }) {
 
 ## Граница Client Component
 
-Пакет не создаёт клиентскую границу React Server Components за приложение. Разместите `ClientProvider` за модулем приложения, который начинается с `'use client'`.
-
-Создайте собственный Client Component приложения:
+Точка входа пакета является границей Client Component. Обёртка приложения может создать браузерный клиент и явно предоставить его:
 
 ```tsx
 // app/ApiProvider.tsx
 'use client'
 
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
-import { ClientProvider, withEndpoint } from '@defjs/react'
+
+const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
-  return <ClientProvider options={[withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!)]}>{children}</ClientProvider>
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-Серверный код, который содержит заголовки запроса, cookie, данные арендатора или учётные данные пользователя, должен создавать core-клиент внутри границы каждого серверного запроса. Не захватывайте такие значения в опции провайдера на уровне модуля или в общем между запросами синглтоне. Адаптер не обеспечивает изоляцию параллельных SSR-запросов.
-
-React Server Components, Next.js, hydration, Strict Mode и параллельный SSR добавляют собственные границы жизненного цикла. Тестируйте реальную конфигурацию приложения, особенно учётные данные на запрос и повторное монтирование provider.
+Серверный код с headers, cookies, tenant state или credentials должен создавать отдельный клиент в каждой границе запроса. Адаптер не изолирует параллельный SSR и не освобождает работу клиента.
 
 ## Управление жизненным циклом эффектов реального времени
 
@@ -256,19 +228,21 @@ export function LiveNotifications() {
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { JSX, ReactNode } from 'react'
 
 interface ClientProviderProps {
+  client: Client
   children?: ReactNode
-  options?: ClientOption[]
 }
 
 declare function ClientProvider(props: ClientProviderProps): JSX.Element
 declare function useClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+Предоставляет переданный клиент потомкам. `children` необязателен.
+
+Возвращает ближайший предоставленный клиент и бросает ошибку при его отсутствии.
 
 ## Что дальше
 

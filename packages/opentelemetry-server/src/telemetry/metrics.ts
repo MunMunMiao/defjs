@@ -103,6 +103,9 @@ export function createServerMetricAttributes(req: HttpRequest): Attributes {
   const { serverAddress, serverPort } = resolveHttpUrl(req.endpoint, req.baseEndpoint)
   const attributes: Attributes = {}
 
+  if (req.operation) {
+    attributes['defjs.operation'] = req.operation
+  }
   if (serverAddress) {
     attributes['server.address'] = serverAddress
   }

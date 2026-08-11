@@ -1,4 +1,4 @@
-import type { EventStreamHandle, HttpRequest } from '@defjs/core'
+import type { EventStreamCloseInfo, EventStreamHandle, HttpRequest } from '@defjs/core'
 import { createSSEInterceptor } from '@defjs/core'
 import type { Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
 import { context, trace } from '@opentelemetry/api'
@@ -13,21 +13,13 @@ import {
 import { addSpanEvent, createSSESpan, endSpan, runSpanHook, setSpanError } from '../telemetry/trace'
 import { resolveUrl } from '../telemetry/url'
 
-type SSECloseCode = 'eof' | 'error' | 'aborted'
-
-interface SSECloseInfo {
-  code: SSECloseCode
-  reason?: string
-  cause?: unknown
-}
-
 export interface SSEInterceptorOptions {
   tracer: Tracer
   propagator: TextMapPropagator
   metrics?: SSEClientMetrics
   requireParentSpan?: boolean
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
-  responseHook?: (span: Span, stream: EventStreamHandle<unknown>) => Promise<void> | void
+  responseHook?: (span: Span, stream: EventStreamHandle<unknown>, req: HttpRequest) => Promise<void> | void
 }
 
 export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions): ReturnType<typeof createSSEInterceptor> {
@@ -41,7 +33,7 @@ export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions
     const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
     const url = resolveUrl(req.endpoint, req.baseEndpoint)
 
-    const span = createSSESpan(tracer, url, parentCtx)
+    const span = createSSESpan(tracer, url, parentCtx, req.operation)
     const spanCtx = trace.setSpan(parentCtx, span)
     const headers = req.headers instanceof Headers ? req.headers : new Headers(req.headers)
     propagator.inject(spanCtx, headers, headersSetter)
@@ -55,7 +47,7 @@ export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions
       const connectedAtMs = performance.now()
       const activeAttributes = createServerMetricAttributes(req)
 
-      runSpanHook(span, 'responseHook', () => responseHook?.(span, stream))
+      runSpanHook(span, 'responseHook', () => responseHook?.(span, stream, req))
       addSpanEvent(span, 'sse.connected')
 
       metrics?.connectDuration.record(durationSeconds(connectStartMs, connectedAtMs), createConnectionMetricAttributes(req, 'success'))
@@ -66,9 +58,12 @@ export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions
       }
 
       stream.closed.then(
-        (closeInfo: SSECloseInfo) => {
+        (closeInfo: EventStreamCloseInfo) => {
           closeActiveStream()
-          const closeAttributes = { 'sse.close.code': closeInfo.code }
+          const closeAttributes = {
+            'sse.close.code': closeInfo.code,
+            ...(closeInfo.code === 'error' ? { 'defjs.sse.error.code': closeInfo.errorCode } : {}),
+          }
 
           if (closeInfo.code === 'error') {
             addSpanEvent(span, 'sse.error', closeAttributes)

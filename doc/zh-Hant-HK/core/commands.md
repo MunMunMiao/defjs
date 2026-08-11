@@ -33,11 +33,14 @@ const result = await client.execute(command)
 | 欄位           | 意思                                                                                           |
 | -------------- | ---------------------------------------------------------------------------------------------- |
 | `method`       | HTTP method string。                                                                           |
+| `operation`    | 用於 telemetry 與診斷的 optional、explicit、static low-cardinality identity。                  |
 | `path`         | 相對 endpoint path，可包含 `:name` placeholder。                                               |
 | `input`        | 對 command input 作結構式解碼的 Struct。                                                       |
 | `build`        | 把 input 欄位投影至 request part 的 schema-bound projection；必須同時提供 `input`。            |
 | `output`       | 用於 response decoding 與 result inference 的 status-to-Struct mapping。                       |
 | `responseType` | 只可在宣告 `output` 時選用 `json`、`text`、`blob` 或 `arraybuffer`；省略 `output` 時禁止宣告。 |
+
+SSE 及 WebSocket 定義同樣支援 `operation?: string`。請從 endpoint contract 明確設定，例如 `users.lookup`；不要從 rendered path、URL、user/tenant data、request ID 等 high-cardinality value 衍生。
 
 Command 欄位直接對應 wire section 時，使用 `struct.request(...)`：
 
@@ -66,7 +69,7 @@ const createUser = defineRequest({
   output: [
     { status: 201, body: struct.object({ id: struct.number() }) },
     { status: 409, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 const command = createUser({
@@ -88,7 +91,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-宣告 `input` 後，必填 object field 與每個已宣告 request section 都必須提供。只有 optional 或 nullish field 可以省略；endpoint 不使用的 section 不要宣告。
+宣告 `input` 後，command root argument 仍然必填。在 `struct.request(...)` 內，如果 `path`、`query` 或 `headers` section 的 field 全部是 optional 或 nullish，便可以整個省略；parsing 會把每個省略的 section normalize 成 `{}`。只要 section 包含任何必填 field，便仍須提供。即使內部 object field 全部 optional，body section 仍然必填。
 
 ```typescript
 const search = defineRequest({
@@ -102,6 +105,35 @@ const search = defineRequest({
 search({ query: { q: 'docs' } })
 // search() // TypeScript error: an argument is required.
 // search({ query: {} }) // TypeScript and runtime error: q is required.
+```
+
+全 optional 的 request section 可以整個省略，但 command argument 本身仍要提供：
+
+```typescript
+const OptionalSections = struct.request({
+  path: struct.object({ locale: struct.string().optional() }),
+  query: struct.object({ page: struct.number().optional() }),
+  headers: struct.object({ traceId: struct.string().optional() }),
+})
+const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
+
+list({})
+list({ query: { page: 2 } })
+
+const [optionalError, normalized] = struct.parse(OptionalSections, {})
+if (optionalError) throw optionalError
+// normalized 是 { path: {}, query: {}, headers: {} }。
+
+const filtered = defineRequest({
+  method: 'GET',
+  path: '/items',
+  input: struct.request({
+    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  }),
+})
+
+filtered({ query: { q: 'docs' } })
+// filtered({}) // TypeScript error：query 包含必填 q。
 ```
 
 這只驗證結構存在與 type，不負責應用層 authorization、range、amount、format 或 state-transition rule。
@@ -154,7 +186,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }] as const,
+  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
 })
 ```
 
@@ -186,20 +218,25 @@ TypeScript build context 會按 transport 收窄。即使繞過 type checking，
 ```typescript
 const User = struct.object({ id: struct.number() })
 const NotFound = struct.object({ message: struct.string() })
-const Unauthorized = struct.object({ message: struct.string() })
+const Conflict = struct.object({ conflict: struct.string() })
 
 const objectOutput = {
   '200': User,
   '404': NotFound,
 }
 
-const arrayOutput = [
-  { status: 200, body: User },
-  { status: [401, 403], body: Unauthorized },
-] as const
+const getUsers = defineRequest({
+  method: 'GET',
+  path: '/users',
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+    { status: [409, 422], body: Conflict },
+  ],
+})
 ```
 
-HTTP success type 是所有已宣告 2xx body 的 union。`error.data` 則是所有已宣告 non-2xx body 的 union。Array form 需要 `as const`，才可保留 status literal 與 grouped readonly array。
+HTTP success type 是已宣告 2xx body 的 union。`error.data` 與已宣告的 non-2xx status 保持關聯。`defineRequest(...)` 使用 const generic，因此 inline status entry 及 grouped status array 不用 `as const` 也可保留 literal。執行 `client.execute(getUsers())` 後，檢查 `error.status === 404` 會把 data narrow 成 `NotFound`；其餘 `409 | 422` branch 會 narrow 成 `Conflict`。
 
 宣告 `output` 後，每個回傳 status 都要有 matching Struct。無論 2xx 或 non-2xx，未匹配都會產生 `UNDECLARED_STATUS`。省略 `output` 時不會讀取或解碼 response body，並會盡力取消它；result 是 `undefined`。
 

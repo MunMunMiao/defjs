@@ -7,6 +7,18 @@ description: Собирайте HTTP-URL и тела, выбирайте Struct 
 
 `defineRequest(...)` создаёт фабрику HTTP-команды. Описания и проекции входных данных разобраны в разделе [«Команды»](/ru-RU/core/commands); эта страница посвящена сетевому поведению и жизненному циклу HTTP.
 
+## Клиентский вход только для HTTP
+
+`@defjs/core/http` — дополнительная точка входа только для HTTP. Она экспортирует `createHttpClient(...)` вместе с HTTP-командами и совместимыми с HTTP опциями клиента:
+
+```typescript
+import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
+
+const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
+```
+
+Используйте её, если потребитель намеренно поддерживает только HTTP. Она не заменяет корневой вход: `createClient(...)` из `@defjs/core` остаётся клиентом для команд HTTP, SSE и WebSocket.
+
 ## Построение URL
 
 `withEndpoint(...)` должен получать абсолютный базовый URL. Его путь сохраняется как каталог:
@@ -100,11 +112,25 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+    { status: 409, body: struct.object({ conflict: struct.string() }) },
+  ],
 })
 ```
 
-Во время выполнения Struct выбирается по точному статусу. Если `output` объявлен, любой несовпавший статус приводит к `UNDECLARED_STATUS`. Тела объявленных 2xx образуют объединение успешных данных, а тела объявленных не-2xx — тип `error.data`.
+Во время выполнения Struct выбирается по точному статусу. Если `output` объявлен, любой несовпавший статус приводит к `UNDECLARED_STATUS`. Тела объявленных 2xx образуют объединение успешных данных. `defineRequest(...)` использует const-дженерик, поэтому inline-статусы сохраняют литеральные значения без `as const`; в объединении HTTP-ошибок каждый статус не-2xx остаётся связан со своим телом `error.data`.
+
+```typescript
+const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+
+if (statusError?.kind === 'http') {
+  if (statusError.status === 404) {
+    console.error(statusError.data.message)
+  } else {
+    // status равен 409, а data — объявленное тело конфликта.
+    console.error(statusError.data.conflict)
+  }
+}
+```
 
 `response.ok` означает только `status >= 200 && status < 300`. Он не говорит об успешном декодировании `output`, бизнес-проверке или авторизации.
 

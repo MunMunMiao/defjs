@@ -17,6 +17,18 @@ pnpm add @defjs/core
 
 別のパッケージマネージャーを使うプロジェクトでは、npm、Yarn、Bun の同等コマンドを使ってください。`@defjs/core` は ESM です。Node.js で実行する場合、現在のパッケージメタデータは Node 22 以降を要求します。
 
+パッケージ化した ESM HTTP consumer は Node.js 22、24、26、Bun 1.3.14、Deno 2.9.5 で実行確認済みです。アプリケーションのコンパイル後は、次の形式のコマンドで実行します。
+
+```sh
+node dist/index.js
+bun run dist/index.js
+deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+```
+
+Deno コマンドは `node_modules` にインストール済みのパッケージを使います。ネットワーク権限は、アプリケーションが必要とする正確な API ホストに置き換えてください。Bun と Deno の確認範囲は文書化された HTTP 部分であり、すべてのプラットフォーム API や transport ではありません。ブラウザ build は通常の bundler と、プラットフォームに必要な Fetch および WebSocket 機能を使います。
+
+runtime 間のテストでは、`error.kind` や `error.code` など Defjs の安定したフィールドだけを検証してください。エンジン固有のネイティブ `Error` メッセージや JSON parse の文言には依存しないでください。Node.js、Bun、Deno では詳細の形式が異なる場合があります。
+
 アプリケーションで必要なアダプターだけを追加します。
 
 | 構成                     | パッケージ                                                                                |
@@ -47,7 +59,7 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 async function loadUser(id: number) {
@@ -72,9 +84,9 @@ void loadUser(7)
 
 成功時は `error` が `null`、`result` がデコード済みの出力データ、`response` が Defjs の `HttpResponse` ラッパーです。失敗時は `result` が `undefined` になります。レスポンスを受信する前に失敗した場合は、レスポンスラッパーも `undefined` です。
 
-### `as const` が必要な理由
+### ステータスリテラルは自動的に保持されます
 
-配列形式の `output` は、ステータスリテラルを使って 2xx の成功ボディと 2xx 以外のエラーボディを分けます。`as const` は各ステータス値と、複数ステータスをまとめた配列を `readonly` リテラルのまま保持します。省略すると TypeScript が `number` や `number[]` に型を広げ、成功・エラー分岐の推論が弱くなることがあります。
+`defineRequest(...)` は `output` に const generic を使うため、inline の配列要素とグループ化したステータス配列はリテラル値を自動的に保持します。推論された 2xx 成功ボディと 2xx 以外のエラーボディを分けるために `as const` は不要です。
 
 オブジェクト形式の `output` も使えます。
 

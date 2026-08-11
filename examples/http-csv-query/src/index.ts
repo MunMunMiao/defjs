@@ -14,7 +14,7 @@ export const searchKnowledgeBase = defineRequest({
   method: 'GET',
   path: '/knowledge/articles',
   input: struct.request({ query: struct.object({ tags: struct.array(struct.string()).alias('tag') }) }),
-  output: [{ status: 200, body: struct.object({ articles: struct.array(struct.object({ id: struct.string() })) }) }] as const,
+  output: [{ status: 200, body: struct.object({ articles: struct.array(struct.object({ id: struct.string() })) }) }],
 })
 
 // Step 2: Keep tag search independent of the provider-specific delimiter encoding.

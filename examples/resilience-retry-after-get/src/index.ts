@@ -20,7 +20,7 @@ export const readInventoryAvailability = defineRequest({
     { status: 200, body: struct.object({ available: struct.number(), sku: struct.string() }) },
     { status: 429, body: struct.object({ code: struct.literal('inventory_rate_limited') }) },
     { status: 503, body: struct.object({ code: struct.literal('inventory_rebuilding') }) },
-  ] as const,
+  ],
 })
 
 function retryDelay(value: string | null, nowMs: number): number | undefined {

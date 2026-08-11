@@ -36,6 +36,72 @@ createClient().execute(command, { abort: new AbortController().signal, timeout: 
 const useList = defineRequest({ method: 'GET', path: '/users', output: { 200: struct.object({ items: struct.object({}) }) } })
 expectTypeOf(useList).toBeCallableWith()
 
+const useInferredArrayOutput = defineRequest({
+  method: 'GET',
+  path: '/array-output',
+  output: [
+    { body: struct.object({ ok: struct.literal(true) }), status: 200 },
+    { body: struct.object({ missing: struct.string() }), status: 404 },
+    { body: struct.object({ conflict: struct.string() }), status: [409, 422] },
+  ],
+})
+
+async function assertInferredArrayOutput(): Promise<void> {
+  const [requestError, result] = await createClient().execute(useInferredArrayOutput())
+
+  if (!requestError) {
+    expectTypeOf(result).toEqualTypeOf<{ ok: true }>()
+    return
+  }
+
+  expectTypeOf(result).toEqualTypeOf<undefined>()
+  if (requestError.kind !== 'http') {
+    // @ts-expect-error transport and definition errors do not carry response data.
+    void requestError.data
+    return
+  }
+
+  // @ts-expect-error only declared non-2xx statuses are represented.
+  const impossibleStatus: 500 = requestError.status
+  void impossibleStatus
+
+  if (requestError.status === 404) {
+    expectTypeOf(requestError.data).toEqualTypeOf<{ missing: string }>()
+  } else {
+    expectTypeOf(requestError.status).toEqualTypeOf<409 | 422>()
+    expectTypeOf(requestError.data).toEqualTypeOf<{ conflict: string }>()
+  }
+}
+
+void assertInferredArrayOutput
+
+const useMappedOutput = defineRequest({
+  method: 'GET',
+  path: '/mapped-output',
+  output: {
+    200: struct.object({ ok: struct.literal(true) }),
+    400: struct.object({ field: struct.string() }),
+    409: struct.object({ conflict: struct.string() }),
+  },
+})
+
+async function assertMappedOutput(): Promise<void> {
+  const [requestError, result] = await createClient().execute(useMappedOutput())
+
+  if (!requestError) {
+    expectTypeOf(result).toEqualTypeOf<{ ok: true }>()
+  } else if (requestError.kind === 'http') {
+    if (requestError.status === 400) {
+      expectTypeOf(requestError.data).toEqualTypeOf<{ field: string }>()
+    } else {
+      expectTypeOf(requestError.status).toEqualTypeOf<409>()
+      expectTypeOf(requestError.data).toEqualTypeOf<{ conflict: string }>()
+    }
+  }
+}
+
+void assertMappedOutput
+
 // @ts-expect-error responseType requires an output declaration.
 defineRequest({ method: 'GET', path: '/discarded', responseType: 'json' })
 
@@ -65,6 +131,38 @@ const useUnionInput = defineRequest({ method: 'POST', path: '/union', input: str
 // @ts-expect-error a required union input cannot be omitted.
 useUnionInput()
 useUnionInput('value')
+
+const useOptionalRequestSections = defineRequest({
+  input: struct.request({
+    headers: struct.object({ traceId: struct.string().optional() }),
+    path: struct.object({ locale: struct.string().optional() }),
+    query: struct.object({ page: struct.number().optional() }),
+  }),
+  method: 'GET',
+  path: '/optional-sections',
+})
+useOptionalRequestSections({})
+useOptionalRequestSections({ query: { page: 1 } })
+// @ts-expect-error the request root remains required even when every declared section is optional.
+useOptionalRequestSections()
+
+const useMixedRequestSection = defineRequest({
+  input: struct.request({ query: struct.object({ page: struct.number().optional(), q: struct.string() }) }),
+  method: 'GET',
+  path: '/mixed-section',
+})
+useMixedRequestSection({ query: { q: 'defjs' } })
+// @ts-expect-error a section with any required field cannot be omitted.
+useMixedRequestSection({})
+
+const useOptionalBodyFields = defineRequest({
+  input: struct.request({ body: struct.json(struct.object({ note: struct.string().optional() })) }),
+  method: 'POST',
+  path: '/body',
+})
+useOptionalBodyFields({ body: {} })
+// @ts-expect-error all-optional body fields do not make the body section optional.
+useOptionalBodyFields({})
 
 declare const result: HttpAwaitResult<{ name: string }, { code: string }>
 const [error, data, response] = result

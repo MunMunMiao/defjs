@@ -1,4 +1,4 @@
-import { defineRequest, struct, type Infer, withEndpoint, withHTTPHandle } from '@defjs/core'
+import { createClient, defineRequest, struct, type Infer, withEndpoint, withHTTPHandle } from '@defjs/core'
 import { ClientProvider, useClient } from '@defjs/react'
 import { createElement, useEffect } from 'react'
 import { holdUntilAbort } from './fixture'
@@ -16,7 +16,7 @@ export const searchCatalog = defineRequest({
       status: 200,
       body: struct.array(catalogProductStruct),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Give each query effect an abort owner and suppress publication after cleanup.
@@ -66,11 +66,11 @@ export async function main(): Promise<void> {
   }
 
   const result = Promise.withResolvers<CatalogProduct[]>()
-  const options = [withEndpoint('https://catalog.fixture.invalid'), withHTTPHandle(fixtureFetch)]
+  const client = createClient(withEndpoint('https://catalog.fixture.invalid'), withHTTPHandle(fixtureFetch))
   const tree = (query: string) =>
     createElement(
       ClientProvider,
-      { options },
+      { client },
       createElement(CatalogSearchEffect, { onError: result.reject, onResult: result.resolve, query }),
     )
 

@@ -2,6 +2,7 @@ import {
   createClient,
   defineWebSocket,
   struct,
+  type Struct,
   type WebSocketIncomingData,
   withEndpoint,
   withWebSocketHandle,
@@ -10,7 +11,16 @@ import {
 import { createClient as createGraphqlClient } from 'graphql-ws'
 import { createRealtimeFixture, JOB_ID, type FixtureTrace, type StatusUpdate } from './fixture'
 
-const statusIncoming = {
+type StatusIncoming = {
+  'status-update': Struct<StatusUpdate>
+}
+
+type StatusOutgoing = {
+  'record-view': Struct<{ jobId: string; mutationId: string }>
+  'watch-status': Struct<{ jobId: string }>
+}
+
+const statusIncoming: StatusIncoming = {
   'status-update': struct.object({
     jobId: struct.string(),
     progress: struct.number(),
@@ -18,7 +28,7 @@ const statusIncoming = {
   }),
 }
 
-const statusOutgoing = {
+const statusOutgoing: StatusOutgoing = {
   'record-view': struct.object({ jobId: struct.string(), mutationId: struct.string() }),
   'watch-status': struct.object({ jobId: struct.string() }),
 }

@@ -4,7 +4,7 @@ import { createClient, defineRequest, struct, type Client, withCredentials, with
 export const probeSessionRequest = defineRequest({
   method: 'GET',
   path: '/session',
-  output: [{ status: 204, body: struct.null() }] as const,
+  output: [{ status: 204, body: struct.null() }],
 })
 
 // Step 2: Confirm only Defjs-level success while leaving cookie authentication to the browser.

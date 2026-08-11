@@ -22,6 +22,7 @@ export type BaseTransportRequestOptions<TInput extends AnyStruct | undefined, TT
   baseEndpoint: string
   context?: HttpContext
   input?: TInput
+  operation?: string
   queryParamsSerializer: QueryParamsSerializer
   timeout?: number
   transport: TTransport
@@ -54,6 +55,7 @@ export function createBaseTransportRequest<TInput extends AnyStruct | undefined,
       endpoint: fillUrl(path, built.params),
       headers,
       method,
+      operation: options.operation,
       queryParams,
       queryString: options.queryParamsSerializer(queryParams, built.query),
       timeout: options.timeout,

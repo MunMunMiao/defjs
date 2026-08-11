@@ -39,7 +39,7 @@ The shipment board resolves through the plugin client, while customs holds resol
 
 ## Key points
 
-- Install `provideClient(...)` once for the intended app scope.
+- Create the app client explicitly and install `createClientPlugin(client)` for the intended scope.
 - Vue injection resolves the nearest matching `HTTP_CLIENT` provider.
 - Create a subtree override once in `setup()` so its descendants share that client.
 

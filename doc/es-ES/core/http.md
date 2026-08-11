@@ -7,6 +7,18 @@ description: Construye URLs y cuerpos HTTP, selecciona Structs según la respues
 
 `defineRequest(...)` crea un constructor de comandos HTTP. [Comandos](/es-ES/core/commands) cubre las definiciones y proyecciones de entrada; esta página describe el protocolo HTTP y su ciclo de vida.
 
+## Entrada de cliente solo HTTP
+
+`@defjs/core/http` es una entrada adicional solo para HTTP. Exporta `createHttpClient(...)` junto con comandos HTTP y opciones de cliente compatibles con HTTP:
+
+```typescript
+import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
+
+const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
+```
+
+Úsala cuando un consumidor admita deliberadamente solo HTTP. No sustituye a la entrada raíz: `createClient(...)` de `@defjs/core` sigue siendo el cliente para comandos HTTP, SSE y WebSocket.
+
 ## Construcción de la URL
 
 `withEndpoint(...)` debe recibir una URL base absoluta. Su ruta se conserva como un directorio:
@@ -100,11 +112,25 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+    { status: 409, body: struct.object({ conflict: struct.string() }) },
+  ],
 })
 ```
 
-En tiempo de ejecución se elige el Struct por el estado exacto. Cuando se ha declarado `output`, cualquier estado sin correspondencia produce `UNDECLARED_STATUS`. Los cuerpos 2xx declarados forman la unión de datos correctos; los cuerpos no 2xx declarados forman `error.data`.
+En tiempo de ejecución se elige el Struct por el estado exacto. Cuando se ha declarado `output`, cualquier estado sin correspondencia produce `UNDECLARED_STATUS`. Los cuerpos 2xx declarados forman la unión de datos correctos. `defineRequest(...)` usa un genérico const, así que los estados inline conservan sus literales sin `as const`; la unión de errores HTTP mantiene cada estado no 2xx correlacionado con su cuerpo `error.data`.
+
+```typescript
+const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+
+if (statusError?.kind === 'http') {
+  if (statusError.status === 404) {
+    console.error(statusError.data.message)
+  } else {
+    // status es 409 y data es el cuerpo de conflicto declarado.
+    console.error(statusError.data.conflict)
+  }
+}
+```
 
 `response.ok` solo significa `status >= 200 && status < 300`. No indica que hayan tenido éxito la decodificación de la salida, la validación de la aplicación ni la autorización.
 

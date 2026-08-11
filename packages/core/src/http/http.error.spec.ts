@@ -72,7 +72,7 @@ describe('request http runtime errors', () => {
     expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
   })
 
-  test('should stop before build and transport when a declared request section is missing', async () => {
+  test('should stop before build and transport when a required request section is missing', async () => {
     let buildCalls = 0
     let transportCalls = 0
     const guardedClient = createClient(
@@ -89,7 +89,7 @@ describe('request http runtime errors', () => {
         buildCalls += 1
       },
       input: struct.request({
-        query: struct.object({ page: struct.number().optional() }),
+        query: struct.object({ page: struct.number() }),
       }),
       method: 'GET',
       path: '/search',

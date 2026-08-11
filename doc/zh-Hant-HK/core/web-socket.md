@@ -94,6 +94,12 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
 
 不要記錄 connection URL，因為可能包含 path identifier、應用程式 query data 與 telemetry propagation 欄位。
 
+## 失敗診斷
+
+使用 browser WebSocket API，或只暴露 standard WebSocket event surface 的 injected constructor 時，transport-level handshake failure 通常只可提供穩定的 `RequestError` `kind: 'transport'`，以及 `NETWORK_ERROR`、`ABORTED` 或 `TIMEOUT` 等 `code`。不能保證取得 HTTP `401`、其他 handshake status、response header/body，或 Node 特有的 `unexpected-response` detail。runtime-specific constructor 可在自己的 adapter boundary 暴露更多資料，但那不是 portable Core contract。
+
+成功啟動後，應等待 `session.closed`，優先使用當中的 `kind`、可選 close `code` 與可選 `wasClean` 作為 terminal diagnostic。Close code 是 WebSocket close code，不是 HTTP status。Routine log 只保留經審查的 low-cardinality context 與這些欄位；不要記錄 connection URL、query、ticket、raw `cause` 或 `reason`。只有具備明確 redaction、access 與 retention policy 時才擴展記錄。
+
 ## Live Session
 
 一個 `WebSocketSession` 是 logical session，可以橫跨多次實體 connection attempt。

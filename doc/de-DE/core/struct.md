@@ -10,7 +10,7 @@ Structs beschreiben strikte strukturelle Dekodierung und Wire-Kodierung. Fehlend
 Verwende die `struct`-Fassade und `Infer<T>` aus dem zentralen Paketeinstieg:
 
 ```typescript
-import { struct, type Infer } from '@defjs/core'
+import { struct, type Infer, type StructInput } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -86,6 +86,35 @@ Ein einheitlicher Modifier-Vertrag gilt: Fehlende Werte und `undefined` sind nur
 
 Fehlende optionale und nullish Objektfelder werden aus der Ausgabe weggelassen; auf oberster Ebene ergeben sie `undefined`. Unbekannte Objektschlüssel werden verworfen. Dekodierte Objekt- und Record-Ausgaben haben einen Null-Prototyp.
 
+Nodes strikter tiefer Gleichheitsvergleich berücksichtigt Prototypen. Ein geparstes Struct-Objekt ist deshalb nicht tiefengleich mit einem Objektliteral mit denselben Feldern. Prüfe diese Grenze ausdrücklich oder erstelle nur für die Assertion eine flache Kopie:
+
+```typescript
+import assert from 'node:assert/strict'
+
+const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
+assert.equal(error, null)
+assert.equal(Object.getPrototypeOf(profile), null)
+assert.deepEqual({ ...profile }, { name: 'Ada' })
+```
+
+Der Spread ist nur eine flache Kopie für diese Assertion. Verschachtelte Struct-Objekte haben weiterhin einen Null-Prototyp. Füge nicht allein für einen Test-Matcher eine globale Normalisierung oder Clone-Schicht in den Produktionspfad ein.
+
+Mit `exactOptionalPropertyTypes` verwenden abgeleitete Objekteingaben exakte optionale Eigenschaften. Lasse einen optionalen oder nullish Schlüssel weg, statt ihm `undefined` zuzuweisen:
+
+```typescript
+const OptionalProfile = struct.object({
+  nickname: struct.string().optional(),
+})
+
+type OptionalProfileInput = StructInput<typeof OptionalProfile>
+
+const omitted: OptionalProfileInput = {}
+// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
+const explicitUndefined: OptionalProfileInput = { nickname: undefined }
+```
+
+Zur Laufzeit akzeptiert `struct.parse` ein explizites `undefined` aus unbekannten Eingaben defensiv und lässt den Schlüssel weg. Diese Normalisierung erweitert den statisch abgeleiteten Eingabetyp für Aufrufer nicht.
+
 ## Erforderliche Objekt- und Request-Eingaben
 
 Objekteigenschaften sind in TypeScript und zur Laufzeit erforderlich, sofern ihr Struct nicht optional oder nullish ist. Auch jeder in `struct.request(...)` deklarierte Abschnitt ist erforderlich; nicht deklarierte Abschnitte gehören nicht zum Eingabetyp.
@@ -149,11 +178,40 @@ const UserBody = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-// Caller input uses { id, displayName }.
-// JSON wire data uses { user_id, display_name }.
+const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
+if (logicalError) throw logicalError
+
+const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
+if (!wireKeyError) throw new Error('struct.parse must read logical keys')
 ```
 
-Aliasse werden beim Dekodieren und Kodieren von JSON-Schlüsseln verwendet. Der automatische Request-Aufbau nutzt sie außerdem für ausgehende Pfad-, Query-, Header-, URL-encoded- und Multipart-Schlüssel. Aufrufer verwenden weiterhin logische Schlüssel. Explizite Zielschlüssel in einer eigenen `build`-Projektion bleiben explizit.
+`logicalUser` verwendet `{ id, displayName }`; `wireKeyError` zeigt auf die fehlende logische `id`-Eigenschaft. Das öffentliche `struct.parse` liest nur logische Werte und behandelt Wire-Schlüssel nicht als Standalone-Parse-Eingabe.
+
+Erst die JSON-Kodierung und -Dekodierung des Transports wendet Wire-Aliasse an:
+
+```typescript
+import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+let requestWireBody: unknown
+const echoUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({ body: struct.json(UserBody) }),
+  output: { 200: UserBody },
+})
+const client = createClient(
+  withEndpoint('https://example.test'),
+  withHTTPHandle(async (input, init) => {
+    requestWireBody = await new Request(input, init).json()
+    return Response.json({ user_id: 1, display_name: 'Ada' })
+  }),
+)
+
+const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
+if (requestError) throw requestError
+```
+
+`requestWireBody` ist `{ user_id, display_name }`, `responseUser` wieder `{ id, displayName }`. Der automatische Request-Aufbau verwendet Aliasse außerdem für ausgehende Pfad-, Query-, Header-, URL-encoded- und Multipart-Schlüssel; explizite Zielschlüssel in einer eigenen `build`-Projektion bleiben unverändert.
 
 ## `StructError`
 

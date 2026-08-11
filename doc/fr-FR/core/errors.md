@@ -26,7 +26,7 @@ En cas d'échec, le deuxième élément vaut `undefined`. Le troisième peut lui
 ```typescript
 import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
 
-type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData, number> | TransportError | DefinitionError
 ```
 
 L'union exportée s'appelle `RequestError<TErrorData>`.
@@ -38,17 +38,32 @@ Testez d'abord `kind`, puis `code` lorsque la branche l'exige.
 Une réponse HTTP non-2xx déclarée produit :
 
 ```typescript
-interface HttpStatusError<TErrorData = unknown> {
+interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> {
   kind: 'http'
   code: 'HTTP_STATUS'
-  status: number
+  status: TStatus
   message: string
   data: TErrorData
   response: HttpResponse<unknown>
 }
 ```
 
-`data` n'existe que sur `HttpStatusError`. Son type est l'union de tous les corps de sortie non-2xx déclarés pour cet endpoint. Vérifier `error.status` ne réduit pas actuellement cette union. Utilisez un test structurel ou un discriminant défini par l'application lorsque la forme du corps varie selon le statut.
+Les génériques sont ordonnés avec les données en premier, puis le statut. Le type exporté général `RequestError<TErrorData>` reste pratique aux frontières de l'application, tandis que l'exécution d'un endpoint renvoie une union de branches `HttpStatusError<Data, Status>` propres à chaque statut. Tester `error.status` réduit donc `error.data` au corps déclaré pour ce statut :
+
+```typescript
+const [error] = await client.execute(getUser())
+
+if (error?.kind === 'http') {
+  if (error.status === 404) {
+    console.error(error.data.missing)
+  } else {
+    // Pour cet endpoint, les statuts restants 409 | 422 partagent le corps de conflit.
+    console.error(error.data.conflict)
+  }
+}
+```
+
+`data` n'existe que sur `HttpStatusError`. Préservez cette union corrélée au statut à la frontière de l'endpoint au lieu de l'élargir en une union de données sans relation.
 
 ### Erreurs de transport
 
@@ -130,6 +145,33 @@ if (!error) {
 ```
 
 Ne journalisez pas `cause`, `data`, les en-têtes ou corps de réponse, ni les URL sans politique explicite de masquage et de rétention.
+
+### Pont vers un `Error` natif
+
+Certaines intégrations exigent de lancer un `Error` natif. Créez une nouvelle erreur de diagnostic à cette frontière et n'exposez par défaut que les classifications stables `kind`, `code` et le `status` HTTP disponible :
+
+```typescript
+import type { RequestError } from '@defjs/core'
+
+type DiagnosticRequestError = Error & {
+  readonly code: RequestError<unknown>['code']
+  readonly kind: RequestError<unknown>['kind']
+  readonly status: number | undefined
+}
+
+export function toDiagnosticError(error: RequestError<unknown>): DiagnosticRequestError {
+  const status = error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined
+  const diagnostic = Object.assign(new Error(`Defjs request failed: ${error.kind}/${error.code}`), {
+    code: error.code,
+    kind: error.kind,
+    status,
+  })
+  diagnostic.name = 'DefjsRequestError'
+  return diagnostic
+}
+```
+
+La nouvelle erreur conserve sa propre stack créée à la frontière. Le pont n'attache ni ne copie jamais le `cause` brut, son message ou ses frames de stack, `data`, les en-têtes ou corps de réponse, ni les URL de requête ou de réponse. Les chaînes des frames peuvent elles-mêmes contenir des URL et des secrets ; copier certaines frames de la cause n'est donc pas un comportement sûr par défaut. Le projet exécutable `examples/observability-redacted-logging` vérifie la conservation du statut 404 tout en s'assurant que les données de réponse et une stack de cause contenant volontairement un secret ne fuient pas.
 
 ## Disponibilité de la réponse
 

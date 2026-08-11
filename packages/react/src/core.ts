@@ -1,19 +1,16 @@
 'use client'
 
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
-import { createClient } from '@defjs/core'
-import { createContext, createElement, useContext, useState, type ReactNode } from 'react'
+import type { Client } from '@defjs/core'
+import { createContext, createElement, useContext, type ReactNode } from 'react'
 
 const HttpClientContext = createContext<Client | null>(null)
 
 export interface ClientProviderProps {
-  options?: ClientOption[]
+  client: Client
   children?: ReactNode
 }
 
-export function ClientProvider({ options = [], children }: ClientProviderProps) {
-  const [client] = useState(() => createClient(...options))
-
+export function ClientProvider({ client, children }: ClientProviderProps) {
   return createElement(HttpClientContext.Provider, { value: client }, children)
 }
 
@@ -25,16 +22,4 @@ export function useClient(): Client {
   }
 
   return client
-}
-
-export function withEndpoint(endpoint: string): ClientOption {
-  return (config) => {
-    config.endpoint = endpoint
-  }
-}
-
-export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
-  return (config) => {
-    config.interceptors = [...(config.interceptors ?? []), ...fns.map((fn) => fn())]
-  }
 }

@@ -17,6 +17,18 @@ pnpm add @defjs/core
 
 如果專案使用其他套件管理工具，請改用對應的 npm、Yarn 或 Bun 指令。`@defjs/core` 採用 ESM。在 Node.js 執行時，目前套件 metadata 要求 Node 22 以上。
 
+打包後的 ESM HTTP consumer 已在 Node.js 22、24、26、Bun 1.3.14 與 Deno 2.9.5 完成實測。編譯應用程式後，對應的命令形式如下：
+
+```sh
+node dist/index.js
+bun run dist/index.js
+deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+```
+
+Deno 命令使用 `node_modules` 中已安裝的套件；請將網路權限替換為應用程式實際需要的精確 API host。Bun 與 Deno 實測涵蓋文件所述的 HTTP 範圍，不代表所有平台 API 或 transport。瀏覽器 build 使用一般 bundler，以及平台提供的必要 Fetch 與 WebSocket 能力。
+
+跨 runtime 測試只應斷言 `error.kind`、`error.code` 等穩定的 Defjs 欄位。不要依賴特定引擎的原生 `Error` message 或 JSON parse 文字；Node.js、Bun 與 Deno 可能採用不同格式。
+
 只在應用程式確實需要時安裝轉接器：
 
 | 應用情境               | 套件                                                                                      |
@@ -47,7 +59,7 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 async function loadUser(id: number) {
@@ -72,9 +84,9 @@ void loadUser(7)
 
 成功時，`error` 是 `null`、`result` 是解碼後的輸出資料，而 `response` 是 Defjs 的 `HttpResponse` wrapper。失敗時，`result` 是 `undefined`；若完全沒收到回應，response wrapper 也會是 `undefined`。
 
-### 為什麼需要 `as const`
+### 自動保留 status literal
 
-陣列形式的 `output` 會用 status literal 區分 2xx 成功 body 與非 2xx 錯誤 body。`as const` 會保留這些 status，以及群組 status 陣列的 readonly literal 型別。少了它，TypeScript 可能把型別拓寬成 `number` 或 `number[]`，導致推導出的成功與錯誤分支變得不精確。
+`defineRequest(...)` 對 `output` 使用 const generic，因此 inline 陣列項目與群組 status 陣列會自動保留 literal 值。區分推導出的 2xx 成功 body 與非 2xx 錯誤 body 時，不再需要 `as const`。
 
 也可以使用物件形式的 output：
 

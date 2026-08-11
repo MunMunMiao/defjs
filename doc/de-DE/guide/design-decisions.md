@@ -53,6 +53,24 @@ WebSocket-Listener für Status und Laufzeitfehler sind ebenfalls Beobachter. Gew
 
 Nutze den zurückgegebenen Handle oder die Session für Entscheidungen zum Lebenszyklus. Beobachter eignen sich für begrenztes Logging, Metriken oder Zustandsupdates. Entferne sie, sobald ihr Besitzer endet.
 
+## Sourcemap-Deployment
+
+Wähle die Sourcemap-Richtlinie für Produktion explizit:
+
+- **public**: Deploye die Map mit dem Bundle. Sie enthält `sourcesContent`; Anwendungs- und Abhängigkeitsquellen sind daher öffentlich abrufbar, auch bei relativen Source-Pfaden.
+
+- **hidden**: Entferne den Source-Map-Verweis aus dem Bundle, lade die Map privat zur Fehlerplattform hoch und deploye sie nicht öffentlich. Die Map-Datei enthält weiterhin sensible Pfade und `sourcesContent`; „hidden“ macht sie nicht sicher.
+
+- **disabled**: Erzeuge keine Produktions-Map. Das verhindert Map-Offenlegung, verzichtet aber auf Source-Level-Symbolication von Produktions-Stacks und erschwert Debugging.
+
+Beschränke Zugriff und Aufbewahrung privater Maps wie bei anderen Debugging-Artefakten. Relative Pfade sind keine Vertraulichkeitsgrenze.
+
+## OpenAPI-Grenze
+
+Wähle genau eine maßgebliche Vertragsquelle. Eine Organisation mit etabliertem OpenAPI-Workflow sollte ihn beibehalten und einen mature generator plus expliziten runtime validator an der Anwendungsgrenze verwenden; generierte TypeScript-Typen validieren Responses nicht zur Laufzeit. Für einen greenfield Defjs-Service wird der Wire-Vertrag direkt mit Defjs Structs und Endpoint-Definitionen beschrieben.
+
+Core fügt weder einen OpenAPI generator/exporter hinzu noch hält es OpenAPI und Defjs als zwei synchronisierte Quellen. Dual-source drift ist schlechter als die Komposition bestehender Werkzeuge an einer klaren Grenze.
+
 ## Zugehörige Referenz
 
 - [Client](/de-DE/core/client) dokumentiert Optionskomposition und Client-Scope.

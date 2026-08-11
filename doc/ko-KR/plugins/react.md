@@ -5,100 +5,73 @@ description: React Context에서 Defjs 클라이언트를 공유하고 API에 �
 
 # `@defjs/react`
 
-`@defjs/react`는 `@defjs/core`를 위한 가벼운 context adapter입니다. 다음 항목을 export합니다.
-
-- core 클라이언트를 만들고 제공하는 `ClientProvider`
-- 가장 가까이 제공된 클라이언트를 반환하는 `useClient()`
-- adapter의 `withEndpoint(...)` 및 interceptor factory용 `withInterceptors(...)` helper
-
-caching, Suspense 통합, query retry, 서버 데이터 직렬화를 추가하지 않습니다. `@defjs/core`, React와 함께 설치하고 이런 애플리케이션 책임은 자체 코드에서 관리하세요.
+이 패키지는 `@defjs/core`용 얇은 Context adapter입니다. `ClientProvider`는 애플리케이션이 만든 client를 제공하고 `useClient()`는 가장 가까운 instance를 반환합니다. client factory, cache, retry, resource lifecycle은 추가하지 않습니다.
 
 ## Client 제공
 
+`@defjs/core`에서 client를 생성하고 구성한 뒤 그 instance를 명시적으로 전달합니다.
+
 ```tsx
-import { ClientProvider, withEndpoint } from '@defjs/react'
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import { UserProfile } from './UserProfile'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+    <ClientProvider client={client}>
       <UserProfile id={7} />
     </ClientProvider>
   )
 }
 ```
 
-commit된 provider mount 하나는 클라이언트 하나를 유지합니다. 일반적인 rerender에서는 변경된 `options` 배열을 다시 적용하거나 클라이언트를 교체하지 않습니다.
-
-구현은 lazy `useState` initializer를 사용합니다. 개발 환경에서 이 initializer가 정확히 한 번만 실행된다고 기대하지 마세요. React Strict Mode는 commit 전에 render-time initialization을 여러 번 평가할 수 있습니다. 중요한 생명주기 보장은 commit된 provider mount 하나가 유지된 클라이언트 하나를 노출한다는 점입니다.
-
-애플리케이션에서 의도적으로 새 클라이언트가 필요할 때 provider를 remount하세요.
-
-```tsx
-<ClientProvider key={tenantId} options={[withEndpoint(endpoint)]}>
-  <TenantApplication />
-</ClientProvider>
-```
+`ClientProvider`는 전달받은 것과 동일한 instance를 노출합니다. 생성과 교체 시점, request 및 realtime resource 수명은 호출자가 소유합니다.
 
 ## 가장 가까운 클라이언트 읽기
 
-React component 또는 사용자 정의 Hook 안에서 `useClient()`를 호출하세요.
+`useClient()`는 React component 또는 custom Hook 안에서 호출합니다. provider 밖에서는 오류를 던지며 중첩 provider는 일반 React Context의 가장 가까운 provider 규칙을 따릅니다.
 
 ```tsx
 import { useClient } from '@defjs/react'
 
-export function UserProfile({ id }: { id: number }) {
+export function UserProfile() {
   const client = useClient()
-  // Execute commands from effects, event handlers, or application integrations.
   return null
 }
 ```
 
-provider 밖에서 호출하면 throw합니다. 중첩 provider는 일반 React Context 동작을 따르며 descendant는 가장 가까운 provider의 클라이언트를 받습니다.
-
-`ClientProvider`는 모든 core `ClientOption`을 받습니다.
+모든 구성 option은 `@defjs/core`에서 가져옵니다.
 
 ```tsx
-import { withCredentials } from '@defjs/core'
-import { ClientProvider, withEndpoint } from '@defjs/react'
-import { Application } from './Application'
+import { createClient, withCredentials, withEndpoint } from '@defjs/core'
 
-;<ClientProvider options={[withEndpoint('https://api.example.com'), withCredentials(true)]}>
-  <Application />
-</ClientProvider>
+const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
 ```
 
 ## Interceptor factory
 
-adapter의 `withInterceptors(...)`는 factory를 받습니다. provider가 클라이언트를 만들 때 factory를 평가하고 결과를 옵션 순서대로 추가합니다.
+interceptor value를 만들고 core의 `withInterceptors(...)`로 조합한 뒤 client를 React에 전달합니다.
 
 ```tsx
-import type { ReactNode } from 'react'
-import { createHttpInterceptor } from '@defjs/core'
-import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
 
-export function ApiBoundary({ children }: { children: ReactNode }) {
-  return (
-    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)]}>{children}</ClientProvider>
-  )
+export function ApiBoundary({ children }: { children: React.ReactNode }) {
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-core `withInterceptors(...)`는 대신 인터셉터 값을 받습니다. 서버 credential factory는 해당 credential을 소유하는 요청 경계 안에 두세요.
+factory가 request별 credential을 캡처한다면 해당 client를 만드는 request boundary 안에서 호출하세요.
 
 ## HTTP 이펙트 생명주기 관리
 
@@ -149,25 +122,24 @@ Defjs는 예상 가능한 요청 실패를 튜플로 반환합니다. query libr
 
 ## Client Component 경계
 
-패키지는 애플리케이션의 React Server Component 클라이언트 경계를 자동으로 만들지 않습니다. `ClientProvider`는 `'use client'`로 시작하는 애플리케이션 소유 모듈 뒤에 두세요.
-
-애플리케이션이 소유하는 Client Component를 만드세요.
+패키지 entry는 Client Component boundary입니다. 애플리케이션 소유 wrapper에서 browser client를 만들고 명시적으로 제공할 수 있습니다.
 
 ```tsx
 // app/ApiProvider.tsx
 'use client'
 
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
-import { ClientProvider, withEndpoint } from '@defjs/react'
+
+const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
-  return <ClientProvider options={[withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!)]}>{children}</ClientProvider>
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-요청 header, cookie, tenant state 또는 사용자 credential을 다루는 서버 코드는 서버 요청 경계마다 core client를 만들어야 합니다. 이런 값을 module-level provider 옵션이나 여러 요청이 공유하는 singleton에 capture하지 마세요. adapter는 동시 SSR 격리를 제공하지 않습니다.
-
-React Server Component, Next.js, hydration, Strict Mode, 동시 SSR에는 각자 framework 생명주기 경계가 있습니다. 요청 범위 credential과 provider remount를 포함해 실제 애플리케이션 설정에서 테스트하세요.
+header, cookie, tenant state 또는 credential을 다루는 server code는 request boundary마다 별도 client를 만들어야 합니다. adapter는 동시 SSR을 격리하거나 client 작업을 정리하지 않습니다.
 
 ## 실시간 이펙트 생명주기 관리
 
@@ -256,19 +228,21 @@ provider unmount/remount는 클라이언트 범위를 바꿉니다. core `Client
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { JSX, ReactNode } from 'react'
 
 interface ClientProviderProps {
+  client: Client
   children?: ReactNode
-  options?: ClientOption[]
 }
 
 declare function ClientProvider(props: ClientProviderProps): JSX.Element
 declare function useClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+전달된 client를 하위 component에 제공합니다. `children`은 선택 사항입니다.
+
+가장 가까운 client를 반환하며 없으면 오류를 던집니다.
 
 ## 다음 단계
 

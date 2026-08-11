@@ -20,7 +20,7 @@ description: أضف instrumentation لأعمال عملاء Defjs الصادرة
 ## إعداد العميل
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
@@ -41,6 +41,21 @@ const client = createClient(
 ```
 
 يضيف المحول interceptor واحدًا لكل transport مفعّل. تعمل الخيارات بترتيب العميل المعتاد، لذلك يحدد موضعها بالنسبة إلى المعترضات الأخرى أي عمل تغلّفه spans.
+
+### هوية العملية
+
+عيّن `operation` بقيمة ثابتة في تعريف كل endpoint. فهي الهوية منخفضة cardinality التي تستخدمها spans وmetrics:
+
+```typescript
+const readOrder = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders/:id',
+  // input and output omitted
+})
+```
+
+عند وجود operation تصبح أسماء spans مثل `GET orders.read` و`SSE orders.watch` و`WebSocket orders.connect`، وتُسجّل `defjs.operation`. عند غيابها يبقى fallback السابق: method لـ HTTP أو `SSE` أو `WebSocket` بلا صفة operation. لا تستنتج الهوية من resolved URL أو path يحوي identifiers، ولا تنسخ resolved URLs إلى telemetry أو logs.
 
 ## الخيارات
 
@@ -103,12 +118,15 @@ withOpenTelemetryServer({
     requestHook(span, request) {
       span.setAttribute('app.operation', 'list-orders')
     },
-    responseHook(span, response) {
+    responseHook(span, response, request) {
+      span.setAttribute('app.operation', request.operation ?? 'unclassified')
       span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
     },
   },
 })
 ```
+
+الوسيط الثالث هو كائن `HttpRequest` الأصلي للـ transport. استخدم `operation` الصريحة منه، ولا تعِد بناء الهوية من `request.endpoint` أو resolved URL أو path.
 
 يمكن أن تعيد الـ hooks القيمة `void` أو `Promise<void>` وتظل غير حاجبة. يُلتقط كل من الرمي المتزامن والرفض غير المتزامن ويُسجل كـ `defjs.otel.hook.error` من دون إيقاف عملية العميل، كما تُعزل أخطاء تسجيل telemetry نفسها.
 
@@ -118,7 +136,8 @@ withOpenTelemetryServer({
 
 ينشئ HTTP interceptor span من نوع `SpanKind.CLIENT` ويسجل:
 
-- method الطلب كاسم span لأن Defjs لا يوفر قالب URL منخفض cardinality؛
+- الاسم `${method} ${operation}` والصفة `defjs.operation` عندما يعلن endpoint عن operation ثابتة؛
+- method الطلب وحده كـ fallback سابق دون تغيير عند غياب operation؛
 - `http.request.method`؛
 - `url.full`؛
 - `server.address` و`server.port` الاختياري؛
@@ -169,7 +188,7 @@ withOpenTelemetryServer({
 
 ## البيانات الحساسة وحدود التغطية
 
-تُحل قيمة `url.full` الافتراضية من request endpoint وbase endpoint بدلًا من serialized query string، لكن قد تظل resolved paths تحتوي identifiers حساسة. ويُلحق WebSocket propagation الحقول بشكل منفصل إلى query string الفعلية.
+تُحل `url.full` الافتراضية من request endpoint وbase endpoint بدل serialized query string، لكن قد تظل paths المحلولة تحتوي identifiers حساسة. هذه transport metadata وليست مصدرًا لهوية operation. أبقِ `operation` ثابتة، ولا تنسخ resolved URLs إلى telemetry أو logs، واضبط redaction في SDK/exporter قبل تصدير URL attributes. وتضيف WebSocket propagation الحقول منفصلة إلى query string الفعلية.
 
 تستقبل `recordException(...)` الأخطاء المرمية وبعض أسباب الإغلاق. قد تكشف رسائل الأخطاء وstacks بيانات حساسة. اضبط processors وحجب البيانات الحساسة على مستوى SDK وexporter وفقًا لذلك؛ لا ينقّح هذا المحول exceptions نيابة عن التطبيق.
 

@@ -26,7 +26,7 @@ const [socketError, session, startupConnection] = await client.execute(socketCom
 ```typescript
 import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
 
-type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData, number> | TransportError | DefinitionError
 ```
 
 이 union은 `RequestError<TErrorData>`라는 이름으로 export됩니다.
@@ -38,17 +38,32 @@ type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | Tra
 선언된 비-2xx HTTP 응답은 다음 값을 만듭니다.
 
 ```typescript
-interface HttpStatusError<TErrorData = unknown> {
+interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> {
   kind: 'http'
   code: 'HTTP_STATUS'
-  status: number
+  status: TStatus
   message: string
   data: TErrorData
   response: HttpResponse<unknown>
 }
 ```
 
-`data`는 `HttpStatusError`에만 있습니다. 타입은 해당 엔드포인트에 선언된 비-2xx output body 전체의 union입니다. 현재 `error.status`를 검사해도 이 union은 좁혀지지 않습니다. 상태별 body 형태가 다르면 애플리케이션이 관리하는 구조 검사나 discriminator를 사용하세요.
+generic 순서는 data, status입니다. 넓은 `RequestError<TErrorData>` export는 애플리케이션 경계에서 계속 유용하지만, endpoint 실행은 status별 `HttpStatusError<Data, Status>` branch의 union을 반환합니다. 따라서 `error.status`를 검사하면 `error.data`가 해당 status에 선언된 body로 좁혀집니다.
+
+```typescript
+const [error] = await client.execute(getUser())
+
+if (error?.kind === 'http') {
+  if (error.status === 404) {
+    console.error(error.data.missing)
+  } else {
+    // 이 endpoint에서 나머지 409 | 422 status는 같은 conflict body를 사용합니다.
+    console.error(error.data.conflict)
+  }
+}
+```
+
+`data`는 `HttpStatusError`에만 있습니다. endpoint 경계에서는 이 status 연관 union을 유지하고 서로 무관한 data union으로 넓히지 마세요.
 
 ### Transport 오류
 
@@ -130,6 +145,33 @@ if (!error) {
 ```
 
 명시적인 민감 정보 마스킹 및 보존 정책이 없다면 `cause`, `data`, 응답 header, body, URL을 로그에 남기지 마세요.
+
+### Native `Error` 브리지
+
+일부 통합은 native `Error` throw를 요구합니다. 그 경계에서 새로운 diagnostic error를 만들고 기본적으로 안정적인 `kind`, `code`와 사용 가능한 HTTP `status` 분류만 노출하세요.
+
+```typescript
+import type { RequestError } from '@defjs/core'
+
+type DiagnosticRequestError = Error & {
+  readonly code: RequestError<unknown>['code']
+  readonly kind: RequestError<unknown>['kind']
+  readonly status: number | undefined
+}
+
+export function toDiagnosticError(error: RequestError<unknown>): DiagnosticRequestError {
+  const status = error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined
+  const diagnostic = Object.assign(new Error(`Defjs request failed: ${error.kind}/${error.code}`), {
+    code: error.code,
+    kind: error.kind,
+    status,
+  })
+  diagnostic.name = 'DefjsRequestError'
+  return diagnostic
+}
+```
+
+새로 만든 오류는 경계에서 생성한 자체 stack을 유지합니다. 원본 `cause`, cause 메시지나 stack frame, `data`, 응답 header나 body, 요청 및 응답 URL을 절대 첨부하거나 복사하지 않습니다. stack frame 문자열 자체에 URL과 secret이 포함될 수 있으므로 선택한 cause frame을 복사하는 것도 안전한 기본값이 아닙니다. 실행 가능한 `examples/observability-redacted-logging` 프로젝트는 404 status가 유지되는지 검증하면서 응답 데이터와 secret을 의도적으로 넣은 cause stack이 유출되지 않는지도 확인합니다.
 
 ## 응답 가용성
 

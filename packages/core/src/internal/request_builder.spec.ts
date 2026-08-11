@@ -1791,6 +1791,24 @@ describe('request_builder edge coverage', () => {
     expect(built.query).toBeUndefined()
   })
 
+  test('request-shaped build consumes normalized empty optional sections', () => {
+    const input = struct.request({
+      headers: struct.object({ traceId: struct.string().optional() }),
+      path: struct.object({ locale: struct.string().optional() }),
+      query: struct.object({ page: struct.number().optional() }),
+    })
+    const [error, parsed] = struct.parse(input, {})
+    if (error) {
+      throw error
+    }
+
+    const built = buildRequest(parsed, undefined, { input })
+
+    expect(built.params).toEqual({})
+    expect(built.query).toEqual({})
+    expect(Array.from(built.headers?.entries() ?? [])).toEqual([])
+  })
+
   test('request-shaped text body with undefined falls back to empty string', () => {
     const input = struct.request({ body: struct.text() })
     const built = buildRequest({ body: undefined }, undefined, { input })

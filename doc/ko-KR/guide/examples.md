@@ -44,7 +44,7 @@ const createUserRequest = defineRequest({
   output: [
     { status: 201, body: User },
     { status: [400, 409], body: ApiError },
-  ] as const,
+  ],
 })
 
 export const listUsersRequest = defineRequest({
@@ -63,7 +63,7 @@ export const listUsersRequest = defineRequest({
         nextCursor: struct.string().optional().alias('next_cursor'),
       }),
     },
-  ] as const,
+  ],
 })
 
 export const getUser = defineRequest({
@@ -75,7 +75,7 @@ export const getUser = defineRequest({
   output: [
     { status: 200, body: User },
     { status: 404, body: ApiError },
-  ] as const,
+  ],
 })
 
 const updateUserRequest = defineRequest({
@@ -93,7 +93,7 @@ const updateUserRequest = defineRequest({
   output: [
     { status: 200, body: User },
     { status: 404, body: ApiError },
-  ] as const,
+  ],
 })
 
 const deleteUserRequest = defineRequest({
@@ -103,9 +103,9 @@ const deleteUserRequest = defineRequest({
     path: struct.object({ id: struct.number() }),
   }),
   output: [
-    { status: 204, body: struct.unknown() },
+    { status: 204, body: struct.null() },
     { status: 404, body: ApiError },
-  ] as const,
+  ],
 })
 
 export async function createUser(input: { name: string; email: string }, signal: AbortSignal) {
@@ -368,12 +368,13 @@ credential provider는 애플리케이션이 소유합니다. 서버에서는 �
 ```typescript
 // main.ts
 import { createApp } from 'vue'
-import { provideClient, withEndpoint } from '@defjs/vue'
+import { createClient, withEndpoint } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 import App from './App.vue'
 
-createApp(App)
-  .use(provideClient(withEndpoint('https://api.example.com')))
-  .mount('#app')
+const client = createClient(withEndpoint('https://api.example.com'))
+
+createApp(App).use(createClientPlugin(client)).mount('#app')
 ```
 
 ```vue
@@ -414,12 +415,15 @@ watch(
 
 ```tsx
 // App.tsx
-import { ClientProvider, withEndpoint } from '@defjs/react'
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import { UserName } from './UserName'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+    <ClientProvider client={client}>
       <UserName id={7} />
     </ClientProvider>
   )

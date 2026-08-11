@@ -9,7 +9,7 @@ export const readExportCapacity = defineRequest({
   output: [
     { status: 200, body: struct.object({ remainingJobs: struct.number() }) },
     { status: 429, body: struct.object({ code: struct.literal('export_quota_exhausted') }) },
-  ] as const,
+  ],
 })
 
 function retryAfterDecision(value: string | null, nowMs: number) {

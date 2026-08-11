@@ -56,6 +56,7 @@ describe('http request helpers', () => {
         baseEndpoint: 'https://api.example.com/v1',
         context: configContext,
         input,
+        operation: 'users.update',
         queryParamsSerializer: (params) => `custom=${params.toString()}`,
         responseType: 'json',
         withCredentials: true,
@@ -64,6 +65,7 @@ describe('http request helpers', () => {
 
     expect(request.baseEndpoint).toBe('https://api.example.com/v1')
     expect(request.endpoint).toBe('/user/7')
+    expect(request.operation).toBe('users.update')
     expect(request.queryParams?.get('include')).toBe('true')
     expect(request.queryParams?.getAll('tags')).toEqual(['a', 'b'])
     expect(request.queryString).toBe('custom=include=true&tags=a&tags=b')

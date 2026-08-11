@@ -5,7 +5,7 @@ export const searchTickets = defineRequest({
   method: 'GET',
   path: '/support/tickets',
   input: struct.request({ query: struct.object({ label: struct.array(struct.string()) }) }),
-  output: [{ status: 200, body: struct.object({ tickets: struct.array(struct.object({ id: struct.string() })) }) }] as const,
+  output: [{ status: 200, body: struct.object({ tickets: struct.array(struct.object({ id: struct.string() })) }) }],
 })
 
 // Step 2: Expose validated tickets without teaching callers the repeated-key wire format.

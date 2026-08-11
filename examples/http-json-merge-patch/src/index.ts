@@ -24,7 +24,7 @@ export const patchCustomerContact = defineRequest({
       status: 200,
       body: customerContactStruct,
     },
-  ] as const,
+  ],
   build(build, input) {
     build.setPathParams({ id: input.id })
     build.setJson(input.patch, { contentType: 'application/merge-patch+json' })

@@ -1,102 +1,51 @@
-import type { ClientConfig, Interceptor } from '@defjs/core'
+import { createClient, type Client } from '@defjs/core'
 import { cleanup, render } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ClientProvider, useClient, withEndpoint, withInterceptors } from './core'
+import { ClientProvider, useClient } from './core'
 
 afterEach(cleanup)
 
-function makeClientConfig(overrides: Partial<ClientConfig> = {}): ClientConfig {
-  return {
-    endpoint: '',
-    http: { handle: fetch },
-    interceptors: [],
-    queryParamsSerializer: (params) => params.toString(),
-    sse: { handle: fetch },
-    webSocket: {},
-    ...overrides,
-  }
-}
-
-describe('withEndpoint', () => {
-  it('should return a ClientOption function', () => {
-    const option = withEndpoint('https://api.example.com')
-    expect(typeof option).toBe('function')
-  })
-
-  it('should set endpoint in config', () => {
-    const config = {} as ClientConfig
-    const option = withEndpoint('https://api.example.com')
-    option(config)
-    expect(config.endpoint).toBe('https://api.example.com')
-  })
-})
-
-describe('withInterceptors', () => {
-  it('should return a ClientOption function', () => {
-    const option = withInterceptors((() => ({})) as unknown as () => Interceptor)
-    expect(typeof option).toBe('function')
-  })
-
-  it('should set interceptors in config', () => {
-    const config = makeClientConfig()
-    const interceptor = (() => ({})) as unknown as () => Interceptor
-    const option = withInterceptors(interceptor)
-    option(config)
-    expect(config.interceptors).toEqual([interceptor()])
-  })
-
-  it('should append interceptors across sequential calls in order', () => {
-    const config = makeClientConfig()
-    const interceptor1 = {} as Interceptor
-    const interceptor2 = {} as Interceptor
-
-    withInterceptors(() => interceptor1)(config)
-    withInterceptors(() => interceptor2)(config)
-
-    expect(config.interceptors).toEqual([interceptor1, interceptor2])
-  })
-
-  it('should initialize interceptors when config starts empty', () => {
-    const config = {} as ClientConfig
-    const interceptor = {} as Interceptor
-
-    withInterceptors(() => interceptor)(config)
-
-    expect(config.interceptors).toEqual([interceptor])
-  })
-})
-
 describe('ClientProvider', () => {
-  it('should provide client to child component', () => {
-    let injectedClient: unknown
+  it('provides the exact client instance supplied by the caller', () => {
+    const client = createClient()
+    let injectedClient: Client | undefined
 
     function Child() {
       injectedClient = useClient()
       return null
     }
 
-    render(createElement(ClientProvider, null, createElement(Child)))
+    render(createElement(ClientProvider, { client }, createElement(Child)))
 
-    expect(injectedClient).toBeDefined()
+    expect(injectedClient).toBe(client)
   })
 
-  it('should configure endpoint via withEndpoint', () => {
-    let injectedClient: unknown
+  it('resolves the nearest client in nested provider trees', () => {
+    const outerClient = createClient()
+    const innerClient = createClient()
+    let outerInjectedClient: Client | undefined
+    let innerInjectedClient: Client | undefined
 
-    function Child() {
-      injectedClient = useClient()
+    function OuterChild() {
+      outerInjectedClient = useClient()
+      return createElement(ClientProvider, { client: innerClient }, createElement(InnerChild))
+    }
+
+    function InnerChild() {
+      innerInjectedClient = useClient()
       return null
     }
 
-    render(createElement(ClientProvider, { options: [withEndpoint('https://api.example.com')] }, createElement(Child)))
+    render(createElement(ClientProvider, { client: outerClient }, createElement(OuterChild)))
 
-    expect(injectedClient).toBeDefined()
+    expect(outerInjectedClient).toBe(outerClient)
+    expect(innerInjectedClient).toBe(innerClient)
   })
 })
 
 describe('useClient', () => {
-  it('should throw when no provider is present', () => {
+  it('throws when no provider is present', () => {
     function Child() {
       useClient()
       return null

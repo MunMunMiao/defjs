@@ -20,7 +20,7 @@ description: Инструментируйте исходящие HTTP-, SSE- и 
 ## Настройка клиента
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
@@ -41,6 +41,21 @@ const client = createClient(
 ```
 
 Адаптер добавляет по одному перехватчику для каждого включённого транспорта. Опции выполняются в обычном порядке клиента, поэтому положение относительно других перехватчиков определяет, какую работу охватывают спаны.
+
+### Идентичность операции
+
+Задавайте `operation` статически в определении каждого endpoint. Это низкокардинальная идентичность для спанов и метрик:
+
+```typescript
+const readOrder = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders/:id',
+  // input and output omitted
+})
+```
+
+При наличии operation спаны называются `GET orders.read`, `SSE orders.watch` или `WebSocket orders.connect`, а также получают `defjs.operation`. Без неё сохраняется прежний fallback: HTTP-метод, `SSE` или `WebSocket`, без атрибута операции. Не выводите идентичность из разрешённого URL или пути с идентификаторами и не копируйте разрешённые URL в телеметрию или логи.
 
 ## Опции
 
@@ -103,12 +118,15 @@ withOpenTelemetryServer({
     requestHook(span, request) {
       span.setAttribute('app.operation', 'list-orders')
     },
-    responseHook(span, response) {
+    responseHook(span, response, request) {
+      span.setAttribute('app.operation', request.operation ?? 'unclassified')
       span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
     },
   },
 })
 ```
+
+Третий аргумент — исходный транспортный `HttpRequest`. Используйте его явную `operation`; не восстанавливайте идентичность из `request.endpoint`, разрешённого URL или пути.
 
 Хуки могут возвращать `void` или `Promise<void>` и при этом не блокируют операцию. Синхронные исключения и асинхронные отклонения перехватываются и записываются как `defjs.otel.hook.error` без остановки клиента; ошибки самой записи телеметрии также изолируются.
 
@@ -118,7 +136,8 @@ withOpenTelemetryServer({
 
 HTTP-перехватчик создаёт спан с `SpanKind.CLIENT` и записывает:
 
-- метод запроса как имя спана, поскольку Defjs не предоставляет низкокардинальный шаблон URL;
+- `${method} ${operation}` как имя спана и `defjs.operation`, когда endpoint объявляет статическую operation;
+- только метод запроса как неизменный прежний fallback при отсутствии operation;
 - `http.request.method`;
 - `url.full`;
 - `server.address` и необязательный `server.port`;
@@ -169,7 +188,7 @@ HTTP-спан завершается, когда HTTP-перехватчик п�
 
 ## Чувствительные данные и пределы покрытия
 
-Стандартный `url.full` разрешается из пути и базового эндпоинта запроса, а не из сериализованной query-строки, но даже разрешённый путь может содержать чувствительные идентификаторы. Распространение WebSocket отдельно добавляет поля в фактическую query-строку.
+Стандартный `url.full` разрешается из request endpoint и base endpoint, а не из сериализованной query string, но разрешённый путь всё ещё может содержать чувствительные идентификаторы. Это транспортные метаданные, а не источник идентичности operation. Оставляйте `operation` статической, не копируйте разрешённые URL в телеметрию или логи и настройте redaction SDK/exporter до экспорта URL-атрибутов. WebSocket propagation отдельно добавляет поля в фактическую query string.
 
 `recordException(...)` получает выброшенные ошибки и некоторые причины закрытия. Сообщения и трассировка стека могут раскрыть чувствительные данные. Настройте на уровне SDK процессоры и маскирование чувствительных данных в экспортёре; адаптер не очищает исключения за приложение.
 

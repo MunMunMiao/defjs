@@ -10,7 +10,7 @@ export const getSettlementReport = defineRequest({
       status: 200,
       body: struct.object({ id: struct.string(), state: struct.literal('ready'), totalCents: struct.number() }),
     },
-  ] as const,
+  ],
 })
 
 export const SETTLEMENT_DEADLINE_MS = 25

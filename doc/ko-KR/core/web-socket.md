@@ -94,6 +94,12 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
 
 connection URL은 로그에 남기지 마세요. path identifier, 애플리케이션 query 데이터, telemetry propagation 필드가 포함될 수 있습니다.
 
+## 실패 진단
+
+browser WebSocket API 또는 standard WebSocket event surface만 노출하는 injected constructor에서는 transport-level handshake failure가 보통 안정적인 `RequestError`의 `kind: 'transport'`와 `NETWORK_ERROR`, `ABORTED`, `TIMEOUT` 같은 `code`만 제공합니다. HTTP `401`, 다른 handshake status, response headers/body 또는 Node 전용 `unexpected-response` detail을 보장할 수 없습니다. runtime별 constructor가 자체 adapter로 추가 정보를 제공할 수 있지만 portable Core contract는 아닙니다.
+
+startup 이후에는 `session.closed`를 기다리고 `kind`, 선택적 close `code`, 선택적 `wasClean`을 우선 terminal diagnostic으로 사용하세요. close code는 WebSocket code이지 HTTP status가 아닙니다. routine log에는 검토된 low-cardinality context와 이 field만 남기고 connection URL, query, ticket, raw `cause`, `reason`은 기록하지 마세요. 명시적인 redaction, access, retention policy가 있을 때만 확장하세요.
+
 ## 라이브 세션
 
 `WebSocketSession` 하나는 여러 물리 연결 시도에 걸쳐 유지되는 논리 세션입니다.

@@ -32,11 +32,13 @@ describe('createEventStreamRequest', () => {
         abort: new AbortController().signal,
         baseEndpoint: 'https://example.com',
         input,
+        operation: 'users.events.watch',
         queryParamsSerializer: (params) => params.toString(),
       },
     )
 
     expect(request.endpoint).toBe('/users/1/events')
+    expect(request.operation).toBe('users.events.watch')
     expect(request.queryString).toBe('include_profile=true')
     expect(request.headers?.get('x-token')).toBe('secret')
   })

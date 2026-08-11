@@ -5,64 +5,39 @@ description: 透過 Vue injection 共用 Defjs 用戶端、依自己的 API 設�
 
 # `@defjs/vue`
 
-`@defjs/vue` 是 `@defjs/core` 的輕量 injection 轉接器，匯出：
-
-- `provideClient(...)`：建立並提供 core client 的 Vue plugin；
-- `injectClient()`：回傳最近一層注入的 client；
-- `HTTP_CLIENT`：用於 override 的 injection key；
-- 轉接器的 `withEndpoint(...)`，以及攔截器 factory helper `withInterceptors(...)`。
-
-它不會增加 transport 行為、cache、state management、retry 或 Nuxt module。請和 `@defjs/core`、Vue 一起安裝，這些責任則留在應用程式自己的 composable、store 與 framework integration。
+此套件是 `@defjs/core` 的輕量 injection adapter。`createClientPlugin(client)` 提供由應用程式建立的 client，`injectClient()` 回傳最近一層 instance，`HTTP_CLIENT` 用於 native subtree override；它不加入 client factory、cache、retry policy 或 resource lifecycle。
 
 ## 安裝 Plugin
 
-每次 plugin installation 都會建立一個 client：
+使用 `@defjs/core` 建立並設定 client，再為這個確切 instance 安裝 plugin：
 
 ```typescript
 // main.ts
+import { createClient, withEndpoint } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
-import { provideClient, withEndpoint } from '@defjs/vue'
 import App from './App.vue'
 
+const client = createClient(withEndpoint('https://api.example.com'))
 const app = createApp(App)
 
-app.use(provideClient(withEndpoint('https://api.example.com')))
-
+app.use(createClientPlugin(client))
 app.mount('#app')
 ```
 
-`provideClient(...options)` 接受 `@defjs/core` 的任何 `ClientOption`，不限於 Vue adapter 重新匯出或建立的選項：
-
-```typescript
-import { withCredentials, withSSEReconnect } from '@defjs/core'
-import { provideClient, withEndpoint } from '@defjs/vue'
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEReconnect({ attempts: 3 })))
-```
-
-Plugin 安裝並建立 client 時才會執行選項。把同一個 plugin object 安裝到另一個 app，會另外建立一個 client。
+plugin 只負責提供傳入的 instance，不會建立、複製、替換或 dispose client。
 
 ## 注入最近一層 Client
 
-請在 component `setup`、`<script setup>`，或 active composable/injection context 中呼叫 `injectClient()`：
+在 `setup`、`<script setup>` 或有效 injection context 內呼叫 `injectClient()`。缺少 `HTTP_CLIENT` 時會拋錯，並遵循 Vue 的最近 provider 規則。
+
+使用公開 key 和 Vue native `provide` 覆寫某個 subtree：
 
 ```vue
 <script setup lang="ts">
-import { injectClient } from '@defjs/vue'
-
-const client = injectClient()
-</script>
-```
-
-找不到 `HTTP_CLIENT` 時會 throw。不要在任意 module scope 呼叫它。
-
-這裡遵循 Vue 一般的 nearest-provider 規則。Component 可以為 descendants 提供 override：
-
-```vue
-<script setup lang="ts">
-import { provide } from 'vue'
 import { createClient, withEndpoint } from '@defjs/core'
 import { HTTP_CLIENT } from '@defjs/vue'
+import { provide } from 'vue'
 
 const scopedClient = createClient(withEndpoint('https://preview.example.com'))
 provide(HTTP_CLIENT, scopedClient)
@@ -73,34 +48,25 @@ provide(HTTP_CLIENT, scopedClient)
 </template>
 ```
 
-Descendant 呼叫 `injectClient()` 會取得 `scopedClient`；這個 subtree 以外的 sibling 仍會取得 app-level client。
-
 ## 攔截器 Factory
 
-Adapter 的 `withInterceptors(...)` 接受 factory，不接受 interceptor instance。Client 建立時會 evaluate 這些 factory，再依 option order 附加結果。
+先建立 interceptor value，並用 core 的 `withInterceptors(...)` 組合，再安裝 plugin：
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)))
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
+app.use(createClientPlugin(client))
 ```
 
-這和 core `withInterceptors(...)` 不同，後者接受已建立的 interceptor value。伺服器端 credential factory 必須維持 request-scoped。
+若 interceptor factory 捕捉 request-scoped credential，應在建立該 client 的 request boundary 內呼叫。
 
 ## 回應輸入變更
 
@@ -163,30 +129,22 @@ watch(
 
 ## SSR 邊界
 
-若設定在瀏覽器中可安全使用而且不依賴個別 request，瀏覽器 app 可以安裝一個 plugin client。
-
-SSR 不應把 request header、cookie、使用者資料或 tenant data 捕捉進跨 request 共用的 app singleton。請在每個 server request boundary 內建立 core client，並只在該 request 的 render tree 傳遞或 provide。
-
-Adapter 不會隔離並行 SSR request 之間的應用程式 closure，也不會替你決定哪些 inbound header 或 cookie 可以安全轉送。
-
-Nuxt client plugin 可以為瀏覽器 consumer 安裝 Vue adapter：
+browser app 可安裝一個 browser-safe client。SSR 應在每個 server request boundary 內建立獨立 core client，並只向對應 app 提供該 instance；不要跨 request 共用 header、cookie、tenant state 或 credential。
 
 ```typescript
 // plugins/defjs.client.ts
-import { provideClient, withEndpoint } from '@defjs/vue'
+import { createClient, withEndpoint } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 
 export default defineNuxtPlugin((nuxtApp) => {
-  nuxtApp.vueApp.use(provideClient(withEndpoint(useRuntimeConfig().public.apiBase)))
+  const client = createClient(withEndpoint(useRuntimeConfig().public.apiBase))
+  nuxtApp.vueApp.use(createClientPlugin(client))
 })
 ```
 
-`.client.ts` suffix 讓它只在瀏覽器執行。它不是 server-request client，不能用來轉送 SSR credential。在 Nuxt 應用程式中，請連同實際 plugin、route handler 與 hydration 設定測試這個邊界。
-
 ## 資源歸屬
 
-安裝或 unmount Vue provider 不會 abort HTTP 工作，也不會關閉 SSE 與 WebSocket 資源。Adapter 只建立 client，而 core client 沒有 `dispose()` method。
-
-啟動 realtime 工作的 component、composable、route 或 store 必須：
+安裝或卸載 plugin 不會 abort HTTP，也不會關閉 SSE 與 WebSocket resource。建立 client 的呼叫端擁有透過它啟動的全部工作。
 
 - 在 async startup 前或同時註冊 cleanup；
 - scope 結束時 abort startup；
@@ -200,15 +158,19 @@ export default defineNuxtPlugin((nuxtApp) => {
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { InjectionKey, Plugin } from 'vue'
 
 declare const HTTP_CLIENT: InjectionKey<Client>
-declare function provideClient(...options: ClientOption[]): Plugin
+declare function createClientPlugin(client: Client): Plugin
 declare function injectClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+建立一個提供傳入 client instance 的 Vue plugin。
+
+回傳最近一層 client；沒有 provider 時拋錯。
+
+用於 native subtree provider 的公開 injection key。
 
 ## 下一步
 

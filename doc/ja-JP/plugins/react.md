@@ -5,100 +5,73 @@ description: React Context で Defjs クライアントを共有し、API に合
 
 # `@defjs/react`
 
-`@defjs/react` は `@defjs/core` 用の薄いコンテキストアダプターです。次をエクスポートします。
-
-- `ClientProvider`: Core クライアントを作成して提供するコンポーネント
-- `useClient()`: 最も近いプロバイダーのクライアントを返す Hook
-- アダプターの `withEndpoint(...)` と、インターセプターファクトリー用の `withInterceptors(...)` ヘルパー
-
-キャッシュ、Suspense 統合、クエリの再試行、サーバーデータのシリアライズは追加しません。`@defjs/core` と React と一緒にインストールし、これらのアプリケーション責務は自分のコードで管理してください。
+このパッケージは `@defjs/core` 用の薄い Context アダプターです。`ClientProvider` はアプリケーションが作成した client を提供し、`useClient()` は最も近い instance を返します。client factory、cache、retry、resource lifecycle は追加しません。
 
 ## クライアントを提供する
 
+`@defjs/core` で client を作成・設定し、その instance を明示的に渡します。
+
 ```tsx
-import { ClientProvider, withEndpoint } from '@defjs/react'
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import { UserProfile } from './UserProfile'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+    <ClientProvider client={client}>
       <UserProfile id={7} />
     </ClientProvider>
   )
 }
 ```
 
-コミット済みのプロバイダーのマウントは、クライアントを 1 つ保持します。通常の再レンダーでは、変更された `options` 配列を再適用せず、クライアントも置き換えません。
-
-実装は遅延評価する `useState` initializer を使います。ただし、開発環境で initializer が正確に 1 回だけ実行されることには依存しないでください。React Strict Mode は、コミット前にレンダー時の初期化を複数回評価することがあります。重要なのは、コミットされた 1 回のプロバイダーマウントが 1 つのクライアントを保持して公開することです。
-
-アプリケーションが意図的に新しいクライアントを必要とする場合は、プロバイダーを再マウントします。
-
-```tsx
-<ClientProvider key={tenantId} options={[withEndpoint(endpoint)]}>
-  <TenantApplication />
-</ClientProvider>
-```
+`ClientProvider` は渡されたものと同一の instance を公開します。作成と差し替えの時期、および request と realtime resource の lifecycle は呼び出し側が所有します。
 
 ## 最も近いクライアントを読む
 
-`useClient()` は React コンポーネントまたはカスタム Hook 内で呼びます。
+`useClient()` は React component または custom Hook 内で呼び出します。provider の外では例外になり、ネストした provider は通常の React Context の最寄り規則に従います。
 
 ```tsx
 import { useClient } from '@defjs/react'
 
-export function UserProfile({ id }: { id: number }) {
+export function UserProfile() {
   const client = useClient()
-  // Execute commands from effects, event handlers, or application integrations.
   return null
 }
 ```
 
-プロバイダーの外では例外を送出します。入れ子のプロバイダーには通常の React Context の規則が適用され、子孫は最も近いプロバイダーのクライアントを受け取ります。
-
-`ClientProvider` は任意の Core `ClientOption` を受け取ります。
+設定 option はすべて `@defjs/core` から使用します。
 
 ```tsx
-import { withCredentials } from '@defjs/core'
-import { ClientProvider, withEndpoint } from '@defjs/react'
-import { Application } from './Application'
+import { createClient, withCredentials, withEndpoint } from '@defjs/core'
 
-;<ClientProvider options={[withEndpoint('https://api.example.com'), withCredentials(true)]}>
-  <Application />
-</ClientProvider>
+const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
 ```
 
 ## インターセプターファクトリー
 
-アダプターの `withInterceptors(...)` はファクトリーを受け取ります。プロバイダーがクライアントを作るときにファクトリーを評価し、オプション順で結果を追加します。
+interceptor value を作り、core の `withInterceptors(...)` で合成してから client を React に渡します。
 
 ```tsx
-import type { ReactNode } from 'react'
-import { createHttpInterceptor } from '@defjs/core'
-import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
 
-export function ApiBoundary({ children }: { children: ReactNode }) {
-  return (
-    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)]}>{children}</ClientProvider>
-  )
+export function ApiBoundary({ children }: { children: React.ReactNode }) {
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-Core の `withInterceptors(...)` はインターセプター値を受け取ります。サーバー認証情報ファクトリーは、その認証情報を所有するリクエスト境界内に置いてください。
+factory が request 固有の credential を捕捉する場合は、その client を作成する request boundary 内で呼び出してください。
 
 ## HTTP エフェクトのライフサイクルを管理する
 
@@ -149,25 +122,24 @@ Defjs は想定されるリクエスト失敗をタプルで返します。ク�
 
 ## Client Component 境界
 
-パッケージは、アプリケーションの React Server Component 用クライアント境界を自動では作りません。`ClientProvider` は、先頭に `'use client'` を置いたアプリケーション側のモジュールからレンダーしてください。
-
-アプリケーション側に Client Component を用意します。
+パッケージ entry は Client Component boundary です。アプリケーション所有の wrapper で browser client を作成して明示的に提供できます。
 
 ```tsx
 // app/ApiProvider.tsx
 'use client'
 
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
-import { ClientProvider, withEndpoint } from '@defjs/react'
+
+const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
-  return <ClientProvider options={[withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!)]}>{children}</ClientProvider>
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-リクエストヘッダー、Cookie、テナント状態、ユーザー認証情報を扱うサーバーコードは、各サーバーリクエスト境界内で Core クライアントを作成してください。それらの値をモジュールレベルのプロバイダーオプションや、リクエスト間で共有するシングルトンに取り込まないでください。アダプターは並行 SSR の分離を提供しません。
-
-React Server Components、Next.js、hydration、Strict Mode、並行 SSR には、それぞれ固有のライフサイクル境界があります。リクエストスコープの認証情報と provider の再マウントを含め、実際のアプリケーション構成でテストしてください。
+header、cookie、tenant state、credential を扱う server code は request boundary ごとに別の client を作成してください。アダプターは並行 SSR を分離せず、client の処理も破棄しません。
 
 ## リアルタイム処理のライフサイクルを管理する
 
@@ -256,19 +228,21 @@ export function LiveNotifications() {
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { JSX, ReactNode } from 'react'
 
 interface ClientProviderProps {
+  client: Client
   children?: ReactNode
-  options?: ClientOption[]
 }
 
 declare function ClientProvider(props: ClientProviderProps): JSX.Element
 declare function useClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+渡された client を descendants に提供します。`children` は任意です。
+
+最も近い client を返し、存在しなければ例外を投げます。
 
 ## 次に読む
 

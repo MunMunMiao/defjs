@@ -94,6 +94,12 @@ The third item on success is the startup-connection snapshot. It has `generation
 
 Do not log connection URLs. They can contain path identifiers, application query data, and telemetry propagation fields.
 
+## Failure Diagnostics
+
+With the browser WebSocket API, or an injected constructor that exposes only the standard WebSocket event surface, a transport-level handshake failure usually exposes only a stable `RequestError` `kind: 'transport'` and `code` such as `NETWORK_ERROR`, `ABORTED`, or `TIMEOUT`. It cannot promise an HTTP `401`, another handshake status, response headers/body, or Node-specific `unexpected-response` details. A runtime-specific constructor may expose more through its own adapter, but that is not a portable Core contract.
+
+After startup, await `session.closed` and use its stable `kind`, optional close `code`, and optional `wasClean` as the primary terminal diagnostic. The close code is a WebSocket close code, not an HTTP status. Routine logs should keep only reviewed low-cardinality context plus those fields; do not record the connection URL, query, ticket, raw `cause`, or peer/owner `reason`. Add any of them only behind an explicit redaction, access, and retention policy.
+
 ## Live Session
 
 A `WebSocketSession` is one logical session that can span several physical connection attempts.

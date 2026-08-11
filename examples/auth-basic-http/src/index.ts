@@ -16,7 +16,7 @@ export const readMorningPickQueue = defineRequest({
   output: [
     { status: 200, body: struct.object({ openPickLists: struct.number(), warehouse: struct.string() }) },
     { status: 401, body: struct.object({ code: struct.literal('invalid_basic_credentials') }) },
-  ] as const,
+  ],
 })
 
 // Step 2: Return validated queue data while keeping reusable Basic credentials out of business code.

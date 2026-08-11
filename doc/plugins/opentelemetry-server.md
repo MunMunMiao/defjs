@@ -20,7 +20,7 @@ Pass an application-supplied `Tracer` and optional `Meter` to `withOpenTelemetry
 ## Configure the Client
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
@@ -41,6 +41,21 @@ const client = createClient(
 ```
 
 The adapter adds one interceptor for each enabled transport. Options run in normal client order, so placement relative to other interceptors controls which work the spans wrap.
+
+### Operation Identity
+
+Set `operation` statically on each endpoint definition. It is the low-cardinality identity used by spans and metrics:
+
+```typescript
+const readOrder = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders/:id',
+  // input and output omitted
+})
+```
+
+With an operation, span names are `GET orders.read`, `SSE orders.watch`, or `WebSocket orders.connect`, and `defjs.operation` is recorded. Without one, the previous fallback remains unchanged: the HTTP method, `SSE`, or `WebSocket`, with no operation attribute. Never infer identity from a resolved URL or path containing identifiers, and do not copy resolved URLs into custom telemetry or logs.
 
 ## Options
 
@@ -103,12 +118,15 @@ withOpenTelemetryServer({
     requestHook(span, request) {
       span.setAttribute('app.operation', 'list-orders')
     },
-    responseHook(span, response) {
+    responseHook(span, response, request) {
+      span.setAttribute('app.operation', request.operation ?? 'unclassified')
       span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
     },
   },
 })
 ```
+
+The third argument is the original transport `HttpRequest`. Read its explicit `operation`; do not reconstruct identity from `request.endpoint`, a resolved URL, or a path.
 
 Hooks may return `void` or `Promise<void>` and remain non-blocking. Synchronous throws and asynchronous rejections are caught and recorded as `defjs.otel.hook.error` without stopping the client operation; failures while recording that telemetry are also isolated.
 
@@ -118,7 +136,8 @@ Use allowlisted, low-cardinality attributes. Do not attach raw headers, query st
 
 The HTTP interceptor creates a `SpanKind.CLIENT` span and records:
 
-- the request method as the span name because Defjs does not provide a low-cardinality URL template;
+- `${method} ${operation}` as the span name and `defjs.operation` when the endpoint declares a static operation;
+- the request method alone as the unchanged fallback when no operation is declared;
 - `http.request.method`;
 - `url.full`;
 - `server.address` and optional `server.port`;
@@ -195,7 +214,7 @@ Generic WebSocket semantic conventions are not stable here. The package does not
 
 ## Sensitive Data and Coverage Limits
 
-Default `url.full` is resolved from the request endpoint and base endpoint rather than the serialized query string, but resolved paths can still contain sensitive identifiers. WebSocket propagation separately appends fields to the actual query string.
+Default `url.full` is resolved from the request endpoint and base endpoint rather than the serialized query string, but resolved paths can still contain sensitive identifiers. It is transport metadata, never an operation-identity source. Keep `operation` static, do not copy resolved URLs into custom telemetry or logs, and configure SDK/exporter redaction before exporting URL attributes. WebSocket propagation separately appends fields to the actual query string.
 
 `recordException(...)` receives thrown errors and selected close causes. Error messages and stacks can expose sensitive data. Configure SDK-level processors and exporter redaction accordingly; this adapter does not sanitize exceptions for the application.
 

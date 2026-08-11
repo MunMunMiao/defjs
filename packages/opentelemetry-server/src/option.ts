@@ -12,7 +12,7 @@ export interface OpenTelemetryServerHttpOptions {
   /** Hook to customize HTTP span before request */
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
   /** Hook to customize HTTP span after response */
-  responseHook?: (span: Span, res: HttpResponse<unknown>) => Promise<void> | void
+  responseHook?: (span: Span, res: HttpResponse<unknown>, req: HttpRequest) => Promise<void> | void
 }
 
 export interface OpenTelemetryServerSSEOptions {
@@ -21,7 +21,7 @@ export interface OpenTelemetryServerSSEOptions {
   /** Hook to customize SSE span before request */
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
   /** Hook to customize SSE span after stream is returned */
-  responseHook?: (span: Span, stream: EventStreamHandle<unknown>) => Promise<void> | void
+  responseHook?: (span: Span, stream: EventStreamHandle<unknown>, req: HttpRequest) => Promise<void> | void
 }
 
 export interface OpenTelemetryServerWebSocketOptions {
@@ -32,7 +32,7 @@ export interface OpenTelemetryServerWebSocketOptions {
   /** Hook to customize WebSocket span before connect */
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
   /** Hook to customize WebSocket span after session is returned */
-  responseHook?: (span: Span, session: WebSocketSessionLike) => Promise<void> | void
+  responseHook?: (span: Span, session: WebSocketSessionLike, req: HttpRequest) => Promise<void> | void
 }
 
 export interface OpenTelemetryServerOptions {

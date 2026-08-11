@@ -17,6 +17,18 @@ pnpm add @defjs/core
 
 如果 project 使用其他 package manager，請改用相應的 npm、Yarn 或 Bun 指令。`@defjs/core` 是 ESM。在 Node.js 執行時，目前 package metadata 要求 Node 22 或以上。
 
+打包後的 ESM HTTP consumer 已在 Node.js 22、24、26、Bun 1.3.14 及 Deno 2.9.5 完成實測。編譯應用程式後，相應指令形式如下：
+
+```sh
+node dist/index.js
+bun run dist/index.js
+deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+```
+
+Deno 指令使用 `node_modules` 中已安裝的 package；請把 network permission 換成應用程式實際需要的精確 API host。Bun 及 Deno 實測只涵蓋文件所述 HTTP 範圍，並不代表所有 platform API 或 transport。Browser build 使用一般 bundler，以及平台提供的必要 Fetch 與 WebSocket 能力。
+
+跨 runtime 測試只應 assert `error.kind`、`error.code` 等穩定 Defjs field。不要依賴特定 engine 的 native `Error` message 或 JSON parse 文本；Node.js、Bun 及 Deno 可能採用不同格式。
+
 只在應用程式真正需要時安裝 adapter：
 
 | 應用場景                  | Packages                                                                                  |
@@ -47,7 +59,7 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 async function loadUser(id: number) {
@@ -72,9 +84,9 @@ void loadUser(7)
 
 成功時，`error` 是 `null`，`result` 是解碼後的 output data，`response` 是 Defjs `HttpResponse` wrapper。失敗時，`result` 是 `undefined`；如果未收到 response，response wrapper 亦是 `undefined`。
 
-### 為甚麼需要 `as const`
+### 自動保留 status literal
 
-Array 形式的 `output` 以 status literal 區分 2xx success body 與非 2xx error body。`as const` 會把這些 status 值及分組 status array 保留成 readonly literal。省略後，TypeScript 可能把它們 widen 成 `number` 或 `number[]`，令 success 與 error branch 的 type inference 變弱。
+`defineRequest(...)` 對 `output` 使用 const generic，因此 inline array item 及分組 status array 會自動保留 literal value。要區分推斷出的 2xx success body 與非 2xx error body，不再需要 `as const`。
 
 亦可使用 object 形式的 `output`：
 

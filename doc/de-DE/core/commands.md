@@ -33,11 +33,14 @@ Das Objekt für `defineRequest` ist die Endpunktdefinition, `getUser` der Comman
 | Feld           | Bedeutung                                                                                                             |
 | -------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `method`       | String mit der HTTP-Methode.                                                                                          |
+| `operation`    | Optionale explizite statische Identität mit niedriger Kardinalität für Telemetrie und Diagnose.                       |
 | `path`         | Relativer Endpunktpfad mit optionalen Platzhaltern der Form `:name`.                                                  |
 | `input`        | Struct zur strukturellen Dekodierung der Command-Eingabe.                                                             |
 | `build`        | Schemagebundene Projektion von Eingabefeldern auf Request-Bestandteile. Benötigt `input`.                             |
 | `output`       | Zuordnung von Status zu Struct für Response-Dekodierung und Ergebnisableitung.                                        |
 | `responseType` | Optionaler Modus `json`, `text`, `blob` oder `arraybuffer`, nur mit deklariertem `output`; andernfalls nicht erlaubt. |
+
+`operation?: string` ist auch für SSE- und WebSocket-Definitionen verfügbar. Setze den Wert ausdrücklich aus dem Endpunktvertrag, etwa `users.lookup`; leite ihn nicht aus einem gerenderten Pfad, einer URL, Benutzer- oder Mandantendaten, Request-IDs oder anderen Werten hoher Kardinalität ab.
 
 Verwende `struct.request(...)`, wenn sich Command-Felder direkt auf Wire-Abschnitte abbilden lassen:
 
@@ -66,7 +69,7 @@ const createUser = defineRequest({
   output: [
     { status: 201, body: struct.object({ id: struct.number() }) },
     { status: 409, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 const command = createUser({
@@ -88,7 +91,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-Wenn `input` deklariert ist, müssen Pflichtfelder des Objekts und jeder deklarierte Request-Abschnitt angegeben werden. Nur optional oder nullish markierte Felder dürfen fehlen. Abschnitte, die der Endpoint nicht verwendet, sollten nicht deklariert werden.
+Wenn `input` deklariert ist, bleibt das Wurzelargument des Commands erforderlich. Innerhalb von `struct.request(...)` kann ein Abschnitt `path`, `query` oder `headers`, dessen Felder alle optional oder nullish sind, als Ganzes fehlen; das Parsing normalisiert jeden fehlenden Abschnitt zu `{}`. Ein Abschnitt mit mindestens einem Pflichtfeld bleibt erforderlich. Auch ein Body-Abschnitt bleibt erforderlich, selbst wenn seine inneren Objektfelder optional sind.
 
 ```typescript
 const search = defineRequest({
@@ -102,6 +105,35 @@ const search = defineRequest({
 search({ query: { q: 'docs' } })
 // search() // TypeScript error: an argument is required.
 // search({ query: {} }) // TypeScript and runtime error: q is required.
+```
+
+Request-Abschnitte mit ausschließlich optionalen Feldern dürfen fehlen, das Command-Argument selbst bleibt jedoch vorhanden:
+
+```typescript
+const OptionalSections = struct.request({
+  path: struct.object({ locale: struct.string().optional() }),
+  query: struct.object({ page: struct.number().optional() }),
+  headers: struct.object({ traceId: struct.string().optional() }),
+})
+const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
+
+list({})
+list({ query: { page: 2 } })
+
+const [optionalError, normalized] = struct.parse(OptionalSections, {})
+if (optionalError) throw optionalError
+// normalized ist { path: {}, query: {}, headers: {} }.
+
+const filtered = defineRequest({
+  method: 'GET',
+  path: '/items',
+  input: struct.request({
+    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  }),
+})
+
+filtered({ query: { q: 'docs' } })
+// filtered({}) // TypeScript-Fehler: query enthält das erforderliche Feld q.
 ```
 
 Dies prüft strukturelle Anwesenheit und Typen, nicht fachliche Autorisierung, Wertebereiche, Beträge, Formate oder Zustandsübergänge.
@@ -154,7 +186,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }] as const,
+  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
 })
 ```
 
@@ -186,20 +218,25 @@ Der TypeScript-Build-Context ist transportspezifisch. Laufzeitprüfungen weisen 
 ```typescript
 const User = struct.object({ id: struct.number() })
 const NotFound = struct.object({ message: struct.string() })
-const Unauthorized = struct.object({ message: struct.string() })
+const Conflict = struct.object({ conflict: struct.string() })
 
 const objectOutput = {
   '200': User,
   '404': NotFound,
 }
 
-const arrayOutput = [
-  { status: 200, body: User },
-  { status: [401, 403], body: Unauthorized },
-] as const
+const getUsers = defineRequest({
+  method: 'GET',
+  path: '/users',
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+    { status: [409, 422], body: Conflict },
+  ],
+})
 ```
 
-Der HTTP-Erfolgstyp ist die Union der deklarierten 2xx-Bodies. `error.data` ist die Union der deklarierten Nicht-2xx-Bodies. Die Array-Form benötigt `as const`, damit Statusliterale und gruppierte readonly Arrays erhalten bleiben.
+Der HTTP-Erfolgstyp ist die Union der deklarierten 2xx-Bodies. `error.data` bleibt mit dem deklarierten Nicht-2xx-Status korreliert. `defineRequest(...)` verwendet ein Const-Generic, sodass Inline-Statuseinträge und gruppierte Statusarrays ihre Literale ohne `as const` behalten. Nach `client.execute(getUsers())` engt `error.status === 404` die Daten auf `NotFound` ein; der übrige Zweig `409 | 422` engt sie auf `Conflict` ein.
 
 Sobald `output` deklariert ist, braucht jeder zurückgegebene Status ein passendes Struct. Ein nicht zugeordneter 2xx- oder Nicht-2xx-Status erzeugt `UNDECLARED_STATUS`. Ohne `output` wird der Response-Body nicht gelesen oder dekodiert und nach bestem Bemühen abgebrochen; das Ergebnis ist `undefined`.
 

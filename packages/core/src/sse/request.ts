@@ -15,6 +15,7 @@ export function createEventStreamRequest<TInput extends AnyStruct | undefined>(
     baseEndpoint: string
     context?: HttpContext
     input?: TInput
+    operation?: string
     queryParamsSerializer: QueryParamsSerializer
     timeout?: number
     withCredentials?: boolean
@@ -25,6 +26,7 @@ export function createEventStreamRequest<TInput extends AnyStruct | undefined>(
     baseEndpoint: options.baseEndpoint,
     context: options.context,
     input: options.input,
+    operation: options.operation,
     queryParamsSerializer: options.queryParamsSerializer,
     timeout: options.timeout,
     transport: 'sse',

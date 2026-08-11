@@ -33,11 +33,14 @@ const result = await client.execute(command)
 | フィールド     | 意味                                                                                                 |
 | -------------- | ---------------------------------------------------------------------------------------------------- |
 | `method`       | HTTP メソッド文字列。                                                                                |
+| `operation`    | telemetry と診断に使う、任意の明示的で static な低 cardinality identity。                            |
 | `path`         | 任意の `:name` プレースホルダーを含む相対エンドポイントパス。                                        |
 | `input`        | コマンド入力の構造デコードに使う Struct。                                                            |
 | `build`        | 入力フィールドからリクエスト各部への、スキーマに束縛されたプロジェクション。`input` が必要です。     |
 | `output`       | レスポンスデコードと結果の型推論に使う、ステータスから Struct へのマッピング。                       |
 | `responseType` | `output` 宣言時のみ指定できる任意の形式。`json`、`text`、`blob`、`arraybuffer`。未宣言時は禁止です。 |
+
+`operation?: string` は SSE と WebSocket の定義でも使えます。`users.lookup` のように endpoint contract から明示的に設定してください。展開済み path、URL、user/tenant data、request ID、その他の高 cardinality 値から派生させないでください。
 
 コマンドフィールドを通信上のセクションへ直接割り当てる場合は、`struct.request(...)` を使います。
 
@@ -66,7 +69,7 @@ const createUser = defineRequest({
   output: [
     { status: 201, body: struct.object({ id: struct.number() }) },
     { status: 409, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 const command = createUser({
@@ -88,7 +91,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-`input` を宣言した場合、必須オブジェクトフィールドと宣言済みの各リクエストセクションを渡す必要があります。省略できるのは optional または nullish のフィールドだけです。エンドポイントが使わないセクションは宣言しません。
+`input` を宣言した場合、command の root argument は引き続き必須です。`struct.request(...)` 内では、すべてのフィールドが optional または nullish の `path`、`query`、`headers` section を全体として省略できます。Parsing は省略した各 section を `{}` に正規化します。必須フィールドを 1 つでも含む section は必須のままです。内部 object field が optional でも body section は必須です。
 
 ```typescript
 const search = defineRequest({
@@ -102,6 +105,35 @@ const search = defineRequest({
 search({ query: { q: 'docs' } })
 // search() // TypeScript error: an argument is required.
 // search({ query: {} }) // TypeScript and runtime error: q is required.
+```
+
+すべてのフィールドが optional の request section は省略できますが、command argument 自体は必要です。
+
+```typescript
+const OptionalSections = struct.request({
+  path: struct.object({ locale: struct.string().optional() }),
+  query: struct.object({ page: struct.number().optional() }),
+  headers: struct.object({ traceId: struct.string().optional() }),
+})
+const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
+
+list({})
+list({ query: { page: 2 } })
+
+const [optionalError, normalized] = struct.parse(OptionalSections, {})
+if (optionalError) throw optionalError
+// normalized は { path: {}, query: {}, headers: {} } です。
+
+const filtered = defineRequest({
+  method: 'GET',
+  path: '/items',
+  input: struct.request({
+    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  }),
+})
+
+filtered({ query: { q: 'docs' } })
+// filtered({}) // TypeScript error: query には必須の q があります。
 ```
 
 これは構造上の存在と型を検証するものであり、アプリケーションの認可、範囲、金額、形式、状態遷移を検証するものではありません。
@@ -154,7 +186,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }] as const,
+  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
 })
 ```
 
@@ -186,20 +218,25 @@ TypeScript の build コンテキストはトランスポート別です。型�
 ```typescript
 const User = struct.object({ id: struct.number() })
 const NotFound = struct.object({ message: struct.string() })
-const Unauthorized = struct.object({ message: struct.string() })
+const Conflict = struct.object({ conflict: struct.string() })
 
 const objectOutput = {
   '200': User,
   '404': NotFound,
 }
 
-const arrayOutput = [
-  { status: 200, body: User },
-  { status: [401, 403], body: Unauthorized },
-] as const
+const getUsers = defineRequest({
+  method: 'GET',
+  path: '/users',
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+    { status: [409, 422], body: Conflict },
+  ],
+})
 ```
 
-HTTP の成功型は、宣言済み 2xx ボディのユニオンです。`error.data` は宣言済みの 2xx 以外のボディをまとめたユニオンです。配列形式では、ステータスリテラルとグループ化した `readonly` 配列を保持するために `as const` が必要です。
+HTTP の成功型は宣言済み 2xx body のユニオンです。`error.data` は宣言済みの 2xx 以外の status と関連付いたままです。`defineRequest(...)` は const generic を使うため、inline status entry とグループ化した status array は `as const` なしでリテラルを保持します。`client.execute(getUsers())` の後で `error.status === 404` を確認すると data は `NotFound` に、残りの `409 | 422` branch では `Conflict` に絞り込まれます。
 
 `output` を宣言した場合、返されるすべてのステータスに対応する Struct が必要です。未対応の 2xx または 2xx 以外のステータスは `UNDECLARED_STATUS` になります。`output` を省略するとレスポンスボディは読み取りもデコードもされず、ベストエフォートでキャンセルされ、結果は `undefined` です。
 

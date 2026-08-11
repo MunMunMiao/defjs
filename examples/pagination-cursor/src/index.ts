@@ -18,7 +18,7 @@ export const listConversationMessages = defineRequest({
         nextCursor: struct.string().optional(),
       }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Own cursor progress detection and preserve message order across validated pages.

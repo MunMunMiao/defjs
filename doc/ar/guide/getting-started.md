@@ -17,6 +17,18 @@ pnpm add @defjs/core
 
 استخدم أمر npm أو Yarn أو Bun المكافئ إذا كان مشروعك يستعمل مدير حزم آخر. حزمة `@defjs/core` بنمط ESM. وعند تشغيلها على Node.js، تتطلب metadata الحالية Node 22 أو أحدث.
 
+اختُبرت تطبيقات HTTP المستهلكة لحزمة ESM بعد تجميعها على Node.js 22 و24 و26، وBun 1.3.14، وDeno 2.9.5. وبعد تجميع تطبيقك، تكون أشكال الأوامر المقابلة:
+
+```sh
+node dist/index.js
+bun run dist/index.js
+deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+```
+
+يستخدم أمر Deno الحزم المثبتة مسبقًا في `node_modules`؛ استبدل إذن الشبكة بأسماء مضيفي API الدقيقة التي يحتاجها تطبيقك. تغطي اختبارات Bun وDeno جزء HTTP الموثق، وليس كل platform API أو transport. تستخدم تطبيقات المتصفح bundler المعتاد وقدرات Fetch وWebSocket المطلوبة من المنصة.
+
+ينبغي أن تتحقق الاختبارات عبر بيئات التشغيل من حقول Defjs المستقرة مثل `error.kind` و`error.code`. لا تعتمد على رسائل `Error` الأصلية الخاصة بالمحرك أو نص أخطاء تحليل JSON؛ فقد تنسّق Node.js وBun وDeno هذه التفاصيل بصورة مختلفة.
+
 أضف adapter فقط عندما يحتاجه تطبيقك:
 
 | إعداد التطبيق            | الحزم                                                                                     |
@@ -47,7 +59,7 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 async function loadUser(id: number) {
@@ -72,9 +84,9 @@ void loadUser(7)
 
 عند النجاح تكون `error` مساوية لـ `null`، وتكون `result` البيانات بعد فك ترميزها، وتكون `response` غلاف `HttpResponse` من Defjs. عند الفشل تكون `result` مساوية لـ `undefined`؛ ويكون غلاف الاستجابة أيضًا `undefined` إذا لم تصل أي استجابة.
 
-### لماذا تهم `as const`؟
+### تُحفظ قيم status الحرفية تلقائيًا
 
-يستخدم الشكل المصفوفي لـ `output` قيم status الحرفية للفصل بين أجسام نجاح 2xx وأجسام أخطاء non-2xx. تحافظ `as const` على قيم status هذه، وعلى مصفوفات status المجمّعة، كقيم readonly حرفية. من دونها قد يوسّعها TypeScript إلى `number` أو `number[]`، ما يضعف استنتاج فرعي النجاح والخطأ.
+تستخدم `defineRequest(...)` ‏const generic لـ `output`، لذلك تحتفظ عناصر المصفوفة المضمّنة ومصفوفات status المجمّعة بقيمها الحرفية تلقائيًا. لا تحتاج إلى `as const` للفصل في الأنواع المستنتجة بين أجسام نجاح 2xx وأجسام أخطاء non-2xx.
 
 الشكل الكائني لـ output مدعوم أيضًا:
 

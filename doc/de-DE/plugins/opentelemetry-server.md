@@ -20,7 +20,7 @@ Die Anwendung ist verantwortlich für:
 ## Client konfigurieren
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
@@ -41,6 +41,21 @@ const client = createClient(
 ```
 
 Der Adapter fügt für jeden aktivierten Transport einen Interceptor hinzu. Optionen laufen in der normalen Client-Reihenfolge. Die Position relativ zu anderen Interceptors bestimmt daher, welche Arbeit die Spans umschließen.
+
+### Operationsidentität
+
+Setze `operation` statisch in jeder Endpoint-Definition. Sie ist die niedrig-kardinale Identität für Spans und Metriken:
+
+```typescript
+const readOrder = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders/:id',
+  // input and output omitted
+})
+```
+
+Mit Operation heißen Spans etwa `GET orders.read`, `SSE orders.watch` oder `WebSocket orders.connect`; außerdem wird `defjs.operation` erfasst. Ohne Operation bleibt der bisherige Fallback unverändert: HTTP-Methode, `SSE` oder `WebSocket`, ohne Operationsattribut. Leite Identität nie aus einer aufgelösten URL oder einem Pfad mit Identifikatoren ab und kopiere aufgelöste URLs nicht in Telemetrie oder Logs.
 
 ## Optionen
 
@@ -103,12 +118,15 @@ withOpenTelemetryServer({
     requestHook(span, request) {
       span.setAttribute('app.operation', 'list-orders')
     },
-    responseHook(span, response) {
+    responseHook(span, response, request) {
+      span.setAttribute('app.operation', request.operation ?? 'unclassified')
       span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
     },
   },
 })
 ```
+
+Das dritte Argument ist der ursprüngliche Transport-`HttpRequest`. Nutze dessen explizite `operation`; rekonstruiere Identität nicht aus `request.endpoint`, einer aufgelösten URL oder einem Pfad.
 
 Hooks dürfen `void` oder `Promise<void>` zurückgeben und bleiben nicht blockierend. Synchrone Fehler und asynchrone Ablehnungen werden abgefangen und als `defjs.otel.hook.error` aufgezeichnet, ohne die Client-Operation zu stoppen; auch Fehler beim Aufzeichnen dieser Telemetrie werden isoliert.
 
@@ -118,7 +136,8 @@ Verwende erlaubte Attribute mit niedriger Kardinalität. Hänge keine rohen Head
 
 Der HTTP-Interceptor erzeugt einen Span mit `SpanKind.CLIENT` und zeichnet auf:
 
-- die Request-Methode als Span-Namen, da Defjs kein URL-Template mit niedriger Kardinalität bereitstellt;
+- `${method} ${operation}` als Span-Name und `defjs.operation`, wenn der Endpoint eine statische Operation deklariert;
+- nur die Request-Methode als unveränderten Fallback, wenn keine Operation deklariert ist;
 - `http.request.method`;
 - `url.full`;
 - `server.address` und optional `server.port`;
@@ -169,7 +188,7 @@ Allgemeine WebSocket-Semantikkonventionen sind hier nicht stabil. Das Paket erze
 
 ## Sensible Daten und Grenzen der Abdeckung
 
-Das standardmäßige `url.full` wird aus Request-Endpunkt und Basisendpunkt statt aus dem serialisierten Query-String aufgelöst. Aufgelöste Pfade können trotzdem sensible Bezeichner enthalten. Die WebSocket-Propagierung hängt Felder separat an den tatsächlichen Query-String an.
+Das standardmäßige `url.full` wird aus Request-Endpoint und Basis-Endpoint statt aus dem serialisierten Query-String aufgelöst; aufgelöste Pfade können dennoch sensible Identifikatoren enthalten. Es ist Transportmetadatum und niemals Quelle der Operationsidentität. Halte `operation` statisch, kopiere aufgelöste URLs nicht in Telemetrie oder Logs und konfiguriere SDK-/Exporter-Redaction vor dem Export von URL-Attributen. WebSocket-Propagierung hängt Felder separat an den tatsächlichen Query-String an.
 
 `recordException(...)` erhält geworfene Fehler und ausgewählte Close-Ursachen. Fehlermeldungen und Stacks können sensible Daten offenlegen. Konfiguriere die Maskierung sensibler Daten in SDK-Prozessoren und Exportern entsprechend; dieser Adapter bereinigt Exceptions nicht für die Anwendung.
 

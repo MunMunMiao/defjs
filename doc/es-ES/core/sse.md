@@ -141,13 +141,14 @@ async function consumeNotifications(signal: AbortSignal) {
       }
     }
   } finally {
-    stream.close('consumer-finished')
     await stream.closed
   }
 }
 ```
 
 Un `execute` correcto significa que ha terminado el arranque. Los errores posteriores aparecen como rechazo del iterador y en `stream.closed`; no cambian el elemento `error` de la tupla original.
+
+Salir antes de un bucle `for await` mediante `break`, `return` o un error lanzado llama a `return()` del iterador. El stream se cierra automáticamente con `{ code: 'aborted', reason: 'iterator-return' }`; esperar `stream.closed` permite observar ese estado final. Llama a `stream.close(...)` de forma explícita solo cuando el propietario deba cerrar el stream desde fuera de una iteración activa.
 
 ## Eventos no válidos
 
@@ -210,7 +211,7 @@ Los fallos de validación de HTTP o de apertura, los errores fatales al procesar
 
 ## Límites propiedad del endpoint
 
-Un stream admite exactamente un consumidor del iterador asíncrono. Crear un segundo iterador lanza; salir del bucle sigue requiriendo `stream.close(...)` de forma explícita.
+Un stream admite exactamente un consumidor del iterador asíncrono. Crear un segundo iterador lanza. Devolver el iterador, incluido un `break` temprano de `for await`, cierra automáticamente el stream con el motivo `iterator-return`.
 
 Cada definición exige `maxBufferSize` y `maxQueueSize` como enteros seguros positivos. El primero limita cada línea SSE y los datos del evento actual; el segundo limita los eventos parseados en espera. El desbordamiento es fatal y nunca descarta eventos silenciosamente.
 
@@ -227,21 +228,33 @@ Un EOF normal permite vaciar los eventos almacenados. Un error fatal de parser, 
 
 ## Cierre definitivo
 
-`stream.closed` se resuelve con:
+`stream.closed` se resuelve con una unión discriminada:
 
 ```typescript
-interface EventStreamCloseInfo {
-  code: 'eof' | 'aborted' | 'error'
-  reason?: string
-  cause?: unknown
-}
+type EventStreamCloseInfo =
+  | { code: 'eof'; reason?: string; cause?: unknown }
+  | { code: 'aborted'; reason?: string; cause?: unknown }
+  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
 ```
 
 - `eof` indica que el cuerpo de la respuesta terminó con normalidad.
 - `aborted` incluye una llamada explícita a `stream.close(...)` o una ruta de cancelación.
-- `error` indica que los reintentos se detuvieron o se produjo un error definitivo del stream.
+- `error` indica que los reintentos se detuvieron o se produjo un error definitivo del stream. Esta rama siempre incluye un `errorCode` público.
 
-`stream.close(reason)` es idempotente. Cancela el trabajo de transporte activo, cierra la cola para nuevos valores y resuelve `stream.closed`. Un `break` no hace ninguna de esas cosas.
+`EventStreamErrorCode` tiene seis valores estables:
+
+| Error code                  | Significado                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `INVALID_RESPONSE`          | El estado, content type, error de respuesta o body era inválido.                  |
+| `MESSAGE_PROCESSING_FAILED` | Falló la transformación de un evento o un callback del ciclo de vida.             |
+| `PARSER_LIMIT_EXCEEDED`     | Se superó un límite de buffer del parser propiedad del endpoint.                  |
+| `QUEUE_OVERFLOW`            | Los eventos parseados superaron el límite de cola del endpoint.                   |
+| `TIMEOUT`                   | El intento de transporte alcanzó el timeout configurado.                          |
+| `TRANSPORT_ERROR`           | Ocurrió otro fallo definitivo de red, lectura del stream o política de reintento. |
+
+`stream.close(reason)` es idempotente. Cancela el trabajo de transporte activo, cierra la cola para nuevos valores y resuelve `stream.closed`. El `return()` del iterador usa la misma ruta de cierre con el motivo `iterator-return`.
+
+Los logs rutinarios deben registrar solo `close.code` y, en la rama `error`, `close.errorCode`. No registres `reason`, `cause`, eventos sin procesar ni URLs del stream sin una política explícita de redacción y conservación.
 
 La parte de la aplicación que abre el stream es responsable de cerrarlo. Ni el cliente ni un provider de framework lo cierran automáticamente.
 

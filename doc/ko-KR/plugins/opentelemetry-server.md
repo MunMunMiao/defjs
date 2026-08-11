@@ -20,7 +20,7 @@ description: 애플리케이션이 제공한 OpenTelemetry Tracer와 선택적�
 ## 클라이언트 설정
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
@@ -41,6 +41,21 @@ const client = createClient(
 ```
 
 adapter는 활성화된 트랜스포트마다 인터셉터 하나를 추가합니다. 옵션은 일반적인 클라이언트 순서로 실행되므로 다른 인터셉터에 대한 상대 위치에 따라 span이 감싸는 작업 범위가 달라집니다.
+
+### Operation identity
+
+각 endpoint definition에 `operation`을 정적으로 설정하세요. span과 metric이 사용하는 low-cardinality identity입니다.
+
+```typescript
+const readOrder = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders/:id',
+  // input and output omitted
+})
+```
+
+operation이 있으면 span 이름은 `GET orders.read`, `SSE orders.watch`, `WebSocket orders.connect`가 되고 `defjs.operation`도 기록됩니다. 없으면 기존 fallback을 유지해 HTTP method, `SSE`, `WebSocket`을 이름으로 쓰고 operation attribute는 생략합니다. resolved URL이나 identifier가 포함된 path에서 identity를 추론하지 말고 resolved URL을 telemetry나 log에 복사하지 마세요.
 
 ## 옵션
 
@@ -103,12 +118,15 @@ withOpenTelemetryServer({
     requestHook(span, request) {
       span.setAttribute('app.operation', 'list-orders')
     },
-    responseHook(span, response) {
+    responseHook(span, response, request) {
+      span.setAttribute('app.operation', request.operation ?? 'unclassified')
       span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
     },
   },
 })
 ```
+
+세 번째 인자는 원래 transport `HttpRequest`입니다. 명시적 `operation`을 사용하고 `request.endpoint`, resolved URL 또는 path에서 identity를 재구성하지 마세요.
 
 hook은 `void` 또는 `Promise<void>`를 반환할 수 있으며 클라이언트 작업을 막지 않습니다. 동기 throw와 비동기 rejection은 모두 잡아서 작업을 중단하지 않고 `defjs.otel.hook.error`로 기록하며, 해당 telemetry 기록 자체의 실패도 격리합니다.
 
@@ -118,7 +136,8 @@ allowlist로 관리하는 low-cardinality attribute만 사용하세요. 원본 h
 
 HTTP 인터셉터는 `SpanKind.CLIENT` span을 만들고 다음 항목을 기록합니다.
 
-- Defjs가 low-cardinality URL template을 제공하지 않으므로 요청 method를 span 이름으로 사용
+- endpoint가 정적 operation을 선언하면 `${method} ${operation}`을 span 이름으로 사용하고 `defjs.operation`을 기록
+- operation이 없으면 기존 fallback 그대로 request method만 사용
 - `http.request.method`
 - `url.full`
 - `server.address`와 선택적인 `server.port`
@@ -169,7 +188,7 @@ metric 이름은 connection이지만 구현은 재연결 delay 구간을 포함�
 
 ## 민감한 데이터와 coverage 제한
 
-기본 `url.full`은 직렬화된 query string이 아니라 request endpoint와 base endpoint에서 해석되지만, 해석된 path에도 민감한 identifier가 들어갈 수 있습니다. WebSocket propagation은 별도로 실제 query string에 필드를 추가합니다.
+기본 `url.full`은 serialized query string이 아니라 request endpoint와 base endpoint에서 해석되지만 resolved path에는 민감한 identifier가 포함될 수 있습니다. 이는 transport metadata이지 operation identity의 출처가 아닙니다. `operation`을 정적으로 유지하고 resolved URL을 telemetry나 log에 복사하지 말며 URL attribute를 export하기 전에 SDK/exporter redaction을 설정하세요. WebSocket propagation은 별도로 실제 query string에 field를 추가합니다.
 
 `recordException(...)`은 throw된 오류와 일부 close cause를 받습니다. 오류 메시지와 stack에 민감한 데이터가 노출될 수 있습니다. SDK 수준 processor와 exporter에서 민감 정보를 적절히 마스킹하세요. 이 adapter는 애플리케이션을 대신해 exception을 sanitize하지 않습니다.
 

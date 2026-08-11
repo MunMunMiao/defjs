@@ -11,7 +11,7 @@ export const startReportExport = defineRequest({
   method: 'POST',
   path: '/reports/:reportId/exports',
   input: struct.request({ path: struct.object({ reportId: struct.string() }) }),
-  output: [{ status: 202, body: struct.object({ operationId: struct.string() }) }] as const,
+  output: [{ status: 202, body: struct.object({ operationId: struct.string() }) }],
 })
 
 // Step 2: Model pending, completed, and failed poll states before workflow branching.
@@ -28,7 +28,7 @@ export const readReportExport = defineRequest({
         struct.object({ state: struct.literal('failed'), code: struct.string() }),
       ]),
     },
-  ] as const,
+  ],
 })
 
 // Step 3: Compose caller cancellation with one total deadline, clear its timer in finally, enforce the poll cap, and validate the download origin.

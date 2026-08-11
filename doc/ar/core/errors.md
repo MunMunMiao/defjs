@@ -26,7 +26,7 @@ const [socketError, session, startupConnection] = await client.execute(socketCom
 ```typescript
 import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
 
-type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData, number> | TransportError | DefinitionError
 ```
 
 اسم الاتحاد المصدّر هو `RequestError<TErrorData>`.
@@ -38,17 +38,32 @@ type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | Tra
 تنتج استجابة HTTP معلنة من نوع non-2xx الشكل التالي:
 
 ```typescript
-interface HttpStatusError<TErrorData = unknown> {
+interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> {
   kind: 'http'
   code: 'HTTP_STATUS'
-  status: number
+  status: TStatus
   message: string
   data: TErrorData
   response: HttpResponse<unknown>
 }
 ```
 
-يوجد `data` على `HttpStatusError` فقط. ونوعه هو اتحاد كل أجسام output من نوع non-2xx المعلنة لنقطة النهاية. لا يؤدي فحص `error.status` حاليًا إلى تضييق ذلك الاتحاد. استخدم فحصًا بنيويًا أو discriminant يملكه التطبيق عندما تكون لأجسام الحالات المختلفة أشكال مختلفة.
+يأتي generic الخاص بالبيانات أولًا، ثم generic الخاص بالحالة. يظل `RequestError<TErrorData>` العام مناسبًا لحدود التطبيق، بينما يعيد تنفيذ endpoint اتحادًا من فروع `HttpStatusError<Data, Status>` الخاصة بكل status. لذلك يضيّق فحص `error.status` نوع `error.data` إلى body المعلن لذلك status:
+
+```typescript
+const [error] = await client.execute(getUser())
+
+if (error?.kind === 'http') {
+  if (error.status === 404) {
+    console.error(error.data.missing)
+  } else {
+    // في هذا endpoint، تشترك الحالتان المتبقيتان 409 | 422 في conflict body.
+    console.error(error.data.conflict)
+  }
+}
+```
+
+يوجد `data` على `HttpStatusError` فقط. حافظ على الاتحاد المرتبط بالـ status عند حد endpoint بدل توسيعه إلى اتحاد بيانات غير مترابط.
 
 ### أخطاء النقل
 
@@ -130,6 +145,33 @@ if (!error) {
 ```
 
 لا تسجّل `cause` أو `data` أو response headers أو bodies أو URLs من دون سياسة صريحة لحجب البيانات الحساسة والاحتفاظ بها.
+
+### جسر إلى `Error` الأصلي
+
+تتطلب بعض التكاملات رمي `Error` أصلي. أنشئ diagnostic error جديدًا عند ذلك الحد، ولا تعرض افتراضيًا سوى تصنيفَي `kind` و`code` المستقرين وHTTP `status` المتاح:
+
+```typescript
+import type { RequestError } from '@defjs/core'
+
+type DiagnosticRequestError = Error & {
+  readonly code: RequestError<unknown>['code']
+  readonly kind: RequestError<unknown>['kind']
+  readonly status: number | undefined
+}
+
+export function toDiagnosticError(error: RequestError<unknown>): DiagnosticRequestError {
+  const status = error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined
+  const diagnostic = Object.assign(new Error(`Defjs request failed: ${error.kind}/${error.code}`), {
+    code: error.code,
+    kind: error.kind,
+    status,
+  })
+  diagnostic.name = 'DefjsRequestError'
+  return diagnostic
+}
+```
+
+يحتفظ الخطأ الجديد بـ boundary stack الخاص به. لا يرفق أو ينسخ أبدًا `cause` الخام أو رسالته أو cause stack frames أو `data` أو response headers أو bodies أو request/response URLs. قد تحتوي نصوص stack frame نفسها على URLs وsecrets، لذلك لا يُعد نسخ cause frames منتقاة خيارًا افتراضيًا آمنًا. يتحقق المشروع القابل للتشغيل `examples/observability-redacted-logging` من الاحتفاظ بـ status 404، ومن عدم تسرب response data أو cause stack صُمم ليحمل secret.
 
 ## توفر الاستجابة
 

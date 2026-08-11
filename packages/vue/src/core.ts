@@ -1,5 +1,4 @@
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
-import { createClient } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { App, InjectionKey, Plugin } from 'vue'
 import { inject } from 'vue'
 
@@ -9,39 +8,14 @@ import { inject } from 'vue'
 export const HTTP_CLIENT: InjectionKey<Client> = Symbol('HTTP_CLIENT')
 
 /**
- * Create a ClientOption that sets the endpoint for the HTTP client.
+ * Create a Vue Plugin that provides an existing HTTP Client instance.
  *
- * @param endpoint - The base URL for API requests (e.g., 'https://api.example.com')
- * @returns A ClientOption function that configures the endpoint
- */
-export function withEndpoint(endpoint: string): ClientOption {
-  return (config) => {
-    config.endpoint = endpoint
-  }
-}
-
-/**
- * Create a ClientOption that registers interceptors for the HTTP client.
- *
- * @param fns - Factory functions that each return an Interceptor
- * @returns A ClientOption function that configures the interceptors
- */
-export function withInterceptors(...fns: (() => Interceptor)[]): ClientOption {
-  return (config) => {
-    config.interceptors = [...(config.interceptors ?? []), ...fns.map((fn) => fn())]
-  }
-}
-
-/**
- * Create a Vue Plugin that provides an HTTP Client instance.
- *
- * @param feature - ClientOption functions to configure the client
+ * @param client - The Client instance to provide
  * @returns A Vue Plugin object
  */
-export function provideClient(...feature: ClientOption[]): Plugin {
+export function createClientPlugin(client: Client): Plugin {
   return {
     install(app: App) {
-      const client = createClient(...feature)
       app.provide(HTTP_CLIENT, client)
     },
   }
@@ -56,7 +30,7 @@ export function provideClient(...feature: ClientOption[]): Plugin {
 export function injectClient(): Client {
   const client = inject(HTTP_CLIENT)
   if (!client) {
-    throw new Error('No HTTP client provided. Did you forget to call app.use(provideClient(...))?')
+    throw new Error('No HTTP client provided. Did you forget to call app.use(createClientPlugin(client))?')
   }
   return client
 }

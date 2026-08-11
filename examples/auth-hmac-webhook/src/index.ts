@@ -24,7 +24,7 @@ export const deliverPaymentWebhook = defineRequest({
   method: 'POST',
   path: '/webhooks/payments',
   input: struct.request({ body: struct.json(paymentCapturedStruct) }),
-  output: [{ status: 204, body: struct.null() }] as const,
+  output: [{ status: 204, body: struct.null() }],
 })
 
 function importHmacKey(secret: Uint8Array): Promise<CryptoKey> {

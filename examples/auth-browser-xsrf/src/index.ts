@@ -5,7 +5,7 @@ export const updateOperatorProfile = defineRequest({
   method: 'PUT',
   path: '/api/operators/operator-7/profile',
   input: struct.request({ body: struct.json(struct.object({ displayName: struct.string() })) }),
-  output: [{ status: 200, body: struct.object({ updated: struct.boolean() }) }] as const,
+  output: [{ status: 200, body: struct.object({ updated: struct.boolean() }) }],
 })
 
 // Step 2: Keep profile-saving code independent of same-origin token placement.

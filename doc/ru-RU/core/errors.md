@@ -26,7 +26,7 @@ const [socketError, session, startupConnection] = await client.execute(socketCom
 ```typescript
 import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
 
-type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData, number> | TransportError | DefinitionError
 ```
 
 Экспортируемое объединение называется `RequestError<TErrorData>`.
@@ -38,17 +38,32 @@ type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | Tra
 Объявленный HTTP-ответ не-2xx создаёт:
 
 ```typescript
-interface HttpStatusError<TErrorData = unknown> {
+interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> {
   kind: 'http'
   code: 'HTTP_STATUS'
-  status: number
+  status: TStatus
   message: string
   data: TErrorData
   response: HttpResponse<unknown>
 }
 ```
 
-Поле `data` есть только у `HttpStatusError`. Его тип — объединение тел всех объявленных не-2xx ответов эндпоинта. Проверка `error.status` сейчас не сужает это объединение. Если тела разных статусов имеют разную форму, используйте структурную проверку или собственный дискриминатор приложения.
+Параметры типа идут в порядке: данные, затем статус. Широкий экспортируемый `RequestError<TErrorData>` по-прежнему удобен на границах приложения, а выполнение эндпоинта возвращает объединение веток `HttpStatusError<Data, Status>` для конкретных статусов. Поэтому проверка `error.status` сужает `error.data` до тела, объявленного для этого статуса:
+
+```typescript
+const [error] = await client.execute(getUser())
+
+if (error?.kind === 'http') {
+  if (error.status === 404) {
+    console.error(error.data.missing)
+  } else {
+    // Для этого эндпоинта оставшиеся статусы 409 | 422 используют одно тело конфликта.
+    console.error(error.data.conflict)
+  }
+}
+```
+
+Поле `data` есть только у `HttpStatusError`. Сохраняйте это объединение, связанное со статусом, на границе эндпоинта и не расширяйте его до несвязанного объединения данных.
 
 ### Транспортные ошибки
 
@@ -130,6 +145,33 @@ if (!error) {
 ```
 
 Не записывайте в журнал `cause`, `data`, заголовки и тела ответов или URL без явной политики маскирования и хранения.
+
+### Мост к нативному `Error`
+
+Некоторым интеграциям требуется выбрасываемый нативный `Error`. Создавайте новую диагностическую ошибку на этой границе и по умолчанию раскрывайте только стабильные классификации `kind`, `code` и доступный HTTP-`status`:
+
+```typescript
+import type { RequestError } from '@defjs/core'
+
+type DiagnosticRequestError = Error & {
+  readonly code: RequestError<unknown>['code']
+  readonly kind: RequestError<unknown>['kind']
+  readonly status: number | undefined
+}
+
+export function toDiagnosticError(error: RequestError<unknown>): DiagnosticRequestError {
+  const status = error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined
+  const diagnostic = Object.assign(new Error(`Defjs request failed: ${error.kind}/${error.code}`), {
+    code: error.code,
+    kind: error.kind,
+    status,
+  })
+  diagnostic.name = 'DefjsRequestError'
+  return diagnostic
+}
+```
+
+Новая ошибка сохраняет собственный stack, созданный на границе. Мост никогда не прикрепляет и не копирует исходный `cause`, его сообщение или stack frames, `data`, заголовки или тела ответов, а также URL запроса и ответа. Сами строки stack frame могут содержать URL и секреты, поэтому копирование выбранных frames причины не является безопасным поведением по умолчанию. Рабочий проект `examples/observability-redacted-logging` проверяет сохранённый статус 404 и гарантирует, что данные ответа и намеренно содержащий секрет stack причины не раскрываются.
 
 ## Доступность ответа
 

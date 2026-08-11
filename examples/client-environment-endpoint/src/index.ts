@@ -9,7 +9,7 @@ export const getBillingHealth = defineRequest({
       status: 200,
       body: struct.object({ service: struct.literal('billing'), state: struct.literal('ready') }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Reject untrusted endpoint components before giving the complete HTTPS base URL to Defjs.

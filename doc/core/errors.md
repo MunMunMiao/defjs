@@ -26,7 +26,7 @@ On failure, the second item is `undefined`. The third item can also be `undefine
 ```typescript
 import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
 
-type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData, number> | TransportError | DefinitionError
 ```
 
 The exported union is named `RequestError<TErrorData>`.
@@ -38,17 +38,32 @@ Branch on `kind`, then on `code` where needed.
 A declared non-2xx HTTP response produces:
 
 ```typescript
-interface HttpStatusError<TErrorData = unknown> {
+interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> {
   kind: 'http'
   code: 'HTTP_STATUS'
-  status: number
+  status: TStatus
   message: string
   data: TErrorData
   response: HttpResponse<unknown>
 }
 ```
 
-`data` exists only on `HttpStatusError`. Its type is the union of all declared non-2xx output bodies for that endpoint. Checking `error.status` does not currently narrow that union. Use an application-owned structural or discriminant check when different status bodies have different shapes.
+The generics are data first and status second. The broad exported `RequestError<TErrorData>` remains convenient for application boundaries, while endpoint execution returns a union of status-specific `HttpStatusError<Data, Status>` branches. Checking `error.status` therefore narrows `error.data` to the body declared for that status:
+
+```typescript
+const [error] = await client.execute(getUser())
+
+if (error?.kind === 'http') {
+  if (error.status === 404) {
+    console.error(error.data.missing)
+  } else {
+    // For this endpoint, the remaining 409 | 422 statuses share the conflict body.
+    console.error(error.data.conflict)
+  }
+}
+```
+
+`data` exists only on `HttpStatusError`. Preserve this status-correlated union at the endpoint boundary instead of widening it into one unrelated data union.
 
 ### Transport Errors
 
@@ -130,6 +145,33 @@ if (!error) {
 ```
 
 Do not log `cause`, `data`, response headers, bodies, or URLs without an explicit redaction and retention policy.
+
+### Native `Error` Bridge
+
+Some integrations require a thrown native `Error`. Create a new diagnostic error at that boundary and expose only the stable `kind`, `code`, and available HTTP `status` classification by default:
+
+```typescript
+import type { RequestError } from '@defjs/core'
+
+type DiagnosticRequestError = Error & {
+  readonly code: RequestError<unknown>['code']
+  readonly kind: RequestError<unknown>['kind']
+  readonly status: number | undefined
+}
+
+export function toDiagnosticError(error: RequestError<unknown>): DiagnosticRequestError {
+  const status = error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined
+  const diagnostic = Object.assign(new Error(`Defjs request failed: ${error.kind}/${error.code}`), {
+    code: error.code,
+    kind: error.kind,
+    status,
+  })
+  diagnostic.name = 'DefjsRequestError'
+  return diagnostic
+}
+```
+
+The newly created error keeps its own boundary stack. It never attaches or copies the raw `cause`, cause message, cause stack frames, `data`, response headers or bodies, or request and response URLs. Stack frame strings can themselves contain URLs and secrets, so copying selected cause frames is not a safe default. The runnable `examples/observability-redacted-logging` project asserts the retained 404 status while checking that response data and a crafted secret-bearing cause stack do not leak.
 
 ## Adapt a Tuple at the Domain Boundary
 

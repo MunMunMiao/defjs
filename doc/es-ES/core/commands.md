@@ -33,11 +33,14 @@ En este caso, el objeto pasado a `defineRequest` es la definición del endpoint,
 | Campo          | Significado                                                                                                     |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
 | `method`       | Cadena con el método HTTP.                                                                                      |
+| `operation`    | Identidad estática explícita opcional de baja cardinalidad para telemetría y diagnóstico.                       |
 | `path`         | Ruta relativa del endpoint, con placeholders `:name` opcionales.                                                |
 | `input`        | Struct que decodifica estructuralmente la entrada del comando.                                                  |
 | `build`        | Proyección vinculada al esquema que lleva campos de entrada a partes de la petición. Requiere `input`.          |
 | `output`       | Relación entre estados y Structs para decodificar la respuesta e inferir el resultado.                          |
 | `responseType` | Modo opcional `json`, `text`, `blob` o `arraybuffer`, solo si declaras `output`; de lo contrario no se permite. |
+
+`operation?: string` también está disponible en definiciones SSE y WebSocket. Defínelo de forma explícita desde el contrato del endpoint, por ejemplo `users.lookup`; no lo derives de una ruta renderizada, URL, datos de usuario o tenant, IDs de petición ni otros valores de alta cardinalidad.
 
 Usa `struct.request(...)` cuando los campos del comando correspondan directamente a secciones del protocolo:
 
@@ -66,7 +69,7 @@ const createUser = defineRequest({
   output: [
     { status: 201, body: struct.object({ id: struct.number() }) },
     { status: 409, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 const command = createUser({
@@ -88,7 +91,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-Cuando declaras `input`, debes proporcionar los campos obligatorios del objeto y todas las secciones de petición declaradas. Solo pueden omitirse los campos optional o nullish. No declares secciones que el endpoint no utilice.
+Cuando declaras `input`, el argumento raíz del comando sigue siendo obligatorio. Dentro de `struct.request(...)`, una sección `path`, `query` o `headers` cuyos campos sean todos optional o nullish puede omitirse por completo; el parsing normaliza cada sección omitida a `{}`. Una sección con cualquier campo obligatorio sigue siendo obligatoria. Las secciones body también siguen siendo obligatorias aunque los campos de su objeto interno sean optional.
 
 ```typescript
 const search = defineRequest({
@@ -102,6 +105,35 @@ const search = defineRequest({
 search({ query: { q: 'docs' } })
 // search() // TypeScript error: an argument is required.
 // search({ query: {} }) // TypeScript and runtime error: q is required.
+```
+
+Las secciones de petición cuyos campos sean todos optional pueden omitirse, pero el argumento del comando sigue presente:
+
+```typescript
+const OptionalSections = struct.request({
+  path: struct.object({ locale: struct.string().optional() }),
+  query: struct.object({ page: struct.number().optional() }),
+  headers: struct.object({ traceId: struct.string().optional() }),
+})
+const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
+
+list({})
+list({ query: { page: 2 } })
+
+const [optionalError, normalized] = struct.parse(OptionalSections, {})
+if (optionalError) throw optionalError
+// normalized es { path: {}, query: {}, headers: {} }.
+
+const filtered = defineRequest({
+  method: 'GET',
+  path: '/items',
+  input: struct.request({
+    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  }),
+})
+
+filtered({ query: { q: 'docs' } })
+// filtered({}) // Error de TypeScript: query contiene el campo obligatorio q.
 ```
 
 Esto valida la presencia y el tipo estructural, no reglas de aplicación sobre autorización, rangos, importes, formatos o transiciones de estado.
@@ -154,7 +186,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }] as const,
+  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
 })
 ```
 
@@ -186,20 +218,25 @@ El contexto de build de TypeScript depende del transporte. Las comprobaciones en
 ```typescript
 const User = struct.object({ id: struct.number() })
 const NotFound = struct.object({ message: struct.string() })
-const Unauthorized = struct.object({ message: struct.string() })
+const Conflict = struct.object({ conflict: struct.string() })
 
 const objectOutput = {
   '200': User,
   '404': NotFound,
 }
 
-const arrayOutput = [
-  { status: 200, body: User },
-  { status: [401, 403], body: Unauthorized },
-] as const
+const getUsers = defineRequest({
+  method: 'GET',
+  path: '/users',
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+    { status: [409, 422], body: Conflict },
+  ],
+})
 ```
 
-El tipo de éxito HTTP es la unión de los cuerpos 2xx declarados. `error.data` es la unión de los cuerpos no 2xx declarados. En la forma de array necesitas `as const` para conservar los estados literales y los arrays agrupados de solo lectura.
+El tipo de éxito HTTP es la unión de los cuerpos 2xx declarados. `error.data` se mantiene correlacionado con el estado no 2xx declarado. `defineRequest(...)` usa un const generic, por lo que las entradas inline y los arrays agrupados de estados conservan sus literales sin `as const`. Después de `client.execute(getUsers())`, comprobar `error.status === 404` estrecha los datos a `NotFound`; la rama restante `409 | 422` los estrecha a `Conflict`.
 
 Cuando declaras `output`, cada estado devuelto debe tener un Struct correspondiente. Un estado 2xx o no 2xx sin declarar produce `UNDECLARED_STATUS`. Si omites `output`, el cuerpo no se lee ni se decodifica y se cancela con el mejor esfuerzo; el resultado es `undefined`.
 

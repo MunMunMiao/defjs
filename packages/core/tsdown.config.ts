@@ -2,7 +2,10 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { defineConfig, type UserConfig } from 'tsdown'
 import { copyPackageDocs } from '../../scripts/copy-package-docs.mjs'
 
-const entry = 'src/public_api.ts'
+const entries = {
+  http: 'src/http_entry.ts',
+  index: 'src/public_api.ts',
+}
 
 async function writeDistPackageJson(): Promise<void> {
   const packageJson = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8')) as Record<string, unknown>
@@ -16,6 +19,10 @@ async function writeDistPackageJson(): Promise<void> {
     '.': {
       types: './index.d.ts',
       default: './index.js',
+    },
+    './http': {
+      types: './http.d.ts',
+      default: './http.js',
     },
   }
   packageJson['unpkg'] = './index.min.js'
@@ -39,7 +46,7 @@ export default defineConfig([
     clean: true,
     dts: true,
     entry: {
-      index: entry,
+      index: entries.index,
     },
     inputOptions: {
       resolve: {
@@ -60,9 +67,26 @@ export default defineConfig([
     target: false,
     tsconfig: 'tsconfig.build.json',
     clean: false,
+    dts: true,
+    entry: {
+      http: entries.http,
+    },
+    inputOptions: {
+      resolve: {
+        mainFields: ['module', 'main'],
+      },
+    },
+  } satisfies UserConfig,
+  {
+    format: 'esm',
+    outDir: 'dist',
+    platform: 'neutral',
+    target: false,
+    tsconfig: 'tsconfig.build.json',
+    clean: false,
     dts: false,
     entry: {
-      'index.min': entry,
+      'index.min': entries.index,
     },
     minify: true,
     inputOptions: {

@@ -58,6 +58,28 @@ describe('sse browser runtime', () => {
     expect(open?.response?.error).toBeUndefined()
   })
 
+  test('should close an open stream when browser iteration stops early', async () => {
+    const useStream = defineEventStream({
+      maxBufferSize: 1024,
+      maxQueueSize: 16,
+      events: { tick: struct.string() },
+      path: '/sse/infinite',
+    })
+    const [error, stream] = await baseClient.execute(useStream())
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected event stream')
+    }
+
+    for await (const event of stream) {
+      expect(event.event).toBe('tick')
+      break
+    }
+
+    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted', reason: 'iterator-return' })
+  })
+
   test('should skip unexpected events in real browsers', async () => {
     const useStream = defineEventStream({
       maxBufferSize: 1024,

@@ -94,6 +94,12 @@ En cas de succès, le troisième élément est l'instantané initial avec `gener
 
 Ne journalisez pas les URL de connexion. Elles peuvent contenir des identifiants de chemin, des données applicatives de query et des champs de propagation de télémétrie.
 
+## Diagnostic des échecs
+
+Avec l’API WebSocket du navigateur ou un constructeur injecté qui n’expose que les événements WebSocket standard, un échec de transport pendant le handshake ne fournit généralement qu’un `RequestError` stable avec `kind: 'transport'` et un `code` tel que `NETWORK_ERROR`, `ABORTED` ou `TIMEOUT`. Il ne peut pas garantir un HTTP `401`, un autre statut de handshake, les headers/body de réponse ni les détails `unexpected-response` propres à Node. Un constructeur spécifique au runtime peut en exposer davantage via son adapter, mais ce n’est pas un contrat Core portable.
+
+Après le démarrage, attendez `session.closed` et utilisez son `kind`, son close `code` facultatif et son `wasClean` facultatif comme diagnostic terminal principal. Le close code est un code WebSocket, pas un statut HTTP. Les logs courants doivent se limiter au contexte validé à faible cardinalité et à ces champs ; ne journalisez ni URL, ni query, ni ticket, ni `cause` brut, ni `reason`. N’élargissez la collecte qu’avec une politique explicite de redaction, d’accès et de rétention.
+
 ## Session active
 
 Une `WebSocketSession` représente une session logique qui peut couvrir plusieurs tentatives de connexion physique.

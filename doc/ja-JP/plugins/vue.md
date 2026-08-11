@@ -5,64 +5,39 @@ description: Vue の injection で Defjs クライアントを共有し、API �
 
 # `@defjs/vue`
 
-`@defjs/vue` は `@defjs/core` 用の薄い injection アダプターです。次をエクスポートします。
-
-- `provideClient(...)`: Core クライアントを作成して provide する Vue プラグイン
-- `injectClient()`: 最も近い階層で inject されたクライアントを返す関数
-- `HTTP_CLIENT`: 上書きに使う injection キー
-- アダプターの `withEndpoint(...)` と、インターセプターファクトリー用の `withInterceptors(...)` ヘルパー
-
-トランスポート動作、キャッシュ、状態管理、再試行、Nuxt モジュールは追加しません。`@defjs/core` と Vue と一緒にインストールし、これらの責務はアプリケーションの composable、store、フレームワーク統合に置いてください。
+このパッケージは `@defjs/core` 用の薄い injection アダプターです。`createClientPlugin(client)` はアプリケーションが作成した client を提供し、`injectClient()` は最も近い instance を返し、`HTTP_CLIENT` は native subtree override に使えます。client factory、cache、retry、resource lifecycle は追加しません。
 
 ## プラグインをインストールする
 
-プラグインをインストールするたびに、クライアントが 1 つ作られます。
+`@defjs/core` で client を作成・設定し、その同一 instance 用の plugin を install します。
 
 ```typescript
 // main.ts
+import { createClient, withEndpoint } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
-import { provideClient, withEndpoint } from '@defjs/vue'
 import App from './App.vue'
 
+const client = createClient(withEndpoint('https://api.example.com'))
 const app = createApp(App)
 
-app.use(provideClient(withEndpoint('https://api.example.com')))
-
+app.use(createClientPlugin(client))
 app.mount('#app')
 ```
 
-`provideClient(...options)` は Vue アダプターが再エクスポートまたは再実装しているオプションだけでなく、`@defjs/core` の任意の `ClientOption` を受け取ります。
-
-```typescript
-import { withCredentials, withSSEReconnect } from '@defjs/core'
-import { provideClient, withEndpoint } from '@defjs/vue'
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEReconnect({ attempts: 3 })))
-```
-
-プラグインのインストール時にオプションが実行され、クライアントが作られます。同じプラグインオブジェクトを別のアプリケーションにインストールすると、別のクライアントが作られます。
+plugin は渡された instance を提供するだけです。client の作成、clone、差し替え、dispose は行いません。
 
 ## 最も近いクライアントを inject する
 
-`injectClient()` はコンポーネントの `setup`、`<script setup>`、または有効な composable/injection コンテキスト内で呼びます。
+`injectClient()` は `setup`、`<script setup>`、または有効な injection context 内で呼び出します。`HTTP_CLIENT` がなければ例外になり、Vue の通常の最寄り provider 規則が適用されます。
+
+subtree override には公開 key と Vue native の `provide` を使います。
 
 ```vue
 <script setup lang="ts">
-import { injectClient } from '@defjs/vue'
-
-const client = injectClient()
-</script>
-```
-
-`HTTP_CLIENT` が見つからなければ例外を送出します。任意のモジュールスコープからは呼ばないでください。
-
-Vue の通常の最寄りプロバイダー規則が適用されます。コンポーネントは子孫向けにクライアントを上書きできます。
-
-```vue
-<script setup lang="ts">
-import { provide } from 'vue'
 import { createClient, withEndpoint } from '@defjs/core'
 import { HTTP_CLIENT } from '@defjs/vue'
+import { provide } from 'vue'
 
 const scopedClient = createClient(withEndpoint('https://preview.example.com'))
 provide(HTTP_CLIENT, scopedClient)
@@ -73,34 +48,25 @@ provide(HTTP_CLIENT, scopedClient)
 </template>
 ```
 
-このサブツリーの子孫が `injectClient()` を呼ぶと `scopedClient` を受け取ります。サブツリー外の兄弟要素は、引き続きアプリケーションレベルのクライアントを受け取ります。
-
 ## インターセプターファクトリー
 
-アダプターの `withInterceptors(...)` はインターセプターのインスタンスではなくファクトリーを受け取ります。クライアントの作成時にファクトリーを評価し、オプション順で結果を追加します。
+interceptor value を作り、core の `withInterceptors(...)` で合成してから plugin を install します。
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)))
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
+app.use(createClientPlugin(client))
 ```
 
-Core の `withInterceptors(...)` は作成済みインターセプター値を受け取るため、挙動が異なります。サーバー認証情報ファクトリーはリクエストスコープに保ってください。
+factory が request 固有の credential を捕捉する場合は、その client を作成する request boundary 内で呼び出してください。
 
 ## 入力の変更に追従する
 
@@ -163,30 +129,22 @@ import した `getUser` コマンドビルダーがエンドポイント契約�
 
 ## SSR 境界
 
-設定がブラウザーで安全に扱え、リクエストに依存しないなら、ブラウザーアプリケーションはプラグインクライアントを 1 つインストールできます。
-
-SSR では、リクエストヘッダー、Cookie、ユーザーデータ、テナントデータを、リクエスト間で共有するアプリケーションのシングルトンに取り込まないでください。各サーバーリクエスト境界内で Core クライアントを作り、そのリクエストのレンダーツリー内だけで渡すか provide します。
-
-アダプターは、並行する SSR リクエスト間でアプリケーションのクロージャを分離しません。どの受信ヘッダーや Cookie を転送してよいかも判断しません。
-
-Nuxt のクライアントプラグインは、ブラウザー側の利用コード向けに Vue アダプターをインストールできます。
+browser app には browser-safe な client を install できます。SSR では server request boundary ごとに別の core client を作成し、対応する app にその instance だけを提供してください。header、cookie、tenant state、credential を request 間で共有しないでください。
 
 ```typescript
 // plugins/defjs.client.ts
-import { provideClient, withEndpoint } from '@defjs/vue'
+import { createClient, withEndpoint } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 
 export default defineNuxtPlugin((nuxtApp) => {
-  nuxtApp.vueApp.use(provideClient(withEndpoint(useRuntimeConfig().public.apiBase)))
+  const client = createClient(withEndpoint(useRuntimeConfig().public.apiBase))
+  nuxtApp.vueApp.use(createClientPlugin(client))
 })
 ```
 
-`.client.ts` 接尾辞があるため、これはブラウザー専用です。サーバーリクエスト用のクライアントではなく、SSR 認証情報の転送には使えません。Nuxt アプリケーションでは、実際に使うプラグイン、route handler、hydration 設定と合わせてこの境界をテストしてください。
-
 ## リソースの所有権
 
-Vue プロバイダーをインストールまたはアンマウントしても、HTTP 処理の中断や SSE/WebSocket リソースのクローズは行われません。アダプターはクライアントを作るだけで、Core クライアントに `dispose()` メソッドはありません。
-
-リアルタイム処理を開始したコンポーネント、composable、ルート、ストアは、次を行う必要があります。
+plugin の install や unmount は HTTP を abort せず、SSE や WebSocket resource も閉じません。client を作成した呼び出し側が、それを通じて開始したすべての処理を所有します。
 
 - 非同期起動の前または同時にクリーンアップを登録する
 - スコープ終了時に起動処理を中断する
@@ -200,15 +158,19 @@ Vue プロバイダーをインストールまたはアンマウントしても�
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { InjectionKey, Plugin } from 'vue'
 
 declare const HTTP_CLIENT: InjectionKey<Client>
-declare function provideClient(...options: ClientOption[]): Plugin
+declare function createClientPlugin(client: Client): Plugin
 declare function injectClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+渡された client instance を提供する Vue plugin を作成します。
+
+最も近い client を返し、存在しなければ例外を投げます。
+
+native subtree provider 用の公開 injection key です。
 
 ## 次に読む
 

@@ -24,7 +24,7 @@ export const getSupportAgent = defineRequest({
         source: struct.or(struct.literal('cache'), struct.literal('origin')),
       }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Keep profile lookup agnostic to which source satisfies the command.

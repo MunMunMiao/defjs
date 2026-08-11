@@ -7,7 +7,7 @@ export const getCarrierTemplate = defineRequest({
   path: '/carrier-templates/:id',
   responseType: 'arraybuffer',
   input: struct.request({ path: struct.object({ id: struct.string() }) }),
-  output: [{ status: 200, body: struct.arrayBuffer() }] as const,
+  output: [{ status: 200, body: struct.arrayBuffer() }],
 })
 
 // Step 2: Abort on the first over-limit progress event and verify final size before returning bytes.

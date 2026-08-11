@@ -21,7 +21,7 @@ export async function consumeCaseAssignments(
   signal: AbortSignal,
   consume: (assignment: CaseAssignment) => void | Promise<void>,
 ) {
-  const [error, stream] = await client.execute(caseAssignmentEvents(), { abort: signal })
+  const [error, stream] = await client.execute(caseAssignmentEvents(), { signal })
   if (error) throw error
 
   const closeOnAbort = () => stream.close(signal.reason)

@@ -41,12 +41,12 @@ export function createDefinitionError(code: DefinitionError['code'], cause: unkn
   }
 }
 
-export function createHttpStatusError<TErrorData = unknown>(
-  status: number,
+export function createHttpStatusError<TErrorData = unknown, TStatus extends number = number>(
+  status: TStatus,
   message: string,
   response: HttpResponse<unknown>,
   data?: TErrorData,
-): HttpStatusError<TErrorData> {
+): HttpStatusError<TErrorData, TStatus> {
   return {
     code: 'HTTP_STATUS',
     data: data as TErrorData,

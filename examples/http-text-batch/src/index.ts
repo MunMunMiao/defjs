@@ -5,7 +5,7 @@ export const writeMetricLines = defineRequest({
   method: 'POST',
   path: '/metrics/write',
   input: struct.request({ body: struct.text() }),
-  output: [{ status: 204, body: struct.null() }] as const,
+  output: [{ status: 204, body: struct.null() }],
 })
 
 export const MAX_BATCH_LINES = 500

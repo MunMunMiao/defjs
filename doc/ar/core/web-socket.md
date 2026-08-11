@@ -94,6 +94,12 @@ type SocketAwaitResult<TIncoming, TOutgoing> =
 
 لا تسجّل connection URLs. فقد تحتوي على path identifiers وapplication query data وحقول نشر telemetry.
 
+## تشخيص الفشل
+
+مع browser WebSocket API أو constructor محقون لا يعرض إلا standard WebSocket events، لا يكشف transport-level handshake failure عادةً إلا `RequestError` ثابتًا من `kind: 'transport'` و`code` مثل `NETWORK_ERROR` أو `ABORTED` أو `TIMEOUT`. لا يمكن ضمان HTTP `401` أو handshake status آخر أو response headers/body أو تفاصيل Node الخاصة بـ `unexpected-response`. قد يكشف constructor خاص بالـ runtime معلومات إضافية عبر adapter خاص به، لكن ذلك ليس Core contract قابلًا للنقل.
+
+بعد startup انتظر `session.closed` واستخدم `kind` وclose `code` الاختياري و`wasClean` الاختياري كتشخيص نهائي أساسي. Close code هو WebSocket close code وليس HTTP status. يجب أن تقتصر routine logs على context منخفض cardinality خضع للمراجعة وهذه الحقول؛ لا تسجّل connection URL أو query أو ticket أو raw `cause` أو `reason`. لا توسعها إلا مع policy صريحة للـ redaction والوصول والاحتفاظ.
+
 ## الجلسة الحية
 
 تمثل `WebSocketSession` جلسة منطقية واحدة قد تمتد عبر عدة محاولات اتصال فعلية.

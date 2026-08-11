@@ -33,11 +33,14 @@ const result = await client.execute(command)
 | Поле           | Значение                                                                                                        |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
 | `method`       | Строка с HTTP-методом.                                                                                          |
+| `operation`    | Необязательная явная статическая низкокардинальная идентичность для телеметрии и диагностики.                   |
 | `path`         | Относительный путь эндпоинта с необязательными плейсхолдерами `:name`.                                          |
 | `input`        | Struct для структурного декодирования входных данных команды.                                                   |
 | `build`        | Проекция входных полей в части запроса, привязанная к схеме. Требует `input`.                                   |
 | `output`       | Соответствие статусов Struct для декодирования ответа и вывода типа результата.                                 |
 | `responseType` | Необязательный режим `json`, `text`, `blob` или `arraybuffer`, только при объявленном `output`; иначе запрещён. |
+
+`operation?: string` доступен также в описаниях SSE и WebSocket. Задавайте его явно из контракта эндпоинта, например `users.lookup`; не выводите его из подставленного пути, URL, данных пользователя или tenant, ID запроса и других высококардинальных значений.
 
 Используйте `struct.request(...)`, когда поля команды напрямую соответствуют частям запроса:
 
@@ -66,7 +69,7 @@ const createUser = defineRequest({
   output: [
     { status: 201, body: struct.object({ id: struct.number() }) },
     { status: 409, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 const command = createUser({
@@ -88,7 +91,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-Если объявлен `input`, нужно передать обязательные поля объекта и каждую объявленную часть запроса. Пропускать можно только optional- и nullish-поля. Не объявляйте части, которые endpoint не использует.
+Если объявлен `input`, корневой аргумент команды остаётся обязательным. Внутри `struct.request(...)` часть `path`, `query` или `headers`, все поля которой optional или nullish, можно пропустить целиком; parsing нормализует каждую пропущенную часть в `{}`. Часть хотя бы с одним обязательным полем остаётся обязательной. Часть body также остаётся обязательной, даже если поля её внутреннего объекта optional.
 
 ```typescript
 const search = defineRequest({
@@ -102,6 +105,35 @@ const search = defineRequest({
 search({ query: { q: 'docs' } })
 // search() // TypeScript error: an argument is required.
 // search({ query: {} }) // TypeScript and runtime error: q is required.
+```
+
+Части запроса только с optional-полями можно пропускать, но сам аргумент команды остаётся:
+
+```typescript
+const OptionalSections = struct.request({
+  path: struct.object({ locale: struct.string().optional() }),
+  query: struct.object({ page: struct.number().optional() }),
+  headers: struct.object({ traceId: struct.string().optional() }),
+})
+const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
+
+list({})
+list({ query: { page: 2 } })
+
+const [optionalError, normalized] = struct.parse(OptionalSections, {})
+if (optionalError) throw optionalError
+// normalized равен { path: {}, query: {}, headers: {} }.
+
+const filtered = defineRequest({
+  method: 'GET',
+  path: '/items',
+  input: struct.request({
+    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  }),
+})
+
+filtered({ query: { q: 'docs' } })
+// filtered({}) // Ошибка TypeScript: query содержит обязательное поле q.
 ```
 
 Это проверка структурного наличия и типа, а не правил приложения об авторизации, диапазонах, суммах, форматах или переходах состояния.
@@ -154,7 +186,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }] as const,
+  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
 })
 ```
 
@@ -186,20 +218,25 @@ const createBatch = defineRequest({
 ```typescript
 const User = struct.object({ id: struct.number() })
 const NotFound = struct.object({ message: struct.string() })
-const Unauthorized = struct.object({ message: struct.string() })
+const Conflict = struct.object({ conflict: struct.string() })
 
 const objectOutput = {
   '200': User,
   '404': NotFound,
 }
 
-const arrayOutput = [
-  { status: 200, body: User },
-  { status: [401, 403], body: Unauthorized },
-] as const
+const getUsers = defineRequest({
+  method: 'GET',
+  path: '/users',
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+    { status: [409, 422], body: Conflict },
+  ],
+})
 ```
 
-Тип успешного HTTP-результата — объединение тел объявленных ответов 2xx. `error.data` — объединение тел объявленных ответов не-2xx. Для массивной формы нужен `as const`, чтобы сохранить литералы статусов и сгруппированные readonly-массивы.
+Тип успешного HTTP-результата — объединение тел объявленных ответов 2xx. `error.data` остаётся связанным с объявленным статусом не-2xx. `defineRequest(...)` использует const generic, поэтому inline-элементы статусов и сгруппированные массивы статусов сохраняют литералы без `as const`. После `client.execute(getUsers())` проверка `error.status === 404` сужает данные до `NotFound`, а оставшаяся ветка `409 | 422` — до `Conflict`.
 
 Когда `output` объявлен, каждому полученному статусу должен соответствовать Struct. Любой несовпавший статус, как 2xx, так и не-2xx, приводит к `UNDECLARED_STATUS`. Без `output` тело ответа не читается и не декодируется, его отмена выполняется по возможности, а результат равен `undefined`.
 

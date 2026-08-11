@@ -7,6 +7,18 @@ description: HTTP URL과 body를 구성하고 상태별 응답 Struct를 선택�
 
 `defineRequest(...)`는 HTTP 커맨드 빌더를 만듭니다. 엔드포인트 정의와 입력 프로젝션은 [커맨드](/ko-KR/core/commands)에서 다루며, 이 페이지는 HTTP wire 형식과 생명주기 동작을 설명합니다.
 
+## HTTP 전용 client entry
+
+`@defjs/core/http`는 추가적인 HTTP 전용 entry point입니다. HTTP command 및 HTTP 호환 client option과 함께 `createHttpClient(...)`를 export합니다.
+
+```typescript
+import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
+
+const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
+```
+
+consumer가 의도적으로 HTTP만 지원할 때 사용하세요. Root entry를 대체하지 않습니다. `@defjs/core`의 `createClient(...)`는 계속 HTTP, SSE, WebSocket command를 모두 지원하는 client입니다.
+
 ## URL 구성
 
 `withEndpoint(...)`에는 절대 base URL을 전달해야 합니다. 이 URL의 path는 directory로 유지됩니다.
@@ -100,11 +112,25 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+    { status: 409, body: struct.object({ conflict: struct.string() }) },
+  ],
 })
 ```
 
-런타임은 정확한 status로 Struct를 선택합니다. `output`을 선언했는데 일치하는 status가 없으면 `UNDECLARED_STATUS`가 발생합니다. 선언된 2xx body는 성공 data union을, 선언된 비-2xx body는 `error.data`를 구성합니다.
+런타임은 정확한 status로 Struct를 선택합니다. `output`을 선언했는데 일치하는 status가 없으면 `UNDECLARED_STATUS`가 발생합니다. 선언된 2xx body는 성공 data union을 구성합니다. `defineRequest(...)`는 const generic을 사용하므로 inline status는 `as const` 없이 literal을 유지하며, HTTP 오류 union은 각 비-2xx status와 해당 `error.data` body의 연관을 유지합니다.
+
+```typescript
+const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+
+if (statusError?.kind === 'http') {
+  if (statusError.status === 404) {
+    console.error(statusError.data.message)
+  } else {
+    // status는 409이고 data는 선언된 conflict body입니다.
+    console.error(statusError.data.conflict)
+  }
+}
+```
 
 `response.ok`는 `status >= 200 && status < 300`이라는 뜻일 뿐입니다. output 디코딩, 애플리케이션 검증 또는 인가 성공을 의미하지 않습니다.
 

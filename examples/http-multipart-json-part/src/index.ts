@@ -10,7 +10,7 @@ export const createCaseNote = defineRequest({
       file: struct.file().optional(),
     }),
   }),
-  output: [{ status: 201, body: struct.object({ id: struct.string() }) }] as const,
+  output: [{ status: 201, body: struct.object({ id: struct.string() }) }],
 })
 
 // Step 2: Serialize case metadata once and return only a validated created-note ID.

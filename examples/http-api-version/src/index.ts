@@ -15,7 +15,7 @@ export const getRepository = defineRequest({
   method: 'GET',
   path: '/repos/:owner/:repository',
   input: struct.request({ path: struct.object({ owner: struct.string(), repository: struct.string() }) }),
-  output: [{ status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) }] as const,
+  output: [{ status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) }],
 })
 
 // Step 2: Expose validated repository data while version selection remains client policy.

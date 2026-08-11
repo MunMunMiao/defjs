@@ -12,7 +12,7 @@ export const readShippingQuote = defineRequest({
       body: struct.object({ amountCents: struct.number(), carrier: struct.string(), orderId: struct.string() }),
     },
     { status: 503, body: struct.object({ code: struct.literal('quote_provider_unavailable') }) },
-  ] as const,
+  ],
 })
 
 function isShippingOutage(error: unknown): boolean {

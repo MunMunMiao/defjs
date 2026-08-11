@@ -92,6 +92,7 @@ interface WebSocketDefinitionBase<
   incoming: TIncoming
   maxIncomingQueueSize: number
   maxOutgoingQueueSize?: number
+  operation?: string
   outgoing?: TOutgoing
   path: string
   protocols?: readonly string[]
@@ -364,6 +365,7 @@ async function runWebSocketCommand<
     abort: signal,
     baseEndpoint: clientConfig.endpoint,
     build: built,
+    operation: endpoint.operation,
     path: endpoint.path,
     queryParamsSerializer: clientConfig.queryParamsSerializer,
     withCredentials: clientConfig.withCredentials,

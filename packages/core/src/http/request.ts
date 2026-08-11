@@ -24,6 +24,7 @@ export function createHttpRequest<TInput extends AnyStruct | undefined>(
     context?: HttpContext
     downloadProgress?: HttpProgressFn
     input?: TInput
+    operation?: string
     queryParamsSerializer: QueryParamsSerializer
     responseType?: HttpResponseType
     timeout?: number
@@ -41,6 +42,7 @@ export function createHttpRequest<TInput extends AnyStruct | undefined>(
     baseEndpoint: options.baseEndpoint,
     context: options.context,
     input: options.input,
+    operation: options.operation,
     queryParamsSerializer: options.queryParamsSerializer,
     timeout: options.timeout,
     transport: 'http',

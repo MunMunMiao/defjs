@@ -20,7 +20,7 @@ description: アプリケーションが渡す OpenTelemetry Tracer と任意の
 ## クライアントを設定する
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
@@ -41,6 +41,21 @@ const client = createClient(
 ```
 
 アダプターは、有効なトランスポートごとにインターセプターを 1 つ追加します。オプションは通常のクライアント順序で実行されるため、ほかのインターセプターに対する配置によってスパンが包む処理範囲が変わります。
+
+### Operation identity
+
+各 endpoint definition に `operation` を静的に設定します。これは span と metric が使う低カーディナリティの identity です。
+
+```typescript
+const readOrder = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders/:id',
+  // input and output omitted
+})
+```
+
+operation がある場合、span name は `GET orders.read`、`SSE orders.watch`、`WebSocket orders.connect` となり、`defjs.operation` も記録されます。ない場合は従来の fallback のまま、HTTP method、`SSE`、`WebSocket` を名前に使い、operation attribute は追加しません。resolved URL や identifier を含む path から identity を推測せず、resolved URL を telemetry や log にコピーしないでください。
 
 ## オプション
 
@@ -103,12 +118,15 @@ withOpenTelemetryServer({
     requestHook(span, request) {
       span.setAttribute('app.operation', 'list-orders')
     },
-    responseHook(span, response) {
+    responseHook(span, response, request) {
+      span.setAttribute('app.operation', request.operation ?? 'unclassified')
       span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
     },
   },
 })
 ```
+
+第 3 引数は元の transport `HttpRequest` です。明示的な `operation` を使い、`request.endpoint`、resolved URL、path から identity を再構築しないでください。
 
 フックは `void` または `Promise<void>` を返せますが、クライアント操作を待たせません。同期 throw と非同期 rejection は捕捉され、操作を停止せず `defjs.otel.hook.error` として記録されます。この telemetry 記録自体の失敗も隔離されます。
 
@@ -118,7 +136,8 @@ withOpenTelemetryServer({
 
 HTTP インターセプターは `SpanKind.CLIENT` スパンを作り、次を記録します。
 
-- Defjs は低カーディナリティの URL テンプレートを提供しないため、リクエストメソッドをスパン名として使用
+- endpoint が静的 operation を宣言した場合は `${method} ${operation}` を span name にし、`defjs.operation` を記録
+- operation がない場合は従来どおり request method のみを fallback に使用
 - `http.request.method`
 - `url.full`
 - `server.address` と任意の `server.port`
@@ -169,7 +188,7 @@ Meter を指定した WebSocket 計装は次のメトリクスを使います。
 
 ## 機密データとテスト範囲の限界
 
-デフォルトの `url.full` はシリアライズ済みクエリ文字列ではなく、リクエストエンドポイントとベースエンドポイントから解決されます。それでも、解決後のパスに機密性のある識別子が含まれる場合はあります。WebSocket 伝播は別に実際のクエリ文字列へフィールドを追加します。
+デフォルトの `url.full` は serialized query string ではなく request endpoint と base endpoint から解決されますが、resolved path に sensitive identifier が含まれる場合があります。これは transport metadata であり、operation identity の情報源ではありません。`operation` は静的に保ち、resolved URL を telemetry や log にコピーせず、URL attribute の export 前に SDK/exporter の redaction を設定してください。WebSocket propagation は別に実際の query string へ field を追加します。
 
 `recordException(...)` には、送出されたエラーと一部のクローズ原因が渡ります。エラーメッセージとスタックは機密データを含むことがあります。SDK レベルの processor と exporter で適切にマスキングしてください。このアダプターはアプリケーションに代わって例外を無害化しません。
 

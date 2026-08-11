@@ -33,11 +33,14 @@ const result = await client.execute(command)
 | 필드           | 의미                                                                                                                     |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `method`       | HTTP method 문자열입니다.                                                                                                |
+| `operation`    | telemetry와 진단을 위한 선택적이고 명시적인 static low-cardinality identity입니다.                                       |
 | `path`         | 선택적인 `:name` placeholder를 포함한 상대 endpoint path입니다.                                                          |
 | `input`        | 커맨드 입력을 구조적으로 디코딩하는 Struct입니다.                                                                        |
 | `build`        | 입력 필드에서 요청 부분으로 이어지는 스키마 결합 프로젝션입니다. `input`이 필요합니다.                                   |
 | `output`       | 응답 디코딩과 결과 추론에 쓰는 상태 코드와 Struct의 매핑입니다.                                                          |
 | `responseType` | `output`을 선언한 경우에만 선택할 수 있는 `json`, `text`, `blob`, `arraybuffer` 모드이며, 생략 시에는 허용되지 않습니다. |
+
+`operation?: string`은 SSE와 WebSocket 정의에서도 사용할 수 있습니다. `users.lookup`처럼 endpoint contract에서 명시적으로 설정하세요. 렌더링된 path, URL, user/tenant data, request ID 또는 기타 high-cardinality 값에서 파생하지 마세요.
 
 커맨드 필드가 wire section에 직접 대응하면 `struct.request(...)`를 사용하세요.
 
@@ -66,7 +69,7 @@ const createUser = defineRequest({
   output: [
     { status: 201, body: struct.object({ id: struct.number() }) },
     { status: 409, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 const command = createUser({
@@ -88,7 +91,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-`input`을 선언하면 필수 객체 필드와 선언한 모든 request section을 제공해야 합니다. optional 또는 nullish 필드만 생략할 수 있습니다. endpoint가 사용하지 않는 section은 선언하지 마세요.
+`input`을 선언하면 command root argument는 계속 필수입니다. `struct.request(...)` 안에서 모든 필드가 optional 또는 nullish인 `path`, `query`, `headers` section은 전체를 생략할 수 있으며 parsing은 생략된 각 section을 `{}`로 정규화합니다. 필수 필드가 하나라도 있는 section은 계속 필수입니다. 내부 object field가 optional이어도 body section은 필수입니다.
 
 ```typescript
 const search = defineRequest({
@@ -102,6 +105,35 @@ const search = defineRequest({
 search({ query: { q: 'docs' } })
 // search() // TypeScript error: an argument is required.
 // search({ query: {} }) // TypeScript and runtime error: q is required.
+```
+
+모든 필드가 optional인 request section은 생략할 수 있지만 command argument 자체는 있어야 합니다.
+
+```typescript
+const OptionalSections = struct.request({
+  path: struct.object({ locale: struct.string().optional() }),
+  query: struct.object({ page: struct.number().optional() }),
+  headers: struct.object({ traceId: struct.string().optional() }),
+})
+const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
+
+list({})
+list({ query: { page: 2 } })
+
+const [optionalError, normalized] = struct.parse(OptionalSections, {})
+if (optionalError) throw optionalError
+// normalized는 { path: {}, query: {}, headers: {} }입니다.
+
+const filtered = defineRequest({
+  method: 'GET',
+  path: '/items',
+  input: struct.request({
+    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  }),
+})
+
+filtered({ query: { q: 'docs' } })
+// filtered({}) // TypeScript error: query에 필수 q가 있습니다.
 ```
 
 이는 구조의 존재 여부와 타입을 검증하는 것이며 애플리케이션 인가, 범위, 금액, 형식, 상태 전이 규칙을 검증하는 것은 아닙니다.
@@ -154,7 +186,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }] as const,
+  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
 })
 ```
 
@@ -186,20 +218,25 @@ TypeScript build context는 트랜스포트별로 다릅니다. 타입 검사를
 ```typescript
 const User = struct.object({ id: struct.number() })
 const NotFound = struct.object({ message: struct.string() })
-const Unauthorized = struct.object({ message: struct.string() })
+const Conflict = struct.object({ conflict: struct.string() })
 
 const objectOutput = {
   '200': User,
   '404': NotFound,
 }
 
-const arrayOutput = [
-  { status: 200, body: User },
-  { status: [401, 403], body: Unauthorized },
-] as const
+const getUsers = defineRequest({
+  method: 'GET',
+  path: '/users',
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+    { status: [409, 422], body: Conflict },
+  ],
+})
 ```
 
-HTTP 성공 타입은 선언된 2xx body의 union입니다. `error.data`는 선언된 2xx가 아닌 body의 union입니다. 배열 형식에서는 상태 코드 리터럴과 그룹화된 readonly 배열을 보존하려고 `as const`를 사용합니다.
+HTTP 성공 타입은 선언된 2xx body의 union입니다. `error.data`는 선언된 비-2xx status와 연관된 상태를 유지합니다. `defineRequest(...)`는 const generic을 사용하므로 inline status entry와 그룹화한 status array가 `as const` 없이 리터럴을 보존합니다. `client.execute(getUsers())` 뒤에 `error.status === 404`를 검사하면 data가 `NotFound`로, 나머지 `409 | 422` branch에서는 `Conflict`로 좁혀집니다.
 
 `output`을 선언하면 반환된 모든 status에 대응하는 Struct가 있어야 합니다. 일치하지 않는 2xx 또는 비-2xx status는 `UNDECLARED_STATUS`를 만듭니다. `output`이 없으면 응답 body를 읽거나 디코딩하지 않고 best-effort로 취소하며, 결과는 `undefined`입니다.
 

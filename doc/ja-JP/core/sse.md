@@ -141,13 +141,14 @@ async function consumeNotifications(signal: AbortSignal) {
       }
     }
   } finally {
-    stream.close('consumer-finished')
     await stream.closed
   }
 }
 ```
 
 `execute` の成功は、起動が完了したことを意味します。起動後のエラーは元のタプルの `error` を変更せず、イテレーターの reject と `stream.closed` に現れます。
+
+`break`、`return`、throw されたエラーによって `for await` ループを早期終了すると、イテレーターの `return()` が呼ばれます。ストリームは `{ code: 'aborted', reason: 'iterator-return' }` で自動的に閉じます。`stream.closed` を await すると、その終端状態を確認できます。実行中の iteration の外側から所有者が閉じる必要がある場合だけ、`stream.close(...)` を明示的に呼んでください。
 
 ## 無効なイベント
 
@@ -210,7 +211,7 @@ HTTP またはオープン時の検証失敗、メッセージ処理の致命的
 
 ## エンドポイント所有の上限
 
-ストリームの非同期イテレーターを消費できるのは 1 つだけです。2 つ目のイテレーター作成は例外になり、ループを抜ける場合も `stream.close(...)` を明示的に呼ぶ必要があります。
+ストリームの非同期イテレーターを消費できるのは 1 つだけです。2 つ目のイテレーター作成は例外になります。`for await` の早期 `break` を含むイテレーターの return は、理由 `iterator-return` でストリームを自動的に閉じます。
 
 各定義には正の安全な整数 `maxBufferSize` と `maxQueueSize` が必要です。前者は SSE の各行と現在のイベントデータを、後者は消費待ちの解析済みイベントを制限します。キューの上限超過は致命的で、イベントを黙って破棄しません。
 
@@ -227,21 +228,33 @@ const notifications = defineEventStream({
 
 ## 終端クローズ
 
-`stream.closed` は次の値で解決されます。
+`stream.closed` は判別ユニオンで解決されます。
 
 ```typescript
-interface EventStreamCloseInfo {
-  code: 'eof' | 'aborted' | 'error'
-  reason?: string
-  cause?: unknown
-}
+type EventStreamCloseInfo =
+  | { code: 'eof'; reason?: string; cause?: unknown }
+  | { code: 'aborted'; reason?: string; cause?: unknown }
+  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
 ```
 
 - `eof` はレスポンスボディが正常に終了したことを表します。
 - `aborted` には明示的な `stream.close(...)` とキャンセルパスが含まれます。
-- `error` は再試行の停止または終端ストリームエラーを表します。
+- `error` は再試行の停止または終端ストリームエラーを表します。この branch には公開 `errorCode` が必ず含まれます。
 
-`stream.close(reason)` は冪等です。実行中のトランスポート処理を中断し、キューへの新規追加を閉じ、`stream.closed` を確定します。`break` はこれらを行いません。
+`EventStreamErrorCode` には 6 つの安定した値があります。
+
+| Error code                  | 意味                                                               |
+| --------------------------- | ------------------------------------------------------------------ |
+| `INVALID_RESPONSE`          | status、content type、response error、response body が不正です。   |
+| `MESSAGE_PROCESSING_FAILED` | event transform または lifecycle callback が失敗しました。         |
+| `PARSER_LIMIT_EXCEEDED`     | endpoint 所有の parser buffer 上限を超えました。                   |
+| `QUEUE_OVERFLOW`            | 解析済み event が endpoint 所有の queue 上限を超えました。         |
+| `TIMEOUT`                   | transport attempt が設定済み timeout に達しました。                |
+| `TRANSPORT_ERROR`           | その他の終端ネットワーク、stream read、retry policy failure です。 |
+
+`stream.close(reason)` は冪等です。実行中のトランスポート処理を中断し、キューへの新規追加を閉じ、`stream.closed` を確定します。イテレーターの `return()` は理由 `iterator-return` で同じ close path を使います。
+
+通常のログには `close.code` と、`error` branch の `close.errorCode` だけを記録してください。明示的なマスキングと保存ポリシーがない限り、`reason`、`cause`、raw event、stream URL を記録しないでください。
 
 ストリームを開いたアプリケーション境界がクローズを所有します。クライアントやフレームワークのプロバイダーが自動でクローズすることはありません。
 

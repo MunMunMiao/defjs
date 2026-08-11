@@ -141,13 +141,14 @@ async function consumeNotifications(signal: AbortSignal) {
       }
     }
   } finally {
-    stream.close('consumer-finished')
     await stream.closed
   }
 }
 ```
 
 Ein erfolgreiches `execute` bedeutet, dass der Start abgeschlossen ist. Fehler nach dem Start erscheinen als Ablehnung des Iterators und über `stream.closed`; sie ändern nicht nachträglich das `error`-Element des ursprünglichen Tupels.
+
+Ein vorzeitiges Verlassen einer `for await`-Schleife durch `break`, `return` oder einen geworfenen Fehler ruft `return()` des Iterators auf. Der Stream schließt automatisch mit `{ code: 'aborted', reason: 'iterator-return' }`; durch Warten auf `stream.closed` beobachtest du diesen Endzustand. Rufe `stream.close(...)` nur dann ausdrücklich auf, wenn der Besitzer den Stream außerhalb einer aktiven Iteration schließen muss.
 
 ## Ungültige Events
 
@@ -210,7 +211,7 @@ HTTP- oder Open-Validierungsfehler, schwerwiegende Fehler bei der Nachrichtenver
 
 ## Endpunkteigene Limits
 
-Ein Stream erlaubt genau einen Async-Iterator-Consumer. Ein zweiter Iterator löst einen Fehler aus; nach einem `break` muss weiterhin ausdrücklich `stream.close(...)` aufgerufen werden.
+Ein Stream erlaubt genau einen Async-Iterator-Consumer. Ein zweiter Iterator löst einen Fehler aus. Die Rückgabe des Iterators, einschließlich eines frühen `break` aus `for await`, schließt den Stream automatisch mit dem Grund `iterator-return`.
 
 Jede Definition benötigt positive sichere Ganzzahlen für `maxBufferSize` und `maxQueueSize`. Das Buffer-Limit gilt je SSE-Zeile und für die Daten des aktuellen Events; das Queue-Limit begrenzt geparste, wartende Events. Ein Queue-Overflow ist fatal und verwirft niemals still ein Event.
 
@@ -227,21 +228,33 @@ Bei normalem EOF können gepufferte Events geleert werden. Ein fataler Parser-, 
 
 ## Endgültiges Schließen
 
-`stream.closed` wird mit Folgendem erfüllt:
+`stream.closed` wird mit einer diskriminierten Union erfüllt:
 
 ```typescript
-interface EventStreamCloseInfo {
-  code: 'eof' | 'aborted' | 'error'
-  reason?: string
-  cause?: unknown
-}
+type EventStreamCloseInfo =
+  | { code: 'eof'; reason?: string; cause?: unknown }
+  | { code: 'aborted'; reason?: string; cause?: unknown }
+  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
 ```
 
 - `eof` bedeutet, dass der Response-Body normal geendet hat.
 - `aborted` umfasst einen ausdrücklichen Aufruf von `stream.close(...)` oder einen Abbruchpfad.
-- `error` bedeutet, dass Retries beendet wurden oder ein endgültiger Streamfehler eingetreten ist.
+- `error` bedeutet, dass Retries beendet wurden oder ein endgültiger Streamfehler eingetreten ist. Dieser Zweig enthält immer einen öffentlichen `errorCode`.
 
-`stream.close(reason)` ist idempotent. Die Methode bricht aktive Transportarbeit ab, schließt die Warteschlange für neue Einträge und erfüllt `stream.closed`. Ein `break` tut nichts davon.
+`EventStreamErrorCode` hat sechs stabile Werte:
+
+| Error code                  | Bedeutung                                                                          |
+| --------------------------- | ---------------------------------------------------------------------------------- |
+| `INVALID_RESPONSE`          | Status, Content-Type, Response-Fehler oder Response-Body war ungültig.             |
+| `MESSAGE_PROCESSING_FAILED` | Event-Transformation oder Lifecycle-Callback ist fehlgeschlagen.                   |
+| `PARSER_LIMIT_EXCEEDED`     | Ein endpunkteigenes Parser-Buffer-Limit wurde überschritten.                       |
+| `QUEUE_OVERFLOW`            | Geparste Events überschritten das endpunkteigene Queue-Limit.                      |
+| `TIMEOUT`                   | Der Transportversuch erreichte seinen konfigurierten Timeout.                      |
+| `TRANSPORT_ERROR`           | Ein anderer endgültiger Netzwerk-, Stream-Lese- oder Retry-Policy-Fehler trat auf. |
+
+`stream.close(reason)` ist idempotent. Die Methode bricht aktive Transportarbeit ab, schließt die Warteschlange für neue Einträge und erfüllt `stream.closed`. `return()` des Iterators verwendet denselben Schließpfad mit dem Grund `iterator-return`.
+
+Routine-Logs sollten nur `close.code` und im `error`-Zweig `close.errorCode` aufzeichnen. Logge `reason`, `cause`, rohe Events oder Stream-URLs nur mit einer ausdrücklichen Maskierungs- und Aufbewahrungsrichtlinie.
 
 Die Anwendungsgrenze, die den Stream öffnet, ist für sein Schließen verantwortlich. Ein Client oder Framework-Provider schließt ihn nicht automatisch.
 

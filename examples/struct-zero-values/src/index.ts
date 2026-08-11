@@ -18,7 +18,7 @@ export const readStoreDaySummary = defineRequest({
         suspensionReason: struct.string().nullish(),
       }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Return Struct-decoded values without truthy fallback replacements.

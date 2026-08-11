@@ -94,6 +94,12 @@ El tercer elemento cuando el arranque tiene éxito es la instantánea inicial co
 
 No registres las URLs de conexión. Pueden contener identificadores de ruta, datos de query de la aplicación y campos de propagación de telemetría.
 
+## Diagnóstico de fallos
+
+Con la API WebSocket del navegador o un constructor inyectado que solo expone los eventos estándar, un fallo de transporte durante el handshake normalmente solo ofrece un `RequestError` estable con `kind: 'transport'` y un `code` como `NETWORK_ERROR`, `ABORTED` o `TIMEOUT`. No puede prometer un HTTP `401`, otro estado del handshake, headers/body de respuesta ni detalles `unexpected-response` específicos de Node. Un constructor propio del runtime puede aportar más mediante su adapter, pero no forma parte del contrato portable de Core.
+
+Tras el arranque, espera `session.closed` y usa `kind`, el close `code` opcional y `wasClean` opcional como diagnóstico terminal principal. El close code es de WebSocket, no un estado HTTP. Los logs rutinarios deben limitarse a contexto revisado de baja cardinalidad y esos campos; no registres la URL, query, ticket, `cause` sin filtrar ni `reason`. Amplía el registro solo con una política explícita de redacción, acceso y retención.
+
 ## Sesión activa
 
 Un `WebSocketSession` representa una sesión lógica que puede abarcar varios intentos de conexión física.

@@ -213,6 +213,13 @@ function parseRequestValue(
     }
     const sectionValue = hasOwnKey(input, sectionKey) ? input[sectionKey] : undefined
     if (sectionValue === undefined) {
+      if (sectionStruct[DEFINITION].kind === 'object') {
+        const emptyResult = parseValue(sectionStruct, {}, [...path, sectionKey], 'field', useAliases)
+        if (emptyResult.ok) {
+          output[sectionKey] = emptyResult.value
+          continue
+        }
+      }
       return failure(issue([...path, sectionKey], 'missing_key', expectedType(sectionStruct[DEFINITION]), undefined))
     }
 

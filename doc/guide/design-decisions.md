@@ -53,6 +53,24 @@ WebSocket state and runtime-error listeners are observers too. Thrown errors and
 
 Use the returned handle or session for lifecycle decisions. Use observers for bounded logging, metrics, or state updates, and remove them when their owner is disposed.
 
+## Sourcemap Deployment
+
+Choose the production sourcemap policy explicitly:
+
+- **public**: deploy the map with the bundle. The map includes `sourcesContent`, so application and dependency source is publicly retrievable even when source paths are relative.
+
+- **hidden**: remove the bundle’s source-map reference, upload the map privately to the error platform, and do not deploy it publicly. The map file still contains sensitive paths and `sourcesContent`; “hidden” does not make the map safe.
+
+- **disabled**: emit no production map. This avoids map disclosure but gives up source-level production stack symbolication and makes debugging harder.
+
+Restrict private-map access and retention just like other debugging artifacts. Relative paths alone are not a confidentiality boundary.
+
+## OpenAPI Boundary
+
+Choose one authoritative contract source. An organization with an established OpenAPI workflow should keep it and use a mature generator plus an explicit runtime validator at the application boundary; generated TypeScript types alone do not validate responses. For a greenfield Defjs service, define the wire contract directly with Defjs Structs and endpoint definitions.
+
+Core will not add an OpenAPI generator/exporter or maintain OpenAPI and Defjs as two synchronized sources. Dual-source drift is worse than composing the existing ecosystem at a clear boundary.
+
 ## Related Reference
 
 - [Client](../core/client.md) documents option composition and client scope.

@@ -16,7 +16,7 @@ export const deliverShipmentReadyWebhook = defineRequest({
   input: struct.request({
     body: struct.json(shipmentReadyDeliveryStruct),
   }),
-  output: [{ status: 204, body: struct.null() }] as const,
+  output: [{ status: 204, body: struct.null() }],
 })
 
 // Step 2: Send once under the operation deadline and preserve timeout as an ambiguous outcome.

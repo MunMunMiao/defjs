@@ -7,6 +7,18 @@ description: ابنِ URLs وأجسام HTTP، ووزّع response Structs، و�
 
 تنشئ `defineRequest(...)` منشئ أمر HTTP. تغطي [الأوامر](/ar/core/commands) التعريفات وإسقاطات input؛ أما هذه الصفحة فتملك سلوك HTTP على wire ودورة حياته.
 
+## مدخل client مخصص لـ HTTP
+
+يمثل `@defjs/core/http` entry إضافيًا مخصصًا لـ HTTP. ويصدّر `createHttpClient(...)` مع HTTP commands وclient options المتوافقة مع HTTP:
+
+```typescript
+import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
+
+const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
+```
+
+استخدمه عندما يدعم consumer بروتوكول HTTP وحده عمدًا. وهو لا يستبدل root entry؛ يبقى `createClient(...)` من `@defjs/core` هو client الخاص بأوامر HTTP وSSE وWebSocket.
+
 ## بناء URL
 
 يجب أن تقدّم `withEndpoint(...)` عنوان URL أساسيًا مطلقًا. ويُحفظ path الخاص به كدليل:
@@ -100,11 +112,25 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+    { status: 409, body: struct.object({ conflict: struct.string() }) },
+  ],
 })
 ```
 
-يختار وقت التشغيل Struct باستخدام status المطابق حرفيًا. ينتج أي status غير مطابق `UNDECLARED_STATUS` عندما يكون `output` معلنًا. تشكل أجسام 2xx المعلنة اتحاد بيانات النجاح، وتشكل أجسام non-2xx المعلنة `error.data`.
+يختار وقت التشغيل Struct باستخدام status المطابق حرفيًا. ينتج أي status غير مطابق `UNDECLARED_STATUS` عندما يكون `output` معلنًا. تشكل أجسام 2xx المعلنة اتحاد بيانات النجاح. يستخدم `defineRequest(...)` نوعًا عامًا const، لذلك تحتفظ حالات status المكتوبة inline بقيمها الحرفية من دون `as const`؛ ويحافظ اتحاد أخطاء HTTP على ارتباط كل status من non-2xx بجسم `error.data` الخاص به.
+
+```typescript
+const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+
+if (statusError?.kind === 'http') {
+  if (statusError.status === 404) {
+    console.error(statusError.data.message)
+  } else {
+    // status هو 409 وdata هي body المعلنة لحالة التعارض.
+    console.error(statusError.data.conflict)
+  }
+}
+```
 
 تعني `response.ok` فقط `status >= 200 && status < 300`. ولا تعني نجاح فك ترميز output أو تحقق قواعد التطبيق أو authorization.
 

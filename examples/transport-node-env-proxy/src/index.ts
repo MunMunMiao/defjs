@@ -13,7 +13,7 @@ export const scheduleCarrierPickup = defineRequest({
       status: 202,
       body: struct.object({ pickupId: struct.string(), state: struct.literal('scheduled') }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Separate pickup behavior from the caller-owned proxy client that carries complete requests.

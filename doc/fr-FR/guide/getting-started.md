@@ -17,6 +17,18 @@ pnpm add @defjs/core
 
 Utilisez la commande npm, Yarn ou Bun équivalente si votre projet emploie un autre gestionnaire de packages. `@defjs/core` est en ESM. Pour une exécution sous Node.js, les métadonnées actuelles du package exigent Node 22 ou une version plus récente.
 
+Des consommateurs HTTP ESM packagés ont été exécutés avec Node.js 22, 24 et 26, Bun 1.3.14 et Deno 2.9.5. Après compilation de votre application, les commandes correspondantes sont :
+
+```sh
+node dist/index.js
+bun run dist/index.js
+deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+```
+
+La commande Deno utilise les packages déjà installés dans `node_modules` ; remplacez l'autorisation réseau par les hôtes API exacts requis par votre application. Les vérifications Bun et Deno couvrent la partie HTTP documentée, pas toutes les API de plateforme ni tous les transports. Les builds navigateur utilisent leur bundler habituel et les capacités Fetch et WebSocket requises par la plateforme.
+
+Les tests multi-runtime doivent vérifier les champs Defjs stables tels que `error.kind` et `error.code`. Ne dépendez pas des messages `Error` natifs propres au moteur ni du texte des erreurs d'analyse JSON ; Node.js, Bun et Deno peuvent formater ces détails différemment.
+
 Ajoutez un adaptateur uniquement si votre application en a besoin :
 
 | Configuration              | Packages                                                                                  |
@@ -47,7 +59,7 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 async function loadUser(id: number) {
@@ -72,9 +84,9 @@ void loadUser(7)
 
 En cas de succès, `error` vaut `null`, `result` contient la sortie décodée et `response` est un wrapper Defjs `HttpResponse`. En cas d'échec, `result` vaut `undefined`. Le wrapper de réponse vaut également `undefined` si aucune réponse n'est arrivée.
 
-### Pourquoi `as const` est nécessaire
+### Les littéraux de statut sont conservés automatiquement
 
-La forme tableau de `output` s'appuie sur les statuts littéraux pour distinguer les corps de succès 2xx des corps d'erreur non-2xx. `as const` conserve ces statuts, ainsi que leurs éventuels groupes, sous forme de littéraux `readonly`. Sans lui, TypeScript peut les élargir en `number` ou `number[]` et perdre en précision dans l'inférence des branches de succès et d'erreur.
+`defineRequest(...)` utilise un const generic pour `output`. Les entrées inline du tableau et les groupes de statuts conservent donc automatiquement leurs valeurs littérales. Aucun `as const` n'est nécessaire pour distinguer, dans les types inférés, les corps de succès 2xx des corps d'erreur non-2xx.
 
 La forme objet est également prise en charge :
 

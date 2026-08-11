@@ -10,7 +10,7 @@ export const submitInvoiceExportRequest = defineRequest({
   output: [
     { status: 202, body: struct.object({ exportId: struct.string() }) },
     { status: 409, body: struct.object({ code: struct.literal('account_closed') }) },
-  ] as const,
+  ],
 })
 
 function providerRequestId(headers: Headers): string {

@@ -129,10 +129,13 @@ describe('createOpenTelemetrySSEInterceptor', () => {
     const interceptor = createOpenTelemetrySSEInterceptor({ tracer, propagator: mockPropagator, metrics })
 
     await interceptor.fn(makeSSERequest(), async () => stream.stream)
-    stream.close('error', new Error('stream broken'))
+    stream.close('error', new Error('stream broken'), 'QUEUE_OVERFLOW')
     await waitForSettledPromises()
 
-    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('sse.error', { 'sse.close.code': 'error' })
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('sse.error', {
+      'defjs.sse.error.code': 'QUEUE_OVERFLOW',
+      'sse.close.code': 'error',
+    })
     expect(activeSpans[0]?.recordException).toHaveBeenCalled()
     expect(activeSpans[0]?.status?.code).toBe(2)
     expect(activeSpans[0]?.ended).toBe(true)
@@ -140,6 +143,7 @@ describe('createOpenTelemetrySSEInterceptor', () => {
       expect.any(Number),
       expect.objectContaining({
         'defjs.result': 'error',
+        'defjs.sse.error.code': 'QUEUE_OVERFLOW',
         'error.type': 'Error',
         'sse.close.code': 'error',
       }),
@@ -234,10 +238,11 @@ describe('createOpenTelemetrySSEInterceptor', () => {
     })
 
     const stream = makeSSEStream()
-    await interceptor.fn(makeSSERequest(), async () => stream)
+    const req = makeSSERequest()
+    await interceptor.fn(req, async () => stream)
 
     expect(responseHook).toHaveBeenCalledTimes(1)
-    expect(responseHook).toHaveBeenCalledWith(activeSpans[0], stream)
+    expect(responseHook).toHaveBeenCalledWith(activeSpans[0], stream, req)
   })
 
   test('should keep stream open when requestHook throws', async () => {

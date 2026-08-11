@@ -28,7 +28,7 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
@@ -39,6 +39,22 @@ if (error) {
   console.log(user.id, user.name)
 }
 ```
+
+`defineRequest(...)` preserves inline output status literals through a const generic, so the array does not need `as const`.
+
+## HTTP-Only Entry
+
+Applications that intentionally support only HTTP can use the additive `@defjs/core/http` entry:
+
+```typescript
+import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
+
+const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
+const health = defineRequest({ method: 'GET', path: '/health' })
+const [healthError] = await httpClient.execute(health())
+```
+
+`createHttpClient(...)` accepts HTTP commands and HTTP-compatible options only. The root `createClient(...)` from `@defjs/core` remains the full HTTP, SSE, and WebSocket client.
 
 ## Core Boundaries
 
@@ -68,7 +84,7 @@ The Deno command assumes dependencies were installed into `node_modules`; scope 
 
 ## Documentation
 
-The package includes the matching English guides and idempotency reference source, so these links stay usable from an installed tarball without repository access.
+The package includes the matching English guides and reliability and observability reference sources, so these links stay usable from an installed tarball without repository access.
 
 - [Getting started](docs/guide/getting-started.md)
 - [Client scope and transport-injection testing](docs/core/client.md)
@@ -82,3 +98,4 @@ The package includes the matching English guides and idempotency reference sourc
 - [React adapter and SSR scope](docs/plugins/react.md)
 - [Vue adapter and SSR scope](docs/plugins/vue.md)
 - [Idempotent write example](examples/resilience-idempotency-key/README.md)
+- [Redacted logging and native Error bridge](examples/observability-redacted-logging/README.md)

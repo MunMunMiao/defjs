@@ -16,7 +16,7 @@ export const readWarehouseAvailability = defineRequest({
   output: [
     { status: 200, body: struct.object({ sku: struct.string(), availableUnits: struct.number() }) },
     { status: 503, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 // Step 2: Expose only successful availability after the interceptor chain settles.

@@ -53,6 +53,24 @@ Les listeners WebSocket d'état et d'erreur d'exécution sont eux aussi des obse
 
 Pilotez le cycle de vie avec le handle ou la session renvoyé. Réservez les observateurs à une journalisation bornée, aux métriques ou aux mises à jour d'état, puis retirez-les lorsque leur propriétaire disparaît.
 
+## Déploiement des sourcemaps
+
+Choisissez explicitement la politique de sourcemap de production :
+
+- **public** : déployez la map avec le bundle. Elle contient `sourcesContent` ; le source de l’application et des dépendances est donc accessible publiquement, même avec des chemins relatifs.
+
+- **hidden** : retirez la référence source-map du bundle, envoyez la map en privé à la plateforme d’erreurs et ne la déployez pas publiquement. Le fichier map contient toujours des chemins sensibles et `sourcesContent` ; « hidden » ne le rend pas sûr.
+
+- **disabled** : ne produisez aucune map en production. Cela évite sa divulgation, mais sacrifie la symbolication source-level des stacks de production et complique le debugging.
+
+Restreignez l’accès et la rétention des maps privées comme pour tout artefact de débogage. Des chemins relatifs ne constituent pas une frontière de confidentialité.
+
+## Frontière OpenAPI
+
+Choisissez une seule source de contrat autoritative. Une organisation disposant déjà d’un workflow OpenAPI doit le conserver et utiliser un mature generator avec un runtime validator explicite à la frontière applicative ; les types TypeScript générés ne valident pas les responses au runtime. Pour un service greenfield Defjs, définissez directement le wire contract avec les Structs et endpoints Defjs.
+
+Core n’ajoutera pas d’OpenAPI generator/exporter et ne maintiendra pas OpenAPI et Defjs comme deux sources synchronisées. Le dual-source drift est pire que la composition d’outils existants à une frontière claire.
+
 ## Références associées
 
 - [Client](/fr-FR/core/client) décrit la composition des options et la portée du client.

@@ -189,11 +189,13 @@ describe('web socket build helpers', () => {
       abort: new AbortController().signal,
       baseEndpoint: 'https://api.example.com/v1',
       build: { params: { roomId: '9' }, query: { token: 'abc' } },
+      operation: 'chat.connect',
       path: '/chat/:roomId',
       queryParamsSerializer: (params) => params.toString(),
       withCredentials: false,
     })
     expect(createWebSocketUrlFromRequest(request)).toBe('wss://api.example.com/v1/chat/9?token=abc')
+    expect(request.operation).toBe('chat.connect')
   })
 
   test('createWebSocketUrlFromRequest converts http to ws', () => {

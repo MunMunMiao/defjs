@@ -1,14 +1,16 @@
 import type { Interceptor } from '../interceptor/interceptor'
 import type {
   ClientConfig,
-  ClientOptions,
   ClientSSEOptions,
   ClientWebSocketOptions,
+  HttpClientConfig,
+  HttpClientOptions,
   QueryParamsSerializer,
   WebSocketHandleConstructor,
 } from './config'
 
 export type ClientOption = (config: ClientConfig) => void
+export type HttpClientOption = (config: HttpClientConfig) => void
 
 function assignDefined<TTarget extends object>(target: TTarget, source: Partial<TTarget>): void {
   for (const key in source) {
@@ -19,25 +21,25 @@ function assignDefined<TTarget extends object>(target: TTarget, source: Partial<
   }
 }
 
-export function withEndpoint(endpoint: string): ClientOption {
+export function withEndpoint(endpoint: string): HttpClientOption {
   return (config) => {
     config.endpoint = endpoint
   }
 }
 
-export function withInterceptors(...interceptors: Interceptor[]): ClientOption {
+export function withInterceptors(...interceptors: Interceptor[]): HttpClientOption {
   return (config) => {
     config.interceptors.push(...interceptors)
   }
 }
 
-export function withQueryParamsSerializer(serializer: QueryParamsSerializer): ClientOption {
+export function withQueryParamsSerializer(serializer: QueryParamsSerializer): HttpClientOption {
   return (config) => {
     config.queryParamsSerializer = serializer
   }
 }
 
-export function withHTTPHandle(fetchImpl: typeof fetch): ClientOption {
+export function withHTTPHandle(fetchImpl: typeof fetch): HttpClientOption {
   return (config) => {
     config.http.handle = fetchImpl
   }
@@ -107,7 +109,7 @@ export function withWebSocketOptions(options: ClientWebSocketOptions): ClientOpt
   return (config) => assignDefined(config.webSocket, options)
 }
 
-export function withXSRF(options: ClientOptions['xsrf'] = {}): ClientOption {
+export function withXSRF(options: HttpClientOptions['xsrf'] = {}): HttpClientOption {
   return (config) => {
     config.xsrf = {
       cookieName: options.cookieName ?? 'XSRF-TOKEN',
@@ -117,7 +119,7 @@ export function withXSRF(options: ClientOptions['xsrf'] = {}): ClientOption {
   }
 }
 
-export function withCredentials(value: boolean): ClientOption {
+export function withCredentials(value: boolean): HttpClientOption {
   return (config) => {
     config.withCredentials = value
   }

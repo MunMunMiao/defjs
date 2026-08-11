@@ -445,10 +445,11 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
     })
 
     const session = makeWsSession()
-    await interceptor.fn(makeWsRequest(), async () => session)
+    const req = makeWsRequest()
+    await interceptor.fn(req, async () => session)
 
     expect(responseHook).toHaveBeenCalledTimes(1)
-    expect(responseHook).toHaveBeenCalledWith(activeSpans[0], session)
+    expect(responseHook).toHaveBeenCalledWith(activeSpans[0], session, req)
   })
 
   test('should keep session open when requestHook throws', async () => {

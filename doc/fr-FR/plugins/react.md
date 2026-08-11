@@ -5,100 +5,73 @@ description: Partagez un client Defjs avec React Context, configurez-le pour vot
 
 # `@defjs/react`
 
-`@defjs/react` est un adaptateur de contexte léger pour `@defjs/core`. Il exporte :
-
-- `ClientProvider`, qui crée et fournit un client Core ;
-- `useClient()`, qui renvoie le client fourni le plus proche ;
-- les helpers d'adaptateur `withEndpoint(...)` et `withInterceptors(...)`, ce dernier acceptant des fabriques d'intercepteurs.
-
-Il n'ajoute ni cache, ni intégration Suspense, ni relance de query, ni sérialisation des données serveur. Installez-le avec `@defjs/core` et React, puis gardez ces responsabilités applicatives dans votre propre code.
+Ce paquet est un adaptateur Context minimal pour `@defjs/core`. `ClientProvider` fournit un client créé par l’application et `useClient()` renvoie l’instance la plus proche. Il n’ajoute ni fabrique de client, ni cache, ni retry, ni cycle de vie des ressources.
 
 ## Fournir un client
 
+Créez et configurez le client avec `@defjs/core`, puis passez explicitement cette instance :
+
 ```tsx
-import { ClientProvider, withEndpoint } from '@defjs/react'
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import { UserProfile } from './UserProfile'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+    <ClientProvider client={client}>
       <UserProfile id={7} />
     </ClientProvider>
   )
 }
 ```
 
-Une fois le montage du provider validé, celui-ci conserve un seul client. Les rendus suivants ne réappliquent pas un tableau `options` modifié et ne remplacent pas ce client.
-
-L'implémentation utilise l'initialisation paresseuse de `useState`. Ne supposez pas qu'elle ne s'exécute qu'une fois en développement : React Strict Mode peut l'évaluer plusieurs fois avant le commit. La garantie utile est qu'un montage validé du provider expose ensuite le même client.
-
-Forcez un nouveau montage du provider lorsque l'application doit volontairement créer un nouveau client :
-
-```tsx
-<ClientProvider key={tenantId} options={[withEndpoint(endpoint)]}>
-  <TenantApplication />
-</ClientProvider>
-```
+`ClientProvider` expose exactement cette instance. L’appelant décide de sa création ou de son remplacement et reste propriétaire des requêtes et ressources temps réel.
 
 ## Lire le client le plus proche
 
-Appelez `useClient()` dans un composant React ou un Hook personnalisé :
+Appelez `useClient()` dans un composant React ou un Hook personnalisé. Un appel hors provider lève une erreur ; les providers imbriqués suivent la règle normale du Context le plus proche.
 
 ```tsx
 import { useClient } from '@defjs/react'
 
-export function UserProfile({ id }: { id: number }) {
+export function UserProfile() {
   const client = useClient()
-  // Execute commands from effects, event handlers, or application integrations.
   return null
 }
 ```
 
-Le Hook lève une exception hors d'un provider. Les providers imbriqués suivent le comportement normal de React Context : les descendants reçoivent le client du provider le plus proche.
-
-`ClientProvider` accepte tout `ClientOption` Core :
+Toutes les options de configuration proviennent de `@defjs/core` :
 
 ```tsx
-import { withCredentials } from '@defjs/core'
-import { ClientProvider, withEndpoint } from '@defjs/react'
-import { Application } from './Application'
+import { createClient, withCredentials, withEndpoint } from '@defjs/core'
 
-;<ClientProvider options={[withEndpoint('https://api.example.com'), withCredentials(true)]}>
-  <Application />
-</ClientProvider>
+const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
 ```
 
 ## Fabriques d'intercepteurs
 
-Le `withInterceptors(...)` de l'adaptateur accepte des fabriques. Il les évalue lorsque le provider crée son client et ajoute leurs résultats dans l'ordre des options.
+Créez les valeurs interceptor et composez-les avec le `withInterceptors(...)` du core avant de passer le client à React :
 
 ```tsx
-import type { ReactNode } from 'react'
-import { createHttpInterceptor } from '@defjs/core'
-import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
 
-export function ApiBoundary({ children }: { children: ReactNode }) {
-  return (
-    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)]}>{children}</ClientProvider>
-  )
+export function ApiBoundary({ children }: { children: React.ReactNode }) {
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-Le `withInterceptors(...)` Core accepte directement des intercepteurs déjà créés. Gardez les fabriques qui capturent des identifiants serveur dans la portée de la requête qui possède ces identifiants.
+Si une fabrique capture des identifiants propres à une requête, appelez-la dans la frontière de requête qui crée ce client.
 
 ## Gérer le cycle de vie des effets HTTP
 
@@ -149,25 +122,24 @@ Defjs renvoie les échecs de requête attendus dans des tuples. Ne transformez u
 
 ## Frontière Client Component
 
-Le package ne crée pas lui-même de frontière cliente pour React Server Components. Placez `ClientProvider` derrière un module de votre application qui commence par `'use client'`.
-
-Créez un Client Component appartenant à l'application :
+L’entrée du paquet est une frontière Client Component. Un wrapper appartenant à l’application peut créer un client navigateur et le fournir explicitement :
 
 ```tsx
 // app/ApiProvider.tsx
 'use client'
 
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
-import { ClientProvider, withEndpoint } from '@defjs/react'
+
+const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
-  return <ClientProvider options={[withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!)]}>{children}</ClientProvider>
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-Le code serveur qui transporte des en-têtes, des cookies, des données de tenant ou des identifiants utilisateur doit créer un client Core dans la portée de chaque requête serveur. Ne capturez pas ces valeurs dans une option de provider au niveau du module ni dans un singleton partagé entre les requêtes. L'adaptateur ne fournit pas d'isolation SSR concurrente.
-
-Les React Server Components, Next.js, l'hydratation, Strict Mode et le SSR concurrent ajoutent leurs propres frontières de cycle de vie. Testez la configuration réelle de votre application, surtout les identifiants par requête et les remontages du provider.
+Le code serveur transportant headers, cookies, état de tenant ou identifiants doit créer un client distinct dans chaque frontière de requête. L’adaptateur n’isole pas les rendus SSR concurrents et ne libère pas le travail du client.
 
 ## Gérer le cycle de vie des effets temps réel
 
@@ -256,19 +228,21 @@ Le démontage ou le remontage du provider change la portée du client. Il n'appe
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { JSX, ReactNode } from 'react'
 
 interface ClientProviderProps {
+  client: Client
   children?: ReactNode
-  options?: ClientOption[]
 }
 
 declare function ClientProvider(props: ClientProviderProps): JSX.Element
 declare function useClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+Fournit le client reçu aux descendants. `children` est facultatif.
+
+Renvoie le client fourni le plus proche et lève une erreur s’il n’existe pas.
 
 ## Étapes suivantes
 

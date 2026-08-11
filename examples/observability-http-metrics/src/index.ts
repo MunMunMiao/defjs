@@ -19,7 +19,7 @@ export const reserveInventoryRequest = defineRequest({
   method: 'POST',
   path: '/v1/inventory/reservations',
   input: struct.request({ body: struct.json(struct.object({ sku: struct.string() })) }),
-  output: [{ status: 200, body: struct.object({ reservationId: struct.string() }) }] as const,
+  output: [{ status: 200, body: struct.object({ reservationId: struct.string() }) }],
 })
 
 export interface HttpMetric {

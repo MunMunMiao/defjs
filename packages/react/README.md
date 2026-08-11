@@ -1,12 +1,10 @@
 # @defjs/react
 
-Thin React adapter for `@defjs/core`. It provides `ClientProvider`, `useClient`, and React-specific option wiring so a typed defjs client can be shared through a component tree.
+Thin React adapter for `@defjs/core`. It provides an existing Defjs client through React Context.
 
 Supports React 18+.
 
 ## Install
-
-Install `@defjs/react` with a compatible `@defjs/core` release and React:
 
 ```sh
 npm install @defjs/core @defjs/react react
@@ -16,13 +14,13 @@ The package is ESM and requires Node.js 22 or newer when run in Node.
 
 ## What this package does
 
-`ClientProvider` creates one `@defjs/core` client for a mounted provider instance and exposes it through React Context. Ordinary rerenders keep that initial client and do not reapply a changed `options` array. `useClient()` reads the nearest provided client. `withEndpoint` and `withInterceptors` are React-specific option glue for provider setup.
+`ClientProvider` exposes the exact `Client` instance supplied by the application. `useClient()` reads the nearest provided instance.
 
-This package is a thin adapter over `@defjs/core`. It does not add a query layer, data cache, Suspense integration, GraphQL client or protocol handling, or application state management. Compose those patterns in your own React code by calling `client.execute(...)` from hooks, loaders, or third-party libraries.
+Client creation and configuration stay in `@defjs/core`. The adapter does not create, cache, replace, dispose, abort, or close anything on behalf of the application, and it does not add a query layer, Suspense integration, GraphQL client, or application state management.
 
 ## Quick Start
 
-Define requests in a shared module with `@defjs/core`:
+Define requests in a shared module:
 
 ```tsx
 // api.ts
@@ -32,111 +30,79 @@ export const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({
-    path: struct.object({
-      id: struct.number(),
-    }),
+    path: struct.object({ id: struct.number() }),
   }),
   output: [
     {
       status: 200,
-      body: struct.object({
-        id: struct.number(),
-        name: struct.string(),
-      }),
+      body: struct.object({ id: struct.number(), name: struct.string() }),
     },
-  ] as const,
+  ],
 })
 ```
 
-Provide one shared client to the part of the tree that needs it:
+Create and own the client at the application boundary, then provide it:
 
 ```tsx
 // app.tsx
-import { ClientProvider, withEndpoint } from '@defjs/react'
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import { UserProfile } from './user-profile'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+    <ClientProvider client={client}>
       <UserProfile id={1} />
     </ClientProvider>
   )
 }
 ```
 
-Read the client inside child components and handle the error-first tuple yourself:
+Read the client inside descendants and own request cleanup where the work starts:
 
 ```tsx
-// user-profile.tsx
 import { useEffect, useState } from 'react'
 import { useClient } from '@defjs/react'
 import { getUser } from './api'
 
 export function UserProfile({ id }: { id: number }) {
   const client = useClient()
-  const [name, setName] = useState<string>('loading...')
+  const [name, setName] = useState('loading...')
 
   useEffect(() => {
     const abort = new AbortController()
 
-    void client
-      .execute(getUser({ path: { id } }), { signal: abort.signal })
-      .then(([error, user]) => {
-        if (abort.signal.aborted) {
-          return
-        }
+    void client.execute(getUser({ path: { id } }), { signal: abort.signal }).then(([error, user]) => {
+      if (!abort.signal.aborted) setName(error ? error.message : user.name)
+    })
 
-        if (error) {
-          setName(error.message)
-          return
-        }
-
-        setName(user.name)
-      })
-      .catch((error) => {
-        if (abort.signal.aborted) {
-          return
-        }
-
-        setName(error instanceof Error ? error.message : String(error))
-      })
-
-    return () => {
-      abort.abort()
-    }
+    return () => abort.abort()
   }, [client, id])
 
   return <div>{name}</div>
 }
 ```
 
-## Cookbook
-
-See the bundled [React guide](docs/plugins/react.md) for request-scoped SSR boundaries, TanStack Query composition, `ClientProvider` lifecycle, and SSE/WebSocket effect cleanup. Long-lived transports must be closed when their UI owner unmounts, including a successful handle that arrives after cleanup has started.
+Nested providers follow normal React Context rules: descendants receive the nearest provider's exact client. Supplying a different `client` prop changes the provided value; the adapter does not invent a remount or caching policy.
 
 ## API
 
-### `<ClientProvider options?: ClientOption[]>`
+### `<ClientProvider client: Client>`
 
-Creates a client once per provider mount and exposes it to descendant components.
+Provides the supplied client to descendant components. `children` is optional.
 
 ### `useClient(): Client`
 
 Returns the client from the nearest `ClientProvider`. Throws if called outside a provider.
 
-### `withEndpoint(endpoint: string): ClientOption`
-
-Sets the base endpoint URL for the client created by `ClientProvider`.
-
-### `withInterceptors(...fns: (() => Interceptor)[]): ClientOption`
-
-Registers interceptor factories evaluated when `ClientProvider` creates the client. withInterceptors(...) in this adapter accepts factory functions because the provider/plugin creates the real @defjs/core client later. Each call appends the interceptors produced by those factories in option application order, matching the core client's withInterceptors(...) composition model.
-
 ## Notes
 
 - The published entry is marked with `'use client'`, so React Server Component consumers treat this adapter as a client boundary.
-- If you need a different client instance, remount the provider at the lifecycle boundary that owns the new configuration. Ordinary rerenders retain the initial client.
-- `@defjs/react` does not change the request, command, interceptor, or error model from `@defjs/core`.
+- Create request-specific clients at the application boundary for SSR data that contains credentials, cookies, or tenant state.
+- The owner that creates a client also owns all requests, SSE streams, and WebSocket sessions started through it. Provider unmount does not clean them up automatically.
+- Import `createClient`, `withEndpoint`, `withInterceptors`, and all other client options from `@defjs/core`.
 
 ## License
 

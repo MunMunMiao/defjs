@@ -43,7 +43,7 @@ describe('request http runtime', () => {
             code: struct.string(),
             message: struct.string(),
           }),
-          status: [401, 403, 404] as const,
+          status: [401, 403, 404],
         },
       ],
       path: '/account/not-found',
@@ -87,6 +87,35 @@ describe('request http runtime', () => {
 
     expect(error).toBeNull()
     expect(result).toEqual({ name: 'Miao' })
+  })
+
+  test('should normalize omitted all-optional request sections before building', async () => {
+    let capturedRequest: HttpRequest | undefined
+    const optionalClient = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async (request) => {
+          capturedRequest = request
+          return makeResponse({ status: 200 })
+        }),
+      ),
+    )
+    const useOptionalSections = defineRequest({
+      input: struct.request({
+        headers: struct.object({ traceId: struct.string().optional() }),
+        path: struct.object({ locale: struct.string().optional() }),
+        query: struct.object({ page: struct.number().optional() }),
+      }),
+      method: 'GET',
+      path: '/search',
+    })
+
+    const [error] = await optionalClient.execute(useOptionalSections({}))
+
+    expect(error).toBeNull()
+    expect(capturedRequest?.endpoint).toBe('/search')
+    expect(capturedRequest?.queryString).toBe('')
+    expect(Array.from(capturedRequest?.headers?.entries() ?? [])).toEqual([])
   })
 
   test('should build params query headers and body, and only execute once per ref', async () => {

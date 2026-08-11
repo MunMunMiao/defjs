@@ -1,12 +1,12 @@
 import type { HttpResponse } from '../internal/http_response'
 
-export interface HttpStatusError<TErrorData = unknown> {
+export interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> {
   code: 'HTTP_STATUS'
   data: TErrorData
   kind: 'http'
   message: string
   response: HttpResponse<unknown>
-  status: number
+  status: TStatus
 }
 
 export interface TransportError {

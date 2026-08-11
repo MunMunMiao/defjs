@@ -14,7 +14,7 @@ export interface HttpInterceptorOptions {
   metrics?: HttpClientMetrics
   requireParentSpan?: boolean
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
-  responseHook?: (span: Span, res: HttpResponse<unknown>) => Promise<void> | void
+  responseHook?: (span: Span, res: HttpResponse<unknown>, req: HttpRequest) => Promise<void> | void
 }
 
 export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptions): ReturnType<typeof createHttpInterceptor> {
@@ -28,7 +28,7 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
     const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
     const { url, serverAddress, serverPort } = resolveHttpUrl(req.endpoint, req.baseEndpoint)
 
-    const span = createHttpSpan(tracer, req.method, url, parentCtx)
+    const span = createHttpSpan(tracer, req.method, url, parentCtx, req.operation)
 
     if (serverAddress) {
       span.setAttribute('server.address', serverAddress)
@@ -49,7 +49,7 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
       const response = await next({ ...req, headers })
       const durationS = durationSeconds(startTime)
 
-      runSpanHook(span, 'responseHook', () => responseHook?.(span, response))
+      runSpanHook(span, 'responseHook', () => responseHook?.(span, response, req))
       setSpanHttpResponse(span, response.status, response.error)
 
       metrics?.requestDuration.record(durationS, createHttpMetricAttributes(req, response))

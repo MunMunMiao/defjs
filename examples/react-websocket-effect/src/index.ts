@@ -1,4 +1,12 @@
-import { defineWebSocket, struct, type WebSocketIncomingData, type WebSocketSession, withEndpoint, withWebSocketHandle } from '@defjs/core'
+import {
+  createClient,
+  defineWebSocket,
+  struct,
+  type WebSocketIncomingData,
+  type WebSocketSession,
+  withEndpoint,
+  withWebSocketHandle,
+} from '@defjs/core'
 import { ClientProvider, useClient } from '@defjs/react'
 import { createElement, useEffect } from 'react'
 import { createWebSocketFixture } from './fixture'
@@ -67,13 +75,13 @@ export async function main(): Promise<void> {
   const fixture = createWebSocketFixture()
   const closed = Promise.withResolvers<void>()
   const status = Promise.withResolvers<ShipmentStatus>()
-  const options = [withEndpoint('https://operations.fixture.invalid'), withWebSocketHandle(fixture.WebSocket)]
+  const client = createClient(withEndpoint('https://operations.fixture.invalid'), withWebSocketHandle(fixture.WebSocket))
 
   // Step 4: Mount the effect, open the socket, and deliver one typed status.
   const renderer = await mountReactFixture(
     createElement(
       ClientProvider,
-      { options },
+      { client },
       createElement(ShipmentStatusEffect, { onClosed: closed.resolve, onError: status.reject, onStatus: status.resolve }),
     ),
   )

@@ -33,11 +33,14 @@ const result = await client.execute(command)
 | الحقل          | المعنى                                                                                                     |
 | -------------- | ---------------------------------------------------------------------------------------------------------- |
 | `method`       | نص HTTP method.                                                                                            |
+| `operation`    | هوية static صريحة منخفضة cardinality للـ telemetry والتشخيص.                                               |
 | `path`         | path نسبي لنقطة النهاية، مع placeholders اختيارية بشكل `:name`.                                            |
 | `input`        | Struct يُستخدم لفك الترميز البنيوي لمدخل الأمر.                                                            |
 | `build`        | إسقاط مرتبط بالـ Struct من حقول input إلى أجزاء الطلب. يتطلب `input`.                                      |
 | `output`       | ربط status بـ Struct لفك ترميز response واستنتاج result.                                                   |
 | `responseType` | نمط response اختياري فقط عند إعلان `output`: `json` أو `text` أو `blob` أو `arraybuffer`؛ ويُمنع عند حذفه. |
+
+يتوفر `operation?: string` أيضًا في تعريفات SSE وWebSocket. اضبطه صراحةً من عقد endpoint، مثل `users.lookup`؛ ولا تشتقه من path معروض أو URL أو بيانات user/tenant أو request IDs أو قيم أخرى عالية cardinality.
 
 استخدم `struct.request(...)` عندما ترتبط حقول الأمر مباشرة بأقسام wire:
 
@@ -66,7 +69,7 @@ const createUser = defineRequest({
   output: [
     { status: 201, body: struct.object({ id: struct.number() }) },
     { status: 409, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 const command = createUser({
@@ -88,7 +91,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-عند إعلان `input` يجب توفير حقول object المطلوبة وكل request section معلن. لا يمكن حذف إلا الحقول الموسومة optional أو nullish. ولا تعلن section لا يستخدمه endpoint.
+عند إعلان `input` يبقى وسيط command الجذري مطلوبًا. داخل `struct.request(...)` يمكن حذف section كامل من نوع `path` أو `query` أو `headers` إذا كانت كل حقوله optional أو nullish؛ ويطبّع parsing كل section محذوف إلى `{}`. يبقى section الذي يحتوي أي حقل مطلوب إلزاميًا، كما يبقى body section مطلوبًا حتى لو كانت حقول object الداخلية optional.
 
 ```typescript
 const search = defineRequest({
@@ -102,6 +105,35 @@ const search = defineRequest({
 search({ query: { q: 'docs' } })
 // search() // TypeScript error: an argument is required.
 // search({ query: {} }) // TypeScript and runtime error: q is required.
+```
+
+يمكن حذف request sections التي كل حقولها optional، لكن command argument نفسه يبقى موجودًا:
+
+```typescript
+const OptionalSections = struct.request({
+  path: struct.object({ locale: struct.string().optional() }),
+  query: struct.object({ page: struct.number().optional() }),
+  headers: struct.object({ traceId: struct.string().optional() }),
+})
+const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
+
+list({})
+list({ query: { page: 2 } })
+
+const [optionalError, normalized] = struct.parse(OptionalSections, {})
+if (optionalError) throw optionalError
+// normalized is { path: {}, query: {}, headers: {} }.
+
+const filtered = defineRequest({
+  method: 'GET',
+  path: '/items',
+  input: struct.request({
+    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  }),
+})
+
+filtered({ query: { q: 'docs' } })
+// filtered({}) // TypeScript error: query contains required q.
 ```
 
 هذا تحقق من وجود البنية ونوعها، وليس تحققًا من authorization أو range أو amount أو format أو state transition في التطبيق.
@@ -154,7 +186,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }] as const,
+  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
 })
 ```
 
@@ -186,20 +218,25 @@ const createBatch = defineRequest({
 ```typescript
 const User = struct.object({ id: struct.number() })
 const NotFound = struct.object({ message: struct.string() })
-const Unauthorized = struct.object({ message: struct.string() })
+const Conflict = struct.object({ conflict: struct.string() })
 
 const objectOutput = {
   '200': User,
   '404': NotFound,
 }
 
-const arrayOutput = [
-  { status: 200, body: User },
-  { status: [401, 403], body: Unauthorized },
-] as const
+const getUsers = defineRequest({
+  method: 'GET',
+  path: '/users',
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+    { status: [409, 422], body: Conflict },
+  ],
+})
 ```
 
-نوع نجاح HTTP هو اتحاد أجسام 2xx المعلنة. و`error.data` هو اتحاد أجسام non-2xx المعلنة. يحتاج الشكل المصفوفي إلى `as const` للحفاظ على status literals والمصفوفات readonly المجمّعة.
+نوع نجاح HTTP هو اتحاد أجسام 2xx المعلنة. يرتبط `error.data` بالـ status المعلن من نوع non-2xx. تستخدم `defineRequest(...)` ‏const generic، لذلك تحتفظ status entries المضمّنة ومصفوفات status المجمّعة بقيمها الحرفية بلا `as const`. بعد `client.execute(getUsers())` يؤدي فحص `error.status === 404` إلى تضييق `error.data` إلى `NotFound`، بينما يضيّق فرع `409 | 422` المتبقي إلى `Conflict`.
 
 عندما يكون `output` معلنًا، يجب أن يملك كل status معاد Struct مطابقًا. ينتج status غير مطابق، سواء كان 2xx أو non-2xx، خطأ `UNDECLARED_STATUS`. وعند حذف `output` لا يُقرأ response body ولا يُفك ترميزه، ويُلغى بأفضل جهد ممكن، وتكون result مساوية لـ `undefined`.
 

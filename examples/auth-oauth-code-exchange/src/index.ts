@@ -25,7 +25,7 @@ export const exchangeAuthorizationCode = defineRequest({
         tokenType: struct.literal('Bearer').alias('token_type'),
       }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Reject callback or PKCE drift before redeeming the code for a validated token.

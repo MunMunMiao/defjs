@@ -10,7 +10,7 @@ Struct 描述嚴格結構式解碼與 wire encoding。必填值缺少或值無�
 從 root entry 使用 `struct` facade 與 `Infer<T>`：
 
 ```typescript
-import { struct, type Infer } from '@defjs/core'
+import { struct, type Infer, type StructInput } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -86,6 +86,35 @@ type ParseResult<T> = [error: null, value: T] | [error: StructError, value: unde
 
 缺少的 optional 與 nullish object field 會從 output 省略；在頂層則解碼成 `undefined`。Unknown key 會被丟棄，decoded object 與 record 使用 null prototype。
 
+Node 的 strict deep equality 會比較 prototype，因此 Struct 解析結果不會與欄位相同的 object literal deep-equal。測試應明確斷言這個 boundary，或只在 assertion 中建立 shallow copy：
+
+```typescript
+import assert from 'node:assert/strict'
+
+const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
+assert.equal(error, null)
+assert.equal(Object.getPrototypeOf(profile), null)
+assert.deepEqual({ ...profile }, { name: 'Ada' })
+```
+
+Spread 只適用於這個淺層 assertion；nested Struct object 仍使用 null prototype。不要只為迎合 test matcher 而在 production path 增加全域 normalize 或 clone。
+
+啟用 `exactOptionalPropertyTypes` 時，推導出的 object input 使用 exact optional property。呼叫方應省略 optional 或 nullish key，而不是明確賦值 `undefined`：
+
+```typescript
+const OptionalProfile = struct.object({
+  nickname: struct.string().optional(),
+})
+
+type OptionalProfileInput = StructInput<typeof OptionalProfile>
+
+const omitted: OptionalProfileInput = {}
+// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
+const explicitUndefined: OptionalProfileInput = { nickname: undefined }
+```
+
+Runtime 面對 unknown input 時仍會防禦性接受 optional/nullish 欄位的明確 `undefined`，並從解析結果省略該 key；這項 normalization 不會放寬靜態呼叫方的 input type。
+
 ## 必填 Object 與 Request Input
 
 除非欄位 Struct 是 optional 或 nullish，否則 object property 在 TypeScript 與 runtime 都必填。`struct.request(...)` 中每個已宣告 section 亦必填；未宣告 section 不會出現在 input type。
@@ -149,11 +178,40 @@ const UserBody = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-// Caller input uses { id, displayName }.
-// JSON wire data uses { user_id, display_name }.
+const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
+if (logicalError) throw logicalError
+
+const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
+if (!wireKeyError) throw new Error('struct.parse must read logical keys')
 ```
 
-Alias 會 decode 與 encode JSON wire key。Automatic request building 亦把 alias 用作 outbound path、query、header、URL-encoded 及 multipart key。呼叫方仍然使用 logical key；custom `build` projection 明確指定的 target key 則維持原樣。
+`logicalUser` 使用 `{ id, displayName }`；`wireKeyError` 指向缺少的 logical `id`。公開 `struct.parse` 只讀取 logical value，不會把 wire key 當作 standalone parse input。
+
+Transport JSON encode 與 decode 才會套用 wire alias：
+
+```typescript
+import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+let requestWireBody: unknown
+const echoUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({ body: struct.json(UserBody) }),
+  output: { 200: UserBody },
+})
+const client = createClient(
+  withEndpoint('https://example.test'),
+  withHTTPHandle(async (input, init) => {
+    requestWireBody = await new Request(input, init).json()
+    return Response.json({ user_id: 1, display_name: 'Ada' })
+  }),
+)
+
+const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
+if (requestError) throw requestError
+```
+
+`requestWireBody` 是 `{ user_id, display_name }`，`responseUser` 則還原為 `{ id, displayName }`。Automatic request building 亦把 alias 用作 outbound path、query、header、URL-encoded 及 multipart key；custom `build` projection 明確指定的 target key 則維持原樣。
 
 ## `StructError`
 

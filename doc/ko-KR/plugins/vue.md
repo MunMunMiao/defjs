@@ -5,64 +5,39 @@ description: Vue injection으로 Defjs 클라이언트를 공유하고 API에 �
 
 # `@defjs/vue`
 
-`@defjs/vue`는 `@defjs/core`를 위한 가벼운 injection adapter입니다. 다음 항목을 export합니다.
-
-- core 클라이언트를 만들고 provide하는 Vue plugin `provideClient(...)`
-- 가장 가까이 inject된 클라이언트를 반환하는 `injectClient()`
-- override에 사용하는 injection key `HTTP_CLIENT`
-- adapter의 `withEndpoint(...)` 및 interceptor factory용 `withInterceptors(...)` helper
-
-트랜스포트 동작, caching, state management, retry, Nuxt module을 추가하지 않습니다. `@defjs/core`, Vue와 함께 설치하고 이런 책임은 애플리케이션 composable, store, framework 통합에 두세요.
+이 패키지는 `@defjs/core`용 얇은 injection adapter입니다. `createClientPlugin(client)`는 애플리케이션이 만든 client를 제공하고, `injectClient()`는 가장 가까운 instance를 반환하며, `HTTP_CLIENT`는 native subtree override에 사용합니다. client factory, cache, retry, resource lifecycle은 추가하지 않습니다.
 
 ## Plugin 설치
 
-plugin을 설치할 때마다 클라이언트 하나를 만듭니다.
+`@defjs/core`에서 client를 생성하고 구성한 뒤 그 동일한 instance용 plugin을 설치합니다.
 
 ```typescript
 // main.ts
+import { createClient, withEndpoint } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
-import { provideClient, withEndpoint } from '@defjs/vue'
 import App from './App.vue'
 
+const client = createClient(withEndpoint('https://api.example.com'))
 const app = createApp(App)
 
-app.use(provideClient(withEndpoint('https://api.example.com')))
-
+app.use(createClientPlugin(client))
 app.mount('#app')
 ```
 
-`provideClient(...options)`는 Vue adapter가 다시 export하거나 만든 옵션뿐 아니라 `@defjs/core`의 모든 `ClientOption`을 받습니다.
-
-```typescript
-import { withCredentials, withSSEReconnect } from '@defjs/core'
-import { provideClient, withEndpoint } from '@defjs/vue'
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withCredentials(true), withSSEReconnect({ attempts: 3 })))
-```
-
-plugin을 설치하고 클라이언트를 만들 때 옵션이 실행됩니다. 같은 plugin 객체를 다른 app에 설치하면 별도의 클라이언트가 만들어집니다.
+plugin은 전달된 instance만 제공합니다. client를 생성, 복제, 교체 또는 dispose하지 않습니다.
 
 ## 가장 가까운 클라이언트 inject
 
-component `setup`, `<script setup>`, 활성 composable/injection context 안에서 `injectClient()`를 호출하세요.
+`injectClient()`는 `setup`, `<script setup>` 또는 활성 injection context 안에서 호출합니다. `HTTP_CLIENT`가 없으면 오류를 던지며 Vue의 일반적인 가장 가까운 provider 규칙을 따릅니다.
+
+subtree override에는 공개 key와 Vue native `provide`를 사용합니다.
 
 ```vue
 <script setup lang="ts">
-import { injectClient } from '@defjs/vue'
-
-const client = injectClient()
-</script>
-```
-
-`HTTP_CLIENT`가 없으면 throw합니다. 임의의 module scope에서 호출하지 마세요.
-
-Vue의 일반적인 nearest-provider 규칙을 따릅니다. component가 descendant용 override를 provide할 수 있습니다.
-
-```vue
-<script setup lang="ts">
-import { provide } from 'vue'
 import { createClient, withEndpoint } from '@defjs/core'
 import { HTTP_CLIENT } from '@defjs/vue'
+import { provide } from 'vue'
 
 const scopedClient = createClient(withEndpoint('https://preview.example.com'))
 provide(HTTP_CLIENT, scopedClient)
@@ -73,34 +48,25 @@ provide(HTTP_CLIENT, scopedClient)
 </template>
 ```
 
-descendant에서 `injectClient()`를 호출하면 `scopedClient`를 받습니다. 이 subtree 밖의 sibling은 계속 app-level 클라이언트를 받습니다.
-
 ## Interceptor factory
 
-adapter의 `withInterceptors(...)`는 인터셉터 instance가 아니라 factory를 받습니다. 클라이언트가 만들어질 때 factory를 평가하고 그 결과를 옵션 순서대로 추가합니다.
+interceptor value를 만들고 core의 `withInterceptors(...)`로 조합한 뒤 plugin을 설치합니다.
 
 ```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import { provideClient, withEndpoint, withInterceptors } from '@defjs/vue'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
-
-app.use(provideClient(withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)))
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
+app.use(createClientPlugin(client))
 ```
 
-이미 만들어진 인터셉터 값을 받는 core `withInterceptors(...)`와 다른 점입니다. 서버 credential factory는 요청 범위로 유지하세요.
+factory가 request별 credential을 캡처한다면 해당 client를 만드는 request boundary 안에서 호출하세요.
 
 ## 입력 변화에 반응하기
 
@@ -163,30 +129,22 @@ import한 `getUser` 커맨드 빌더가 엔드포인트 계약을 소유합니�
 
 ## SSR 경계
 
-설정이 브라우저에서 안전하고 요청과 무관하다면 브라우저 app에 plugin 클라이언트 하나를 설치할 수 있습니다.
-
-SSR에서는 요청 header, cookie, 사용자 또는 tenant 데이터를 여러 요청이 공유하는 app singleton에 capture하지 마세요. 서버 요청 경계마다 core 클라이언트를 만들고 해당 요청의 render tree 안에서만 전달하거나 provide하세요.
-
-adapter는 동시에 실행되는 SSR 요청 사이에서 애플리케이션 closure를 격리하지 않습니다. 어떤 inbound header나 cookie를 전달해도 안전한지도 결정하지 않습니다.
-
-Nuxt client plugin은 브라우저 consumer를 위해 Vue adapter를 설치할 수 있습니다.
+browser app에는 browser-safe client를 설치할 수 있습니다. SSR에서는 server request boundary마다 별도 core client를 만들고 해당 app에 그 instance만 제공하세요. header, cookie, tenant state, credential을 request 사이에 공유하면 안 됩니다.
 
 ```typescript
 // plugins/defjs.client.ts
-import { provideClient, withEndpoint } from '@defjs/vue'
+import { createClient, withEndpoint } from '@defjs/core'
+import { createClientPlugin } from '@defjs/vue'
 
 export default defineNuxtPlugin((nuxtApp) => {
-  nuxtApp.vueApp.use(provideClient(withEndpoint(useRuntimeConfig().public.apiBase)))
+  const client = createClient(withEndpoint(useRuntimeConfig().public.apiBase))
+  nuxtApp.vueApp.use(createClientPlugin(client))
 })
 ```
 
-`.client.ts` suffix는 이 코드를 브라우저 전용으로 만듭니다. 서버 요청 클라이언트가 아니며 SSR credential을 전달하는 데 사용하면 안 됩니다. Nuxt 애플리케이션에서는 실제 plugin, route handler, hydration 설정과 함께 이 경계를 테스트하세요.
-
 ## 리소스 소유권
 
-Vue 프로바이더를 설치하거나 unmount해도 HTTP 작업을 abort하거나 SSE·WebSocket 리소스를 닫지 않습니다. adapter는 클라이언트를 만들 뿐이며 core 클라이언트에는 `dispose()` method가 없습니다.
-
-realtime 작업을 시작한 컴포넌트, composable, route 또는 store는 다음 작업을 해야 합니다.
+plugin 설치나 unmount는 HTTP를 abort하거나 SSE 및 WebSocket resource를 닫지 않습니다. client를 만든 호출자가 이를 통해 시작한 모든 작업을 소유합니다.
 
 - 비동기 시작 전이나 동시에 cleanup을 등록합니다.
 - scope가 끝나면 시작 작업을 abort합니다.
@@ -200,15 +158,19 @@ realtime 작업을 시작한 컴포넌트, composable, route 또는 store는 다
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { InjectionKey, Plugin } from 'vue'
 
 declare const HTTP_CLIENT: InjectionKey<Client>
-declare function provideClient(...options: ClientOption[]): Plugin
+declare function createClientPlugin(client: Client): Plugin
 declare function injectClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+전달된 client instance를 제공하는 Vue plugin을 만듭니다.
+
+가장 가까운 client를 반환하며 없으면 오류를 던집니다.
+
+native subtree provider용 공개 injection key입니다.
 
 ## 다음 단계
 

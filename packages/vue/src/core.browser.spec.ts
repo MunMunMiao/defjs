@@ -1,9 +1,9 @@
-import { createClient, createHttpInterceptor, defineRequest, struct, type Client } from '@defjs/core'
+import { createClient, createHttpInterceptor, defineRequest, struct, type Client, withEndpoint, withInterceptors } from '@defjs/core'
 import { afterEach, beforeEach, describe, expect, inject, test } from 'vitest'
 import { createApp, defineComponent, h, nextTick, provide, ref, type App, type Component } from 'vue'
-import { HTTP_CLIENT, injectClient, provideClient, withEndpoint, withInterceptors } from './index'
+import { createClientPlugin, HTTP_CLIENT, injectClient } from './index'
 
-const passthroughHttpInterceptor = () => createHttpInterceptor((req, next) => next(req))
+const passthroughHttpInterceptor = createHttpInterceptor((req, next) => next(req))
 
 const UserStruct = struct.object({
   id: struct.number(),
@@ -67,14 +67,8 @@ describe('vue browser runtime', () => {
     }
   })
 
-  test('returns a Vue plugin that installs a client provider', () => {
-    const plugin = provideClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor))
-
-    expect(plugin).toHaveProperty('install')
-    expect(typeof plugin.install).toBe('function')
-  })
-
-  test('provides a client through the provideClient plugin', () => {
+  test('provides the exact client instance supplied by the caller', () => {
+    const client = createClient(withEndpoint(testServerHost))
     let injectedClient: Client | undefined
 
     const Consumer = defineComponent({
@@ -85,14 +79,18 @@ describe('vue browser runtime', () => {
       },
     })
 
+    const plugin = createClientPlugin(client)
+    expect(plugin).toHaveProperty('install')
+
     mountRuntime(Consumer, (app) => {
-      app.use(provideClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor)))
+      app.use(plugin)
     })
 
-    expect(injectedClient).toBeDefined()
+    expect(injectedClient).toBe(client)
   })
 
   test('shares one client through multiple Vue component layers', () => {
+    const client = createClient(withEndpoint(testServerHost))
     let middleClient: Client | undefined
     let leafClient: Client | undefined
 
@@ -113,12 +111,11 @@ describe('vue browser runtime', () => {
     })
 
     mountRuntime(Middle, (app) => {
-      app.use(provideClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor)))
+      app.use(createClientPlugin(client))
     })
 
-    expect(middleClient).toBeDefined()
-    expect(leafClient).toBeDefined()
-    expect(middleClient).toBe(leafClient)
+    expect(middleClient).toBe(client)
+    expect(leafClient).toBe(client)
   })
 
   test('renders data fetched by the injected client', async () => {
@@ -158,8 +155,9 @@ describe('vue browser runtime', () => {
       },
     })
 
+    const client = createClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor))
     const root = mountRuntime(UserList, (app) => {
-      app.use(provideClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor)))
+      app.use(createClientPlugin(client))
     })
 
     expect(root.textContent).toContain('Loading users')
@@ -190,6 +188,9 @@ describe('vue browser runtime', () => {
         req.headers?.set('x-defjs-scope', scope)
         return next(req)
       })
+
+    const outer = createClient(withEndpoint(testServerHost), withInterceptors(scopedInterceptor('outer')))
+    const inner = createClient(withEndpoint(testServerHost), withInterceptors(scopedInterceptor('inner')))
 
     const OuterRequestConsumer = defineComponent({
       name: 'OuterRequestConsumer',
@@ -242,13 +243,7 @@ describe('vue browser runtime', () => {
     const InnerProvider = defineComponent({
       name: 'InnerClientProvider',
       setup() {
-        provide(
-          HTTP_CLIENT,
-          createClient(
-            withEndpoint(testServerHost),
-            withInterceptors(() => scopedInterceptor('inner')),
-          ),
-        )
+        provide(HTTP_CLIENT, inner)
         return () => h(InnerMiddle)
       },
     })
@@ -261,12 +256,7 @@ describe('vue browser runtime', () => {
     })
 
     const root = mountRuntime(Root, (app) => {
-      app.use(
-        provideClient(
-          withEndpoint(testServerHost),
-          withInterceptors(() => scopedInterceptor('outer')),
-        ),
-      )
+      app.use(createClientPlugin(outer))
     })
 
     expect(root.querySelector('[data-scope="outer"]')?.textContent).toBe('outer: loading')
@@ -286,119 +276,11 @@ describe('vue browser runtime', () => {
     expect(outerUsers).toEqual(expectedUsers)
     expect(innerError).toBeNull()
     expect(innerUsers).toEqual(expectedUsers)
-    expect(outerClient).toBeDefined()
-    expect(outerSiblingClient).toBeDefined()
-    expect(innerMiddleClient).toBeDefined()
-    expect(innerLeafClient).toBeDefined()
-    expect(outerClient).toBe(outerSiblingClient)
-    expect(innerMiddleClient).toBe(innerLeafClient)
-    expect(innerLeafClient).not.toBe(outerClient)
+    expect(outerClient).toBe(outer)
+    expect(outerSiblingClient).toBe(outer)
+    expect(innerMiddleClient).toBe(inner)
+    expect(innerLeafClient).toBe(inner)
     expect([...seenScopes].sort()).toEqual(['inner', 'outer'])
-  })
-
-  test('provides a client with only endpoint', () => {
-    let injectedClient: Client | undefined
-
-    const Consumer = defineComponent({
-      name: 'EndpointOnlyConsumer',
-      setup() {
-        injectedClient = injectClient()
-        return () => h('div')
-      },
-    })
-
-    mountRuntime(Consumer, (app) => {
-      app.use(provideClient(withEndpoint(testServerHost)))
-    })
-
-    expect(injectedClient).toBeDefined()
-  })
-
-  test('provides a client with only interceptors', () => {
-    let injectedClient: Client | undefined
-
-    const Consumer = defineComponent({
-      name: 'InterceptorsOnlyConsumer',
-      setup() {
-        injectedClient = injectClient()
-        return () => h('div')
-      },
-    })
-
-    mountRuntime(Consumer, (app) => {
-      app.use(provideClient(withInterceptors(passthroughHttpInterceptor)))
-    })
-
-    expect(injectedClient).toBeDefined()
-  })
-
-  test('provides a client with no options', () => {
-    let injectedClient: Client | undefined
-
-    const Consumer = defineComponent({
-      name: 'NoOptionsConsumer',
-      setup() {
-        injectedClient = injectClient()
-        return () => h('div')
-      },
-    })
-
-    mountRuntime(Consumer, (app) => {
-      app.use(provideClient())
-    })
-
-    expect(injectedClient).toBeDefined()
-  })
-
-  test('creates injectable clients for each supported option shape', () => {
-    const optionSets: Array<{ name: string; options: Parameters<typeof provideClient> }> = [
-      { name: 'endpoint only', options: [withEndpoint(testServerHost)] },
-      { name: 'interceptors only', options: [withInterceptors(passthroughHttpInterceptor)] },
-      { name: 'no options', options: [] },
-    ]
-
-    for (const { name, options } of optionSets) {
-      let injectedClient: Client | undefined
-
-      const Consumer = defineComponent({
-        name: `OptionShapeConsumer:${name}`,
-        setup() {
-          injectedClient = injectClient()
-          return () => h('div', name)
-        },
-      })
-
-      mountRuntime(Consumer, (app) => {
-        app.use(provideClient(...options))
-      })
-
-      expect(injectedClient).toBeDefined()
-    }
-  })
-
-  test('executes requests with a client configured by endpoint and interceptors', async () => {
-    let injectedClient: Client | undefined
-
-    const Consumer = defineComponent({
-      name: 'ConfiguredClientConsumer',
-      setup() {
-        injectedClient = injectClient()
-        return () => h('div')
-      },
-    })
-
-    mountRuntime(Consumer, (app) => {
-      app.use(provideClient(withEndpoint(testServerHost), withInterceptors(passthroughHttpInterceptor)))
-    })
-
-    if (!injectedClient) {
-      throw new Error('Expected injected client')
-    }
-
-    const [error, users] = await injectedClient.execute(getUsers())
-
-    expect(error).toBeNull()
-    expect(users).toEqual(expectedUsers)
   })
 
   test('throws a helpful error when no provider is installed', () => {

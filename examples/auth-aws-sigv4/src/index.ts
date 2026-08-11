@@ -13,7 +13,7 @@ export const uploadDailyReport = defineRequest({
     path: struct.object({ reportDate: struct.string() }),
     body: struct.json(struct.object({ completedOrders: struct.number(), warehouse: struct.string() })),
   }),
-  output: [{ status: 204, body: struct.null() }] as const,
+  output: [{ status: 204, body: struct.null() }],
 })
 
 // Step 2: Expose report publication only after Defjs accepts the bodyless success response.

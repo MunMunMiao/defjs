@@ -68,6 +68,7 @@ interface EventStreamDefinitionBase<TEvents extends EventStructs = EventStructs>
   maxBufferSize: number
   maxQueueSize: number
   method?: string
+  operation?: string
   path: string
 }
 
@@ -218,6 +219,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
       baseEndpoint: clientConfig.endpoint,
       context: config.context,
       input: endpoint.input,
+      operation: endpoint.operation,
       queryParamsSerializer: clientConfig.queryParamsSerializer,
       timeout: cancellation.timeout,
       withCredentials: clientConfig.withCredentials,

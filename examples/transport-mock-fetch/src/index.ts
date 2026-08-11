@@ -10,7 +10,7 @@ export const getInventoryItem = defineRequest({
       status: 200,
       body: struct.object({ available: struct.number(), name: struct.string(), sku: struct.string() }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Expose the same validated inventory operation through any injected Fetch implementation.

@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process'
 import { lstat, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { gzipSync } from 'node:zlib'
 
 const packagePatterns = [
   ['@defjs/core', /^defjs-core-.+\.tgz$/],
@@ -12,7 +13,19 @@ const packagePatterns = [
   ['@defjs/opentelemetry-server', /^defjs-opentelemetry-server-.+\.tgz$/],
 ]
 
+// Vite 8.1.5 baseline: 14,326 B gzip; 16 KiB leaves 14% headroom for toolchain drift.
+const httpGzipBudgetBytes = 16 * 1_024
+const realtimeSentinels = [
+  ['WebSocket', 'globalThis.WebSocket'],
+  ['heartbeat', 'heartbeat'],
+  ['maxIncomingQueueSize', 'maxIncomingQueueSize'],
+  ['maxQueueSize', 'maxQueueSize'],
+  ['reconnect', 'reconnect'],
+  ['text/event-stream', 'text/event-stream'],
+]
+
 const indexSource = `import { defineEventStream, defineRequest, defineWebSocket, struct } from '@defjs/core'
+import { createHttpClient } from '@defjs/core/http'
 
 const inventoryPath = struct.request({ path: struct.object({ sku: struct.string() }) })
 const sseLimits = { maxBufferSize: 65_536, maxQueueSize: 16 }
@@ -40,6 +53,18 @@ export const inventorySocket = defineWebSocket({
   incoming: { changed: struct.object({ available: struct.number(), sku: struct.string() }) },
   outgoing: { watch: struct.object({ sku: struct.string() }) },
 })
+
+const optionalQuery = defineRequest({
+  method: 'GET',
+  path: '/optional',
+  input: struct.request({ query: struct.object({ q: struct.string().optional() }) }),
+})
+
+optionalQuery({})
+// @ts-expect-error exactOptionalPropertyTypes rejects an explicitly undefined optional section
+optionalQuery({ query: undefined })
+
+export const httpOnlyClient = createHttpClient()
 `
 
 const runtimeSource = `import assert from 'node:assert/strict'
@@ -48,14 +73,19 @@ import * as react from '@defjs/react'
 import * as vue from '@defjs/vue'
 import * as openTelemetry from '@defjs/opentelemetry-server'
 
-assert.equal(typeof react.withEndpoint, 'function')
-assert.equal(typeof vue.withEndpoint, 'function')
+assert.equal(typeof react.ClientProvider, 'function')
+assert.equal(typeof react.useClient, 'function')
+assert.equal(typeof vue.createClientPlugin, 'function')
+assert.equal(typeof vue.injectClient, 'function')
 assert.equal(typeof openTelemetry.withOpenTelemetryServer, 'function')
 
 let fetchCalls = 0
 const fakeFetch = async (input) => {
   fetchCalls += 1
   const url = input instanceof Request ? input.url : String(input)
+  if (url === 'https://example.test/empty') {
+    return new Response(null, { status: 204 })
+  }
   assert.equal(url, 'https://example.test/health')
   return new Response(JSON.stringify({ ok: true }), {
     headers: { 'content-type': 'application/json' },
@@ -75,13 +105,145 @@ const [error, result, response] = await client.execute(readHealth())
 assert.equal(error, null)
 assert.equal(result?.ok, true)
 assert.equal(response?.status, 200)
-assert.equal(fetchCalls, 1)
+
+const clearHealth = defineRequest({
+  method: 'DELETE',
+  path: '/empty',
+  output: { 204: struct.null() },
+  responseType: 'json',
+})
+const [emptyError, emptyResult, emptyResponse] = await client.execute(clearHealth())
+
+assert.equal(emptyError, null)
+assert.equal(emptyResult, null)
+assert.equal(emptyResponse?.status, 204)
+assert.equal(fetchCalls, 2)
+
+try {
+  delete Object.prototype.polluted
+  const [structError] = struct.parse(
+    struct.record(struct.record(struct.string())),
+    JSON.parse('{"__proto__":{"polluted":7}}'),
+  )
+  assert.ok(structError)
+
+  const formatted = structError.format()
+  const flattened = structError.flatten()
+  assert.equal(Object.getPrototypeOf(formatted), null)
+  assert.equal(Object.hasOwn(formatted, '__proto__'), true)
+  assert.equal(Object.getPrototypeOf(flattened.fieldErrors), null)
+  assert.equal(Object.hasOwn(flattened.fieldErrors, '__proto__'), true)
+  assert.equal(Object.hasOwn(Object.prototype, 'polluted'), false)
+} finally {
+  delete Object.prototype.polluted
+}
+`
+
+function viteHttpSource(packageName, clientFactory) {
+  return `import {
+  ${clientFactory} as createConsumerClient,
+  defineRequest,
+  struct,
+  withEndpoint,
+  withHTTPHandle,
+} from '${packageName}'
+
+function assertEqual(actual, expected, message) {
+  if (!Object.is(actual, expected)) {
+    throw new Error(message + ': expected ' + String(expected) + ', received ' + String(actual))
+  }
+}
+
+const products = defineRequest({
+  method: 'GET',
+  path: '/products',
+  input: struct.request({ query: struct.object({ scenario: struct.string() }) }),
+  output: [
+    { status: 200, body: struct.object({ ok: struct.boolean() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ],
+  responseType: 'json',
+})
+
+export async function runPackedHttpAcceptance() {
+  let fetchCalls = 0
+  const handle = async (input) => {
+    fetchCalls += 1
+    const request = input instanceof Request ? input : new Request(input)
+    const scenario = new URL(request.url).searchParams.get('scenario')
+    if (scenario === 'malformed') {
+      return new Response(JSON.stringify({ ok: 'yes' }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    }
+    if (scenario === 'missing') {
+      return new Response(JSON.stringify({ message: 'not found' }), {
+        headers: { 'content-type': 'application/json' },
+        status: 404,
+      })
+    }
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { 'content-type': 'application/json' },
+      status: 200,
+    })
+  }
+  const client = createConsumerClient(withEndpoint('https://example.test'), withHTTPHandle(handle))
+
+  const [successError, success, successResponse] = await client.execute(products({ query: { scenario: 'ok' } }))
+  assertEqual(successError, null, 'valid 200 error')
+  assertEqual(success?.ok, true, 'valid 200 body')
+  assertEqual(successResponse?.status, 200, 'valid 200 status')
+
+  const [malformedError, malformed, malformedResponse] = await client.execute(products({ query: { scenario: 'malformed' } }))
+  assertEqual(malformedError?.kind, 'definition', 'malformed 200 error kind')
+  assertEqual(malformedError?.code, 'RESPONSE_VALIDATION_FAILED', 'malformed 200 error code')
+  assertEqual(malformed, undefined, 'malformed 200 body')
+  assertEqual(malformedResponse?.status, 200, 'malformed 200 status')
+
+  const [missingError, missing, missingResponse] = await client.execute(products({ query: { scenario: 'missing' } }))
+  assertEqual(missingError?.kind, 'http', '404 error kind')
+  assertEqual(missingError?.status, 404, '404 error status')
+  assertEqual(missingError?.data?.message, 'not found', '404 error body')
+  assertEqual(missing, undefined, '404 success body')
+  assertEqual(missingResponse?.status, 404, '404 response status')
+  assertEqual(fetchCalls, 3, 'fetch call count')
+}
+`
+}
+
+const viteConfigSource = `import { defineConfig } from 'vite'
+
+const entries = {
+  http: 'vite-http.ts',
+  root: 'vite-root.ts',
+}
+
+export default defineConfig(({ mode }) => {
+  const entry = entries[mode]
+  if (!entry) {
+    throw new Error('Unsupported packed-consumer Vite mode: ' + mode)
+  }
+
+  return {
+    build: {
+      emptyOutDir: true,
+      lib: { entry, fileName: 'index', formats: ['es'] },
+      minify: 'oxc',
+      outDir: 'dist/vite-' + mode,
+      reportCompressedSize: false,
+      sourcemap: false,
+      target: 'es2022',
+    },
+  }
+})
 `
 
 const tsconfig = {
   compilerOptions: {
     declaration: true,
     emitDeclarationOnly: true,
+    exactOptionalPropertyTypes: true,
     lib: ['ES2022', 'DOM', 'DOM.Iterable'],
     module: 'NodeNext',
     moduleResolution: 'NodeNext',
@@ -126,6 +288,9 @@ try {
     writeFile(join(consumerDirectory, 'tsconfig.json'), `${JSON.stringify(tsconfig, null, 2)}\n`),
     writeFile(join(consumerDirectory, 'index.ts'), indexSource),
     writeFile(join(consumerDirectory, 'runtime.mjs'), runtimeSource),
+    writeFile(join(consumerDirectory, 'vite-http.ts'), viteHttpSource('@defjs/core/http', 'createHttpClient')),
+    writeFile(join(consumerDirectory, 'vite-root.ts'), viteHttpSource('@defjs/core', 'createClient')),
+    writeFile(join(consumerDirectory, 'vite.config.mjs'), viteConfigSource),
   ])
 
   await run(
@@ -143,13 +308,17 @@ try {
       'vue@3.5.13',
       '@opentelemetry/api@1.9.0',
       '@opentelemetry/core@2.0.0',
+      'vite@8.1.5',
     ],
     consumerDirectory,
   )
   await run(process.execPath, ['node_modules/typescript/bin/tsc', '--project', 'tsconfig.json'], consumerDirectory)
   await verifyDeclarations(join(consumerDirectory, 'dist'), [repositoryRoot, packageDirectory])
-  await verifyInstalledPackages(consumerDirectory)
   await run(process.execPath, ['runtime.mjs'], consumerDirectory)
+  await run(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--mode', 'root'], consumerDirectory)
+  await run(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--mode', 'http'], consumerDirectory)
+  await verifyViteHttpEntries(consumerDirectory)
+  await verifyInstalledPackages(consumerDirectory)
 
   console.log(`Packed consumer verified with Node ${process.version}`)
 } finally {
@@ -175,6 +344,37 @@ function run(command, args, cwd) {
       reject(new Error(`${command} exited with ${code ?? `signal ${signal}`}`))
     })
   })
+}
+
+async function verifyViteHttpEntries(directory) {
+  const root = await inspectViteEntry(directory, 'root')
+  const http = await inspectViteEntry(directory, 'http')
+
+  await (await import(pathToFileURL(root.file).href)).runPackedHttpAcceptance()
+  await (await import(pathToFileURL(http.file).href)).runPackedHttpAcceptance()
+
+  console.log(
+    `Packed Vite HTTP bundles: root=${root.bytes} B/${root.gzipBytes} B gzip [${root.markers.join(', ') || 'no realtime markers'}], ` +
+      `http=${http.bytes} B/${http.gzipBytes} B gzip [${http.markers.join(', ') || 'no realtime markers'}]`,
+  )
+
+  assert.ok(http.gzipBytes <= httpGzipBudgetBytes, `HTTP entry exceeds ${httpGzipBudgetBytes} B gzip budget`)
+  assert.deepEqual(http.markers, [], 'HTTP entry contains realtime runtime markers')
+}
+
+async function inspectViteEntry(directory, name) {
+  const outputDirectory = join(directory, 'dist', `vite-${name}`)
+  const files = (await readdir(outputDirectory, { recursive: true })).filter((file) => /\.(?:m?js)$/u.test(file))
+  assert.equal(files.length, 1, `Expected one Vite JavaScript artifact for ${name}, found ${files.length}`)
+
+  const file = join(outputDirectory, files[0])
+  const source = await readFile(file)
+  return {
+    bytes: source.byteLength,
+    file,
+    gzipBytes: gzipSync(source).byteLength,
+    markers: realtimeSentinels.filter(([, sentinel]) => source.includes(sentinel)).map(([name]) => name),
+  }
 }
 
 async function verifyDeclarations(directory, forbiddenPaths) {

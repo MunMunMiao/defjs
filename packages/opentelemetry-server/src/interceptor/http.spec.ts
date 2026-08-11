@@ -178,10 +178,11 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     })
 
     const res = makeHttpResponse()
-    await interceptor.fn(makeHttpRequest(), async () => res)
+    const req = makeHttpRequest()
+    await interceptor.fn(req, async () => res)
 
     expect(responseHook).toHaveBeenCalledTimes(1)
-    expect(responseHook).toHaveBeenCalledWith(activeSpans[0], res)
+    expect(responseHook).toHaveBeenCalledWith(activeSpans[0], res, req)
     expect(activeSpans[0]?.ended).toBe(true) // span ends after hook
   })
 

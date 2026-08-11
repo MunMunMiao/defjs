@@ -5,100 +5,73 @@ description: شارك Defjs client عبر React context، واضبطه للـ AP
 
 # `@defjs/react`
 
-`@defjs/react` محول context خفيف لـ `@defjs/core`. وهو يصدّر:
-
-- `ClientProvider`، الذي ينشئ core client ويوفّره؛
-- `useClient()`، التي تعيد أقرب client موفّر؛
-- مساعد adapter باسم `withEndpoint(...)` ومساعد `withInterceptors(...)` لمصانع المعترضات.
-
-لا يضيف المحول caching أو تكامل Suspense أو query retries أو server data serialization. ثبّته إلى جانب `@defjs/core` وReact، واترك هذه المسؤوليات عالية المستوى لتطبيقك.
+هذه الحزمة محوّل Context خفيف لـ `@defjs/core`. يوفّر `ClientProvider` عميلاً أنشأه التطبيق، ويعيد `useClient()` أقرب نسخة. لا تضيف الحزمة مصنع عميل أو cache أو سياسة retry أو دورة حياة للموارد.
 
 ## توفير Client
 
+أنشئ العميل واضبطه بواسطة `@defjs/core`، ثم مرّر النسخة صراحة:
+
 ```tsx
-import { ClientProvider, withEndpoint } from '@defjs/react'
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import { UserProfile } from './UserProfile'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+    <ClientProvider client={client}>
       <UserProfile id={7} />
     </ClientProvider>
   )
 }
 ```
 
-بعد تثبيت المزوّد، يحتفظ بعميل واحد طوال مدة تركيبه. لا تعيد عمليات التصيير العادية تطبيق مصفوفة `options` بعد تغييرها، ولا تستبدل العميل.
-
-يستخدم التنفيذ مهيئًا كسولًا عبر `useState`. لا تفترض أن هذا المهيئ سيعمل مرة واحدة فقط في بيئة التطوير؛ فقد يقيّم React Strict Mode التهيئة أكثر من مرة أثناء التصيير قبل تثبيت المكوّن. المهم أن كل تركيب مكتمل للمزوّد يعرض عميلًا واحدًا ثابتًا طوال دورة حياته.
-
-أعد mount للـ provider عندما يحتاج التطبيق عمدًا إلى client جديد:
-
-```tsx
-<ClientProvider key={tenantId} options={[withEndpoint(endpoint)]}>
-  <TenantApplication />
-</ClientProvider>
-```
+يوفّر `ClientProvider` النسخة نفسها تماماً. يقرر المستدعي متى ينشئها أو يستبدلها، ويظل مسؤولاً عن الطلبات وموارد الوقت الحقيقي.
 
 ## قراءة أقرب Client
 
-استدعِ `useClient()` داخل React component أو custom Hook:
+استدعِ `useClient()` داخل مكوّن React أو Hook مخصص. يرمي خطأ خارج provider، وتتبع providers المتداخلة قاعدة أقرب React Context.
 
 ```tsx
 import { useClient } from '@defjs/react'
 
-export function UserProfile({ id }: { id: number }) {
+export function UserProfile() {
   const client = useClient()
-  // Execute commands from effects, event handlers, or application integrations.
   return null
 }
 ```
 
-ترمي خارج provider. وتتبع nested providers سلوك React Context المعتاد؛ يحصل الأحفاد على client من أقرب provider.
-
-يقبل `ClientProvider` أي `ClientOption` من core:
+تأتي جميع خيارات الإعداد من `@defjs/core`:
 
 ```tsx
-import { withCredentials } from '@defjs/core'
-import { ClientProvider, withEndpoint } from '@defjs/react'
-import { Application } from './Application'
+import { createClient, withCredentials, withEndpoint } from '@defjs/core'
 
-;<ClientProvider options={[withEndpoint('https://api.example.com'), withCredentials(true)]}>
-  <Application />
-</ClientProvider>
+const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
 ```
 
 ## مصانع المعترضات
 
-تقبل `withInterceptors(...)` الخاصة بالمحول factories. تقيّمها عندما ينشئ provider عميله، وتُلحق نتائجها بترتيب الخيارات.
+أنشئ قيم interceptor وركّبها بواسطة `withInterceptors(...)` من core قبل تمرير العميل إلى React:
 
 ```tsx
-import type { ReactNode } from 'react'
-import { createHttpInterceptor } from '@defjs/core'
-import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
 
-export function ApiBoundary({ children }: { children: ReactNode }) {
-  return (
-    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)]}>{children}</ClientProvider>
-  )
+export function ApiBoundary({ children }: { children: React.ReactNode }) {
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-تقبل `withInterceptors(...)` في core قيم interceptor بدلًا من ذلك. أبقِ server credential factories داخل حد الطلب الذي يملك تلك credentials.
+إذا كان factory يلتقط بيانات اعتماد خاصة بالطلب، فاستدعه داخل حد الطلب الذي ينشئ العميل.
 
 ## إدارة دورة حياة تأثيرات HTTP
 
@@ -149,25 +122,24 @@ export function UserProfile({ id }: { id: number }) {
 
 ## حد Client Component
 
-لا تنشئ الحزمة React Server Component client boundary نيابة عن تطبيقك. ضع `ClientProvider` خلف module يملكه التطبيق ويبدأ بـ `'use client'`.
-
-أنشئ Client Component يملكه التطبيق:
+مدخل الحزمة هو Client Component boundary. يمكن لغلاف يملكه التطبيق إنشاء عميل المتصفح وتمريره صراحة:
 
 ```tsx
 // app/ApiProvider.tsx
 'use client'
 
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
-import { ClientProvider, withEndpoint } from '@defjs/react'
+
+const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
-  return <ClientProvider options={[withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!)]}>{children}</ClientProvider>
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-ينبغي لكود الخادم الذي يحمل request headers أو cookies أو tenant state أو user credentials إنشاء core client داخل حد كل server request. لا تلتقط هذه القيم في provider option على مستوى module أو singleton مشترك بين الطلبات. لا يوفر المحول عزلًا متزامنًا لـ SSR.
-
-تضيف React Server Components وNext.js وhydration وStrict Mode وSSR المتزامن حدود lifecycle خاصة بالإطار. اختبر الإعداد الفعلي لتطبيقك، خصوصًا credentials ضمن نطاق request وإعادة mount للـ provider.
+ينبغي لكود الخادم الذي يحمل headers أو cookies أو tenant state أو credentials إنشاء عميل منفصل داخل كل request boundary. لا يعزل المحوّل طلبات SSR المتزامنة ولا يتخلص من العمل الذي يملكه العميل.
 
 ## إدارة دورة حياة التأثيرات الفورية
 
@@ -256,19 +228,21 @@ export function LiveNotifications() {
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { JSX, ReactNode } from 'react'
 
 interface ClientProviderProps {
+  client: Client
   children?: ReactNode
-  options?: ClientOption[]
 }
 
 declare function ClientProvider(props: ClientProviderProps): JSX.Element
 declare function useClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+يوفّر العميل المحدد للأبناء. `children` اختياري.
+
+يعيد أقرب عميل موفّر ويرمي خطأ عند غيابه.
 
 ## التالي
 

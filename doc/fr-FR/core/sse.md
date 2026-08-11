@@ -141,13 +141,14 @@ async function consumeNotifications(signal: AbortSignal) {
       }
     }
   } finally {
-    stream.close('consumer-finished')
     await stream.closed
   }
 }
 ```
 
 Un `execute` réussi signifie que le démarrage est terminé. Les erreurs ultérieures rejettent l'itérateur et se retrouvent dans `stream.closed` ; elles ne modifient pas l'élément `error` du tuple initial.
+
+Quitter prématurément une boucle `for await` par `break`, `return` ou une erreur lancée appelle `return()` sur l'itérateur. Le flux se ferme automatiquement avec `{ code: 'aborted', reason: 'iterator-return' }` ; attendre `stream.closed` permet d'observer cet état terminal. Appelez explicitement `stream.close(...)` uniquement lorsque le propriétaire doit fermer le flux depuis l'extérieur d'une itération active.
 
 ## Événements invalides
 
@@ -210,7 +211,7 @@ Les échecs de validation HTTP ou d'ouverture, les erreurs fatales de traitement
 
 ## Limites propres à l'endpoint
 
-Un flux n'accepte qu'un seul consommateur d'itérateur asynchrone. Créer un second itérateur lève une erreur ; quitter la boucle exige toujours un appel explicite à `stream.close(...)`.
+Un flux n'accepte qu'un seul consommateur d'itérateur asynchrone. Créer un second itérateur lève une erreur. Retourner l'itérateur, notamment par un `break` anticipé dans `for await`, ferme automatiquement le flux avec le motif `iterator-return`.
 
 Chaque définition exige des entiers sûrs positifs `maxBufferSize` et `maxQueueSize`. Le premier limite chaque ligne SSE et les données de l'événement courant ; le second limite les événements analysés en attente. Un débordement est fatal et ne supprime jamais silencieusement un événement.
 
@@ -227,21 +228,33 @@ Une fin de fichier normale permet de vider les événements en attente. Une erre
 
 ## Fermeture définitive
 
-`stream.closed` se résout avec :
+`stream.closed` se résout avec une union discriminée :
 
 ```typescript
-interface EventStreamCloseInfo {
-  code: 'eof' | 'aborted' | 'error'
-  reason?: string
-  cause?: unknown
-}
+type EventStreamCloseInfo =
+  | { code: 'eof'; reason?: string; cause?: unknown }
+  | { code: 'aborted'; reason?: string; cause?: unknown }
+  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
 ```
 
 - `eof` signifie que le corps de la réponse s'est terminé normalement.
 - `aborted` comprend un appel explicite à `stream.close(...)` ou un parcours d'annulation.
-- `error` signifie que les nouvelles tentatives ont cessé ou qu'une erreur définitive du flux s'est produite.
+- `error` signifie que les nouvelles tentatives ont cessé ou qu'une erreur définitive du flux s'est produite. Cette branche contient toujours un `errorCode` public.
 
-`stream.close(reason)` est idempotente. Elle annule le travail de transport actif, interdit les nouveaux ajouts dans la file et résout `stream.closed`. Un `break` ne fait rien de tout cela.
+`EventStreamErrorCode` possède six valeurs stables :
+
+| Error code                  | Signification                                                                              |
+| --------------------------- | ------------------------------------------------------------------------------------------ |
+| `INVALID_RESPONSE`          | Le statut, le content type, l'erreur ou le corps de réponse était invalide.                |
+| `MESSAGE_PROCESSING_FAILED` | La transformation d'un événement ou un callback de cycle de vie a échoué.                  |
+| `PARSER_LIMIT_EXCEEDED`     | Une limite de buffer du parser appartenant à l'endpoint a été dépassée.                    |
+| `QUEUE_OVERFLOW`            | Les événements analysés ont dépassé la limite de file de l'endpoint.                       |
+| `TIMEOUT`                   | La tentative de transport a atteint son timeout configuré.                                 |
+| `TRANSPORT_ERROR`           | Un autre échec définitif de réseau, de lecture du flux ou de politique de retry a eu lieu. |
+
+`stream.close(reason)` est idempotente. Elle annule le travail de transport actif, interdit les nouveaux ajouts dans la file et résout `stream.closed`. Le `return()` de l'itérateur utilise le même chemin de fermeture avec le motif `iterator-return`.
+
+Les logs ordinaires ne doivent enregistrer que `close.code` et, dans la branche `error`, `close.errorCode`. Ne journalisez pas `reason`, `cause`, les événements bruts ou les URL du flux sans politique explicite de masquage et de rétention.
 
 La couche applicative qui ouvre le flux est responsable de sa fermeture. Un client ou un provider de framework ne le ferme pas automatiquement.
 

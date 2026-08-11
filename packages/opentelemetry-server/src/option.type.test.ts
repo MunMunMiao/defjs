@@ -128,6 +128,9 @@ type WebSocketResponseHook = NonNullable<OpenTelemetryServerWebSocketOptions['re
 type HttpResponseArg = Expect<Equal<Parameters<HttpResponseHook>[1], HttpResponse<unknown>>>
 type SSEResponseArg = Expect<Equal<Parameters<SSEResponseHook>[1], EventStreamHandle<unknown>>>
 type WebSocketResponseArg = Expect<Equal<Parameters<WebSocketResponseHook>[1], WebSocketSessionLike>>
+type HttpResponseRequestArg = Expect<Equal<Parameters<HttpResponseHook>[2], HttpRequest>>
+type SSEResponseRequestArg = Expect<Equal<Parameters<SSEResponseHook>[2], HttpRequest>>
+type WebSocketResponseRequestArg = Expect<Equal<Parameters<WebSocketResponseHook>[2], HttpRequest>>
 
 // Hook parameter types stay transport-specific.
 type HttpRequestHook = NonNullable<OpenTelemetryServerHttpOptions['requestHook']>
@@ -177,6 +180,9 @@ export type Cases =
   | HttpResponseArg
   | SSEResponseArg
   | WebSocketResponseArg
+  | HttpResponseRequestArg
+  | SSEResponseRequestArg
+  | WebSocketResponseRequestArg
   | HttpRequestArg
   | HttpRequestHookResult
   | HttpResponseHookResult

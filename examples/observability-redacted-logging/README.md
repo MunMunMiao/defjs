@@ -2,13 +2,13 @@
 
 ## Problem
 
-A support service looks up customers by email using a Bearer credential. Logging the full URL, headers, or request object would expose the email and token to a system with broader access and retention.
+A support service looks up customers by email using a Bearer credential. Logging the full URL, headers, request object, or plain `RequestError` would expose the email, token, response data, or validation input to a system with broader access and retention.
 
-The interceptor should construct a new log entry from an explicit allowlist: method, fixed operation name, status classification, and elapsed duration.
+The interceptor should construct a new log entry from an explicit allowlist: method, fixed operation name, status classification, and elapsed duration. A native `Error` bridge must likewise expose only stable request classification and a new boundary stack.
 
 ## Scenario
 
-The runner sends `alina.chen@example.invalid` and `Bearer fixture-customer-token` to a local customer fixture. The fixture reads the native URL and authorization header, then returns customer `customer-1042`. The logger emits only the fixed `customers.lookup` operation, method, status, and a deterministic 7 ms duration.
+The runner sends `alina.chen@example.invalid` and `Bearer fixture-customer-token` to a local customer fixture. The fixture reads the native URL and authorization header, then returns customer `customer-1042`. The logger emits only the fixed `customers.lookup` operation, method, status, and a deterministic 7 ms duration. Silent assertions also cover a typed 404 and a transport cause whose message and crafted stack URL contain the credential.
 
 No external traffic or logger is used.
 
@@ -18,7 +18,7 @@ Send the sensitive email and credential only to the local transport while the in
 
 ## Source map
 
-- [`src/index.ts`](./src/index.ts): The request definition, safe log schema, interceptor, business operation, local fixture, and runner.
+- [`src/index.ts`](./src/index.ts): The request definition, safe log schema, native `Error` bridge, interceptor, business operation, local fixture, and runner.
 
 ## Run
 
@@ -27,6 +27,10 @@ From the repository root, with workspace dependencies installed:
 ```sh
 pnpm --silent --filter @defjs/example-observability-redacted-logging start
 ```
+
+## Use the Bundled Reference
+
+Published `@defjs/core` includes this README and `src/index.ts` as source-only reference material. Copy `src/index.ts` into an application that already installs `@defjs/core`, then compile and run it with that application's TypeScript toolchain.
 
 ## Expected result
 
@@ -39,6 +43,7 @@ pnpm --silent --filter @defjs/example-observability-redacted-logging start
 ## Key points
 
 - Build logs from an allowlist instead of serializing a request and deleting known secrets.
+- `toDiagnosticError` gives tools that require a native `Error` stable `kind`, `code`, optional HTTP `status`, and a fresh boundary stack without attaching or copying `cause`, cause stack frames, `data`, headers, bodies, URLs, or the cause message.
 - The context token gives ordinary TypeScript callers a bounded operation-name union; the interceptor's explicit allowlist remains the privacy boundary.
 - Keep credentials, query values, bodies, correlation IDs, and raw errors outside routine request logs.
 - Treat redacted operational logs as sensitive data in production.

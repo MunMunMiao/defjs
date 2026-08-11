@@ -94,6 +94,12 @@ Bei Erfolg ist das dritte Element der Start-Snapshot mit `generation: 1`. Er kan
 
 Logge keine Verbindungs-URLs. Sie können Pfadbezeichner, Query-Daten der Anwendung und Felder zur Telemetriepropagierung enthalten.
 
+## Fehlerdiagnose
+
+Mit der Browser-WebSocket-API oder einem injizierten Konstruktor, der nur die standardisierte WebSocket-Event-Oberfläche bereitstellt, liefert ein Transportfehler beim Handshake normalerweise nur einen stabilen `RequestError` mit `kind: 'transport'` und einem `code` wie `NETWORK_ERROR`, `ABORTED` oder `TIMEOUT`. Ein HTTP-`401`, anderer Handshake-Status, Response-Header/-Body oder Node-spezifische `unexpected-response`-Details sind nicht garantiert. Ein runtime-spezifischer Konstruktor kann über seinen eigenen Adapter mehr liefern; das ist kein portabler Core-Vertrag.
+
+Warte nach dem Start auf `session.closed` und nutze dessen `kind`, optionalen Close-`code` und optionales `wasClean` als primäre Terminaldiagnose. Der Close-Code ist ein WebSocket-Close-Code, kein HTTP-Status. Routine-Logs sollten nur geprüften niedrig-kardinalen Kontext und diese Felder enthalten; protokolliere weder Verbindungs-URL, Query, Ticket, rohes `cause` noch `reason`. Erweitere dies nur mit einer expliziten Redaction-, Zugriffs- und Aufbewahrungsrichtlinie.
+
 ## Live-Session
 
 Eine `WebSocketSession` ist eine logische Session, die mehrere physische Verbindungsversuche umfassen kann.

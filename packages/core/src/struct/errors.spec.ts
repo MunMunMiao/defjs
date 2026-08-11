@@ -86,6 +86,52 @@ describe('StructError format / flatten / prettify', () => {
     expect(tree['\\_errors']).toEqual({ _errors: ['Expected string at _errors, received 42'] })
   })
 
+  test('format and flatten keep attacker-controlled paths out of object prototypes', () => {
+    const pollutionKey = 'defjsStructErrorPolluted'
+    const cases = [
+      {
+        input: JSON.parse(`{"__proto__":{"${pollutionKey}":7}}`),
+        schema: struct.record(struct.record(struct.string())),
+        target: Object.prototype,
+        topLevelKey: '__proto__',
+      },
+      {
+        input: JSON.parse(`{"constructor":{"prototype":{"${pollutionKey}":7}}}`),
+        schema: struct.record(struct.record(struct.record(struct.string()))),
+        target: Object.prototype,
+        topLevelKey: 'constructor',
+      },
+      {
+        input: JSON.parse(`{"toString":{"${pollutionKey}":7}}`),
+        schema: struct.record(struct.record(struct.string())),
+        target: Object.prototype.toString,
+        topLevelKey: 'toString',
+      },
+    ]
+
+    try {
+      for (const { input, schema, target, topLevelKey } of cases) {
+        const [err] = struct.parse(schema, input)
+        expect(err).toBeInstanceOf(StructError)
+        if (!err) {
+          throw new Error('expected parse error')
+        }
+
+        const tree = err.format()
+        const flat = err.flatten()
+
+        expect(Object.getPrototypeOf(tree)).toBeNull()
+        expect(Object.hasOwn(tree, topLevelKey)).toBe(true)
+        expect(Object.getPrototypeOf(flat.fieldErrors)).toBeNull()
+        expect(Object.hasOwn(flat.fieldErrors, topLevelKey)).toBe(true)
+        expect(Object.hasOwn(target, pollutionKey)).toBe(false)
+      }
+    } finally {
+      delete (Object.prototype as Record<string, unknown>)[pollutionKey]
+      delete (Object.prototype.toString as unknown as Record<string, unknown>)[pollutionKey]
+    }
+  })
+
   test('prettify renders deep array paths without stray dots', () => {
     const matrix = struct.array(struct.array(struct.array(struct.string())))
     const [err] = parse(matrix, [[[1]]])

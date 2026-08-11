@@ -14,7 +14,7 @@ export const readInventorySnapshot = defineRequest({
         location: struct.object({ aisle: struct.string() }),
       }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Expose only fully validated snapshots from the HTTP 200 response.

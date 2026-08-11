@@ -1,5 +1,5 @@
-import { defineRequest, struct, type Infer, withEndpoint, withHTTPHandle } from '@defjs/core'
-import { injectClient, provideClient } from '@defjs/vue'
+import { createClient, defineRequest, struct, type Infer, withEndpoint, withHTTPHandle } from '@defjs/core'
+import { createClientPlugin, injectClient } from '@defjs/vue'
 import { defineComponent, nextTick, ref, watch, type ComponentPublicInstance, type PropType } from 'vue'
 import { holdUntilAbort } from './fixture'
 import { createHostRoot, hostRenderer } from './renderer'
@@ -16,7 +16,7 @@ export const searchCustomers = defineRequest({
       status: 200,
       body: struct.array(customerMatchStruct),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Give each watcher run an abort owner and publish only while that run remains current.
@@ -75,7 +75,8 @@ export async function main(): Promise<void> {
   const result = Promise.withResolvers<CustomerMatch[]>()
   const root = createHostRoot()
   const app = hostRenderer.createApp(ReactiveCustomerSearch, { onError: result.reject, onResult: result.resolve })
-  app.use(provideClient(withEndpoint('https://customers.fixture.invalid'), withHTTPHandle(fixtureFetch)))
+  const client = createClient(withEndpoint('https://customers.fixture.invalid'), withHTTPHandle(fixtureFetch))
+  app.use(createClientPlugin(client))
   const instance = app.mount(root) as CustomerSearchInstance
   let visibleCustomers: CustomerMatch[] = []
   try {

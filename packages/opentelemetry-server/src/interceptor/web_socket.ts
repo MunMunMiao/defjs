@@ -20,7 +20,7 @@ export interface WebSocketInterceptorOptions {
   requireParentSpan?: boolean
   queryPropagation?: boolean
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
-  responseHook?: (span: Span, session: WebSocketSessionLike) => Promise<void> | void
+  responseHook?: (span: Span, session: WebSocketSessionLike, req: HttpRequest) => Promise<void> | void
 }
 
 export function createOpenTelemetryWebSocketInterceptor(
@@ -36,7 +36,7 @@ export function createOpenTelemetryWebSocketInterceptor(
     const url = resolveUrl(req.endpoint, req.baseEndpoint)
 
     const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
-    const span = createWebSocketSpan(tracer, url, parentCtx)
+    const span = createWebSocketSpan(tracer, url, parentCtx, req.operation)
     const spanCtx = trace.setSpan(parentCtx, span)
 
     let queryParams = req.queryParams
@@ -59,7 +59,7 @@ export function createOpenTelemetryWebSocketInterceptor(
       const connectedAtMs = performance.now()
       const activeAttributes = createServerMetricAttributes(req)
 
-      runSpanHook(span, 'responseHook', () => responseHook?.(span, session))
+      runSpanHook(span, 'responseHook', () => responseHook?.(span, session, req))
       addSpanEvent(span, 'websocket.connected')
 
       metrics?.connectDuration.record(durationSeconds(connectStartMs, connectedAtMs), createConnectionMetricAttributes(req, 'success'))

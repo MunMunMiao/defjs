@@ -7,6 +7,18 @@ description: HTTP URL とボディの構築、レスポンス Struct の選択�
 
 `defineRequest(...)` は HTTP コマンドビルダーを作ります。定義と入力プロジェクションは [Commands](/ja-JP/core/commands) を参照してください。このページでは HTTP の通信形式とライフサイクルを扱います。
 
+## HTTP 専用 client entry
+
+`@defjs/core/http` は追加の HTTP 専用 entry point です。HTTP command と HTTP 対応 client option とともに `createHttpClient(...)` を export します。
+
+```typescript
+import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
+
+const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
+```
+
+consumer が意図的に HTTP だけをサポートする場合に使います。root entry を置き換えるものではありません。`@defjs/core` の `createClient(...)` は引き続き HTTP、SSE、WebSocket command 用の client です。
+
 ## URL の構築
 
 `withEndpoint(...)` には絶対ベース URL が必要です。そのパスはディレクトリとして保持されます。
@@ -100,11 +112,25 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+    { status: 409, body: struct.object({ conflict: struct.string() }) },
+  ],
 })
 ```
 
-ランタイムはステータスが完全一致する Struct を選びます。`output` が宣言されている場合、未対応のステータスはすべて `UNDECLARED_STATUS` になります。宣言済み 2xx ボディが成功データのユニオン、宣言済みの 2xx 以外のボディが `error.data` です。
+ランタイムはステータスが完全一致する Struct を選びます。`output` が宣言されている場合、未対応のステータスはすべて `UNDECLARED_STATUS` になります。宣言済み 2xx ボディが成功データのユニオンです。`defineRequest(...)` は const generic を使うため、inline のステータスは `as const` なしでリテラルを保持します。HTTP エラーのユニオンでは、2xx 以外の各ステータスと対応する `error.data` ボディの関連も保持されます。
+
+```typescript
+const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+
+if (statusError?.kind === 'http') {
+  if (statusError.status === 404) {
+    console.error(statusError.data.message)
+  } else {
+    // status は 409、data は宣言済みの conflict ボディです。
+    console.error(statusError.data.conflict)
+  }
+}
+```
 
 `response.ok` が示すのは `status >= 200 && status < 300` だけです。出力デコード、アプリケーション検証、認可の成功を意味しません。
 

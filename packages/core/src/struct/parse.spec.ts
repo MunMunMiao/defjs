@@ -333,15 +333,30 @@ describe('parse.ts object and composite values', () => {
     }
     expect(Object.keys(value)).toEqual(['path', 'query', 'headers', 'body'])
 
-    const [missingError, missingValue] = parse(Input, {
+    const [omittedError, omittedValue] = parse(Input, {
       body: { name: 'Miao' },
       headers: { trace: 'trace-1' },
       path: { id: 'u_1' },
     })
+
+    if (omittedError) {
+      throw omittedError
+    }
+    expect(omittedValue.query).toEqual({})
+    expect(Object.keys(omittedValue)).toEqual(['path', 'query', 'headers', 'body'])
+
+    const RequiredQuery = struct.request({ query: struct.object({ page: struct.number() }) })
+    const [missingError, missingValue] = parse(RequiredQuery, {})
     expect(missingError).toBeInstanceOf(StructError)
     expect(missingError?.issues[0]?.code).toBe('missing_key')
     expect(missingError?.issues[0]?.path).toEqual(['query'])
     expect(missingValue).toBeUndefined()
+
+    const OptionalBodyFields = struct.request({ body: struct.json(struct.object({ note: struct.string().optional() })) })
+    const [missingBodyError, missingBodyValue] = parse(OptionalBodyFields, {})
+    expect(missingBodyError).toBeInstanceOf(StructError)
+    expect(missingBodyError?.issues[0]?.path).toEqual(['body'])
+    expect(missingBodyValue).toBeUndefined()
   })
 
   test('stops object, array, and record parsing at the first issue', () => {

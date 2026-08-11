@@ -141,13 +141,14 @@ async function consumeNotifications(signal: AbortSignal) {
       }
     }
   } finally {
-    stream.close('consumer-finished')
     await stream.closed
   }
 }
 ```
 
 يعني نجاح `execute` أن البدء اكتمل. تظهر الأخطاء التي تقع بعد البدء عبر رفض iterator و`stream.closed`، لا بتغيير عنصر `error` في الـ tuple الأصلي.
+
+يستدعي الخروج المبكر من حلقة `for await` عبر `break` أو `return` أو خطأ مرمي الدالة `return()` للـ iterator. يُغلق stream تلقائيًا بالقيمة `{ code: 'aborted', reason: 'iterator-return' }`؛ وانتظار `stream.closed` يراقب هذه الحالة النهائية. استدعِ `stream.close(...)` صراحةً فقط عندما يحتاج المالك إلى الإغلاق من خارج iteration النشط.
 
 ## الأحداث غير الصالحة
 
@@ -210,7 +211,7 @@ withSSEReconnect({
 
 ## حدود الموارد المملوكة لنقطة النهاية
 
-للـ stream مستهلك async iterator واحد فقط. إنشاء iterator ثانٍ يرمي خطأ، والخروج من الحلقة ما زال يتطلب استدعاء `stream.close(...)` صراحةً.
+للـ stream مستهلك async iterator واحد فقط. إنشاء iterator ثانٍ يرمي خطأ. تؤدي إعادة iterator، بما فيها `break` مبكرة من `for await`، إلى إغلاق stream تلقائيًا مع reason تساوي `iterator-return`.
 
 يجب أن تعلن كل نقطة نهاية `maxBufferSize` و`maxQueueSize` كعددين صحيحين آمنين وموجبين. يحد الأول كل سطر SSE وبيانات الحدث الحالي، ويحد الثاني الأحداث المحللة المنتظرة. تجاوز الطابور خطأ نهائي ولا يحذف أي event بصمت.
 
@@ -227,21 +228,33 @@ const notifications = defineEventStream({
 
 ## الإغلاق النهائي
 
-تُحل `stream.closed` بالقيمة التالية:
+تُحل `stream.closed` باتحاد تمييزي:
 
 ```typescript
-interface EventStreamCloseInfo {
-  code: 'eof' | 'aborted' | 'error'
-  reason?: string
-  cause?: unknown
-}
+type EventStreamCloseInfo =
+  | { code: 'eof'; reason?: string; cause?: unknown }
+  | { code: 'aborted'; reason?: string; cause?: unknown }
+  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
 ```
 
 - تعني `eof` أن response body انتهى بصورة عادية.
 - تشمل `aborted` الاستدعاء الصريح لـ `stream.close(...)` أو مسار الإلغاء.
-- تعني `error` أن retry توقف أو وقع خطأ stream نهائي.
+- تعني `error` أن retry توقف أو وقع خطأ stream نهائي. يحتوي هذا الفرع دائمًا على `errorCode` عام.
 
-`stream.close(reason)` idempotent. تلغي أعمال النقل النشطة، وتغلق queue أمام pushes الجديدة، وتحل `stream.closed`. لا يفعل `break` أيًا من ذلك.
+لـ `EventStreamErrorCode` ست قيم مستقرة:
+
+| Error code                  | المعنى                                                              |
+| --------------------------- | ------------------------------------------------------------------- |
+| `INVALID_RESPONSE`          | status أو content type أو response error أو response body غير صالح. |
+| `MESSAGE_PROCESSING_FAILED` | فشل تحويل event أو lifecycle callback.                              |
+| `PARSER_LIMIT_EXCEEDED`     | تجاوز buffer limit يملكه endpoint داخل parser.                      |
+| `QUEUE_OVERFLOW`            | تجاوزت الأحداث المحللة حد queue الذي يملكه endpoint.                |
+| `TIMEOUT`                   | بلغت محاولة transport قيمة timeout المضبوطة.                        |
+| `TRANSPORT_ERROR`           | وقع فشل نهائي آخر في الشبكة أو قراءة stream أو retry policy.        |
+
+`stream.close(reason)` idempotent. تلغي أعمال النقل النشطة، وتغلق queue أمام pushes الجديدة، وتحل `stream.closed`. تستخدم `return()` للـ iterator مسار الإغلاق نفسه مع reason تساوي `iterator-return`.
+
+يجب أن تسجّل logs الاعتيادية `close.code` فقط، و`close.errorCode` في فرع `error`. لا تسجّل `reason` أو `cause` أو الأحداث الخام أو stream URLs بلا سياسة صريحة لحجب البيانات والاحتفاظ بها.
 
 حد التطبيق الذي يفتح stream يملك إغلاقه. لا يغلقه client أو framework provider تلقائيًا.
 

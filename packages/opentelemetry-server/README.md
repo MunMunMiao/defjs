@@ -24,7 +24,7 @@ Initialize your application's OpenTelemetry SDK separately. The package provides
 Initialize the OpenTelemetry SDK in your application, get a `Tracer`, then pass it into `withOpenTelemetryServer(...)`:
 
 ```typescript
-import { createClient, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { trace } from '@opentelemetry/api'
 
@@ -40,6 +40,23 @@ const client = createClient(
 )
 ```
 
+## Operation Identity
+
+Set the optional `operation` field statically on `defineRequest(...)`, `defineEventStream(...)`, or `defineWebSocket(...)`:
+
+```typescript
+const readOrder = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders/:id',
+  // input and output omitted
+})
+```
+
+An explicit operation is the low-cardinality transport identity. HTTP spans use names such as `GET orders.read`; SSE and WebSocket spans use `SSE orders.watch` and `WebSocket orders.connect`. Spans and metrics also receive `defjs.operation`.
+
+Without `operation`, the previous fallback remains unchanged: HTTP uses the request method as its span name, SSE uses `SSE`, WebSocket uses `WebSocket`, and `defjs.operation` is omitted. Never infer an operation from `req.endpoint`, a resolved URL, or a path containing identifiers. Do not copy resolved URLs into custom attributes or logs.
+
 ## Full Configuration
 
 ```typescript
@@ -52,10 +69,8 @@ const client = createClient(
     requireParentSpan: false,
     http: {
       enabled: true,
-      requestHook(span, req) {
-        span.setAttribute('defjs.operation', req.endpoint)
-      },
-      responseHook(span, res) {
+      responseHook(span, res, req) {
+        span.setAttribute('app.operation', req.operation ?? 'unclassified')
         span.setAttribute('defjs.response.status_text', res.statusText)
       },
     },
@@ -103,36 +118,38 @@ With the safe default, trace context does not ride on the WebSocket URL. Use ano
 
 ### HTTP Options
 
-| Option         | Type                                   | Default     | Description                                                          |
-| -------------- | -------------------------------------- | ----------- | -------------------------------------------------------------------- |
-| `enabled`      | `boolean`                              | `true`      | Enable HTTP tracing                                                  |
-| `requestHook`  | `(span, req) => void \| Promise<void>` | `undefined` | Customize HTTP span before request, `req` is `HttpRequest`           |
-| `responseHook` | `(span, res) => void \| Promise<void>` | `undefined` | Customize HTTP span after response, `res` is `HttpResponse<unknown>` |
+| Option         | Type                                        | Default     | Description                                                             |
+| -------------- | ------------------------------------------- | ----------- | ----------------------------------------------------------------------- |
+| `enabled`      | `boolean`                                   | `true`      | Enable HTTP tracing                                                     |
+| `requestHook`  | `(span, req) => void \| Promise<void>`      | `undefined` | Customize HTTP span before request, `req` is `HttpRequest`              |
+| `responseHook` | `(span, res, req) => void \| Promise<void>` | `undefined` | Customize HTTP span after response; `req` is the original `HttpRequest` |
 
 ### SSE Options
 
-| Option         | Type                                      | Default     | Description                                                                               |
-| -------------- | ----------------------------------------- | ----------- | ----------------------------------------------------------------------------------------- |
-| `enabled`      | `boolean`                                 | `true`      | Enable SSE tracing                                                                        |
-| `requestHook`  | `(span, req) => void \| Promise<void>`    | `undefined` | Customize SSE span before stream request                                                  |
-| `responseHook` | `(span, stream) => void \| Promise<void>` | `undefined` | Customize SSE span after stream handle returned, `stream` is `EventStreamHandle<unknown>` |
+| Option         | Type                                           | Default     | Description                                                                          |
+| -------------- | ---------------------------------------------- | ----------- | ------------------------------------------------------------------------------------ |
+| `enabled`      | `boolean`                                      | `true`      | Enable SSE tracing                                                                   |
+| `requestHook`  | `(span, req) => void \| Promise<void>`         | `undefined` | Customize SSE span before stream request                                             |
+| `responseHook` | `(span, stream, req) => void \| Promise<void>` | `undefined` | Customize SSE span after stream handle returned; `req` is the original `HttpRequest` |
 
 ### WebSocket Options
 
-| Option             | Type                                       | Default     | Description                                                                                                                         |
-| ------------------ | ------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                                  | `true`      | Enable WebSocket tracing                                                                                                            |
-| `queryPropagation` | `boolean`                                  | `false`     | Inject trace context and baggage into the WebSocket URL query string. Enable only after reviewing URL logging and disclosure risks. |
-| `requestHook`      | `(span, req) => void \| Promise<void>`     | `undefined` | Customize WebSocket span before connection request                                                                                  |
-| `responseHook`     | `(span, session) => void \| Promise<void>` | `undefined` | Customize WebSocket span after session returned, `session` is `WebSocketSessionLike`                                                |
+| Option             | Type                                            | Default     | Description                                                                                                                         |
+| ------------------ | ----------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                                       | `true`      | Enable WebSocket tracing                                                                                                            |
+| `queryPropagation` | `boolean`                                       | `false`     | Inject trace context and baggage into the WebSocket URL query string. Enable only after reviewing URL logging and disclosure risks. |
+| `requestHook`      | `(span, req) => void \| Promise<void>`          | `undefined` | Customize WebSocket span before connection request                                                                                  |
+| `responseHook`     | `(span, session, req) => void \| Promise<void>` | `undefined` | Customize WebSocket span after session returned; `req` is the original `HttpRequest`                                                |
 
 > **Hook Exception Handling**: Hooks may return `void` or `Promise<void>`. If `requestHook` or `responseHook` throws or rejects, the error is recorded on the span's `defjs.otel.hook.error` event without blocking the hook caller, and the client request/stream/session **continues normally**.
 >
-> **Attribute hygiene**: Prefer explicit allowlists, redaction, and stable low-cardinality attributes in `requestHook` / `responseHook`. Do not attach raw query strings, request or response bodies, full headers, baggage values, or message payloads unless your application has already reviewed privacy, cardinality, retention, and redaction requirements.
+> Each `responseHook` receives the original transport `HttpRequest` as its third argument. Read its explicit `operation`; do not reconstruct identity from its endpoint or a resolved URL.
+>
+> **Attribute hygiene**: Prefer explicit allowlists, redaction, and stable low-cardinality attributes in `requestHook` / `responseHook`. Do not attach resolved URLs, raw query strings, request or response bodies, full headers, baggage values, or message payloads unless your application has already reviewed privacy, cardinality, retention, and redaction requirements.
 
 ## HTTP Semantic Conventions and Metrics
 
-HTTP tracing uses stable OpenTelemetry HTTP client attribute and metric names. This is not a claim of complete semantic-convention compliance. The interceptor creates a `SpanKind.CLIENT` span named after the request method because Defjs does not provide a low-cardinality URL template. It records these core attributes:
+HTTP tracing uses stable OpenTelemetry HTTP client attribute and metric names. This is not a claim of complete semantic-convention compliance. With an explicit operation, the interceptor creates a `SpanKind.CLIENT` span named `${method} ${operation}` and records `defjs.operation`. Without one, it preserves the previous method-only span name and omits that attribute. It also records:
 
 - `http.request.method`
 - `url.full`
@@ -147,13 +164,13 @@ HTTP span status and `error.type` follow these rules:
 - a Defjs status-0 transport result does not set `http.response.status_code`; caller cancellation leaves status unset, timeout uses `ERROR` / `TIMEOUT`, and other transport failures use `ERROR` / `NETWORK_ERROR`;
 - an error thrown through the interceptor marks the span `ERROR`, records the exception, and uses its `Error.name` or another low-cardinality type fallback as `error.type`.
 
-In the current implementation, `url.full` is resolved from `req.endpoint` and the optional `req.baseEndpoint`; it does not append `req.queryString`. This is an implementation boundary, not a guarantee that URLs are safe: endpoint fields and WebSocket propagation can still contain sensitive or high-cardinality values.
+In the current implementation, `url.full` is resolved from `req.endpoint` and the optional `req.baseEndpoint`; it does not append `req.queryString`. This is an implementation boundary, not an identity source or a guarantee that URLs are safe. Resolved paths can contain sensitive or high-cardinality identifiers. Keep operation names static, do not copy `url.full` into custom telemetry or logs, and apply SDK/exporter redaction before exporting URL attributes.
 
 When `meter` is provided, the following stable metrics are collected:
 
-| Metric                         | Unit | Attributes                                                                                                          |
-| ------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------- |
-| `http.client.request.duration` | `s`  | `http.request.method`, `server.address`, `server.port`, optional `http.response.status_code`, optional `error.type` |
+| Metric                         | Unit | Attributes                                                                                                                                      |
+| ------------------------------ | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `http.client.request.duration` | `s`  | `http.request.method`, optional `defjs.operation`, `server.address`, `server.port`, optional `http.response.status_code`, optional `error.type` |
 
 The metric applies the same response-status and `error.type` classification as the HTTP span.
 

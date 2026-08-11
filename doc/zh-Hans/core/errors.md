@@ -26,7 +26,7 @@ const [socketError, session, startupConnection] = await client.execute(socketCom
 ```typescript
 import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
 
-type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData, number> | TransportError | DefinitionError
 ```
 
 导出的 union 名称是 `RequestError<TErrorData>`。
@@ -38,17 +38,32 @@ type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | Tra
 已声明的非 2xx HTTP response 会产生：
 
 ```typescript
-interface HttpStatusError<TErrorData = unknown> {
+interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> {
   kind: 'http'
   code: 'HTTP_STATUS'
-  status: number
+  status: TStatus
   message: string
   data: TErrorData
   response: HttpResponse<unknown>
 }
 ```
 
-只有 `HttpStatusError` 有 `data`。它的类型是该 endpoint 所有已声明非 2xx output body 的 union。检查 `error.status` 目前不会缩窄这个 union。不同 status 的 body shape 不同时，请使用应用自己定义的结构检查或 discriminant。
+两个 generic 的顺序是 data 在前、status 在后。宽泛的 `RequestError<TErrorData>` export 仍适合应用边界，而 endpoint execute 会返回按 status 区分的 `HttpStatusError<Data, Status>` union。因此，检查 `error.status` 会把 `error.data` 缩窄到该 status 声明的 body：
+
+```typescript
+const [error] = await client.execute(getUser())
+
+if (error?.kind === 'http') {
+  if (error.status === 404) {
+    console.error(error.data.missing)
+  } else {
+    // 对该 endpoint，其余 409 | 422 status 共用同一个 conflict body。
+    console.error(error.data.conflict)
+  }
+}
+```
+
+只有 `HttpStatusError` 有 `data`。请在 endpoint 边界保留这个与 status 关联的 union，不要把它拓宽成互不关联的 data union。
 
 ### Transport Error
 
@@ -130,6 +145,33 @@ if (!error) {
 ```
 
 没有明确的脱敏和保留策略时，不要记录 `cause`、`data`、response headers、body 或 URL。
+
+### 原生 `Error` Bridge
+
+部分 integration 要求 throw 原生 `Error`。请在这个边界创建新的 diagnostic error，默认只公开稳定的 `kind`、`code` 和可用的 HTTP `status` 分类：
+
+```typescript
+import type { RequestError } from '@defjs/core'
+
+type DiagnosticRequestError = Error & {
+  readonly code: RequestError<unknown>['code']
+  readonly kind: RequestError<unknown>['kind']
+  readonly status: number | undefined
+}
+
+export function toDiagnosticError(error: RequestError<unknown>): DiagnosticRequestError {
+  const status = error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined
+  const diagnostic = Object.assign(new Error(`Defjs request failed: ${error.kind}/${error.code}`), {
+    code: error.code,
+    kind: error.kind,
+    status,
+  })
+  diagnostic.name = 'DefjsRequestError'
+  return diagnostic
+}
+```
+
+新建 error 会保留它在边界处生成的自身 stack。这个 bridge 绝不会附加或复制原始 `cause`、cause message、cause stack frame、`data`、response header/body 或 request/response URL。stack frame 文本本身也可能包含 URL 和 secret，因此选取并复制部分 cause frame 并不是安全的默认行为。可运行的 `examples/observability-redacted-logging` 项目会断言保留的 404 status，同时检查 response data 和刻意带有 secret 的 cause stack 没有泄漏。
 
 ## Response 可用性
 

@@ -8,13 +8,13 @@ One logical payment should retain one Defjs command and one `Idempotency-Key` ac
 
 ## Scenario
 
-The runner creates one payment command for 12500 USD cents with key `payment-order-874-attempt-1`. The local receiver stores the delivered body bytes with `pay-9001`. Executing the same command again sends the same key and bytes, so the receiver returns that payment with `replayed: true`; a different payload under the key is rejected before JSON decoding.
+The runner creates one payment command for 12500 USD cents with key `payment-order-874-attempt-1`. The local receiver stores the delivered body bytes with `pay-9001`, then simulates a lost response. That transport failure is an unknown outcome, so the owner replays the same command and receives the committed payment with `replayed: true`. A different payload under the same key is then verified to return typed `409 idempotency_payload_mismatch`.
 
 The in-memory map demonstrates receiver behavior only; production storage must be durable and atomic with payment creation.
 
 ## Approach
 
-Freeze one payment command with its key and serialized body, execute that same command twice, and let the local receiver compare delivered bytes before returning its stored replay.
+Freeze one payment command with its key and serialized body, treat a post-commit disconnect as an unknown outcome, replay only that same command, and let the local receiver compare delivered bytes before returning its stored result.
 
 ## Source map
 
@@ -43,6 +43,7 @@ The replay names `pay-9001`, showing that the second execution retrieved the exi
 ## Key points
 
 - The operation owner retains the key across an unknown outcome.
+- A timeout or disconnect is not evidence that the receiver rejected the write.
 - The receiver binds each key to the delivered request bytes before returning an existing result.
 - Idempotency prevents duplicate acceptance within the receiver's retention scope; it does not prove settlement.
 

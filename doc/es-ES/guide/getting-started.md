@@ -17,6 +17,18 @@ pnpm add @defjs/core
 
 Utiliza el comando equivalente de npm, Yarn o Bun si tu proyecto usa otro gestor de paquetes. `@defjs/core` es ESM. Al ejecutarlo en Node.js, los metadatos actuales del paquete requieren Node 22 o posterior.
 
+Se han ejecutado consumidores HTTP ESM empaquetados con Node.js 22, 24 y 26, Bun 1.3.14 y Deno 2.9.5. Después de compilar tu aplicación, las formas de los comandos correspondientes son:
+
+```sh
+node dist/index.js
+bun run dist/index.js
+deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+```
+
+El comando de Deno usa los paquetes ya instalados en `node_modules`; sustituye el permiso de red por los hosts exactos de la API que necesite tu aplicación. Las comprobaciones de Bun y Deno cubren la parte HTTP documentada, no todas las API de plataforma ni todos los transportes. Las compilaciones de navegador usan su bundler habitual y las capacidades Fetch y WebSocket necesarias de la plataforma.
+
+Las pruebas entre runtimes deben comprobar campos estables de Defjs como `error.kind` y `error.code`. No dependas de mensajes nativos de `Error` específicos del motor ni del texto del análisis JSON; Node.js, Bun y Deno pueden dar formatos diferentes a esos detalles.
+
 Añade un adaptador solo cuando tu aplicación lo necesite:
 
 | Configuración             | Paquetes                                                                                  |
@@ -47,7 +59,7 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 async function loadUser(id: number) {
@@ -72,9 +84,9 @@ void loadUser(7)
 
 Si todo va bien, `error` es `null`, `result` contiene los datos de salida decodificados y `response` es un wrapper `HttpResponse` de Defjs. Si hay un error, `result` es `undefined`; el wrapper de respuesta también será `undefined` si no se recibió ninguna respuesta.
 
-### Por qué importa `as const`
+### Los literales de estado se conservan automáticamente
 
-Cuando `output` es un array, sus literales de estado separan los cuerpos correctos 2xx de los cuerpos de error no 2xx. `as const` conserva esos estados y los arrays agrupados de estados como literales de solo lectura. Sin él, TypeScript puede ampliarlos a `number` o `number[]`, lo que debilita los tipos inferidos para las ramas de éxito y error.
+`defineRequest(...)` usa un const generic para `output`, por lo que las entradas inline y los arrays agrupados de estados conservan automáticamente sus valores literales. No necesitas `as const` para separar los cuerpos 2xx correctos de los cuerpos de error no 2xx en los tipos inferidos.
 
 También puedes declarar la salida como un objeto:
 

@@ -10,7 +10,7 @@ Struct описывают строгое структурное декодиро
 Используйте фасад `struct` и тип `Infer<T>` из корневой точки входа:
 
 ```typescript
-import { struct, type Infer } from '@defjs/core'
+import { struct, type Infer, type StructInput } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -86,6 +86,35 @@ type ParseResult<T> = [error: null, value: T] | [error: StructError, value: unde
 
 Отсутствующие optional- и nullish-поля объекта не попадают в результат; на верхнем уровне они декодируются в `undefined`. Неизвестные ключи отбрасываются. Декодированные объекты и записи имеют null-прототип.
 
+Строгое глубокое сравнение в Node учитывает прототипы, поэтому объект, разобранный Struct, не равен по глубине литералу с теми же полями. Проверяйте эту границу явно либо создавайте поверхностную копию только внутри проверки:
+
+```typescript
+import assert from 'node:assert/strict'
+
+const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
+assert.equal(error, null)
+assert.equal(Object.getPrototypeOf(profile), null)
+assert.deepEqual({ ...profile }, { name: 'Ada' })
+```
+
+Spread здесь создаёт только поверхностную копию для проверки. Вложенные Struct-объекты тоже имеют null-прототип. Не добавляйте глобальную нормализацию или клонирование в production-путь только ради тестового matcher.
+
+При включённом `exactOptionalPropertyTypes` выведенные объектные входы используют точные необязательные свойства. Опускайте optional- или nullish-ключ вместо присваивания ему `undefined`:
+
+```typescript
+const OptionalProfile = struct.object({
+  nickname: struct.string().optional(),
+})
+
+type OptionalProfileInput = StructInput<typeof OptionalProfile>
+
+const omitted: OptionalProfileInput = {}
+// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
+const explicitUndefined: OptionalProfileInput = { nickname: undefined }
+```
+
+Во время выполнения `struct.parse` защитно принимает явный `undefined` из неизвестного входа и опускает ключ. Эта нормализация не расширяет статически выведенный входной тип вызывающего кода.
+
 ## Обязательный объектный вход и части запроса
 
 Свойства объекта обязательны в TypeScript и во время выполнения, если их Struct не optional или nullish. Каждая объявленная в `struct.request(...)` часть тоже обязательна; необъявленные части не входят во входной тип.
@@ -149,11 +178,40 @@ const UserBody = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-// Caller input uses { id, displayName }.
-// JSON wire data uses { user_id, display_name }.
+const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
+if (logicalError) throw logicalError
+
+const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
+if (!wireKeyError) throw new Error('struct.parse must read logical keys')
 ```
 
-Псевдонимы декодируют и кодируют ключи JSON. При автоматическом построении запроса они также используются для исходящих ключей пути, query, заголовков, URL-encoded и multipart. Вызывающий код продолжает использовать логические ключи. Явные целевые ключи пользовательской проекции `build` остаются явными.
+`logicalUser` использует `{ id, displayName }`; `wireKeyError` указывает на отсутствие логического ключа `id`. Публичный `struct.parse` читает только логические значения и не принимает сетевые ключи как вход отдельного parse.
+
+Wire-псевдонимы применяются только при JSON-кодировании и декодировании транспорта:
+
+```typescript
+import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+let requestWireBody: unknown
+const echoUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({ body: struct.json(UserBody) }),
+  output: { 200: UserBody },
+})
+const client = createClient(
+  withEndpoint('https://example.test'),
+  withHTTPHandle(async (input, init) => {
+    requestWireBody = await new Request(input, init).json()
+    return Response.json({ user_id: 1, display_name: 'Ada' })
+  }),
+)
+
+const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
+if (requestError) throw requestError
+```
+
+`requestWireBody` равен `{ user_id, display_name }`, а `responseUser` снова имеет вид `{ id, displayName }`. Автоматическое построение запроса также применяет псевдонимы к исходящим ключам path, query, headers, URL-encoded и multipart; явные целевые ключи пользовательской проекции `build` не меняются.
 
 ## `StructError`
 

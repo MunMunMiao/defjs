@@ -20,16 +20,16 @@ export class StructError extends Error {
   }
 
   format(): FormattedStructError {
-    const root: FormattedStructError = { _errors: [] }
+    const root = createFormattedError()
     for (const item of this.issues) {
       let cursor: FormattedStructError = root
       for (const segment of item.path) {
         const key = formatErrorTreeKey(segment)
         const existing = cursor[key]
-        if (existing && !Array.isArray(existing)) {
+        if (Object.hasOwn(cursor, key) && existing && !Array.isArray(existing)) {
           cursor = existing
         } else {
-          const next: FormattedStructError = { _errors: [] }
+          const next = createFormattedError()
           cursor[key] = next
           cursor = next
         }
@@ -41,7 +41,7 @@ export class StructError extends Error {
 
   flatten(): FlattenedStructError {
     const formErrors: string[] = []
-    const fieldErrors: { [key: string]: string[] } = {}
+    const fieldErrors: { [key: string]: string[] } = Object.create(null)
     for (const item of this.issues) {
       if (item.path.length === 0) {
         formErrors.push(item.message)
@@ -64,6 +64,10 @@ export class StructError extends Error {
       })
       .join('\n')
   }
+}
+
+function createFormattedError(): FormattedStructError {
+  return Object.assign(Object.create(null), { _errors: [] as string[] })
 }
 
 function formatErrorTreeKey(segment: number | string): string {

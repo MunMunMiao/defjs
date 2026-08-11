@@ -17,6 +17,18 @@ pnpm add @defjs/core
 
 Verwende den entsprechenden npm-, Yarn- oder Bun-Befehl, wenn dein Projekt einen anderen Paketmanager nutzt. `@defjs/core` ist ESM. Für die Ausführung unter Node.js verlangt die aktuelle Paketmetadaten Node 22 oder neuer.
 
+Gepackte ESM-HTTP-Consumer wurden mit Node.js 22, 24 und 26, Bun 1.3.14 sowie Deno 2.9.5 ausgeführt. Nach dem Kompilieren deiner Anwendung sehen die zugehörigen Befehle so aus:
+
+```sh
+node dist/index.js
+bun run dist/index.js
+deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+```
+
+Der Deno-Befehl verwendet bereits in `node_modules` installierte Pakete; ersetze die Netzwerkfreigabe durch die genauen API-Hosts deiner Anwendung. Die Bun- und Deno-Prüfungen decken den dokumentierten HTTP-Ausschnitt ab, nicht jede Plattform-API oder jeden Transport. Browser-Builds verwenden ihren normalen Bundler und die erforderlichen Fetch- und WebSocket-Funktionen der Plattform.
+
+Laufzeitübergreifende Tests sollten stabile Defjs-Felder wie `error.kind` und `error.code` prüfen. Verlasse dich nicht auf enginespezifische native `Error`-Meldungen oder JSON-Parse-Texte; Node.js, Bun und Deno können diese Details unterschiedlich formatieren.
+
 Installiere einen Adapter nur, wenn deine Anwendung ihn braucht:
 
 | Anwendungssetup              | Pakete                                                                                    |
@@ -47,7 +59,7 @@ const getUser = defineRequest({
   output: [
     { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
     { status: 404, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 async function loadUser(id: number) {
@@ -72,9 +84,9 @@ void loadUser(7)
 
 Bei Erfolg ist `error` gleich `null`, `result` enthält die dekodierten Ausgabedaten und `response` ist ein Defjs-`HttpResponse`-Wrapper. Bei einem Fehler ist `result` gleich `undefined`; auch der Response-Wrapper ist `undefined`, wenn keine Response eingetroffen ist.
 
-### Warum `as const` wichtig ist
+### Statusliterale bleiben automatisch erhalten
 
-Die Array-Form von `output` nutzt Statusliterale, um erfolgreiche 2xx-Bodies von Nicht-2xx-Fehler-Bodies zu trennen. `as const` erhält diese Statuswerte und gruppierte Statusarrays als readonly Literale. Ohne `as const` kann TypeScript sie zu `number` oder `number[]` erweitern. Dadurch werden die abgeleiteten Erfolgs- und Fehlerzweige ungenauer.
+`defineRequest(...)` verwendet für `output` ein Const-Generic. Inline-Arrayeinträge und gruppierte Statusarrays behalten deshalb ihre Literalwerte automatisch. Du brauchst kein `as const`, um abgeleitete 2xx-Erfolgs-Bodies von Nicht-2xx-Fehler-Bodies zu trennen.
 
 Auch die Objektform von `output` wird unterstützt:
 

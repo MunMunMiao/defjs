@@ -1,4 +1,12 @@
-import type { EventStreamHandle, HttpRequest, HttpResponse, WebSocketCloseInfo, WebSocketSessionLike } from '@defjs/core'
+import type {
+  EventStreamCloseInfo,
+  EventStreamErrorCode,
+  EventStreamHandle,
+  HttpRequest,
+  HttpResponse,
+  WebSocketCloseInfo,
+  WebSocketSessionLike,
+} from '@defjs/core'
 import { makeResponse } from '@defjs/core'
 import type {
   Context,
@@ -41,12 +49,6 @@ interface Deferred<T> {
   promise: Promise<T>
   resolve(value: T): void
   reject(reason?: unknown): void
-}
-
-interface SSECloseInfo {
-  code: SSECloseCode
-  reason?: string
-  cause?: unknown
 }
 
 export type MockSpan = Omit<
@@ -203,7 +205,7 @@ function makeSSEHandleBase(): Pick<EventStreamHandle<unknown>, 'open' | 'close'>
 export function makeSSEStream(closeCode: SSECloseCode = 'eof', closeCause?: unknown): EventStreamHandle<unknown> {
   return {
     ...makeSSEHandleBase(),
-    closed: Promise.resolve({ code: closeCode, cause: closeCause, reason: '' }),
+    closed: Promise.resolve(makeSSECloseInfo(closeCode, closeCause)),
     async *[Symbol.asyncIterator]() {
       // no events
     },
@@ -211,7 +213,7 @@ export function makeSSEStream(closeCode: SSECloseCode = 'eof', closeCause?: unkn
 }
 
 export function makeDeferredSSEStream() {
-  const closed = createDeferred<SSECloseInfo>()
+  const closed = createDeferred<EventStreamCloseInfo>()
   const stream: EventStreamHandle<unknown> = {
     ...makeSSEHandleBase(),
     closed: closed.promise,
@@ -222,13 +224,17 @@ export function makeDeferredSSEStream() {
 
   return {
     stream,
-    close(code: SSECloseCode = 'eof', cause?: unknown) {
-      closed.resolve({ code, cause, reason: '' })
+    close(code: SSECloseCode = 'eof', cause?: unknown, errorCode?: EventStreamErrorCode) {
+      closed.resolve(makeSSECloseInfo(code, cause, errorCode))
     },
     reject(error: unknown) {
       closed.reject(error)
     },
   }
+}
+
+function makeSSECloseInfo(code: SSECloseCode, cause?: unknown, errorCode: EventStreamErrorCode = 'TRANSPORT_ERROR'): EventStreamCloseInfo {
+  return code === 'error' ? { code, cause, errorCode, reason: '' } : { code, cause, reason: '' }
 }
 
 export function makeSSEStreamError(error: unknown): EventStreamHandle<unknown> {

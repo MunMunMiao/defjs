@@ -71,13 +71,11 @@ export interface ClientSSEConfig extends ClientSSEOptions {
   handle: typeof fetch
 }
 
-export interface ClientOptions {
+export interface HttpClientOptions {
   endpoint: string
   http?: { handle?: typeof fetch }
   interceptors?: Interceptor[]
   queryParamsSerializer?: QueryParamsSerializer
-  sse?: ClientSSEOptions
-  webSocket?: ClientWebSocketOptions
   xsrf?: {
     cookieName?: string
     headerName?: string
@@ -86,19 +84,27 @@ export interface ClientOptions {
   withCredentials?: boolean
 }
 
-export interface ClientConfig {
+export interface ClientOptions extends HttpClientOptions {
+  sse?: ClientSSEOptions
+  webSocket?: ClientWebSocketOptions
+}
+
+export interface HttpClientConfig {
   endpoint: string
   http: { handle: typeof fetch }
   interceptors: Interceptor[]
   queryParamsSerializer: QueryParamsSerializer
-  sse: ClientSSEConfig
-  webSocket: ClientWebSocketOptions
   xsrf?: {
     cookieName: string
     headerName: string
     tokenProvider?: (context: { request: HttpRequest }) => string | null | undefined
   }
   withCredentials?: boolean
+}
+
+export interface ClientConfig extends HttpClientConfig {
+  sse: ClientSSEConfig
+  webSocket: ClientWebSocketOptions
 }
 
 const DEFAULT_FETCH = globalThis.fetch.bind(globalThis) as typeof fetch
@@ -111,4 +117,35 @@ export const DEFAULT_SSE_OPTIONS: ClientSSEConfig = {
   handle: DEFAULT_FETCH,
   onInvalidEvent: undefined,
   reconnect: undefined,
+}
+
+export function createHttpClientConfig(): HttpClientConfig {
+  return {
+    endpoint: '',
+    http: { ...DEFAULT_HTTP_OPTIONS },
+    interceptors: [],
+    queryParamsSerializer: DEFAULT_QUERY_PARAMS_SERIALIZER,
+    xsrf: undefined,
+  }
+}
+
+export function createClientConfig(): ClientConfig {
+  return {
+    ...createHttpClientConfig(),
+    sse: { ...DEFAULT_SSE_OPTIONS },
+    webSocket: {
+      handle: globalThis.WebSocket,
+      beforeConnect: undefined,
+      heartbeat: undefined,
+      protocols: undefined,
+      reconnect: undefined,
+    },
+  }
+}
+
+export function applyClientOptions<TConfig>(config: TConfig, options: readonly ((config: TConfig) => void)[]): TConfig {
+  for (const option of options) {
+    option(config)
+  }
+  return config
 }

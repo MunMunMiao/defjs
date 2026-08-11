@@ -8,7 +8,7 @@ export const getDirectoryUser = defineRequest({
     path: struct.object({ id: struct.string() }),
     query: struct.object({ fields: struct.literal('id,displayName').alias('$select') }),
   }),
-  output: [{ status: 200, body: struct.object({ id: struct.string(), displayName: struct.string() }) }] as const,
+  output: [{ status: 200, body: struct.object({ id: struct.string(), displayName: struct.string() }) }],
 })
 
 // Step 2: Return only the reviewed ID and display name even if the service sends extra fields.

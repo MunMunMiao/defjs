@@ -33,11 +33,14 @@ Here, the object passed to `defineRequest` is the endpoint definition, `getUser`
 | Field          | Meaning                                                                                                     |
 | -------------- | ----------------------------------------------------------------------------------------------------------- |
 | `method`       | HTTP method string.                                                                                         |
+| `operation`    | Optional explicit static low-cardinality identity for telemetry and diagnostics.                            |
 | `path`         | Relative endpoint path, with optional `:name` placeholders.                                                 |
 | `input`        | Struct used for structural decoding of command input.                                                       |
 | `build`        | Schema-bound projection from input fields to request parts. Requires `input`.                               |
 | `output`       | Status-to-Struct mapping for response decoding and result inference.                                        |
 | `responseType` | Optional `json`, `text`, `blob`, or `arraybuffer` mode only when `output` is declared; otherwise forbidden. |
+
+`operation?: string` is also available on SSE and WebSocket definitions. Set it explicitly from the endpoint contract, for example `users.lookup`; do not derive it from a rendered path, URL, user or tenant data, request IDs, or other high-cardinality values.
 
 Use `struct.request(...)` when command fields map directly to wire sections:
 
@@ -66,7 +69,7 @@ const createUser = defineRequest({
   output: [
     { status: 201, body: struct.object({ id: struct.number() }) },
     { status: 409, body: struct.object({ message: struct.string() }) },
-  ] as const,
+  ],
 })
 
 const command = createUser({
@@ -88,7 +91,7 @@ const health = defineRequest({ method: 'GET', path: '/health' })
 health()
 ```
 
-When `input` is declared, required object fields and every declared request section must be supplied. Only fields marked optional or nullish can be omitted. Sections that the endpoint does not use should not be declared.
+When `input` is declared, the root command argument remains required. Within `struct.request(...)`, a `path`, `query`, or `headers` section whose fields are all optional or nullish can be omitted as a whole. Parsing normalizes each omitted section to `{}`. A section containing any required field remains required; body sections also remain required even when their inner object fields are optional.
 
 ```typescript
 const search = defineRequest({
@@ -102,6 +105,35 @@ const search = defineRequest({
 search({ query: { q: 'docs' } })
 // search() // TypeScript error: an argument is required.
 // search({ query: {} }) // TypeScript and runtime error: q is required.
+```
+
+All-optional request sections can be omitted, but the command argument itself is still present:
+
+```typescript
+const OptionalSections = struct.request({
+  path: struct.object({ locale: struct.string().optional() }),
+  query: struct.object({ page: struct.number().optional() }),
+  headers: struct.object({ traceId: struct.string().optional() }),
+})
+const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
+
+list({})
+list({ query: { page: 2 } })
+
+const [optionalError, normalized] = struct.parse(OptionalSections, {})
+if (optionalError) throw optionalError
+// normalized is { path: {}, query: {}, headers: {} }.
+
+const filtered = defineRequest({
+  method: 'GET',
+  path: '/items',
+  input: struct.request({
+    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  }),
+})
+
+filtered({ query: { q: 'docs' } })
+// filtered({}) // TypeScript error: query contains required q.
 ```
 
 This is structural presence and type validation, not application authorization, range, amount, format, or state-transition validation.
@@ -154,7 +186,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }] as const,
+  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
 })
 ```
 
@@ -186,20 +218,25 @@ The TypeScript build context is transport-specific. Runtime checks also reject u
 ```typescript
 const User = struct.object({ id: struct.number() })
 const NotFound = struct.object({ message: struct.string() })
-const Unauthorized = struct.object({ message: struct.string() })
+const Conflict = struct.object({ conflict: struct.string() })
 
 const objectOutput = {
   '200': User,
   '404': NotFound,
 }
 
-const arrayOutput = [
-  { status: 200, body: User },
-  { status: [401, 403], body: Unauthorized },
-] as const
+const getUsers = defineRequest({
+  method: 'GET',
+  path: '/users',
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+    { status: [409, 422], body: Conflict },
+  ],
+})
 ```
 
-The HTTP success type is the union of declared 2xx bodies. `error.data` is the union of declared non-2xx bodies. Array form needs `as const` to preserve status literals and grouped readonly arrays.
+The HTTP success type is the union of declared 2xx bodies. `error.data` is correlated with the declared non-2xx status. `defineRequest(...)` uses a const generic, so inline status entries and grouped status arrays retain their literals without `as const`. After `client.execute(getUsers())`, checking `error.status === 404` narrows `error.data` to `NotFound`; the remaining `409 | 422` branch narrows it to `Conflict`.
 
 When `output` is declared, every returned status must have a matching Struct. An unmatched 2xx or non-2xx status produces `UNDECLARED_STATUS`. When `output` is omitted, the response body is not read or decoded and is cancelled best-effort; the result is `undefined`.
 

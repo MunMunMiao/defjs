@@ -212,10 +212,17 @@ export type RequestShape = {
   query?: ObjectStruct<ObjectShape>
 }
 
+type RequestObjectSectionInput<TKey extends 'headers' | 'path' | 'query', TSection> =
+  TSection extends ObjectStruct<ObjectShape>
+    ? {} extends StructInput<TSection>
+      ? { [K in TKey]?: StructInput<TSection> }
+      : { [K in TKey]: StructInput<TSection> }
+    : {}
+
 export type RequestInput<T extends RequestShape> = Simplify<
-  (T['path'] extends ObjectStruct<ObjectShape> ? { path: StructInput<T['path']> } : {}) &
-    (T['query'] extends ObjectStruct<ObjectShape> ? { query: StructInput<T['query']> } : {}) &
-    (T['headers'] extends ObjectStruct<ObjectShape> ? { headers: StructInput<T['headers']> } : {}) &
+  RequestObjectSectionInput<'path', T['path']> &
+    RequestObjectSectionInput<'query', T['query']> &
+    RequestObjectSectionInput<'headers', T['headers']> &
     (T['body'] extends StructLike<unknown, unknown, boolean> ? { body: StructInput<T['body']> } : {})
 >
 

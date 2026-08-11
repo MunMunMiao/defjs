@@ -471,7 +471,7 @@ describe('fetchEventStream advanced', () => {
     const iterator = stream[Symbol.asyncIterator]()
 
     await expect(iterator.next()).rejects.toThrow('SSE parser buffer exceeded maxBufferSize')
-    await expect(stream.closed).resolves.toMatchObject({ code: 'error' })
+    await expect(stream.closed).resolves.toMatchObject({ code: 'error', errorCode: 'PARSER_LIMIT_EXCEEDED' })
     expect(fetch).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledOnce()
     expect(onerror).toHaveBeenCalledOnce()
@@ -549,7 +549,7 @@ describe('fetchEventStream advanced', () => {
     })
 
     await expect(stream[Symbol.asyncIterator]().next()).rejects.toThrow('Failed to process event stream message')
-    await expect(stream.closed).resolves.toMatchObject({ code: 'error' })
+    await expect(stream.closed).resolves.toMatchObject({ code: 'error', errorCode: 'MESSAGE_PROCESSING_FAILED' })
     expect(fetch).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledOnce()
     expect(onerror).toHaveBeenCalledOnce()
@@ -575,8 +575,8 @@ describe('fetchEventStream advanced', () => {
       reconnect: { attempts: 2, delayMs: 0 },
     })
 
-    await expect(stream.closed).resolves.toMatchObject({ code: 'error' })
-    await expect(stream[Symbol.asyncIterator]().next()).rejects.toThrow('Failed to process event stream message')
+    await expect(stream.closed).resolves.toMatchObject({ code: 'error', errorCode: 'QUEUE_OVERFLOW' })
+    await expect(stream[Symbol.asyncIterator]().next()).rejects.toThrow('Event stream queue exceeded maxQueueSize')
     expect(fetch).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledOnce()
   })
@@ -641,6 +641,32 @@ describe('fetchEventStream advanced', () => {
       expect(cancel).toHaveBeenCalledWith('stop')
     })
     await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+  })
+
+  test('should close and cancel the active response when iteration returns early', async () => {
+    const cancel = vi.fn()
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('data: first\n\n'))
+            },
+            cancel,
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    ) as unknown as typeof globalThis.fetch
+    const stream = await fetchEventStream(createRequest('/events'), { fetch })
+    const iterator = stream[Symbol.asyncIterator]()
+
+    await expect(iterator.next()).resolves.toMatchObject({ done: false, value: { data: 'first' } })
+    await expect(iterator.return?.()).resolves.toEqual({ done: true, value: undefined })
+    await expect(iterator.return?.()).resolves.toEqual({ done: true, value: undefined })
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+
+    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted', reason: 'iterator-return' })
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith('iterator-return'))
   })
 
   test('should abort while onopen never settles', async () => {
@@ -762,7 +788,12 @@ describe('fetchEventStream advanced', () => {
     controller.abort(timeoutError)
 
     await expect(next).rejects.toBe(ERR_TIMEOUT)
-    await expect(stream.closed).resolves.toEqual({ code: 'error', cause: ERR_TIMEOUT, reason: ERR_TIMEOUT.message })
+    await expect(stream.closed).resolves.toEqual({
+      code: 'error',
+      errorCode: 'TIMEOUT',
+      cause: ERR_TIMEOUT,
+      reason: ERR_TIMEOUT.message,
+    })
     expect(cancel).toHaveBeenCalledExactlyOnceWith(timeoutError)
   })
 

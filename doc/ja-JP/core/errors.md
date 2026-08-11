@@ -26,7 +26,7 @@ const [socketError, session, startupConnection] = await client.execute(socketCom
 ```typescript
 import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
 
-type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData, number> | TransportError | DefinitionError
 ```
 
 エクスポートされているユニオン名は `RequestError<TErrorData>` です。
@@ -38,17 +38,32 @@ type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData> | Tra
 宣言済みの 2xx 以外の HTTP レスポンスは、次のエラーになります。
 
 ```typescript
-interface HttpStatusError<TErrorData = unknown> {
+interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> {
   kind: 'http'
   code: 'HTTP_STATUS'
-  status: number
+  status: TStatus
   message: string
   data: TErrorData
   response: HttpResponse<unknown>
 }
 ```
 
-`data` があるのは `HttpStatusError` だけです。その型は、エンドポイントで宣言した 2xx 以外の出力ボディをまとめたユニオンです。現在、`error.status` を確認してもこのユニオンの型は絞り込まれません。ステータスごとにボディの形が異なる場合は、アプリケーション側で構造または判別フィールドを確認してください。
+generic の順序はデータ、ステータスです。広い `RequestError<TErrorData>` export はアプリケーション境界で引き続き便利ですが、endpoint の実行結果はステータス別の `HttpStatusError<Data, Status>` branch のユニオンです。そのため、`error.status` を確認すると `error.data` はそのステータスで宣言した body に絞り込まれます。
+
+```typescript
+const [error] = await client.execute(getUser())
+
+if (error?.kind === 'http') {
+  if (error.status === 404) {
+    console.error(error.data.missing)
+  } else {
+    // この endpoint では、残りの 409 | 422 status は同じ conflict body を使います。
+    console.error(error.data.conflict)
+  }
+}
+```
+
+`data` があるのは `HttpStatusError` だけです。endpoint 境界ではステータスと関連付いたこのユニオンを維持し、無関係なデータユニオンへ広げないでください。
 
 ### トランスポートエラー
 
@@ -130,6 +145,33 @@ if (!error) {
 ```
 
 明示的なマスキングと保存ポリシーがない限り、`cause`、`data`、レスポンスヘッダー、ボディ、URL をログへ出さないでください。
+
+### ネイティブ `Error` へのブリッジ
+
+一部の統合ではネイティブ `Error` の throw が必要です。その境界で新しい診断エラーを作り、デフォルトでは安定した `kind`、`code`、取得可能な HTTP `status` の分類だけを公開します。
+
+```typescript
+import type { RequestError } from '@defjs/core'
+
+type DiagnosticRequestError = Error & {
+  readonly code: RequestError<unknown>['code']
+  readonly kind: RequestError<unknown>['kind']
+  readonly status: number | undefined
+}
+
+export function toDiagnosticError(error: RequestError<unknown>): DiagnosticRequestError {
+  const status = error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined
+  const diagnostic = Object.assign(new Error(`Defjs request failed: ${error.kind}/${error.code}`), {
+    code: error.code,
+    kind: error.kind,
+    status,
+  })
+  diagnostic.name = 'DefjsRequestError'
+  return diagnostic
+}
+```
+
+新しく作成したエラーは、境界で生成された自身の stack を保持します。未加工の `cause`、cause のメッセージや stack frame、`data`、レスポンスヘッダーやボディ、リクエストとレスポンスの URL は一切添付もコピーもしません。stack frame の文字列自体に URL や secret が含まれることがあるため、選択した cause frame のコピーも安全なデフォルトではありません。実行可能な `examples/observability-redacted-logging` プロジェクトでは、404 ステータスが保持されることを検証し、レスポンスデータと secret を意図的に含めた cause stack が漏れないことも確認しています。
 
 ## レスポンスの有無
 

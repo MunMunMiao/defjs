@@ -21,7 +21,7 @@ export const runViewerOperation = defineRequest({
         errors: struct.array(struct.object({ message: struct.string() })).optional(),
       }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Reject operation errors or missing data before exposing the viewer.

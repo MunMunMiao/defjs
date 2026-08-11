@@ -12,7 +12,7 @@ export const replaceCaseNote = defineRequest({
   output: [
     { status: 200, body: struct.object({ caseId: struct.string(), text: struct.string() }) },
     { status: 412, body: struct.object({ code: struct.literal('version_conflict') }) },
-  ] as const,
+  ],
 })
 
 function isStrongEntityTag(value: string): boolean {

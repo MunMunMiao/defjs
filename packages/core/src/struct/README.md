@@ -15,7 +15,7 @@ Struct 主要回答三个问题：
 从根入口导入 `struct`、`Infer` 和 endpoint API：
 
 ```typescript
-import { createClient, defineRequest, struct, type Infer, withEndpoint } from '@defjs/core'
+import { createClient, defineRequest, struct, type Infer, type StructInput, withEndpoint } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -110,6 +110,19 @@ const [error, summary] = struct.parse(DailySummary, {
 
 `struct.object(shape)` 只遍历声明的 shape，未知 key 会被丢弃。`array`、`record`、`tuple`、object 和 intersection 都在第一个确定错误处停止；tuple 输入长度必须与声明长度完全一致。解析后的 object 和 record 使用 null prototype；依赖 `Object.prototype` 方法时，应使用 `Object.keys`/`Object.entries`，或显式复制为普通对象。
 
+Node 的 strict deep equality 会比较 prototype，因此 Struct 解析结果不会与字段相同的 object literal 深度相等。测试应显式断言这个边界，或只在断言处做 shallow copy：
+
+```typescript
+import assert from 'node:assert/strict'
+
+const [profileError, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
+assert.equal(profileError, null)
+assert.equal(Object.getPrototypeOf(profile), null)
+assert.deepEqual({ ...profile }, { name: 'Ada' })
+```
+
+Spread 只适用于这里的浅层断言；嵌套 Struct object 仍使用 null prototype。不要仅为迎合测试 matcher 而在生产路径增加全局 normalize 或 clone。
+
 ## 缺失、`null` 与修饰符
 
 `optional()`、`null()` 和 `nullish()` 会返回带有新 flags 的 Struct，不会改变原 Struct。实际行为取决于 Struct 位于对象字段位置还是作为顶层 value：
@@ -128,7 +141,21 @@ const [error, summary] = struct.parse(DailySummary, {
 - `.nullish()` 同时设置 optional 和 nullable：缺失时省略对象字段，显式 `null` 时保留 `null`；作为顶层 value 时，缺失结果是 `undefined`。
 - `.null()` 或 `.nullish()` 不会让任意非 null 值免于类型解析；错误类型仍然失败。
 
-Object input 属性默认必填；只有 `.optional()` 或 `.nullish()` 字段可以省略。运行时与 TypeScript input 类型使用同一合同。
+Object input 属性默认必填；只有 `.optional()` 或 `.nullish()` 字段可以省略。启用 `exactOptionalPropertyTypes` 时，推导出的 object input 使用 exact optional property：调用方应省略 optional 或 nullish key，而不是显式赋值 `undefined`。
+
+```typescript
+const OptionalProfile = struct.object({
+  nickname: struct.string().optional(),
+})
+
+type OptionalProfileInput = StructInput<typeof OptionalProfile>
+
+const omitted: OptionalProfileInput = {}
+// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
+const explicitUndefined: OptionalProfileInput = { nickname: undefined }
+```
+
+运行时面对 unknown input 时仍会防御性地接受 optional/nullish 字段的显式 `undefined`，并从解析结果中省略该 key；这项 normalization 不会放宽静态调用方的 input 类型。
 
 ## 结构解析与应用校验
 
@@ -155,24 +182,46 @@ Struct 会区分“没有传字段”和“显式传入合法的 `0`、`false`�
 `.alias(name)` 只改变 wire key，不改变逻辑字段名、`Infer`、request section 或 body codec。JSON、query、path、headers、URL-encoded 和 FormData 的自动编解码都会读取同一 alias。
 
 ```typescript
-const Profile = struct.object({
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const UserBody = struct.object({
+  id: struct.number().alias('user_id'),
   displayName: struct.string().alias('display_name'),
 })
 
-const Input = struct.request({
-  query: struct.object({
-    includeProfile: struct.boolean().optional().alias('include_profile'),
-  }),
-  body: struct.json(Profile),
+const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
+if (logicalError) throw logicalError
+
+const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
+if (!wireKeyError) throw new Error('struct.parse must read logical keys')
+
+let requestWireBody: unknown
+const echoUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({ body: struct.json(UserBody) }),
+  output: { 200: UserBody },
 })
+const client = createClient(
+  withEndpoint('https://example.test'),
+  withHTTPHandle(async (input, init) => {
+    requestWireBody = await new Request(input, init).json()
+    return Response.json({ user_id: 1, display_name: 'Ada' })
+  }),
+)
+
+const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
+if (requestError) throw requestError
 ```
 
-| 概念              | 示例                       | 结果                                                |
-| ----------------- | -------------------------- | --------------------------------------------------- |
-| TypeScript 属性名 | `displayName`              | 调用方和解析后对象使用 `displayName`                |
-| wire key          | `display_name`             | JSON/query/path/headers/表单编码使用 `display_name` |
-| 解析后的值        | `{ displayName: 'Miao' }`  | 不会变成 `{ display_name: 'Miao' }`                 |
-| 编码后的值        | `{ display_name: 'Miao' }` | 发到协议边界的 key                                  |
+`logicalUser` 和 `responseUser` 使用 `{ id, displayName }`；`wireKeyError` 指向缺失的逻辑 `id`；`requestWireBody` 则是 `{ user_id, display_name }`。公开 `struct.parse` 读取逻辑值，transport JSON 编解码才会应用 wire alias。
+
+| 概念              | 示例                      | 结果                                                |
+| ----------------- | ------------------------- | --------------------------------------------------- |
+| TypeScript 属性名 | `displayName`             | 调用方和解析后对象使用 `displayName`                |
+| wire key          | `display_name`            | JSON/query/path/headers/表单编码使用 `display_name` |
+| 解析后的值        | `{ displayName: 'Ada' }`  | 不会变成 `{ display_name: 'Ada' }`                  |
+| 编码后的值        | `{ display_name: 'Ada' }` | 发到协议边界的 key                                  |
 
 同一 object shape 内的 wire key 必须唯一；两个字段不能通过 alias 解析成同一个外部 key。不同 request section 可以各自使用同名 wire key，因为它们属于不同的协议位置。
 

@@ -1,8 +1,8 @@
-import { createHttpInterceptor, defineRequest, struct } from '@defjs/core'
+import { createClient, createHttpInterceptor, defineRequest, struct, type Client, withEndpoint, withInterceptors } from '@defjs/core'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { createElement, useEffect, useState } from 'react'
 import { afterEach, describe, expect, inject, it } from 'vitest'
-import { ClientProvider, useClient, withEndpoint, withInterceptors } from './core'
+import { ClientProvider, useClient } from './core'
 
 afterEach(cleanup)
 
@@ -38,19 +38,15 @@ function UserList() {
   )
 }
 
-function App({ endpoint }: { endpoint: string }) {
-  return createElement(
-    ClientProvider,
-    { options: [withEndpoint(endpoint)] },
-    createElement('div', null, createElement('h1', null, 'Users'), createElement(UserList)),
-  )
+function App({ client }: { client: Client }) {
+  return createElement(ClientProvider, { client }, createElement('div', null, createElement('h1', null, 'Users'), createElement(UserList)))
 }
 
 describe('React wrapper e2e', () => {
   it('should fetch and render real data through useClient', async () => {
     const endpoint = inject('testServerHost')
 
-    render(createElement(App, { endpoint }))
+    render(createElement(App, { client: createClient(withEndpoint(endpoint)) }))
 
     await waitFor(() => {
       expect(screen.getByTestId('user-1').textContent).toBe('John')
@@ -72,7 +68,8 @@ describe('React wrapper e2e', () => {
       return createElement(DeepChild)
     }
 
-    render(createElement(ClientProvider, { options: [withEndpoint(endpoint)] }, createElement(MiddleChild)))
+    const client = createClient(withEndpoint(endpoint))
+    render(createElement(ClientProvider, { client }, createElement(MiddleChild)))
 
     expect(clients.length).toBe(2)
     expect(clients[0]).toBe(clients[1])
@@ -141,16 +138,15 @@ describe('React wrapper e2e', () => {
       return createElement('span', { 'data-testid': 'inner-count' }, count)
     }
 
+    const outer = createClient(withEndpoint(endpoint), withInterceptors(scopedInterceptor('outer')))
+    const inner = createClient(withEndpoint(endpoint), withInterceptors(scopedInterceptor('inner')))
+
     render(
       createElement(
         ClientProvider,
-        { options: [withEndpoint(endpoint), withInterceptors(() => scopedInterceptor('outer'))] },
+        { client: outer },
         createElement(OuterRequestConsumer),
-        createElement(
-          ClientProvider,
-          { options: [withEndpoint(endpoint), withInterceptors(() => scopedInterceptor('inner'))] },
-          createElement(InnerMiddle),
-        ),
+        createElement(ClientProvider, { client: inner }, createElement(InnerMiddle)),
         createElement(OuterSiblingConsumer),
       ),
     )
@@ -167,6 +163,8 @@ describe('React wrapper e2e', () => {
     expect(outerClient).toBe(outerSiblingClient)
     expect(innerMiddleClient).toBe(innerLeafClient)
     expect(innerLeafClient).not.toBe(outerClient)
+    expect(outerClient).toBe(outer)
+    expect(innerLeafClient).toBe(inner)
     expect([...seenScopes].sort()).toEqual(['inner', 'outer'])
   })
 })

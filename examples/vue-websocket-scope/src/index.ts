@@ -1,5 +1,13 @@
-import { defineWebSocket, struct, type WebSocketIncomingData, type WebSocketSession, withEndpoint, withWebSocketHandle } from '@defjs/core'
-import { injectClient, provideClient } from '@defjs/vue'
+import {
+  createClient,
+  defineWebSocket,
+  struct,
+  type WebSocketIncomingData,
+  type WebSocketSession,
+  withEndpoint,
+  withWebSocketHandle,
+} from '@defjs/core'
+import { createClientPlugin, injectClient } from '@defjs/vue'
 import { defineComponent, nextTick, onScopeDispose, type PropType } from 'vue'
 import { createWebSocketFixture } from './fixture'
 import { createHostRoot, hostRenderer } from './renderer'
@@ -71,7 +79,8 @@ export async function main(): Promise<void> {
     onDecision: decision.resolve,
     onError: decision.reject,
   })
-  app.use(provideClient(withEndpoint('https://fraud.fixture.invalid'), withWebSocketHandle(fixture.WebSocket)))
+  const client = createClient(withEndpoint('https://fraud.fixture.invalid'), withWebSocketHandle(fixture.WebSocket))
+  app.use(createClientPlugin(client))
   app.mount(root)
   const socket = await fixture.connected
   try {

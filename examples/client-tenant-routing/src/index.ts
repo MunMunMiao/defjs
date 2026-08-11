@@ -16,7 +16,7 @@ const tenantRouteContext = makeHttpContextToken(() => '')
 export const listProjects = defineRequest({
   method: 'GET',
   path: '/projects',
-  output: [{ status: 200, body: struct.array(struct.object({ id: struct.string() })) }] as const,
+  output: [{ status: 200, body: struct.array(struct.object({ id: struct.string() })) }],
 })
 
 // Step 2: Validate the tenant slug and bind it to one execution context before dispatch.

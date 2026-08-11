@@ -22,6 +22,8 @@ export interface HttpRequest {
   endpoint: string
   headers?: Headers
   method: string
+  /** Static, low-cardinality endpoint identity for telemetry and diagnostics. */
+  operation?: string
   queryParams?: URLSearchParams
   queryString?: string
   responseType?: HttpResponseType

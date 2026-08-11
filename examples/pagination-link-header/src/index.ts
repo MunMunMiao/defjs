@@ -21,7 +21,7 @@ export const listOpenRepositoryIssues = defineRequest({
       status: 200,
       body: struct.array(struct.object({ id: struct.string(), title: struct.string() })),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Treat Link metadata as untrusted and allow only advancing pages on the same collection.

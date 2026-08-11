@@ -36,7 +36,7 @@ export const readOrderBatch = defineRequest({
         responses: struct.array(batchChildResponse),
       }),
     },
-  ] as const,
+  ],
 })
 
 // Step 2: Require unique child IDs and restore caller order from correlation, never array position.

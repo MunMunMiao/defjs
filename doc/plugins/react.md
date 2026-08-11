@@ -5,100 +5,73 @@ description: Share a Defjs client through React context, configure it for your A
 
 # `@defjs/react`
 
-`@defjs/react` is a thin context adapter for `@defjs/core`. It exports:
-
-- `ClientProvider`, which creates and provides a core client;
-- `useClient()`, which returns the nearest provided client;
-- adapter `withEndpoint(...)` and interceptor-factory `withInterceptors(...)` helpers.
-
-It does not add caching, Suspense integration, query retries, or server data serialization. Install it alongside `@defjs/core` and React, then let your application keep ownership of those higher-level concerns.
+This package is a thin Context adapter for `@defjs/core`. `ClientProvider` provides an application-created client, and `useClient()` returns the nearest instance. It adds no client factory, cache, retry policy, or resource lifecycle.
 
 ## Provide a Client
 
+Create and configure the client with `@defjs/core`, then pass that instance explicitly:
+
 ```tsx
-import { ClientProvider, withEndpoint } from '@defjs/react'
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import { UserProfile } from './UserProfile'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function App() {
   return (
-    <ClientProvider options={[withEndpoint('https://api.example.com')]}>
+    <ClientProvider client={client}>
       <UserProfile id={7} />
     </ClientProvider>
   )
 }
 ```
 
-A committed provider mount retains one client. Ordinary rerenders do not reapply a changed `options` array or replace the client.
-
-The implementation uses a lazy `useState` initializer. Do not rely on that initializer running exactly once in development: React Strict Mode can evaluate render-time initialization more than once before committing. The lifecycle guarantee that matters is that one committed provider mount exposes one retained client.
-
-Remount the provider when the application deliberately needs a new client:
-
-```tsx
-<ClientProvider key={tenantId} options={[withEndpoint(endpoint)]}>
-  <TenantApplication />
-</ClientProvider>
-```
+`ClientProvider` exposes that exact instance. The caller decides when to create or replace it and remains responsible for requests and realtime resources started through it.
 
 ## Read the Nearest Client
 
-Call `useClient()` inside a React component or custom Hook:
+Call `useClient()` inside a React component or custom Hook. It throws outside a provider, and nested providers follow normal React Context nearest-provider behavior.
 
 ```tsx
 import { useClient } from '@defjs/react'
 
-export function UserProfile({ id }: { id: number }) {
+export function UserProfile() {
   const client = useClient()
-  // Execute commands from effects, event handlers, or application integrations.
   return null
 }
 ```
 
-It throws outside a provider. Nested providers follow normal React Context behavior; descendants receive the nearest provider's client.
-
-`ClientProvider` accepts any core `ClientOption`:
+All configuration options come from `@defjs/core`:
 
 ```tsx
-import { withCredentials } from '@defjs/core'
-import { ClientProvider, withEndpoint } from '@defjs/react'
-import { Application } from './Application'
+import { createClient, withCredentials, withEndpoint } from '@defjs/core'
 
-;<ClientProvider options={[withEndpoint('https://api.example.com'), withCredentials(true)]}>
-  <Application />
-</ClientProvider>
+const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
 ```
 
 ## Interceptor Factories
 
-The adapter's `withInterceptors(...)` accepts factories. It evaluates them when the provider creates its client and appends their results in option order.
+Create interceptor values and compose them with core `withInterceptors(...)` before passing the client to React:
 
 ```tsx
-import type { ReactNode } from 'react'
-import { createHttpInterceptor } from '@defjs/core'
-import { ClientProvider, withEndpoint, withInterceptors } from '@defjs/react'
-import { readAccessToken } from './auth'
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 
-function createAuthInterceptor() {
-  return createHttpInterceptor((request, next) => {
-    const token = readAccessToken()
-    if (!token) {
-      return next(request)
-    }
+const auth = createHttpInterceptor((request, next) => {
+  const headers = new Headers(request.headers)
+  headers.set('Authorization', `Bearer ${readAccessToken()}`)
+  return next({ ...request, headers })
+})
 
-    const headers = new Headers(request.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return next({ ...request, headers })
-  })
-}
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
 
-export function ApiBoundary({ children }: { children: ReactNode }) {
-  return (
-    <ClientProvider options={[withEndpoint('https://api.example.com'), withInterceptors(createAuthInterceptor)]}>{children}</ClientProvider>
-  )
+export function ApiBoundary({ children }: { children: React.ReactNode }) {
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-Core `withInterceptors(...)` accepts interceptor values instead. Keep server credential factories inside the request boundary that owns those credentials.
+If an interceptor factory captures request-specific credentials, call it inside the request boundary that creates that client.
 
 ## Own HTTP Effects
 
@@ -177,25 +150,24 @@ Do not wrap the same request in a second application effect; let one lifecycle o
 
 ## Client Component Boundary
 
-The package does not establish a React Server Component client boundary for your application. Put `ClientProvider` behind an application-owned module that starts with `'use client'`.
-
-Create an application-owned Client Component:
+The package entry is a Client Component boundary. An application-owned wrapper can create a browser client and provide it explicitly:
 
 ```tsx
 // app/ApiProvider.tsx
 'use client'
 
+import { createClient, withEndpoint } from '@defjs/core'
+import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
-import { ClientProvider, withEndpoint } from '@defjs/react'
+
+const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
-  return <ClientProvider options={[withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!)]}>{children}</ClientProvider>
+  return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-Server code that carries request headers, cookies, tenant state, or user credentials should create a core client inside each server request boundary. Do not capture those values in a module-level provider option or cross-request singleton. The adapter does not provide concurrent SSR isolation.
-
-React Server Components, Next.js, hydration, Strict Mode, and concurrent SSR all add framework-specific lifecycle boundaries. Test the exact configuration used by your application, especially request-scoped credentials and provider remounting.
+Server code carrying headers, cookies, tenant state, or credentials should create a separate client inside each request boundary. The adapter does not isolate concurrent SSR requests or dispose client-owned work.
 
 ## Own Realtime Effects
 
@@ -284,19 +256,21 @@ Provider unmount/remount changes client scope. It does not call `dispose`, abort
 ## API
 
 ```typescript
-import type { Client, ClientOption, Interceptor } from '@defjs/core'
+import type { Client } from '@defjs/core'
 import type { JSX, ReactNode } from 'react'
 
 interface ClientProviderProps {
+  client: Client
   children?: ReactNode
-  options?: ClientOption[]
 }
 
 declare function ClientProvider(props: ClientProviderProps): JSX.Element
 declare function useClient(): Client
-declare function withEndpoint(endpoint: string): ClientOption
-declare function withInterceptors(...factories: (() => Interceptor)[]): ClientOption
 ```
+
+Provides the supplied client to descendants. `children` is optional.
+
+Returns the nearest provided client and throws when none exists.
 
 ## Next
 
