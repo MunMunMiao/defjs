@@ -152,7 +152,7 @@ const numericEventStructs = { 404: struct.string() } satisfies EventStructs
 expectTypeOf<EventStreamData<typeof numericEventStructs>['event']>().toEqualTypeOf<'404'>()
 expectTypeOf<EventStreamData<typeof numericEventStructs>['data']>().toEqualTypeOf<string>()
 
-const prototypeEventStructs = { __proto__: struct.number() } satisfies EventStructs
+const prototypeEventStructs = { ['__proto__']: struct.number() } satisfies EventStructs
 expectTypeOf<EventStreamData<typeof prototypeEventStructs>['event']>().toEqualTypeOf<'__proto__'>()
 expectTypeOf<EventStreamData<typeof prototypeEventStructs>['data']>().toEqualTypeOf<number>()
 

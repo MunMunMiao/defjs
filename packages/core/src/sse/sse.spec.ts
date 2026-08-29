@@ -278,10 +278,10 @@ describe('request event stream runtime', () => {
     await expect(collectStreamEvents(stream)).resolves.toEqual([{ data: 'fallback', event: '__proto__', id: undefined }])
   })
 
-  test('should decode an object-literal __proto__ event declaration', async () => {
+  test('should decode a computed __proto__ own event declaration', async () => {
     const client = createSSEClientFromText('event: __proto__\ndata: 7\n\n')
-    const events = { __proto__: struct.number() }
-    expect(Object.hasOwn(events, '__proto__')).toBe(false)
+    const events = { ['__proto__']: struct.number() }
+    expect(Object.hasOwn(events, '__proto__')).toBe(true)
     const useStream = defineEventStream({ maxBufferSize: 1024, maxQueueSize: 16, events, path: '/events' })
 
     const [error, stream] = await client.execute(useStream())
@@ -293,7 +293,7 @@ describe('request event stream runtime', () => {
     await expect(collectStreamEvents(stream)).resolves.toEqual([{ data: 7, event: '__proto__', id: undefined }])
   })
 
-  test('should prefer an object-literal __proto__ declaration over the default struct', async () => {
+  test('should ignore an object-literal prototype as an event declaration', async () => {
     const client = createSSEClientFromText('event: __proto__\ndata: 7\n\n')
     const events = { __proto__: struct.number(), default: struct.string() }
     expect(Object.hasOwn(events, '__proto__')).toBe(false)
@@ -305,7 +305,7 @@ describe('request event stream runtime', () => {
     if (!stream) {
       throw new Error('Expected stream')
     }
-    await expect(collectStreamEvents(stream)).resolves.toEqual([{ data: 7, event: '__proto__', id: undefined }])
+    await expect(collectStreamEvents(stream)).resolves.toEqual([{ data: '7', event: '__proto__', id: undefined }])
   })
 
   test('should decode struct.json event payloads with struct key aliases', async () => {

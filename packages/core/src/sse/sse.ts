@@ -25,7 +25,6 @@ import { createBaseTransportRequest } from '../internal/transport_request'
 import type { RequestOutputShape } from '../http/request'
 import type { AnyStruct, Infer } from '../struct'
 import { decodeJson } from '../struct/codec/json'
-import { isStruct } from '../struct/guards'
 import { parseStructValue } from '../struct/introspection'
 import { DEFINITION } from '../struct/symbols'
 import type { RuntimeStruct } from '../struct/types'
@@ -33,7 +32,7 @@ import type { EventStreamHandle, EventStreamOpenInfo } from './transport/event_s
 import { fetchEventStream, getErrorOpenInfo, getEventStreamFatalCode } from './transport/event_stream'
 import type { EventStreamMessage } from './transport/parser'
 
-/** Map of SSE event names to payload structs. */
+/** Map of SSE event names to payload structs. Declare `__proto__` with a computed own key. */
 export type EventStructs = { [key: string]: AnyStruct }
 
 type EventName<TKey extends string | number> = `${TKey}`
@@ -414,16 +413,9 @@ function validateEventStreamLimits(endpoint: { maxBufferSize: number; maxQueueSi
 }
 
 function resolveEventStruct<TEvents extends EventStructs>(events: TEvents, eventName: string): AnyStruct | undefined {
+  // Security: event declarations must be own properties. Declare the valid `__proto__` event name with a computed key.
   if (Object.hasOwn(events, eventName)) {
     return events[eventName]
-  }
-
-  // JavaScript treats an object-literal __proto__ field as the object's prototype instead of an own property.
-  if (eventName === '__proto__') {
-    const prototype = Object.getPrototypeOf(events) as unknown
-    if (isStruct(prototype)) {
-      return prototype
-    }
   }
 
   if (Object.hasOwn(events, 'default')) {
