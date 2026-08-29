@@ -53,10 +53,6 @@ export function applyRequestContentType(request: HttpRequest, headers: Headers):
   }
 }
 
-export function detectHttpContentType(body: HttpRequest['body']): string | null {
-  return resolveHttpBodyContentType(body)
-}
-
 export function resolveHttpBodyContentType(body: HttpRequest['body']): string | null {
   switch (true) {
     case isFormDataBody(body):

@@ -1,11 +1,7 @@
-import { afterEach, describe, expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import type { ErrorMap } from './index'
-import { StructError, setErrorMap, struct } from './index'
+import { StructError, struct } from './index'
 import { parseStructTuple as parse } from './introspection'
-
-afterEach(() => {
-  setErrorMap(undefined)
-})
 
 describe('StructError format / flatten / prettify', () => {
   const userStruct = struct.object({
@@ -147,37 +143,26 @@ describe('StructError format / flatten / prettify', () => {
 })
 
 describe('errors.ts errorMap', () => {
-  test('setErrorMap overrides default issue messages', () => {
+  test('parse errorMap overrides default issue messages', () => {
     const map: ErrorMap = (issue) => {
       if (issue.code === 'invalid_type') {
         return `字段 ${issue.path.join('.')} 类型不符（期望 ${issue.expected}）`
       }
       return undefined
     }
-    setErrorMap(map)
 
-    const [err] = parse(struct.string(), 42)
+    const [err] = parse(struct.string(), 42, { errorMap: map })
     expect(err).toBeInstanceOf(StructError)
     expect(err?.issues[0]?.message).toBe('字段  类型不符（期望 string）')
   })
 
   test('errorMap returning undefined preserves the default message', () => {
-    setErrorMap(() => undefined)
-
-    const [err] = parse(struct.string(), 42)
+    const [err] = parse(struct.string(), 42, { errorMap: () => undefined })
     expect(err).toBeInstanceOf(StructError)
     expect(err?.issues[0]?.message).toBe('Expected string at <root>, received 42')
   })
 
-  test('clearing errorMap restores defaults', () => {
-    setErrorMap(() => 'custom')
-
-    const [before] = parse(struct.string(), 42)
-    expect(before).toBeInstanceOf(StructError)
-    expect(before?.issues[0]?.message).toBe('custom')
-
-    setErrorMap(undefined)
-
+  test('omitting errorMap uses default messages', () => {
     const [after] = parse(struct.string(), 42)
     expect(after).toBeInstanceOf(StructError)
     expect(after?.issues[0]?.message).toBe('Expected string at <root>, received 42')

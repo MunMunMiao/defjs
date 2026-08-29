@@ -1,72 +1,75 @@
 ---
 title: HTTP
-description: 建立 HTTP URL 與 body、分派 response Struct、取消工作、設定 credentials 與 XSRF，並了解 Fetch boundary。
+description: Define 一個 request，execute 佢，按 status 分支，再用 signal 或者 timeout cancel。
 ---
 
 # HTTP
 
-`defineRequest(...)` 會建立 HTTP command builder。[Commands](/zh-Hant-HK/core/commands) 負責 endpoint 定義與 input projection；本頁集中說明 HTTP wire 及 lifecycle 行為。
+Define → execute → 按 tuple 分支 → screen 離開就 cancel。呢個就係成個 HTTP loop。
 
-## HTTP-Only Client Entry
+## Basic Setup
 
-`@defjs/core/http` 是額外提供的 HTTP-only entry，export `createHttpClient(...)`、HTTP command 及 HTTP-compatible client option：
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-```typescript
-import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
-
-const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
-```
-
-當 consumer 明確只支援 HTTP 時使用。它不會取代 root entry：`@defjs/core` 的 `createClient(...)` 仍是支援 HTTP、SSE 及 WebSocket command 的完整 client。
-
-## URL 建構
-
-`withEndpoint(...)` 必須提供 absolute base URL。當中的 path 會保留為 directory：
-
-```typescript
-const client = createClient(withEndpoint('https://api.example.com/v1'))
-
-const listUsers = defineRequest({
+const client = createClient(withEndpoint('https://api.example.com'))
+const getUser = defineRequest({
   method: 'GET',
-  path: '/users',
+  path: '/users/:id',
+  input: struct.request({ path: struct.object({ id: struct.number() }) }),
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ],
 })
 
-// Resolves to https://api.example.com/v1/users
+const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
+if (error?.kind === 'http' && error.status === 404) {
+  console.log(error.data.message)
+} else if (!error) {
+  console.log(data.name, response.status)
+}
 ```
 
-Base path 沒有 trailing slash 時會自動補上。Base endpoint 上的 query 與 hash 都會被丟棄。
+## Resolve URL
 
-Endpoint `path` 是相對 contract path。可以保留開首 slash，runtime 會在 resolve 前移除，所以不會取代 base directory。Runtime 會拒絕：
+`withEndpoint(...)` 要有效嘅 absolute URL。Endpoint pathname 當 directory 留住；query 同 hash 會喺 command resolution 之前丟棄。
 
-- absolute URL 或 protocol-relative URL；
-- 含有 `?` 的 path；
-- 含有 `#` 的 path。
+```ts
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-Path placeholder 使用 `:name`：
-
-```typescript
+const client = createClient(withEndpoint('https://api.example.com/v1'))
 const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({
     path: struct.object({ id: struct.string() }),
+    query: struct.object({ fields: struct.string().optional() }),
   }),
 })
+
+const command = getUser({ path: { id: 'a/b' }, query: { fields: 'name' } })
+void client.execute(command)
+// → https://api.example.com/v1/users/a%2Fb?fields=name
 ```
 
-請直接傳入原始 placeholder 值。Defjs 會先將 scalar 序列化為字串，拒絕空值及完整值 `.`、`..`，再於替換前準確呼叫一次 `encodeURIComponent`。`/`、`?`、`#`、`%`、空格及 Unicode 都會保留在單一 path segment 內。不要預先編碼；`%` 會按原始輸入處理並編碼為 `%25`。
+Path placeholders 係 raw scalars，encode 剛好一次。Empty values 同 `.` / `..` 會被 reject。一個 placeholder 入面嘅 slashes、`?`、`#`、`%`、spaces 同 Unicode 仍然係一個 encoded segment — 唔好 pre-encode。
 
-## Request Encoding
+Definition path 唔可以有 `?` 或者 `#`，亦唔可以係 absolute 或者 protocol-relative。Default query encoder 接受 scalars 同 arrays of scalars。Nested/complex query values 要 `withQueryParamsSerializer(...)`，否則 construction 會 fail。
 
-欄位直接對應 wire 時，使用 `struct.request(...)`：
+## Encode input
 
-```typescript
-const createUser = defineRequest({
-  method: 'POST',
-  path: '/organizations/:organizationId/users',
+`struct.request(...)` 將 path、query、headers 同 body 分開。Body wrapper 揀 codec 同 content type：
+
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
+const updateUser = defineRequest({
+  method: 'PATCH',
+  path: '/users/:id',
   input: struct.request({
-    path: struct.object({ organizationId: struct.string() }),
-    query: struct.object({ notify: struct.boolean().optional() }),
+    path: struct.object({ id: struct.number() }),
     headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
     body: struct.json(
       struct.object({
@@ -74,163 +77,96 @@ const createUser = defineRequest({
       }),
     ),
   }),
+  output: {
+    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
+  },
 })
-```
 
-Body Struct 決定 encoding 與 default content type：
-
-| Body Struct                | Wire body             | 預設 `Content-Type`                               |
-| -------------------------- | --------------------- | ------------------------------------------------- |
-| `struct.json(inner)`       | `JSON.stringify(...)` | `application/json`                                |
-| `struct.text()`            | string                | `text/plain;charset=UTF-8`                        |
-| `struct.urlencoded(shape)` | `URLSearchParams`     | `application/x-www-form-urlencoded;charset=UTF-8` |
-| `struct.formData(shape)`   | `FormData`            | 由平台設定，包括 boundary                         |
-| `struct.blob()`            | `Blob`                | Blob type 或 `application/octet-stream`           |
-| `struct.arrayBuffer()`     | `ArrayBuffer`         | `application/octet-stream`                        |
-
-自訂 `build` 可呼叫對應 HTTP builder method。Setter method 取代該 request part；`addHeaders`、`addFormData` 與 `addFormUrlEncoded` 則追加至現有 part。所有值都必須來自 schema-bound projection。
-
-### Query Value
-
-預設 query encoder 接受扁平 scalar 與 scalar array。Nested object 會在 request building 階段失敗。
-
-`withQueryParamsSerializer((params, rawParams) => string)` 可改變已接受 flat value 的輸出格式。它收到 `URLSearchParams` view 與 encoded flat record，但不能令 nested query object 變成有效 input，因為 object 會在 serializer 執行前被拒絕。
-
-Alias 會成為 outbound query、path 與 header key；呼叫方仍使用 Struct 的 logical field name。
-
-## Status 與 Output Decoding
-
-`output` 把 status code 對應至 response Struct：
-
-```typescript
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
+const [error, user] = await client.execute(
+  updateUser({
+    path: { id: 7 },
+    headers: { requestId: 'request-42' },
+    body: { displayName: 'Ada' },
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-    { status: 409, body: struct.object({ conflict: struct.string() }) },
-  ],
-})
+)
+if (error) console.error(error.code)
+else console.log(user.id)
 ```
 
-Runtime 會按精確 status 選擇 Struct。宣告 `output` 後，任何未匹配 status 都會產生 `UNDECLARED_STATUS`。已宣告 2xx body 組成 success-data union。`defineRequest(...)` 使用 const generic，所以 inline status 無需 `as const` 都可保留 literal；HTTP error union 會維持每個 non-2xx status 與對應 `error.data` body 的關聯。
+Aliases 淨係 rewrite outbound wire keys。Parsed values 同 command inputs 保留 logical names。
 
-```typescript
-const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+| Wrapper                    | Runtime body      | Default content type                                         |
+| -------------------------- | ----------------- | ------------------------------------------------------------ |
+| `struct.json(inner)`       | JSON string       | `application/json`                                           |
+| `struct.text()`            | string            | `text/plain;charset=UTF-8`                                   |
+| `struct.urlencoded(shape)` | `URLSearchParams` | `application/x-www-form-urlencoded;charset=UTF-8`            |
+| `struct.formData(shape)`   | `FormData`        | Platform multipart boundary；Defjs 會清 stale `Content-Type` |
+| `struct.blob()`            | `Blob`            | Blob type 或者 `application/octet-stream`                    |
+| `struct.arrayBuffer()`     | `ArrayBuffer`     | `application/octet-stream`                                   |
 
-if (statusError?.kind === 'http') {
-  if (statusError.status === 404) {
-    console.error(statusError.data.message)
-  } else {
-    // status 是 409，data 是已宣告的 conflict body。
-    console.error(statusError.data.conflict)
-  }
+Custom `build` 暴露同一套 location/codec setters。最後一次 body write 贏（value + content-type metadata）。High-level commands 唔會將 arbitrary object 變做 body — 要 declare wrapper，或者用 matching setter。
+
+## 按 status dispatch
+
+`output` 係 status → Struct map，或者 `{ status, body }[]`。有 `output` 又冇 `responseType` 時，representation 預設係 `json`。Explicit types：`json`、`text`、`blob`、`arraybuffer`。
+
+操作次序：
+
+1. Status `0` → transport error。
+2. 冇 `output` → 2xx succeeds，`data === undefined`；non-2xx → `HTTP_STATUS`，`error.data === undefined`。Body 唔 decode。
+3. 有 `output` 時，exact declared status 揀佢嘅 Struct。Array form：之後嘅 match override 之前嘅 grouped match。
+4. Undeclared status → 喺 body decode **之前**就 `UNDECLARED_STATUS`。
+5. Representation failure → `RESPONSE_VALIDATION_FAILED`，冇 partial data。
+6. Decoded declared 2xx → result；decoded declared non-2xx → `HTTP_STATUS` 上嘅 typed `error.data`。
+
+`HttpResponse` 有 `url`、`status`、`statusText`、`headers`、`body`、`error` 同 `ok`。`ok` 淨係指 `200 <= status < 300`。佢係 Defjs value，唔係 native `Response`。冇 `output` 時唔允許 `responseType`。
+
+## Cancel the work
+
+Execution options 收 `signal`，再加 `abort` 或者 `timeout`。**`abort` 同 `timeout` 互斥。** `signal` 可以同其中一個一齊用。
+
+```ts
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
+const command = defineRequest({ method: 'GET', path: '/report' })()
+const controller = new AbortController()
+const pending = client.execute(command, { signal: controller.signal, timeout: 5_000 })
+
+controller.abort('screen closed')
+const [error] = await pending
+if (error?.kind === 'transport' && error.code === 'ABORTED') {
+  console.log('caller cancellation')
 }
 ```
 
-`response.ok` 只代表 `status >= 200 && status < 300`，不表示 output decoding、application validation 或 authorization 成功。
+`timeout` 一定要係 `1..2_147_483_647` 入面嘅 positive safe integer。Recognized cancel → `ABORTED`；execution timeout → `TIMEOUT`；其他 Fetch/interceptor failures → `NETWORK_ERROR`。Server 接受咗 write 之後再 cancel，**唔**證明 write 已經 rollback。
 
-已宣告 `output` 而省略 `responseType` 時，response 預設以 `json` parse。Explicit mode 包括 `json`、`text`、`blob` 與 `arraybuffer`，再由選取的 Struct 作結構式解碼。省略 `output` 時不允許指定 `responseType`，result data 是 `undefined`，回傳 response wrapper 的 `body` 是 `null`。Runtime 不會讀取或 decode response body，只會 best-effort 取消它。
+## Credentials 同 XSRF
 
-Command result 按固定優先次序分類：status 0 transport failure → 無 `output` → 精確 status match 或 `UNDECLARED_STATUS` → `response.error` → Struct decoding。因此，body representation error 只可能在已宣告 `output` 時出現；如果 Fetch 記錄了這類錯誤，未宣告 status branch 仍然優先。
+`withCredentials(true)` 為 HTTP 同 SSE set Fetch `credentials: 'include'`。佢唔會 create `Authorization`，亦唔會 configure WebSocket auth。`false` 會留 credentials unspecified。
 
-### Representation Error
+`withXSRF(...)` 淨係 HTTP。Defaults：`cookieName: 'XSRF-TOKEN'`，`headerName: 'X-XSRF-TOKEN'`。Header 淨係為 non-safe methods inject，而且只喺 caller 未 set、同埋 same-origin browser requests 時。Skip `GET`、`HEAD`、`OPTIONS`、`TRACE`。喺 browser 之外，如果需要 injection，就傳 synchronous request-scoped `tokenProvider`。
 
-對精確匹配的已宣告 output，JSON 或其他 body codec 失敗時，Fetch 會把原始 exception 保存在 `HttpResponse.error`。Command execution 會在套用 output Struct 前停止，並回傳 `[RESPONSE_VALIDATION_FAILED, undefined, response]`；原始 exception 保留為 `cause`，而且不會產生 typed `error.data`。
+Keep credentials、XSRF tokens 同 query strings 出日常 logs。唔好用 query params 當一般 credential channel。
 
-普通 non-2xx response 不會填入 `response.error`，其 status 由 `status` 與 `ok` 表示。Non-2xx status 與 body 已宣告且 body 有效時，Struct 會正常解碼，最終 `HTTP_STATUS` error 會把 typed body 保留於 `error.data`。
+## Progress 同 Fetch boundary
 
-## HTTP 結果
+`onDownloadProgress` 會喺讀 explicit response representation 時 run。`lengthComputable` 淨係喺有 positive `Content-Length` 時先係 true。冇 `responseType` → 冇 body decode → 冇 body-read progress。
 
-```typescript
-const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
-```
+`onUploadProgress` 睇住 Fetch 讀 `ReadableStream<Uint8Array>` request body。Normal body wrappers 唔暴露 raw stream setter — upload progress 主要用喺 low-level construction。
 
-成功時，`response` 是 Defjs `HttpResponse` wrapper，其 body 與 `data` 相同。失敗時有沒有 response，取決於 execution 已進行到哪一步。完整分類見 [Errors](/zh-Hant-HK/core/errors)。
+`fetchHandler(httpRequest, fetchImpl?)` 係更低層嘅 Fetch boundary：build native `Request`，call Fetch，讀 representation，return `HttpResponse`。佢 **唔會** validate command input、dispatch `output`，或者 run interceptors。對 injected transport tests 有用 — 唔係 `client.execute` 嘅替代品。
 
-## Cancellation 與 Timeout
+## Replay limits
 
-HTTP execution 接受 `abort`、`signal` 與 `timeout`：
+Defjs **唔會** auto-retry HTTP。Retry 一次 read 仍然要有 reviewed timeout/network/duplicate policy。Retry 一次 mutation 要 replayable bytes、server support、綁住 auth scope + request bytes 嘅 idempotency key，同 receiver duplicate policy。
 
-```typescript
-const controller = new AbortController()
+Client/command/Fetch boundary 唔知 failed write 有冇 commit。將 replay decisions 留喺 app 或者 reviewed interceptor。Interceptors 可以 short-circuit 或者 replace low-level request；最終 status 同 body 仍然要滿足 command 嘅 contract。
 
-const [error] = await client.execute(command, {
-  signal: controller.signal,
-  timeout: 5_000,
-})
-```
+## Related recipes
 
-`signal` 會與 client internal signal 及正數 timeout 合併。獨立的 `abort` 欄位是目前 API 保留的另一個 cancellation signal。`abort` 與 `timeout` 不能同時提供，否則回傳 `REQUEST_VALIDATION_FAILED`；`signal` 則可配搭其中任何一項。
-
-HTTP、SSE 與 WebSocket execution 的 `timeout` 必須是 `1..2_147_483_647` 範圍內的正安全整數；`0`、負數、小數、`NaN`、`Infinity` 或超出上限的值會在建立 request、stream 或 socket 資源前回傳 `REQUEST_VALIDATION_FAILED`。
-
-可識別的 cancellation 產生 `ABORTED`。`AbortSignal.timeout(...)` reason 或 execution timeout 產生 `TIMEOUT`；其他 Fetch failure 產生 `NETWORK_ERROR`。
-
-## Credentials 與 XSRF
-
-`withCredentials(true)` 令 HTTP 與 SSE 使用 Fetch `credentials: 'include'`。`false` 只會讓該 Fetch option 保持 unset，不會強制使用 `omit`。這個設定不會加入 `Authorization` header，亦不會設定 WebSocket authentication。
-
-`withXSRF(...)` 只作用於 HTTP request。預設值是：
-
-```typescript
-withXSRF({
-  cookieName: 'XSRF-TOKEN',
-  headerName: 'X-XSRF-TOKEN',
-})
-```
-
-RFC 安全方法 `GET`、`HEAD`、`OPTIONS` 與 `TRACE` 會跳過注入。其他所有方法，包括 `PROPPATCH` 這類自訂非安全方法，都會在注入前使用相同的已存在 header、same-origin 與 token guard。已設定的 header 會保留。瀏覽器 cookie lookup 只限 same-origin request；瀏覽器以外請提供同步 `tokenProvider`，其 precedence 高於 cookie lookup。
-
-```typescript
-import type { HttpRequest } from '@defjs/core'
-
-declare const readRequestScopedToken: (request: HttpRequest) => string | null
-
-withXSRF({
-  tokenProvider: ({ request }) => readRequestScopedToken(request),
-})
-```
-
-伺服器端 token provider 必須保持 request-scoped。`withCredentials(true)` 不會令 JavaScript 可以讀取 cross-origin browser cookie，亦不會觸發 cross-origin XSRF header injection。
-
-## Progress Observer
-
-`onDownloadProgress` 在讀取 Fetch response body 時回報 byte。只有正數 `Content-Length` 存在時，`lengthComputable` 才是 true。
-
-```typescript
-declare const updateProgress: (value: number | undefined) => void
-
-const [error, file] = await client.execute(downloadFile(), {
-  onDownloadProgress({ loaded, total, lengthComputable }) {
-    updateProgress(lengthComputable ? loaded / total : undefined)
-  },
-})
-```
-
-`onUploadProgress` 只觀察 `ReadableStream<Uint8Array>` request body。目前 high-level command builder 有 Blob 與 ArrayBuffer projection setter，卻沒有 raw stream setter。因此沒有標準 `defineRequest` 範例可以提供此 option 所需的 stream。不要把手動建立的 stream 寫成可用的 high-level command body。
-
-Progress callback 會在 transport read/write path 執行。請確保 callback 不拋錯，而且開銷要小。
-
-## Low-Level Fetch Boundary
-
-`fetchHandler(httpRequest, fetchImpl?)` 已匯出。它把 Defjs `HttpRequest` 轉成 native `Request`、呼叫 Fetch、parse 選定的 response representation，再回傳 Defjs `HttpResponse` wrapper。Fetch failure 會成為 status-0 wrapper。
-
-直接呼叫 `fetchHandler` 會繞過：
-
-- command input decoding 與 request projection；
-- HTTP output status dispatch 與 Struct decoding；
-- client interceptor orchestration；
-- 轉換成 high-level `RequestError` tuple 的流程。
-
-它是已匯出的 low-level boundary，不是建議的 command workflow。這份文件未確立其長期 stability commitment。
-
-## 下一步
-
-- [Interceptors](/zh-Hant-HK/core/interceptors)：request cloning、short-circuit 與 retry。
-- [Errors](/zh-Hant-HK/core/errors)：HTTP status、transport 與 definition failure。
-- [Struct](/zh-Hant-HK/core/struct)：嚴格結構式解碼。
+- [GET with a declared 404](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [Cancel an HTTP call](../recipes/cancel-http.md)
+- [Test with a local Fetch handle](../recipes/test-with-handle.md)

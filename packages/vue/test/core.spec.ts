@@ -13,7 +13,9 @@ describe('injectClient', () => {
     })
     app.config.warnHandler = () => {}
 
-    expect(() => app.mount(document.createElement('div'))).toThrow('No HTTP client provided')
+    expect(() => app.mount(document.createElement('div'))).toThrow(
+      'No Defjs client provided. Did you forget to call app.use(createClientPlugin(client))?',
+    )
   })
 })
 

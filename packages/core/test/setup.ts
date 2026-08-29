@@ -1,4 +1,4 @@
-import type { Socket } from 'node:net'
+import { connect, type Socket } from 'node:net'
 import type { ServerType } from '@hono/node-server'
 import { createAdaptorServer } from '@hono/node-server'
 import type { NodeWebSocket } from '@hono/node-ws'
@@ -19,7 +19,9 @@ declare module 'vitest' {
 let testServer: ServerType | undefined
 let nodeWebSocket: NodeWebSocket | undefined
 let testServerAddr: string
+let testServerPort: number | undefined
 const testServerSockets = new Set<Socket>()
+const providerEnvelopeAttempts = new Map<string, number>()
 const isDenoRuntime = 'Deno' in globalThis
 
 type ServerConnectionCleanup = {
@@ -383,6 +385,59 @@ export async function setup({ provide }: TestProject) {
   )
 
   app.get(
+    '/ws/provider-envelopes',
+    upgradeWebSocket((c) => {
+      const key = c.req.query('key') ?? 'default'
+      const mode = c.req.query('mode') ?? 'default'
+      const attempt = (providerEnvelopeAttempts.get(key) ?? 0) + 1
+      providerEnvelopeAttempts.set(key, attempt)
+
+      return {
+        onClose() {
+          if (mode === 'queue' && attempt === 1) {
+            return
+          }
+          providerEnvelopeAttempts.delete(key)
+        },
+        onMessage(event, ws) {
+          const decoded = JSON.parse(typeof event.data === 'string' ? event.data : String(event.data)) as Record<string, unknown>
+          ws.send(
+            JSON.stringify({
+              method: 'wire',
+              success: true,
+              result: {
+                attempt,
+                hasType: Object.hasOwn(decoded, 'type'),
+                keys: Object.keys(decoded).sort(),
+                method: decoded['method'],
+                req_id: decoded['req_id'],
+              },
+            }),
+          )
+
+          if (decoded['method'] === 'ping') {
+            ws.send(JSON.stringify({ method: 'pong', req_id: decoded['req_id'] }))
+          }
+          if (mode === 'queue' && attempt === 1) {
+            ws.close(1012, 'restart')
+          }
+        },
+        onOpen(_event, ws) {
+          if (mode === 'queue' && attempt === 1) {
+            ws.send(JSON.stringify({ method: 'subscribe', success: true, result: { channel: 'ticker' } }))
+            ws.send(JSON.stringify({ channel: 'heartbeat' }))
+            ws.send(JSON.stringify({ channel: 'ticker', type: 'update', data: [{ symbol: 'BTC/USD', last: 1 }] }))
+            return
+          }
+          if (attempt > 1 || mode === 'heartbeat') {
+            ws.send(JSON.stringify({ channel: 'heartbeat' }))
+          }
+        },
+      }
+    }),
+  )
+
+  app.get(
     '/ws/heartbeat',
     upgradeWebSocket(() => ({
       onMessage(event, ws) {
@@ -486,67 +541,131 @@ export async function setup({ provide }: TestProject) {
   }
 
   testServerAddr = `http://127.0.0.1:${address.port}`
+  testServerPort = address.port
   server.unref()
   provide('testServerHost', testServerAddr)
   console.log(`Test server is running on ${testServerAddr}`)
 }
 
 export async function teardown() {
-  if (nodeWebSocket) {
-    nodeWebSocket.wss.clients.forEach((client: { terminate(): void }) => {
-      client.terminate()
-    })
+  const failures: Error[] = []
+  const port = testServerPort
 
-    await new Promise<void>((resolve, reject) => {
-      nodeWebSocket?.wss.close((error: Error | undefined) => {
-        if (error) {
-          reject(error)
-          return
-        }
-
-        resolve()
+  try {
+    const currentWebSocket = nodeWebSocket
+    if (currentWebSocket) {
+      currentWebSocket.wss.clients.forEach((client: { terminate(): void }) => {
+        client.terminate()
       })
+      try {
+        await teardownDeadline(
+          new Promise<void>((resolve, reject) => {
+            currentWebSocket.wss.close((error: Error | undefined) => {
+              if (error) {
+                reject(error)
+                return
+              }
+              resolve()
+            })
+          }),
+          'WebSocket server close timed out',
+        )
+      } catch (cause) {
+        currentWebSocket.wss.clients.forEach((client: { terminate(): void }) => {
+          client.terminate()
+        })
+        failures.push(labeledTeardownFailure('WebSocket server close failed', cause))
+      }
+    }
+
+    const currentServer = testServer
+    if (currentServer?.listening) {
+      if (!isDenoRuntime) {
+        const serverWithCleanup = currentServer as ServerType & ServerConnectionCleanup
+        serverWithCleanup.closeIdleConnections?.()
+        serverWithCleanup.closeAllConnections?.()
+      }
+
+      try {
+        await teardownDeadline(
+          new Promise<void>((resolve, reject) => {
+            currentServer.close((error) => {
+              if (error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') {
+                reject(error)
+                return
+              }
+              resolve()
+            })
+          }),
+          'HTTP server close timed out',
+        )
+      } catch (cause) {
+        testServerSockets.forEach((socket) => {
+          socket.destroy()
+        })
+        failures.push(labeledTeardownFailure('HTTP server close failed', cause))
+      }
+    }
+
+    if (failures.length === 0 && typeof port === 'number') {
+      try {
+        await assertLoopbackPortClosed(port)
+      } catch (cause) {
+        failures.push(labeledTeardownFailure('Loopback port close verification failed', cause))
+      }
+    }
+  } finally {
+    providerEnvelopeAttempts.clear()
+    testServerSockets.clear()
+    nodeWebSocket = undefined
+    testServer = undefined
+    testServerPort = undefined
+  }
+
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Test server teardown failed')
+  }
+}
+
+async function teardownDeadline<T>(promise: Promise<T>, timeoutMessage: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(timeoutMessage)), 500)
+        timeout.unref?.()
+      }),
+    ])
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function labeledTeardownFailure(label: string, cause: unknown): Error {
+  const detail = cause instanceof Error ? cause.message : String(cause)
+  return new Error(`${label}: ${detail}`, { cause })
+}
+
+async function assertLoopbackPortClosed(port: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect({ host: '127.0.0.1', port })
+    const timeout = setTimeout(() => finish(new Error('Loopback connection attempt timed out')), 500)
+    timeout.unref?.()
+
+    socket.once('connect', () => finish(new Error(`Loopback port ${port} still accepts connections`)))
+    socket.once('error', (error: NodeJS.ErrnoException) => {
+      finish(error.code === 'ECONNREFUSED' ? undefined : error)
     })
 
-    nodeWebSocket = undefined
-  }
-
-  if (!testServer) {
-    return
-  }
-
-  if (!testServer.listening) {
-    testServerSockets.clear()
-    testServer = undefined
-    return
-  }
-
-  if (!isDenoRuntime) {
-    const serverWithCleanup = testServer as ServerType & ServerConnectionCleanup
-    serverWithCleanup.closeIdleConnections?.()
-    serverWithCleanup.closeAllConnections?.()
-  }
-
-  testServerSockets.forEach((socket) => {
-    socket.destroy()
-  })
-  testServerSockets.clear()
-
-  await new Promise<void>((resolve, reject) => {
-    testServer?.close((error) => {
+    function finish(error?: Error): void {
+      clearTimeout(timeout)
+      socket.destroy()
       if (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ERR_SERVER_NOT_RUNNING') {
-          resolve()
-          return
-        }
-
         reject(error)
         return
       }
-
       resolve()
-    })
+    }
   })
-
-  testServer = undefined
 }

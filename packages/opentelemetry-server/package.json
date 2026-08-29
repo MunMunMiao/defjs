@@ -21,9 +21,11 @@
     "test": "vitest run --coverage"
   },
   "devDependencies": {
-    "@defjs/core": "workspace:^0.4.0",
+    "@defjs/core": "workspace:^",
     "@hono/node-server": "catalog:",
     "@hono/node-ws": "catalog:",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/core": "2.10.0",
     "@vitest/coverage-istanbul": "catalog:",
     "hono": "catalog:",
     "tsdown": "catalog:",
@@ -32,11 +34,8 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@defjs/core": "workspace:^0.4.0 || ^0.5.0",
+    "@defjs/core": "^0.4.0",
     "@opentelemetry/api": "^1.0.0",
     "@opentelemetry/core": "^2.0.0"
-  },
-  "engines": {
-    "node": ">=22"
   }
 }

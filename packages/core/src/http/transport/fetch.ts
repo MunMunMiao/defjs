@@ -1,3 +1,4 @@
+import type { FetchHandle } from '../../client/config'
 import { awaitWithSignal, resolveAbortTransportError } from '../../internal/abort'
 import type { HttpProgressFn, HttpRequest } from '../../internal/http_request'
 import type { HttpResponse } from '../../internal/http_response'
@@ -185,7 +186,7 @@ function cancelWrappedUploadBody(request: HttpRequest, body: unknown, reason: un
   }
 }
 
-async function fetchWithSignal(fetchImpl: typeof fetch, request: Request, signal: AbortSignal | undefined): Promise<Response> {
+async function fetchWithSignal(fetchImpl: FetchHandle, request: Request, signal: AbortSignal | undefined): Promise<Response> {
   if (!signal) {
     return await fetchImpl(request)
   }
@@ -232,9 +233,10 @@ export function createFetchRequest(request: HttpRequest): Request {
   }
 }
 
-async function parseFetchResponse(httpRequest: HttpRequest, response: Response): Promise<HttpResponse<unknown>> {
+async function parseFetchResponse(httpRequest: HttpRequest, response: Response, fallbackUrl: string): Promise<HttpResponse<unknown>> {
   const downloadProgress = httpRequest.downloadProgress
-  const { headers, status, statusText, url } = response
+  const { headers, status, statusText } = response
+  const url = response.url || fallbackUrl
 
   if (response.body && httpRequest.responseType === undefined) {
     void response.body.cancel().catch(() => undefined)
@@ -292,24 +294,34 @@ async function parseFetchResponse(httpRequest: HttpRequest, response: Response):
   })
 }
 
+/**
+ * Default HTTP transport: perform `httpRequest` with `fetch` and return an `HttpResponse`.
+ * Used by the client unless `withHTTPHandle` replaces it; also usable in tests and custom handlers.
+ *
+ * @param httpRequest - Normalized request (URL, headers, body, abort, progress hooks).
+ * @param fetchImpl - Fetch implementation; defaults to global `fetch`.
+ * @returns Parsed `HttpResponse`, or a status-0 response when the network/abort fails.
+ */
 export async function fetchHandler(
   httpRequest: HttpRequest,
-  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis) as typeof fetch,
+  fetchImpl: FetchHandle = globalThis.fetch.bind(globalThis),
 ): Promise<HttpResponse<unknown>> {
   const abortSignal = httpRequest.abort
+  let prepared = httpRequest
   let request: Request | undefined
   let response: Response
 
   try {
-    request = createFetchRequest(httpRequest)
+    prepared = await prepareUploadProgressRequest(httpRequest)
+    request = createFetchRequest(prepared)
     response = await fetchWithSignal(fetchImpl, request, abortSignal)
   } catch (error) {
-    cancelWrappedUploadBody(httpRequest, request?.body, error)
+    cancelWrappedUploadBody(prepared, request?.body, error)
     return makeResponse({ error: (abortSignal && resolveAbortTransportError(abortSignal)?.cause) ?? error })
   }
 
   try {
-    return await parseFetchResponse(httpRequest, response)
+    return await parseFetchResponse(httpRequest, response, request.url)
   } catch (error) {
     const transportError = abortSignal && resolveAbortTransportError(abortSignal)
     if (transportError) {
@@ -317,4 +329,68 @@ export async function fetchHandler(
     }
     throw error
   }
+}
+
+async function prepareUploadProgressRequest(request: HttpRequest): Promise<HttpRequest> {
+  const { uploadProgress, body } = request
+  if (!uploadProgress || body == null || isReadableStreamBody(body) || !supportsStreamingRequestBody()) {
+    return request
+  }
+
+  const converted = await convertBodyToUploadStream(body)
+  if (!converted) {
+    return request
+  }
+
+  const headers = new Headers(request.headers)
+  if (converted.contentType) {
+    headers.set('Content-Type', converted.contentType)
+  }
+  if (converted.total > 0) {
+    headers.set('Content-Length', String(converted.total))
+  }
+
+  const startEvent = { lengthComputable: converted.total > 0, loaded: 0, total: converted.total }
+  try {
+    if (request.abort) {
+      await awaitWithSignal(() => uploadProgress(startEvent), request.abort)
+    } else {
+      await uploadProgress(startEvent)
+    }
+  } catch (error) {
+    void converted.stream.cancel(error)
+    throw error
+  }
+
+  return {
+    ...request,
+    body: converted.stream,
+    bodyContentType: converted.contentType ?? request.bodyContentType,
+    bodyContentTypeSource: converted.stream,
+    headers,
+  }
+}
+
+async function convertBodyToUploadStream(
+  body: HttpRequest['body'],
+): Promise<{ contentType?: string | null; stream: ReadableStream<Uint8Array>; total: number } | undefined> {
+  if (typeof Blob !== 'undefined' && body instanceof Blob) {
+    return { contentType: body.type || undefined, stream: body.stream(), total: body.size }
+  }
+
+  if (body instanceof ArrayBuffer) {
+    return {
+      contentType: 'application/octet-stream',
+      stream: new Blob([body]).stream(),
+      total: body.byteLength,
+    }
+  }
+
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    const serialized = new Response(body)
+    const blob = await serialized.blob()
+    return { contentType: serialized.headers.get('Content-Type'), stream: blob.stream(), total: blob.size }
+  }
+
+  return undefined
 }

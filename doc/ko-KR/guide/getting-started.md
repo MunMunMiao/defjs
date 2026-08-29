@@ -1,54 +1,64 @@
 ---
-title: 시작하기
-description: Defjs를 설치하고 타입이 지정된 HTTP 엔드포인트를 정의해 애플리케이션에서 호출합니다.
+title: '시작하기: HTTP 요청 하나'
+description: GET /users/:id를 정의하고, 로컬 Fetch 핸들로 실행한 뒤 실제 API로 연결해요.
 ---
 
-# 시작하기
+# 시작하기: HTTP 요청 하나
 
-Defjs를 사용하면 애플리케이션이 호출할 API 계약을 한 번 정의하고 타입이 지정된 입력, 런타임 디코딩, 명확한 트랜스포트 결과와 함께 재사용할 수 있습니다.
+`GET /users/:id`를 정의하고, 명시적인 클라이언트로 실행한 뒤 `200`과 선언된 `404`를 모두 디코딩해요. 로컬 핸들러로 첫 실행은 오프라인으로 두고, 실제 서비스로 바꿔도 명령은 그대로예요.
 
-## 설치
+## Step 1 — 설치
 
-애플리케이션에 Core 패키지를 추가하세요.
+`@defjs/core`는 ESM이고 Node.js 22+、Bun、Deno가 필요해요. Node가 `.ts`를 그대로 실행해요. package.json에 `"type": "module"`을 넣으세요. 브라우저에서는 번들러와 Fetch도 필요해요.
+
+::: tabs
+== bun
+
+```sh
+bun add @defjs/core
+```
+
+== npm
+
+```sh
+npm install @defjs/core
+```
+
+== pnpm
 
 ```sh
 pnpm add @defjs/core
 ```
 
-프로젝트가 다른 패키지 관리자를 사용한다면 npm, Yarn, Bun의 같은 명령을 사용하세요. `@defjs/core`는 ESM입니다. Node.js에서 실행할 때 현재 패키지 metadata는 Node 22 이상을 요구합니다.
-
-패키징된 ESM HTTP consumer는 Node.js 22, 24, 26, Bun 1.3.14, Deno 2.9.5에서 실행 검증했습니다. 애플리케이션을 컴파일한 뒤에는 다음 형태의 명령을 사용합니다.
+== yarn
 
 ```sh
-node dist/index.js
-bun run dist/index.js
-deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+yarn add @defjs/core
 ```
 
-Deno 명령은 `node_modules`에 이미 설치된 패키지를 사용합니다. 네트워크 권한은 애플리케이션에 필요한 정확한 API host로 바꾸세요. Bun과 Deno 검증은 문서화된 HTTP 범위만 다루며 모든 platform API나 transport를 보장하지 않습니다. 브라우저 build는 일반적인 bundler와 플랫폼에 필요한 Fetch 및 WebSocket 기능을 사용합니다.
+== deno
 
-runtime 간 테스트에서는 `error.kind`, `error.code`처럼 안정적인 Defjs 필드를 검증하세요. 엔진별 native `Error` 메시지나 JSON parse 문구에 의존하지 마세요. Node.js, Bun, Deno는 이런 세부 정보를 서로 다르게 표시할 수 있습니다.
+```sh
+deno add npm:@defjs/core
+```
 
-애플리케이션에 필요한 adapter만 추가하세요.
-
-| 구성               | 패키지                                                                                    |
-| ------------------ | ----------------------------------------------------------------------------------------- |
-| React 18+          | `@defjs/core`, `@defjs/react`, `react`                                                    |
-| Vue 3+             | `@defjs/core`, `@defjs/vue`, `vue`                                                        |
-| 서버 OpenTelemetry | `@defjs/core`, `@defjs/opentelemetry-server`, `@opentelemetry/api`, `@opentelemetry/core` |
-
-::: tip 설치한 버전에 맞는 문서를 사용하세요
-이 페이지는 현재 문서 버전의 API를 설명합니다. 애플리케이션에 설치된 버전을 확인하세요. export나 option이 다르다면 여러 버전의 예제를 섞지 말고 해당 버전의 문서와 릴리스 노트를 사용하세요.
 :::
 
-## 첫 요청 정의
+## Step 2 — 요청 정의하기
 
-API가 `GET /users/:id`를 제공한다고 가정합니다. base URL과 response Struct를 실제 서비스 계약에 맞게 바꾸세요.
+`src/get-user.ts`를 만들어요. `struct.request(...)`는 path 값을 query, 헤더, body와 분리해요.
 
-```typescript
-import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+```ts get-user.ts
+import { defineRequest, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
 
 const getUser = defineRequest({
   method: 'GET',
@@ -57,57 +67,161 @@ const getUser = defineRequest({
     path: struct.object({ id: struct.number() }),
   }),
   output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
   ],
 })
 
-async function loadUser(id: number) {
-  const [error, user, response] = await client.execute(getUser({ path: { id } }))
+const command = getUser({ path: { id: 7 } })
+void command
+```
 
-  if (error) {
-    console.error(error.kind, error.code)
-    return
+`defineRequest(...)`는 빌더를 돌려줘요. `getUser(...)`를 호출하면 `client.execute(...)`에 넘길 opaque 명령이 만들어져요.
+
+## Step 3 — 로컬에서 실행하기
+
+네트워크 없이 돌리도록 클라이언트 로컬 Fetch 핸들을 연결해요. Defjs는 여전히 입력을 검증하고, `Request`를 만들고, status로 분기하고, body를 파싱해요.
+
+```ts get-user.ts
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+  ],
+})
+
+const handle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
   }
 
-  console.log(user.name, response.status)
+  return Response.json({ message: 'User not found' }, { status: 404 })
 }
 
-void loadUser(7)
-```
+const client = createClient(withEndpoint('https://api.example.test'), withHTTPHandle(handle))
 
-`defineRequest(...)`는 **커맨드 빌더**를 반환합니다. `getUser(...)`를 호출하면 엔드포인트 정의와 호출 입력을 담은 **커맨드**가 만들어집니다. 이어서 `client.execute(...)`는 다음 HTTP 3요소 튜플을 반환합니다.
+const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }), {
+  timeout: 5_000,
+})
 
-```typescript
-;[error, result, response]
-```
-
-성공하면 `error`는 `null`, `result`는 디코딩된 출력 데이터, `response`는 Defjs `HttpResponse` 래퍼입니다. 실패하면 `result`는 `undefined`입니다. 응답을 받지 못한 실패에서는 응답 래퍼도 `undefined`입니다.
-
-### 상태 리터럴은 자동으로 보존됩니다
-
-`defineRequest(...)`는 `output`에 const generic을 사용하므로 inline 배열 항목과 그룹화한 상태 배열의 리터럴 값이 자동으로 유지됩니다. 추론된 2xx 성공 body와 비-2xx 오류 body를 구분하기 위해 `as const`를 붙일 필요가 없습니다.
-
-객체 형식 output도 지원합니다.
-
-```typescript
-const output = {
-  '200': struct.object({ id: struct.number() }),
-  '404': struct.object({ message: struct.string() }),
+if (error) {
+  if (error.kind === 'http' && error.status === 404) {
+    console.log(error.data.message)
+  } else {
+    console.error(error.kind, error.code)
+  }
+} else {
+  console.log(`Loaded ${user.name} from ${response.status}`)
 }
 ```
 
-## 애플리케이션에 적용
+실행해요:
 
-엔드포인트 정의는 서비스 API를 설명하는 모듈에 두세요. 컴포넌트, route handler, job, store에서 커맨드 빌더를 재사용합니다. endpoint, credential, interceptor, 생명주기를 소유하는 경계에서 클라이언트를 만드세요.
+::: tabs
+== bun
 
-- 브라우저 애플리케이션은 보통 클라이언트 하나를 공유할 수 있습니다.
-- 서버 렌더링에서는 header, cookie, 사용자, tenant가 요청마다 다르면 요청 범위 클라이언트를 만드세요.
-- SSE나 WebSocket 리소스를 여는 코드는 해당 리소스를 소비하고 닫는 일도 맡아야 합니다.
+```sh
+bun src/get-user.ts
+```
 
-## 다음 단계
+== npm
 
-- [커맨드](/ko-KR/core/commands)에서는 자동 요청 매핑과 사용자 정의 스키마 결합 프로젝션을 설명합니다.
-- [오류](/ko-KR/core/errors)에서는 세 트랜스포트의 튜플과 `RequestError` union을 설명합니다.
-- [HTTP](/ko-KR/core/http)에서는 URL 해석, 요청 body, 출력 디코딩, 취소, XSRF 동작을 설명합니다.
-- [예제](/ko-KR/guide/examples)에서는 이 계약들을 애플리케이션이 소유하는 사용 패턴으로 조합합니다.
+```sh
+node src/get-user.ts
+```
+
+== pnpm
+
+```sh
+node src/get-user.ts
+```
+
+== yarn
+
+```sh
+node src/get-user.ts
+```
+
+== deno
+
+```sh
+deno run src/get-user.ts
+```
+
+:::
+
+```txt
+Loaded Ada from 200
+```
+
+없는 사용자를 시험해 보려면 path id를 `8`로 바꾸고 다시 실행해요:
+
+```txt
+User not found
+```
+
+성공 시: `error`는 `null`, `user`는 `200` Struct 출력, `response`는 `HttpResponse`예요. 선언된 `404`에서는 `error.kind`가 `'http'`, `error.status`가 `404`, `error.data`는 타입이 잡힌 `NotFound`예요. 실패 시 튜플 두 번째 항목은 `undefined`예요.
+
+## Step 4 — 실제 API로 연결하기
+
+서비스가 그 body로 `GET /v1/users/:id`를 구현하면 `withHTTPHandle(...)`을 빼고 실제 base URL을 설정해요.
+
+```ts
+import { createClient, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const localHandle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
+  }
+
+  return Response.json({ message: 'User not found' }, { status: 404 })
+}
+
+const localClient = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(localHandle))
+const realClient = createClient(withEndpoint('https://api.example.com/v1'))
+void localClient
+void realClient
+```
+
+명령은 같고, 클라이언트만 달라요.
+
+## 결과가 달라질 때
+
+- 잘못된 입력 / 잘못된 빌드 / 충돌하는 취소 옵션 → `REQUEST_VALIDATION_FAILED`
+- 선언된 non-2xx → 타입이 잡힌 `error.data`와 함께 `HTTP_STATUS`
+- 선언된 body가 디코딩되지 않음 → `RESPONSE_VALIDATION_FAILED`
+- 선언이 없는 status → `UNDECLARED_STATUS` (body 디코딩 전)
+- Fetch 실패 / 취소 / 타임아웃 → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+
+`timeout`은 `1..2_147_483_647` 범위의 양의 안전 정수여야 해요. `abort`와 `timeout`을 함께 넘기지 마세요. `signal`은 둘 중 하나와 조합할 수 있어요. 취소는 호출자가 본 결과를 알려 줄 뿐, 서버 쓰기가 커밋됐는지는 증명하지 않아요.
+
+## 다음 레시피
+
+- [선언된 404가 있는 GET](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [HTTP 호출 취소하기](../recipes/cancel-http.md)
+- [SSE 스트림 소비하기](../recipes/consume-sse.md)
+- [WebSocket 세션 열기](../recipes/websocket-session.md)
+- [로컬 Fetch 핸들로 테스트하기](../recipes/test-with-handle.md)

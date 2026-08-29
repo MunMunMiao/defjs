@@ -1,286 +1,79 @@
 ---
-title: 指令
-description: 定義端點、建立指令建構器與指令、將 Struct 輸入對應到 wire，並推導 HTTP 輸出型別。
+title: Commands
+description: 定義 endpoints、建立不透明 commands、對應 inputs，並推導傳輸結果。
 ---
 
-# 指令
+# Commands
 
-Defjs 有三個彼此相關的階段：
+一份定義 → builder → 不透明 command → `client.execute`。HTTP、SSE、WebSocket 走同一條管線。
 
-1. **端點定義**描述穩定的 HTTP、SSE 或 WebSocket 契約。
-2. **指令建構器**是 `defineRequest`、`defineEventStream` 或 `defineWebSocket` 回傳的函式。
-3. **指令**是呼叫建構器並傳入輸入後得到的值。把這個指令交給 `client.execute(...)`。
+## Basic Setup
 
-```typescript
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-})
+```typescript twoslash
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
-const command = getUser({ path: { id: 42 } })
-const result = await client.execute(command)
+const client = createClient(withEndpoint('https://api.example.com'))
+const health = defineRequest({ method: 'GET', path: '/health' })
+const [error, data, response] = await client.execute(health())
+if (!error) console.log(data, response.status)
 ```
 
-這裡傳給 `defineRequest` 的物件是端點定義，`getUser` 是指令建構器，`command` 則是指令。
+## 選定義
 
-## HTTP 端點定義
+| 定義                     | 契約                                              | 成功時的值                           |
+| ------------------------ | ------------------------------------------------- | ------------------------------------ |
+| `defineRequest(...)`     | Method、相對 path、選填 input、選填 status output | 解碼後的資料 + `HttpResponse`        |
+| `defineEventStream(...)` | Path、buffer／queue 限制、event-name → Struct map | `EventStreamHandle` + open 快照      |
+| `defineWebSocket(...)`   | Path、incoming map、選填 outgoing map、queue 限制 | `WebSocketSession` + connection 快照 |
 
-`defineRequest(...)` 接受下列欄位：
+沒有 `input` → builder 不吃參數。有 `input` → 就算巢狀欄位全是 optional，也要傳 Struct 值。選填的 `path`／`query`／`headers` 區段可以省略；區段裡有必填欄位就不行。有 body wrapper 就表示 body 必填。
 
-| 欄位           | 意義                                                                                           |
-| -------------- | ---------------------------------------------------------------------------------------------- |
-| `method`       | HTTP method 字串。                                                                             |
-| `operation`    | 用於 telemetry 與診斷的可選、明確、靜態低基數 identity。                                       |
-| `path`         | 相對端點路徑，可包含 `:name` placeholder。                                                     |
-| `input`        | 對指令輸入做結構解碼的 Struct。                                                                |
-| `build`        | 將輸入欄位對應到請求各部分的結構描述綁定投影。必須同時提供 `input`。                           |
-| `output`       | 用於回應解碼與結果推導的 status-to-Struct 對應。                                               |
-| `responseType` | 僅在宣告 `output` 時可選用 `json`、`text`、`blob` 或 `arraybuffer`；省略 `output` 時禁止宣告。 |
+讓 commands 保持不透明。別去挖 tags 或 symbols。
 
-SSE 與 WebSocket 定義同樣支援 `operation?: string`。請從端點契約明確設定，例如 `users.lookup`；不要從渲染後的 path、URL、使用者或 tenant 資料、request ID 等高基數值衍生。
+## 自動 request 對應
 
-指令欄位會直接對應到 wire section 時，請使用 `struct.request(...)`：
+當邏輯 input 已有 path／query／headers／body 時，用 `struct.request(...)`：
 
-```typescript
+```typescript twoslash
 import { defineRequest, struct } from '@defjs/core'
 
 const createUser = defineRequest({
   method: 'POST',
-  path: '/organizations/:organizationId/users',
+  path: '/users',
   input: struct.request({
-    path: struct.object({
-      organizationId: struct.string().alias('organization_id'),
-    }),
-    query: struct.object({
-      notify: struct.boolean().optional(),
-    }),
-    headers: struct.object({
-      requestId: struct.string().alias('x-request-id'),
-    }),
-    body: struct.json(
-      struct.object({
-        displayName: struct.string().alias('display_name'),
-      }),
-    ),
+    body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: [
-    { status: 201, body: struct.object({ id: struct.number() }) },
-    { status: 409, body: struct.object({ message: struct.string() }) },
-  ],
+  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
 })
-
-const command = createUser({
-  path: { organizationId: 'acme' },
-  query: { notify: true },
-  headers: { requestId: 'request-42' },
-  body: { displayName: 'Ada' },
-})
+void createUser
 ```
 
-呼叫端使用邏輯欄位名稱，alias 則決定 wire key。
-
-## 指令建構器的引數可省略性
-
-沒有 `input` 的建構器不接受引數：
-
-```typescript
-const health = defineRequest({ method: 'GET', path: '/health' })
-health()
-```
-
-宣告 `input` 後，command 根引數仍然必填。在 `struct.request(...)` 內，如果 `path`、`query` 或 `headers` section 的 field 全部是 optional 或 nullish，就可以整個省略；解析會把每個省略的 section 正規化為 `{}`。只要 section 包含任何必填 field，就仍須提供。即使內部 object field 全部 optional，body section 仍然必填。
-
-```typescript
-const search = defineRequest({
-  method: 'GET',
-  path: '/search',
-  input: struct.request({
-    query: struct.object({ q: struct.string() }),
-  }),
-})
-
-search({ query: { q: 'docs' } })
-// search() // TypeScript error: an argument is required.
-// search({ query: {} }) // TypeScript and runtime error: q is required.
-```
-
-全 optional 的 request section 可以整個省略，但 command argument 本身仍須提供：
-
-```typescript
-const OptionalSections = struct.request({
-  path: struct.object({ locale: struct.string().optional() }),
-  query: struct.object({ page: struct.number().optional() }),
-  headers: struct.object({ traceId: struct.string().optional() }),
-})
-const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
-
-list({})
-list({ query: { page: 2 } })
-
-const [optionalError, normalized] = struct.parse(OptionalSections, {})
-if (optionalError) throw optionalError
-// normalized 是 { path: {}, query: {}, headers: {} }。
-
-const filtered = defineRequest({
-  method: 'GET',
-  path: '/items',
-  input: struct.request({
-    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
-  }),
-})
-
-filtered({ query: { q: 'docs' } })
-// filtered({}) // TypeScript error：query 包含必填 q。
-```
-
-這只驗證結構存在與型別，不負責應用程式層級 authorization、range、amount、format 或 state transition 規則。
-
-## 自動建構請求
-
-`input` 是 `struct.request(...)` 且省略 `build` 時，Defjs 會自動對應已宣告的 section：
-
-- `path` 取代 path placeholder。
-- `query` 變成 query parameter。
-- `headers` 變成 request header。
-- `body` 使用它自己的 body wrapper。
-
-Request body 必須宣告受支援的 boundary：
-
-```typescript
-struct.json(struct.object({ name: struct.string() }))
-struct.text()
-struct.urlencoded({ name: struct.string() })
-struct.formData({ file: struct.file() })
-struct.blob()
-struct.arrayBuffer()
-```
-
-不要把裸的 `struct.object(...)` 放進 `request.body`；`struct.request(...)` 會拒絕它。HTTP 支援所有 body 形式，SSE 不接受 body section，WebSocket 則同時不接受 headers 與 body section。
+Aliases 只改 outbound wire keys。剖析後的值與 command inputs 仍用邏輯名稱。
 
 ## 自訂 `build`
 
-邏輯欄位需要放到不同 wire 位置或使用不同 key 時，請用 `build(request, input)`。其中 `input` 是**結構描述綁定投影**，只表示欄位綁定，不提供呼叫端的執行階段值。
+當呼叫端形狀與 wire 形狀不同時，才用 `build(request, input)`。它是受約束的投影 — 不是放 auth 政策分支或搞 side effects 的地方。
 
-```typescript
-const createBatch = defineRequest({
-  method: 'POST',
-  path: '/accounts/:account_id/users',
-  input: struct.object({
-    accountId: struct.number(),
-    users: struct.array(
-      struct.object({
-        displayName: struct.string(),
-        email: struct.string(),
-      }),
-    ),
-  }),
-  build(request, input) {
-    request.setPathParams({ account_id: input.accountId })
-    request.setJson({
-      users: input.users.map((user) => ({
-        display_name: user.displayName,
-        email: user.email,
-      })),
-    })
-  },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
-})
-```
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-投影可以：
-
-- 選取已宣告欄位；
-- 指定目標 wire key；
-- 用 `.map(...)` 對陣列做一個輸入項目對一個輸出項目的投影；
-- 把選取的物件綁定到 JSON 時，使用該物件欄位的 alias 編碼。
-
-投影不能檢查呼叫端值、依值分支、進行任意轉換、改變陣列項目數量，或注入 literal 值。例如，`request.setJson({ version: 'v1' })` 不是有效投影，因為 `'v1'` 並非來自輸入綁定檢視。
-
-請在建立指令前正規化並驗證應用程式資料。`build` 只負責宣告式 wire mapping。
-
-### Build 能力
-
-| 目標                                                  | HTTP | SSE    | WebSocket |
-| ----------------------------------------------------- | ---- | ------ | --------- |
-| `setPathParams`, `setQueryParams`                     | 支援 | 支援   | 支援      |
-| `setHeaders`, `addHeaders`                            | 支援 | 支援   | 不支援    |
-| JSON、text、HTML、form、Blob、ArrayBuffer body method | 支援 | 不支援 | 不支援    |
-
-TypeScript build context 會依 transport 提供不同型別。即使繞過型別檢查，執行階段也會拒絕不受支援的輸出。
-
-## HTTP 輸出推導
-
-`output` 支援物件 map，或 status/body pair 陣列：
-
-```typescript
-const User = struct.object({ id: struct.number() })
-const NotFound = struct.object({ message: struct.string() })
-const Conflict = struct.object({ conflict: struct.string() })
-
-const objectOutput = {
-  '200': User,
-  '404': NotFound,
-}
-
-const getUsers = defineRequest({
+const search = defineRequest({
   method: 'GET',
-  path: '/users',
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-    { status: [409, 422], body: Conflict },
-  ],
+  path: '/search',
+  input: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  build(request, input) {
+    request.withQuery({ q: input.q, page: input.page ?? 1 })
+  },
+  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
 })
+void search
 ```
 
-HTTP 成功型別是已宣告 2xx body 的 union；`error.data` 與已宣告的非 2xx status 保持關聯。`defineRequest(...)` 使用 const generic，因此 inline status entry 與 grouped status array 不需 `as const` 即可保留 literal。執行 `client.execute(getUsers())` 後，檢查 `error.status === 404` 會將 data narrow 為 `NotFound`；其餘 `409 | 422` 分支會 narrow 為 `Conflict`。
+## Status output 形狀
 
-宣告 `output` 後，每個實際回傳的 status 都必須有對應 Struct。任何未對應的 2xx 或非 2xx status 都會產生 `UNDECLARED_STATUS`。省略 `output` 時不會讀取或解碼 response body，並會盡力取消它；結果則是 `undefined`。
+`output` 可以是 status → Struct map，或 `{ status, body }[]`。精確 status 優先。陣列項目：較晚的 match 會覆寫較早的 grouped match。沒有相符宣告 → 在 body 解碼前得到 `UNDECLARED_STATUS`。
 
-## SSE 與 WebSocket 定義
+## 相關 recipes
 
-`defineEventStream(...)` 用 `events` map 取代 HTTP `output`。Event name 會選擇 Struct，選用的 `default` 項目則在執行階段處理未宣告名稱。
-
-```typescript
-const notifications = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/notifications',
-  events: {
-    message: struct.json(struct.object({ text: struct.string() })),
-    default: struct.string(),
-  },
-})
-```
-
-`defineWebSocket(...)` 會宣告 `incoming` 與選用的 `outgoing` message map。Message envelope 使用 `type` discriminator。
-
-```typescript
-const chat = defineWebSocket({
-  maxIncomingQueueSize: 100,
-  path: '/chat',
-  incoming: {
-    message: struct.object({ text: struct.string() }),
-  },
-  outgoing: {
-    send: struct.object({ text: struct.string() }),
-  },
-})
-```
-
-解碼、queue、reconnect 與關閉責任請見 [SSE](/zh-Hant-TW/core/sse)與 [WebSocket](/zh-Hant-TW/core/web-socket)。
-
-## 把指令視為不透明值
-
-應用程式程式碼應建立指令，再把它交給 `Client.execute(...)`。不要依賴 transport tag 或結構反射。
-
-目前 root entry 有匯出 transport command interface 與 low-level executor function。建議流程不需要使用這些 export；本文件也尚未建立它們的長期穩定性承諾。執行階段分派所用的 command tag symbol 與 guard function 並未從 root 匯出。
-
-## 下一步
-
-- [Client](/zh-Hant-TW/core/client)說明 execute overload 與選項組合。
-- [HTTP](/zh-Hant-TW/core/http)負責 URL、編碼、回應與取消行為。
-- [Struct](/zh-Hant-TW/core/struct)說明嚴格結構解碼。
+- [已宣告 404 的 GET](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)

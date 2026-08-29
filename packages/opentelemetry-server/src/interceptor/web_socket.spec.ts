@@ -140,6 +140,55 @@ describe('createOpenTelemetryWebSocketInterceptor', () => {
     expect(activeSpans[0]?.attributes['url.full']).toBe('wss://api.example.com/ws')
   })
 
+  test('should merge startSpanHook attributes last into initial WebSocket span options', async () => {
+    const { tracer } = createMockTracer()
+    const req = makeWsRequest()
+    const startSpanHook = vi.fn(() => ({ 'app.tenant': 'acme', 'url.full': 'wss://tenant.example.com/socket' }))
+    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator, startSpanHook })
+
+    await interceptor.fn(req, async () => makeWsSession())
+
+    expect(startSpanHook).toHaveBeenCalledWith(req)
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes).toEqual({
+      'app.tenant': 'acme',
+      'url.full': 'wss://tenant.example.com/socket',
+    })
+  })
+
+  test('should keep the resolved WebSocket URL in initial span options when startSpanHook is absent', async () => {
+    const { tracer } = createMockTracer()
+    const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator })
+
+    await interceptor.fn(makeWsRequest(), async () => makeWsSession())
+
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes).toEqual({
+      'url.full': 'wss://api.example.com/ws',
+    })
+  })
+
+  test('should continue WebSocket and record a hook error when startSpanHook throws', async () => {
+    const { tracer } = createMockTracer()
+    const next = vi.fn(async () => makeWsSession())
+    const interceptor = createOpenTelemetryWebSocketInterceptor({
+      tracer,
+      propagator: mockPropagator,
+      startSpanHook: () => {
+        throw new Error('start hook failed')
+      },
+    })
+
+    await interceptor.fn(makeWsRequest(), next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes).toEqual({
+      'url.full': 'wss://api.example.com/ws',
+    })
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', {
+      'error.type': 'Error',
+      'hook.name': 'startSpanHook',
+    })
+  })
+
   test('should add websocket.connected event on success', async () => {
     const { tracer } = createMockTracer()
     const interceptor = createOpenTelemetryWebSocketInterceptor({ tracer, propagator: mockPropagator })

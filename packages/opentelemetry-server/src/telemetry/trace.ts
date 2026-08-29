@@ -1,3 +1,4 @@
+import type { HttpRequest } from '@defjs/core'
 import type { Attributes, Context } from '@opentelemetry/api'
 import type { Span, Tracer } from '@opentelemetry/api'
 import { createTransportError } from '@defjs/core'
@@ -9,7 +10,27 @@ function markSpanStatusSet(span: Span): void {
   spanStatusSet.set(span, true)
 }
 
-export function createHttpSpan(tracer: Tracer, method: string, url: string, parentCtx: Context, operation?: string): Span {
+type StartSpanHookResult = { ok: true; attributes?: Attributes } | { ok: false; error: unknown }
+
+export function resolveStartSpanHook(hook: ((request: HttpRequest) => Attributes) | undefined, request: HttpRequest): StartSpanHookResult {
+  if (!hook) {
+    return { ok: true }
+  }
+  try {
+    return { ok: true, attributes: hook(request) }
+  } catch (error) {
+    return { ok: false, error }
+  }
+}
+
+export function createHttpSpan(
+  tracer: Tracer,
+  method: string,
+  url: string,
+  parentCtx: Context,
+  operation?: string,
+  startAttributes?: Attributes,
+): Span {
   return tracer.startSpan(
     operation ? `${method} ${operation}` : method,
     {
@@ -18,29 +39,36 @@ export function createHttpSpan(tracer: Tracer, method: string, url: string, pare
         ...(operation ? { 'defjs.operation': operation } : {}),
         'http.request.method': method,
         'url.full': url,
+        ...startAttributes,
       },
     },
     parentCtx,
   )
 }
 
-export function createSSESpan(tracer: Tracer, url: string, parentCtx: Context, operation?: string): Span {
+export function createSSESpan(tracer: Tracer, url: string, parentCtx: Context, operation?: string, startAttributes?: Attributes): Span {
   return tracer.startSpan(
     operation ? `SSE ${operation}` : 'SSE',
     {
       kind: SpanKind.CLIENT,
-      attributes: { ...(operation ? { 'defjs.operation': operation } : {}), 'url.full': url },
+      attributes: { ...(operation ? { 'defjs.operation': operation } : {}), 'url.full': url, ...startAttributes },
     },
     parentCtx,
   )
 }
 
-export function createWebSocketSpan(tracer: Tracer, url: string, parentCtx: Context, operation?: string): Span {
+export function createWebSocketSpan(
+  tracer: Tracer,
+  url: string,
+  parentCtx: Context,
+  operation?: string,
+  startAttributes?: Attributes,
+): Span {
   return tracer.startSpan(
     operation ? `WebSocket ${operation}` : 'WebSocket',
     {
       kind: SpanKind.CLIENT,
-      attributes: { ...(operation ? { 'defjs.operation': operation } : {}), 'url.full': url },
+      attributes: { ...(operation ? { 'defjs.operation': operation } : {}), 'url.full': url, ...startAttributes },
     },
     parentCtx,
   )

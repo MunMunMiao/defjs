@@ -1,219 +1,196 @@
 ---
 title: React
-description: 通过 React Context 共享 Defjs client，按自己的 API 配置它，并从 effect 清理请求和实时资源。
+description: 装 provider、读 Client、拉用户，并在 effect 重跑时 abort。
 ---
 
-# `@defjs/react`
+# React
 
-该包是 `@defjs/core` 的轻量 Context 适配器。`ClientProvider` 提供由应用创建的 client，`useClient()` 返回最近的实例；它不增加 client 工厂、缓存、重试策略或资源生命周期。
+把已有的 `@defjs/core` Client 接到 React 树。你拿到 Context 和 `useClient()`。这个包**不会**创建 Client、加缓存、重试 command，也不会释放传输资源。启动工作的组件、effect 或数据库拥有它。
 
-## 提供 Client
+## 基本用法
 
-使用 `@defjs/core` 创建并配置 client，再显式传入该实例：
+装 `@defjs/core`、`@defjs/react`，以及 React 18+。ESM；在 Node 里跑要 Node.js 22+：
 
-```tsx
-import { createClient, withEndpoint } from '@defjs/core'
-import { ClientProvider } from '@defjs/react'
-import { UserProfile } from './UserProfile'
+`bun add @defjs/core @defjs/react react`
 
-const client = createClient(withEndpoint('https://api.example.com'))
+Provide Client，再按变化 abort 拉用户：
 
-export function App() {
-  return (
-    <ClientProvider client={client}>
-      <UserProfile id={7} />
-    </ClientProvider>
-  )
-}
-```
-
-`ClientProvider` 提供的就是传入的同一个实例。调用方决定何时创建或替换它，并继续负责由它启动的请求和实时资源。
-
-## 读取最近的 Client
-
-在 React 组件或自定义 Hook 内调用 `useClient()`。缺少 provider 时它会抛错；嵌套 provider 遵循 React Context 的最近层级规则。
-
-```tsx
-import { useClient } from '@defjs/react'
-
-export function UserProfile() {
-  const client = useClient()
-  return null
-}
-```
-
-所有配置选项都来自 `@defjs/core`：
-
-```tsx
-import { createClient, withCredentials, withEndpoint } from '@defjs/core'
-
-const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
-```
-
-## Interceptor Factory
-
-先创建 interceptor 值，并用 core 的 `withInterceptors(...)` 组合，再把 client 传给 React：
-
-```tsx
-import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
-import { ClientProvider } from '@defjs/react'
-
-const auth = createHttpInterceptor((request, next) => {
-  const headers = new Headers(request.headers)
-  headers.set('Authorization', `Bearer ${readAccessToken()}`)
-  return next({ ...request, headers })
-})
-
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
-
-export function ApiBoundary({ children }: { children: React.ReactNode }) {
-  return <ClientProvider client={client}>{children}</ClientProvider>
-}
-```
-
-如果 interceptor 工厂捕获请求级凭据，应在创建该 client 的请求边界内调用它。
-
-## 管理 HTTP Effect
-
-在 effect 内创建 cancellation，并忽略 cleanup 后才完成的结果：
-
-```tsx
-import { useEffect, useState } from 'react'
-import { useClient } from '@defjs/react'
-import { getUser } from './api'
-
-export function UserProfile({ id }: { id: number }) {
-  const client = useClient()
-  const [name, setName] = useState('')
-  const [errorMessage, setErrorMessage] = useState('')
-
-  useEffect(() => {
-    const abort = new AbortController()
-
-    void client
-      .execute(getUser({ path: { id } }), { signal: abort.signal })
-      .then(([error, user]) => {
-        if (abort.signal.aborted) {
-          return
-        }
-
-        if (error) {
-          setErrorMessage('Unable to load user.')
-          return
-        }
-
-        setErrorMessage('')
-        setName(user.name)
-      })
-      .catch(() => {
-        if (!abort.signal.aborted) {
-          setErrorMessage('Unable to load user.')
-        }
-      })
-
-    return () => abort.abort()
-  }, [client, id])
-
-  return errorMessage ? <p>{errorMessage}</p> : <p>{name}</p>
-}
-```
-
-Defjs 通过 tuple 返回预期内的 request failure。只有集成边界需要异常时才 throw，例如 query library 的 `queryFn`。
-
-## Client Component 边界
-
-包入口属于 Client Component 边界。应用自己的 wrapper 可以创建浏览器 client 并显式提供：
-
-```tsx
-// app/ApiProvider.tsx
-'use client'
-
+```tsx twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
 
-const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
   return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-携带 header、cookie、tenant 状态或凭据的服务端代码应在每个请求边界内创建独立 client。适配器不会隔离并发 SSR，也不会替 client 清理工作。
-
-## 管理 Realtime Effect
-
-Provider unmount 不会关闭后代发起的资源。打开 WebSocket 的 effect 必须 abort startup、关闭晚到的 session、消费 incoming queue、unsubscribe observer，并关闭 active session。
-
-```tsx
-import { useEffect } from 'react'
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
 import { useClient } from '@defjs/react'
-import { openNotificationsSocket } from './api'
-import { handleNotification } from './notifications'
-import { recordRealtimeFailure } from './telemetry'
+import { useEffect, useState } from 'react'
 
-export function LiveNotifications() {
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
+
+export function UserName({ id }: { id: number }) {
+  const client = useClient()
+  const [name, setName] = useState<string>()
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    void client.execute(getUser({ path: { id } }), { signal: controller.signal }).then(([error, user]) => {
+      if (controller.signal.aborted) return
+      setName(error ? undefined : user.name)
+    })
+
+    return () => controller.abort()
+  }, [client, id])
+
+  return <span>{name ?? 'Loading...'}</span>
+}
+```
+
+`ClientProvider` 是普通 Context provider。换 `client` prop 就换后代看到的——不 clone、不替换、不释放。嵌套 provider 形成显式边界。
+
+开发模式下 React 可能多次 setup/cleanup effect。Signal 检查拦住过期 promise 写进当前渲染。Tuple 错误仍是数据。
+
+## 用 `useClient` 读
+
+`useClient()` 返回最近的 `Client`。在 render 期间调用（组件或自定义 hook）。没有 provider 就抛：
+
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
+import { useClient } from '@defjs/react'
+
+const health = defineRequest({
+  method: 'GET',
+  path: '/health',
+  output: { 200: struct.object({ ok: struct.boolean() }) },
+})
+
+export function HealthCheck() {
+  const client = useClient()
+
+  const check = async () => {
+    const [error, result] = await client.execute(health())
+    if (error) {
+      console.error(error.kind, error.code)
+      return
+    }
+    console.log(result.ok)
+  }
+
+  return (
+    <button type="button" onClick={() => void check()}>
+      Check service
+    </button>
+  )
+}
+```
+
+Hook 只提供 Client。它不启动工作、不订阅传输，也不把错误优先 tuple 变成异常。
+
+## 自己管 query 工作
+
+Query 库可以拥有缓存、重试、过期结果抑制、取消。把库给你的 signal 传进去：
+
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
+import { useCallback } from 'react'
+import { useClient } from '@defjs/react'
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
+
+export function useUserQueryFn(id: number) {
+  const client = useClient()
+
+  return useCallback(
+    async ({ signal }: { signal: AbortSignal }) => {
+      const [error, user] = await client.execute(getUser({ path: { id } }), { signal })
+      if (error) throw error
+      return user
+    },
+    [client, id],
+  )
+}
+```
+
+别把同一 command 再包一层 effect——两个所有者会让取消和过期结果处理含糊。
+
+## 自己管 realtime 工作
+
+SSE 和 WebSocket handle 比 `client.execute(...)` 活得久。await 启动前先注册清理，关晚到释放之后才到的 handle，消费唯一 iterator，await 终止 promise：
+
+```tsx twoslash
+import { defineWebSocket, struct } from '@defjs/core'
+import { useClient } from '@defjs/react'
+import { useEffect } from 'react'
+
+const notifications = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/notifications',
+  incoming: {
+    message: struct.object({ text: struct.string() }),
+  },
+})
+
+export function Notifications() {
   const client = useClient()
 
   useEffect(() => {
-    const abort = new AbortController()
+    const controller = new AbortController()
     let disposed = false
-    let closeActiveSession: ((reason: string) => void) | undefined
+    let closeActive: (() => void) | undefined
 
     void (async () => {
-      const [error, session] = await client.execute(openNotificationsSocket(), {
-        signal: abort.signal,
-      })
+      const [error, session] = await client.execute(notifications(), { signal: controller.signal })
+      if (error) return
 
-      if (error) {
-        if (!abort.signal.aborted) {
-          recordRealtimeFailure({ operation: 'notifications-startup' })
-        }
-        return
+      let closed = false
+      const close = () => {
+        if (closed) return
+        closed = true
+        session.close(1000, 'effect-disposed')
       }
-
-      const unsubscribeError = session.onRuntimeError(() => {
-        recordRealtimeFailure({ operation: 'notifications' })
-      })
-      let closeRequested = false
-
-      const closeSession = (reason: string) => {
-        if (closeRequested) {
-          return
-        }
-        closeRequested = true
-        unsubscribeError()
-        session.close(1000, reason)
-      }
-      closeActiveSession = closeSession
+      closeActive = close
 
       if (disposed) {
-        closeSession('effect-disposed')
+        close()
         await session.closed
         return
       }
 
       try {
         for await (const message of session.receive) {
-          if (disposed) {
-            break
-          }
-          handleNotification(message)
+          console.info(message.text)
         }
       } finally {
-        closeSession('consumer-finished')
+        close()
         await session.closed
       }
-    })().catch(() => {
-      if (!abort.signal.aborted) {
-        recordRealtimeFailure({ operation: 'notifications-consumer' })
-      }
-    })
+    })()
 
     return () => {
       disposed = true
-      abort.abort()
-      closeActiveSession?.('effect-disposed')
+      controller.abort()
+      closeActive?.()
     }
   }, [client])
 
@@ -221,31 +198,27 @@ export function LiveNotifications() {
 }
 ```
 
-这个 fragment 假设 `recordRealtimeFailure` 是应用 telemetry function。它会主动消费 `session.receive`；让有限 incoming queue 一直无人读取，最终 overflow 会 fatal 终止 session。SSE handle 也应遵循同样的 startup 和 cleanup 纪律。
+`EventStreamHandle` 同理：在 `finally` 里 close，await `stream.closed`。WebSocket 消费者还要退订状态/运行时错误监听，并持续读 `session.receive`——有界队列不读会溢出。
 
-Provider unmount/remount 会改变 client scope，但不会调用 `dispose`、abort request 或关闭 handle/session，因为 core `Client` 没有这样的生命周期 API。
+## SSR 与 Client 作用域
 
-## API
+包入口是 Client Component 边界。浏览器应用在 endpoint、interceptor、抓住的状态对浏览器安全且请求无关时，可以共享模块作用域 Client。SSR 时若 headers、cookie、用户、租户、凭证不同，在每个请求边界里单独创建 Client。
 
-```typescript
-import type { Client } from '@defjs/core'
-import type { JSX, ReactNode } from 'react'
+Provider 卸载**不会** abort HTTP、关 SSE/WebSocket、退订监听，也不会调 `dispose`。`@defjs/react` 没有这套生命周期 API。启动每次操作的代码必须收尾或取消。
 
-interface ClientProviderProps {
-  client: Client
-  children?: ReactNode
-}
+## 参考
 
-declare function ClientProvider(props: ClientProviderProps): JSX.Element
-declare function useClient(): Client
-```
+`@defjs/react` 的公开导出：
 
-向后代提供传入的 client；`children` 可选。
+- `ClientProvider` — 收 `ClientProviderProps`，provide 传入的 Client
+- `useClient` — 最近的 Client，没有就抛
+- `ClientProviderProps` — `{ client: Client; children?: ReactNode }`
 
-返回最近的 client；没有 provider 时抛错。
+Client 和 options 在 `@defjs/core` 里创建。见 [Client](../core/client.md)、[Errors](../core/errors.md)、[SSE](../core/sse.md)、[WebSocket](../core/web-socket.md)。
 
-## 下一步
+## 相关配方
 
-- [Client](/zh-Hans/core/client)：core option 组合和作用域。
-- [Errors](/zh-Hans/core/errors)：tuple 到 exception 的集成边界。
-- [SSE](/zh-Hans/core/sse) 与 [WebSocket](/zh-Hans/core/web-socket)：realtime 资源所有权。
+- [声明了 404 的 GET](../recipes/get-declared-404.md)
+- [取消一次 HTTP](../recipes/cancel-http.md)
+- [消费 SSE 流](../recipes/consume-sse.md)
+- [打开 WebSocket 会话](../recipes/websocket-session.md)

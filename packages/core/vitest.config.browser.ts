@@ -1,7 +1,7 @@
 import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
-import { globalSetupPath, packageRoot } from './test/shared'
-import { xsrfProxyPlugin } from './test/vite-xsrf-plugin'
+import { globalSetupPath, packageRoot } from './test/shared.ts'
+import { xsrfProxyPlugin } from './test/vite-xsrf-plugin.ts'
 
 export default defineConfig({
   root: packageRoot,

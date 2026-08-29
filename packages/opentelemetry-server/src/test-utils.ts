@@ -192,35 +192,40 @@ export function makeSSERequest(headers?: Headers): HttpRequest {
   }
 }
 
-function makeSSEHandleBase(): Pick<EventStreamHandle<unknown>, 'open' | 'close'> {
-  return {
+function makeSSEHandleBase(closed: Promise<EventStreamCloseInfo>, close: (reason?: unknown) => void = noop): EventStreamHandle<unknown> {
+  let disposeTask: Promise<void> | undefined
+  const handle: EventStreamHandle<unknown> = {
     open: {
       response: makeHttpResponse<null>(),
       url: 'https://api.example.com/events',
     },
-    close: noop,
-  }
-}
-
-export function makeSSEStream(closeCode: SSECloseCode = 'eof', closeCause?: unknown): EventStreamHandle<unknown> {
-  return {
-    ...makeSSEHandleBase(),
-    closed: Promise.resolve(makeSSECloseInfo(closeCode, closeCause)),
+    closed,
+    close,
+    [Symbol.asyncDispose]() {
+      return (disposeTask ??= Promise.resolve()
+        .then(() => {
+          handle.close()
+          return handle.closed
+        })
+        .then(noop))
+    },
     async *[Symbol.asyncIterator]() {
       // no events
     },
   }
+  return handle
+}
+
+export function makeSSEStream(closeCode: SSECloseCode = 'eof', closeCause?: unknown): EventStreamHandle<unknown> {
+  const closed = Promise.resolve(makeSSECloseInfo(closeCode, closeCause))
+  return makeSSEHandleBase(closed)
 }
 
 export function makeDeferredSSEStream() {
   const closed = createDeferred<EventStreamCloseInfo>()
-  const stream: EventStreamHandle<unknown> = {
-    ...makeSSEHandleBase(),
-    closed: closed.promise,
-    async *[Symbol.asyncIterator]() {
-      // no events
-    },
-  }
+  const stream = makeSSEHandleBase(closed.promise, (reason) => {
+    closed.resolve(makeSSECloseInfo('aborted', reason))
+  })
 
   return {
     stream,
@@ -238,13 +243,8 @@ function makeSSECloseInfo(code: SSECloseCode, cause?: unknown, errorCode: EventS
 }
 
 export function makeSSEStreamError(error: unknown): EventStreamHandle<unknown> {
-  return {
-    ...makeSSEHandleBase(),
-    closed: Promise.reject(error),
-    async *[Symbol.asyncIterator]() {
-      // no events
-    },
-  }
+  const closed = Promise.reject<EventStreamCloseInfo>(error)
+  return makeSSEHandleBase(closed)
 }
 
 export function makeWsRequest(queryParams?: URLSearchParams, headers?: Headers): HttpRequest {
@@ -300,7 +300,8 @@ function createDeferred<T>(): Deferred<T> {
 }
 
 function createWsSession(closed: Promise<WebSocketCloseInfo>): WebSocketSessionLike {
-  return {
+  let disposeTask: Promise<void> | undefined
+  const session: WebSocketSessionLike = {
     bufferedAmount: 0,
     connection: { generation: 1 },
     closed,
@@ -310,5 +311,14 @@ function createWsSession(closed: Promise<WebSocketCloseInfo>): WebSocketSessionL
     onRuntimeError: () => noop,
     onStateChange: () => noop,
     send: noop,
+    [Symbol.asyncDispose]() {
+      return (disposeTask ??= Promise.resolve()
+        .then(() => {
+          session.close()
+          return session.closed
+        })
+        .then(noop))
+    },
   }
+  return session
 }

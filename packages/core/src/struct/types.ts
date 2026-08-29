@@ -1,4 +1,3 @@
-import type { ExcludeUnion } from '../internal/utility_types'
 import type { StructError } from './errors'
 import type { ResolvedStructField } from './fields'
 import type { DEFINITION } from './symbols'
@@ -6,6 +5,12 @@ import type { DEFINITION } from './symbols'
 export type Path = Array<number | string>
 export type ParseMode = 'field' | 'value'
 
+/**
+ * Error-first parse tuple from `struct.parse`.
+ *
+ * On success the error is `null` and `value` is the parsed output. On failure
+ * the error is a `StructError` and `value` is always `undefined`.
+ */
 export type ParseResult<O> = [error: null, value: O] | [error: StructError, value: undefined]
 export type LiteralValue = boolean | null | number | string
 
@@ -15,6 +20,11 @@ export interface StructTypes<Input = unknown, Output = unknown, OptionalOut exte
   output: Output
 }
 
+/**
+ * Minimal structural brand carried by every struct instance.
+ *
+ * `_struct` holds input/output phantom types used by `Infer` and `StructInput`.
+ */
 export interface StructLike<I = unknown, O = unknown, OO extends boolean = boolean> {
   readonly _struct: StructTypes<I, O, OO>
 }
@@ -27,44 +37,112 @@ export type OptionalOutputStruct = {
   }
 }
 
+/**
+ * A single validation failure produced while parsing a struct.
+ */
 export interface StructIssue {
+  /** Machine-readable failure category. */
   code: 'custom' | 'invalid_enum' | 'invalid_literal' | 'invalid_type' | 'invalid_union' | 'missing_key'
+  /** Human-readable description of the expected type or value. */
   expected: string
+  /** Final message after optional `ErrorMap` rewriting. */
   message: string
+  /** Path from the parse root to the failing location. */
   path: Path
+  /** Value that failed validation at `path`. */
   received: unknown
 }
 
+/**
+ * Nested error tree returned by `StructError.format()`.
+ *
+ * Leaf messages live under `_errors`; nested keys mirror the failing path.
+ */
 export interface FormattedStructError {
   _errors: string[]
   [key: string]: FormattedStructError | string[]
 }
 
+/**
+ * Flat field/form error bags returned by `StructError.flatten()`.
+ */
 export interface FlattenedStructError {
+  /** Messages whose path is empty (root-level issues). */
   formErrors: string[]
+  /** Messages keyed by the first path segment. */
   fieldErrors: { [key: string]: string[] }
 }
 
+/**
+ * Chainable modifiers available on every `Struct` instance.
+ */
 export interface StructMethods<I, O, OO extends boolean> {
+  /**
+   * Override the external wire name for this field without changing the TypeScript property name.
+   *
+   * @param name - Wire / protocol field name.
+   * @returns The same struct branded with the alias.
+   */
   alias(name: string): Struct<I, O, OO>
+  /**
+   * Allow `null` in addition to the current input and output types.
+   *
+   * @returns A struct that accepts and emits `null`.
+   */
   null(): Struct<I | null, O | null, OO>
+  /**
+   * Alias for {@link StructMethods.null}.
+   *
+   * @returns A struct that accepts and emits `null`.
+   */
+  nullable(): Struct<I | null, O | null, OO>
+  /**
+   * Allow `null` or `undefined`, marking the field optional in object output.
+   *
+   * @returns A struct that accepts `null`/`undefined` and treats the field as optional.
+   */
   nullish(): Struct<I | null | undefined, O | null | undefined, true>
+  /**
+   * Allow `undefined`, marking the field optional in object shapes.
+   *
+   * @returns A struct that accepts `undefined` and treats the field as optional.
+   */
   optional(): Struct<I | undefined, O | undefined, true>
 }
 
+/**
+ * Public struct contract: modifiers plus the `_struct` type brand.
+ *
+ * Built via the `struct` facade (`struct.string()`, `struct.object()`, …).
+ */
 export type Struct<Input = unknown, Output = Input, OptionalOut extends boolean = false> = StructMethods<Input, Output, OptionalOut> &
   StructLike<Input, Output, OptionalOut>
 
 export type PresentValue = NonNullable<unknown>
 
+/**
+ * Broad struct constraint for endpoint and client generics.
+ *
+ * Prefer a concrete `Struct<…>` when you need precise input/output inference.
+ */
 // Type boundary: AnyStruct is the broad constraint used by endpoint generics. The concrete struct.any()
 // return type excludes nullish input until a modifier explicitly adds it.
 // oxlint-disable-next-line typescript/no-explicit-any
 export type AnyStruct = Struct<any, any, boolean>
 
+/**
+ * Infer the accepted input type of a struct.
+ *
+ * @typeParam T - A struct-like value with a `_struct.input` brand.
+ */
 export type StructInput<T> = T extends { readonly _struct: { readonly input: unknown } } ? T['_struct']['input'] : never
 type StructOutput<T> = T extends { readonly _struct: { readonly output: unknown } } ? T['_struct']['output'] : never
 
+/**
+ * Infer the parsed output type of a struct (alias of the internal output brand).
+ *
+ * @typeParam T - A struct-like value with a `_struct.output` brand.
+ */
 export type Infer<T> = StructOutput<T>
 
 // Type boundary: FieldOutput inspects the generic struct surface; `unknown` lets the
@@ -72,7 +150,7 @@ export type Infer<T> = StructOutput<T>
 export type FieldOutput<S> =
   S extends StructLike<unknown, unknown, boolean>
     ? S extends OptionalOutputStruct
-      ? ExcludeUnion<S['_struct']['output'], undefined>
+      ? Exclude<S['_struct']['output'], undefined>
       : S['_struct']['output']
     : never
 
@@ -87,7 +165,7 @@ export type ObjectInput<T extends ObjectShape> = Simplify<
   {
     -readonly [K in keyof T as T[K] extends OptionalOutputStruct ? never : K]: T[K]['_struct']['input']
   } & {
-    -readonly [K in keyof T as T[K] extends OptionalOutputStruct ? K : never]?: ExcludeUnion<T[K]['_struct']['input'], undefined>
+    -readonly [K in keyof T as T[K] extends OptionalOutputStruct ? K : never]?: Exclude<T[K]['_struct']['input'], undefined>
   }
 >
 
@@ -107,9 +185,9 @@ export type TupleOutput<T extends readonly StructLike<unknown, unknown, boolean>
   -readonly [K in keyof T]: StructOutput<T[K]>
 }
 
-export type UnionOutput<T extends readonly StructLike<unknown, unknown, boolean>[]> = ExcludeUnion<StructOutput<T[number]>, undefined>
+export type UnionOutput<T extends readonly StructLike<unknown, unknown, boolean>[]> = Exclude<StructOutput<T[number]>, undefined>
 
-export type UnionInput<T extends readonly StructLike<unknown, unknown, boolean>[]> = ExcludeUnion<StructInput<T[number]>, undefined>
+export type UnionInput<T extends readonly StructLike<unknown, unknown, boolean>[]> = Exclude<StructInput<T[number]>, undefined>
 
 type IntersectionInputValue<T extends readonly StructLike<unknown, unknown, boolean>[]> = T extends readonly [
   infer Head extends StructLike<unknown, unknown, boolean>,
@@ -118,10 +196,7 @@ type IntersectionInputValue<T extends readonly StructLike<unknown, unknown, bool
   ? StructInput<Head> & IntersectionInputValue<Tail>
   : unknown
 
-export type IntersectionInput<T extends readonly StructLike<unknown, unknown, boolean>[]> = ExcludeUnion<
-  IntersectionInputValue<T>,
-  undefined
->
+export type IntersectionInput<T extends readonly StructLike<unknown, unknown, boolean>[]> = Exclude<IntersectionInputValue<T>, undefined>
 
 type IntersectionOutputValue<T extends readonly StructLike<unknown, unknown, boolean>[]> = T extends readonly [
   infer Head extends StructLike<unknown, unknown, boolean>,
@@ -130,10 +205,7 @@ type IntersectionOutputValue<T extends readonly StructLike<unknown, unknown, boo
   ? StructOutput<Head> & IntersectionOutputValue<Tail>
   : unknown
 
-export type IntersectionOutput<T extends readonly StructLike<unknown, unknown, boolean>[]> = ExcludeUnion<
-  IntersectionOutputValue<T>,
-  undefined
->
+export type IntersectionOutput<T extends readonly StructLike<unknown, unknown, boolean>[]> = Exclude<IntersectionOutputValue<T>, undefined>
 
 export type StringStruct = Struct<string, string>
 
@@ -168,37 +240,40 @@ export interface ObjectStructTypes<T extends ObjectShape> extends StructTypes<Ob
   output: ObjectOutput<T>
 }
 
+/**
+ * Object-shaped struct produced by `struct.object(shape)`.
+ *
+ * Field presence follows each field's optional/nullish modifiers; wire names
+ * can differ from TypeScript keys via `.alias()`.
+ */
 export interface ObjectStruct<T extends ObjectShape>
   extends StructMethods<ObjectInput<T>, ObjectOutput<T>, false>, StructLike<ObjectInput<T>, ObjectOutput<T>, false> {
   readonly _struct: ObjectStructTypes<T>
 }
 
 export type RequestBodyCodec = 'arrayBuffer' | 'blob' | 'formData' | 'json' | 'text' | 'urlencoded'
-export type ContentCodecKind = RequestBodyCodec
 export const REQUEST_SECTION_KEYS = ['path', 'query', 'headers', 'body'] as const
-export type RequestSectionKey = (typeof REQUEST_SECTION_KEYS)[number]
 
 export type RequestBodyDescriptor = {
   codec: RequestBodyCodec
+  contentType?: string | null
   struct: RuntimeStruct
 }
-export type ContentBoundaryDescriptor = RequestBodyDescriptor
-
 export interface RequestBodyStructTypes<C extends RequestBodyCodec, S extends StructLike<unknown, unknown, boolean>> extends StructTypes<
-  ExcludeUnion<StructInput<S>, undefined>,
-  ExcludeUnion<StructOutput<S>, undefined>,
+  Exclude<StructInput<S>, undefined>,
+  Exclude<StructOutput<S>, undefined>,
   false
 > {
   codec: C
-  input: ExcludeUnion<StructInput<S>, undefined>
+  input: Exclude<StructInput<S>, undefined>
   optionalOut: undefined
-  output: ExcludeUnion<StructOutput<S>, undefined>
+  output: Exclude<StructOutput<S>, undefined>
 }
 
 export interface RequestBodyStruct<C extends RequestBodyCodec, S extends StructLike<unknown, unknown, boolean>>
   extends
-    StructMethods<ExcludeUnion<StructInput<S>, undefined>, ExcludeUnion<StructOutput<S>, undefined>, false>,
-    StructLike<ExcludeUnion<StructInput<S>, undefined>, ExcludeUnion<StructOutput<S>, undefined>, false> {
+    StructMethods<Exclude<StructInput<S>, undefined>, Exclude<StructOutput<S>, undefined>, false>,
+    StructLike<Exclude<StructInput<S>, undefined>, Exclude<StructOutput<S>, undefined>, false> {
   readonly _struct: RequestBodyStructTypes<C, S>
 }
 
@@ -239,6 +314,11 @@ export interface RequestStructTypes<T extends RequestShape> extends StructTypes<
   output: RequestOutput<T>
 }
 
+/**
+ * Request-section struct produced by `struct.request({ path, query, headers, body })`.
+ *
+ * Groups path, query, headers, and body contracts used by HTTP/SSE/WebSocket builders.
+ */
 export interface RequestStruct<T extends RequestShape>
   extends StructMethods<RequestInput<T>, RequestOutput<T>, false>, StructLike<RequestInput<T>, RequestOutput<T>, false> {
   readonly _struct: RequestStructTypes<T>
@@ -314,6 +394,7 @@ export type ObjectDefinition = BaseDefinition & {
 
 export type RequestBodyDefinition = BaseDefinition & {
   codec: RequestBodyCodec
+  contentType?: string | null
   kind: 'requestBody'
   struct: StructLike<unknown, unknown, boolean>
 }
@@ -389,6 +470,7 @@ export type RuntimeStruct = {
   readonly _struct: StructTypes<unknown, unknown, boolean>
   alias(name: string): RuntimeStruct
   null(): RuntimeStruct
+  nullable(): RuntimeStruct
   nullish(): RuntimeStruct
   optional(): RuntimeStruct
 }

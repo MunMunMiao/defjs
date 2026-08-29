@@ -1,185 +1,131 @@
 ---
-title: SSE
-description: 제한된 Server-Sent Events를 정의하고 디코딩하며 재연결을 설정하고 소유한 스트림을 닫습니다.
+title: Server-Sent Events
+description: 타입이 잡힌 SSE 스트림을 소비하고, 닫고, 종료 closed 프로미스를 await 해요.
 ---
 
-# SSE
+# Server-Sent Events
 
-`defineEventStream(...)`은 SSE 커맨드 빌더를 만듭니다. 엔드포인트는 path와 각 이벤트 이름에 사용할 Struct를 선언합니다.
+스트림을 열고 순회한 뒤, 소유한 핸들을 `await using`으로 해제하세요. 수동 `close()`와 `closed`도 그대로 쓸 수 있고, 클라이언트와 플러그인이 반환된 스트림을 대신 dispose하지 않아요.
 
-```typescript
-import { defineEventStream, struct } from '@defjs/core'
+## Basic Setup
 
+```typescript twoslash
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
   maxQueueSize: 100,
   path: '/notifications',
   events: {
-    message: struct.json(
-      struct.object({
-        id: struct.number(),
-        text: struct.string(),
-      }),
-    ),
-    heartbeat: struct.string(),
-  },
-})
-```
-
-method 기본값은 `GET`입니다. 엔드포인트가 다른 method를 지정할 수는 있지만 high-level SSE build context는 요청 body를 지원하지 않습니다.
-
-## 이벤트 디코딩
-
-SSE parser는 먼저 `events[eventName]`을 선택하고, 없으면 `events.default`를 선택합니다. 둘 다 일치하지 않으면 이벤트를 버리고 선택적으로 등록한 invalid-event observer에 `missing-struct`를 보고합니다.
-
-SSE `data:`는 text로 들어옵니다.
-
-- `struct.string()`, `struct.text()`, `struct.any()`, `struct.unknown()`은 text를 받습니다.
-- `struct.number()`는 text를 trim한 뒤 finite number를 받습니다.
-- `struct.boolean()`은 text를 trim한 뒤 `true` 또는 `false`만 받습니다.
-- `struct.json(inner)`는 JSON text를 parse한 다음 `inner`로 구조적 디코딩합니다.
-
-`struct.object(...)`만 사용하면 JSON처럼 보이는 이벤트 text를 parse하지 않습니다. `struct.json(...)`으로 감싸세요.
-
-`default` Struct는 그 외에 선언되지 않은 이름을 처리합니다.
-
-```typescript
-const events = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/events',
-  events: {
-    update: struct.json(struct.object({ version: struct.number() })),
-    default: struct.string(),
-  },
-})
-```
-
-`default` Struct가 없으면 `EventStreamData<TEvents>`는 선언된 event 이름으로 구성된 판별 union입니다. `event.event`를 기준으로 분기하면 `event.data`는 대응하는 Struct의 출력 타입으로 좁혀집니다. `default`가 있으면 해당 분기는 wire상의 실제 event 이름을 `event: string`으로 유지합니다. 따라서 알려진 event와 `default`를 함께 사용하는 스트림에는 이 넓은 fallback 분기가 유지됩니다.
-
-## 입력과 요청 매핑
-
-path, query, header section에는 `struct.request(...)`를 사용합니다.
-
-```typescript
-const roomEvents = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/rooms/:roomId/events',
-  input: struct.request({
-    path: struct.object({ roomId: struct.string() }),
-    query: struct.object({ after: struct.string().optional() }),
-  }),
-  events: {
     message: struct.json(struct.object({ text: struct.string() })),
   },
 })
-```
 
-사용자 정의 SSE `build`는 path parameter, query parameter, header를 설정할 수 있습니다. 스키마에 결합된 프로젝션을 받으며 body나 credentials는 설정할 수 없습니다. credentials는 클라이언트의 `withCredentials(...)`로 설정하세요.
-
-## 시작 튜플
-
-```typescript
-const [error, stream, startupOpen] = await client.execute(
-  roomEvents({
-    path: { roomId: 'general' },
-  }),
-)
-```
-
-HTTP, SSE, WebSocket 실행의 `timeout`은 `1..2_147_483_647` 범위의 양의 안전 정수여야 하며, `0`, 음수, 소수, `NaN`, `Infinity`, 상한을 넘는 값은 request, stream, socket 리소스를 만들기 전에 `REQUEST_VALIDATION_FAILED`를 반환합니다.
-
-SSE는 다음 값을 반환합니다.
-
-```typescript
-type StreamAwaitResult<TEvent> =
-  | [error: null, stream: EventStreamHandle<TEvent>, open: StreamOpenInfo]
-  | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
-```
-
-성공할 때 세 번째 요소는 검증을 통과한 시작 시점 open 스냅샷입니다. 이 스냅샷의 응답은 HTTP status와 `text/event-stream` content type 검사를 통과했습니다.
-
-`stream.open`은 라이브 getter입니다. 이후 재연결에서 status나 content-type 검증에 실패한 응답까지 포함해 논리 스트림이 마지막으로 받은 응답을 담습니다. 초기 스냅샷이 중요하면 `startupOpen`을 따로 보관하세요.
-
-기본적으로 `startupOpen.url`, `stream.open.url`, 응답 URL을 로그에 남기지 마세요. 민감한 path 또는 query 데이터가 포함될 수 있습니다.
-
-## 이벤트 소비
-
-소유자는 같은 생명주기 안에서 순회를 시작하고 종료를 준비해야 합니다.
-
-```typescript
-import type { Client } from '@defjs/core'
-
-declare const client: Client
-declare const showNotification: (message: { id: number; text: string }) => void
-
-async function consumeNotifications(signal: AbortSignal) {
-  const [error, stream, startupOpen] = await client.execute(notifications(), { signal })
-
-  if (error) {
-    console.error('notification stream startup failed', { kind: error.kind, code: error.code })
-    return
-  }
-
-  console.info('notification stream connected', {
-    status: startupOpen.response?.status,
-  })
-
-  try {
-    for await (const event of stream) {
-      switch (event.event) {
-        case 'message':
-          showNotification(event.data)
-          break
-        case 'heartbeat':
-          break
-        default: {
-          const exhaustive: never = event
-          void exhaustive
-        }
-      }
-    }
-  } finally {
-    await stream.closed
+const [error, stream] = await client.execute(notifications())
+if (error) {
+  console.error(error.code)
+} else {
+  await using ownedStream = stream
+  for await (const event of ownedStream) {
+    if (event.event === 'message') console.log(event.data.text)
   }
 }
 ```
 
-성공한 `execute`는 시작이 완료됐다는 뜻입니다. 시작 이후 오류는 원래 튜플의 `error`를 바꾸지 않고 iterator rejection과 `stream.closed`를 통해 나타납니다.
+## 스트림 정의하기
 
-`break`, `return`, throw된 오류로 `for await` 루프를 일찍 벗어나면 iterator의 `return()`이 호출됩니다. 스트림은 `{ code: 'aborted', reason: 'iterator-return' }`으로 자동 종료되며, `stream.closed`를 기다리면 이 최종 상태를 확인할 수 있습니다. 활성 iteration 외부에서 소유자가 스트림을 닫아야 할 때만 `stream.close(...)`를 명시적으로 호출하세요.
+`defineEventStream(...)`에는 `events`, 양의 안전 정수 `maxBufferSize`, 양의 안전 정수 `maxQueueSize`, 상대 `path`가 필요해요. 메서드 기본값은 `GET`이에요.
 
-## 유효하지 않은 이벤트
+요청 입력에는 `path`, `query`, `headers`가 있을 수 있고 — `body`는 없어요. 커스텀 `build`는 path/query/header setter만 받아요. `Accept`를 이미 설정하지 않았다면 Defjs가 `Accept: text/event-stream`을 보내요.
 
-`withSSEOnInvalidEvent(...)` 또는 `withSSEOptions(...)`로 `onInvalidEvent`를 설정합니다.
+하나의 논리 스트림은 여러 물리 Fetch 시도를 걸칠 수 있어요. SSE는 재연결 옵션 없이도 일시적 네트워크·스트림 읽기 실패를 기본 재시도해요. `attempts` 한도가 없으면 그 재시도는 무제한이에요. 그래도 핸들과 async iterator는 하나예요.
 
-```typescript
+## 열고 살펴보기
+
+`client.execute(...)`는 status, content-type, body 검사가 통과한 뒤에만 resolve해요.
+
+```typescript twoslash
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
+const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.string() },
+})
+
+const [error, stream, startupOpen] = await client.execute(notifications())
+if (error) {
+  console.error(error.kind, error.code, startupOpen?.response.status)
+} else {
+  console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
+  stream.close('example-finished')
+  await stream.closed
+}
+```
+
+응답은 성공이어야 하고, media type essence가 `text/event-stream`이어야 하며 body가 있어야 해요. non-2xx 시작 → `HTTP_STATUS`. 잘못된 content type이나 없는 body → `RESPONSE_VALIDATION_FAILED`. 응답이 도착한 뒤 검증이 실패해도 응답 스냅샷이 튜플 세 번째에 남을 수 있어요.
+
+`startupOpen`은 초기 스냅샷이에요. `stream.open`은 live이고 이후 물리 open에서 바뀌어요. 첫 응답이 중요하면 튜플 값을 유지하세요.
+
+```typescript twoslash
+import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+
+type StreamResult<T> =
+  | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
+  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+
+const result: StreamResult<string> | undefined = undefined
+void result
+```
+
+## 이벤트 디코딩하기
+
+와이어 이벤트 이름 → `events[eventName]`; 없으면 `events.default`. 맞는 Struct가 없으면 이벤트를 전달하지 않아요. SSE `event` 필드가 없으면 논리 이름은 `message`예요.
+
+SSE `data`는 텍스트로 시작해요. 선택된 Struct가 변환을 정해요.
+
+| Struct                                                                 | Conversion                                                     |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `struct.string()`, `struct.text()`, `struct.any()`, `struct.unknown()` | 텍스트로 유지                                                  |
+| `struct.number()`                                                      | trim한 텍스트가 유한 숫자여야 해요; 빈 값은 무효               |
+| `struct.boolean()`                                                     | trim한 텍스트가 정확히 `true` 또는 `false`                     |
+| `struct.json(inner)`                                                   | JSON 파싱 후 `inner`로 디코딩                                  |
+| object, array, union, 기타 일반 Struct                                 | 텍스트를 직접 디코딩; JSON처럼 보여도 **자동 파싱하지 않아요** |
+
+방출 값: `event`, 디코딩된 `data`, 선택적 비어 있지 않은 `id`. `default`가 있으면 알 수 없는 이벤트 이름은 추론 유니온에서 `string`이에요.
+
+## 잘못된 이벤트 관찰하기
+
+잘못되거나 미선언된 이벤트는 큐에 넣지 않고 버려요. `withSSEOnInvalidEvent(...)`는 원본 ID, 이름, 텍스트 data와 `missing-struct` 또는 `validation-failed`, 선택적 cause를 관찰할 수 있어요.
+
+```ts
+import { createClient, withEndpoint, withSSEOnInvalidEvent } from '@defjs/core'
+
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+  withSSEOnInvalidEvent(({ reason, message, cause, signal }) => {
     if (signal.aborted) return
-    recordInvalidEvent({ eventName: message.event, reason })
+    console.info('Dropped SSE event', {
+      reason,
+      event: message.event,
+      hasCause: cause !== undefined,
+    })
   }),
 )
 ```
 
-observer는 다음 값을 받습니다.
-
-- `reason: 'missing-struct' | 'validation-failed'`
-- 원본 event `id`, 이름, data text
-- 검증 실패의 `cause`
-- 현재 시도의 `signal`
-
-이 이벤트는 버리지만 이후 유효한 이벤트는 전달될 수 있습니다. Observer 오류는 격리되고 abort는 `signal`을 통해 대기 중인 observer를 중단합니다. 빠르게 끝나도록 작성하고 원본 `id`, `data`, `cause`는 기록 전에 마스킹하세요.
+옵저버는 transform 경계에서 돌아요. 활성 시도 signal이 abort되지 않는 한 실패는 격리돼요. 짧게 유지하고, 원본 이벤트 data를 신뢰하지 마세요.
 
 ## 재연결
 
-SSE는 네트워크 오류와 stream read 실패를 재시도하는 기본 동작이 있습니다. 정상 EOF는 `code: 'eof'`로 스트림을 닫으며 재연결하지 않습니다.
+재연결 설정은 기본 재시도 경로를 맞춤 설정해요 — 재시도를 켜는 데 필수는 아니에요. 정상 EOF는 재시도하지 않아요. 네트워크와 스트림 읽기 실패는 재시도할 수 있어요. status/content-type 검증, 파서 한도, 메시지 transform 실패, 큐 오버플로, 정상 EOF는 논리 스트림에 종료예요.
 
-기본 재시도는 1초부터 시작하고 횟수 제한이 없습니다. `attempts`로 제한하세요.
+```ts
+import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
 
-```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withSSEReconnect({
@@ -187,79 +133,61 @@ const client = createClient(
     delayMs: 1_000,
     factor: 2,
     maxDelayMs: 30_000,
-    jitter: 250,
+    jitter: 0.5,
+    shouldReconnect({ attempt, open }) {
+      return attempt <= 5 && (open?.response.status ?? 0) !== 401
+    },
   }),
 )
 ```
 
-`attempts`는 최초 시도 이후의 재시도 횟수입니다. `attempts: 0`은 재시도를 끕니다. `shouldReconnect`에 전달되는 `attempt`는 첫 재시도에서 1로 시작해 논리 스트림 전체에서 누적됩니다. 물리 연결이 성공해도 reset되지 않습니다.
+`attempts`는 최초 시도 이후 재시도 횟수예요. `attempts: 0`은 재시도를 꺼요. 시도 한도가 없으면 내장 재시도가 무제한이에요. `delayMs`는 초기 간격이고, `factor`가 키우고, `maxDelayMs`가 기본값을 상한해요. SSE `jitter`는 WebSocket과 같은 **0–1 곱셈 인자**예요. 스트림 `retry:` 필드는 현재 간격을 갱신해요. 정책 콜백이 false를 반환하거나 throw/reject하면 논리 스트림이 끝나요.
 
-delay는 현재 retry interval을 기준으로 시작합니다. 서버의 SSE `retry:` 필드가 이 interval을 바꿀 수 있습니다. `factor`는 지수 증가를 적용하고 `maxDelayMs`는 그 기준값을 제한합니다. 그 뒤 `jitter`가 0부터 설정값까지의 임의 millisecond를 더합니다. 상한을 적용한 뒤 jitter를 더하므로 최종 delay는 `maxDelayMs`를 `jitter` 미만만큼 넘을 수 있습니다.
+가장 최근에 파싱된 이벤트 ID는 이후 시도의 `Last-Event-ID`가 돼요. 무제한 재연결 전에 서버의 재생 의미를 알아 두세요.
 
-```typescript
-withSSEReconnect({
-  attempts: 5,
-  shouldReconnect({ attempt, lastEventId, cause, open }) {
-    return shouldRetryStream({ attempt, lastEventId, cause, status: open?.response.status })
-  },
-})
+## 버퍼와 큐 한도
+
+둘 다 양의 안전 정수여야 해요. 오버플로는 치명적이에요 — 오래된 이벤트를 조용히 버리지 않아요.
+
+| Limit           | Protects                             | Terminal code           |
+| --------------- | ------------------------------------ | ----------------------- |
+| `maxBufferSize` | 파싱 중 불완전/과대 SSE 줄/이벤트    | `PARSER_LIMIT_EXCEEDED` |
+| `maxQueueSize`  | 소비자 하나보다 빠르게 생산된 이벤트 | `QUEUE_OVERFLOW`        |
+
+치명적 스트림은 버퍼된 이벤트도 비우고, 활성 body를 취소하고, iterator를 reject하고, `stream.closed`를 `code: 'error'`로 resolve해요.
+
+## 닫고 dispose하기
+
+`EventStreamHandle`: live opening 스냅샷 하나, 종료 프로미스 하나, `close` 하나, async iterator 하나, 표준 async disposer 하나예요.
+
+```typescript twoslash
+import type { EventStreamCloseInfo, EventStreamHandle, EventStreamOpenInfo } from '@defjs/core'
+
+interface StreamApi<T> extends AsyncIterable<T>, AsyncDisposable {
+  readonly open: EventStreamOpenInfo
+  readonly closed: Promise<EventStreamCloseInfo>
+  close(reason?: unknown): void
+  [Symbol.asyncDispose](): PromiseLike<void>
+}
+
+const handle = null as unknown as EventStreamHandle<string>
+const api: StreamApi<string> = handle
+void api
 ```
 
-트랜스포트는 이후 시도에 최신 event ID를 `Last-Event-ID`로 보냅니다. `shouldReconnect`가 throw하거나 reject하면 retry가 중단되고 대기 중인 startup 또는 stream이 해당 policy 오류로 settle됩니다. Abort는 현재 시도의 signal을 통해 대기 중인 predicate를 중단합니다.
+종료 코드: `eof`, `aborted`, 또는 `error`. `error` 결과에는 `EventStreamErrorCode`도 있어요. `INVALID_RESPONSE`, `MESSAGE_PROCESSING_FAILED`, `PARSER_LIMIT_EXCEEDED`, `QUEUE_OVERFLOW`, `TIMEOUT`, 또는 `TRANSPORT_ERROR`예요.
 
-HTTP/open 검증 실패, 메시지 처리의 fatal 오류, 정상 EOF는 재시도 가능한 네트워크/read 실패와 다릅니다. 모든 최종 경로가 재연결된다고 가정하지 마세요.
+`close(reason)`은 활성 시도를 abort하고, 큐를 닫고, `aborted`로 settle해요. 루프 `break` / `return` / throw는 iterator return을 호출하고 `iterator-return`으로 닫아요. 명령을 실행한 코드가 닫기를 소유해요.
 
-## 엔드포인트 소유 제한
+`await using`은 같은 소유 close 경로를 호출하고 Defjs의 읽기/재연결 작업이 멈추고 활성 reader lock이 해제될 때까지 기다려요. Provider가 제어하는 `ReadableStream.cancel()` 프로미스가 끝없이 멈춘 경우까지 완료를 보장하지는 않아요. 이유나 종료 결과가 필요하면 명시적으로 `stream.close(reason)`한 뒤 `await stream.closed` 해도 돼요.
 
-스트림에는 async iterator consumer가 정확히 하나만 허용됩니다. 두 번째 iterator 생성은 오류를 던집니다. `for await`의 조기 `break`를 포함한 iterator return은 reason `iterator-return`으로 스트림을 자동 종료합니다.
+구조적으로 `EventStreamHandle`을 직접 구현한 코드는 이제 `[Symbol.asyncDispose](): PromiseLike<void>`를 같은 lifecycle에 연결해야 해요. 구현자에게는 컴파일 타임 breaking change지만, Defjs 핸들을 받기만 하는 소비자는 런타임에 새 메서드를 호출할 필요가 없어요.
 
-모든 정의에는 양의 안전한 정수 `maxBufferSize`와 `maxQueueSize`가 필요합니다. 전자는 각 SSE line과 현재 event data를, 후자는 소비 대기 중인 파싱된 event를 제한합니다. Queue overflow는 fatal이며 event를 조용히 버리지 않습니다.
+저장소에서 검증하고 지원하는 최소 lib 계약은 고정된 TypeScript 7과 `ES2022`, `ESNext.Disposable`, `DOM`, `DOM.Iterable`이에요. 이 네 항목의 조합이 하나의 baseline이고, 각 declaration이 네 항목을 각각 독립적으로 모두 강제한다는 뜻은 아니에요. 테스트하지 않은 이전 compiler도 보장하지 않아요. 일반 HTTP Client는 `AsyncDisposable`이 아니며, timeout이나 `AbortSignal`로 요청을 관리해요.
 
-```typescript
-const notifications = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/notifications',
-  events: { message: struct.json(notificationStruct) },
-})
-```
+자격 증명, 이벤트 data, 이벤트 ID, cause, 스트림 URL은 일상 로그에 넣지 마세요. `withCredentials(true)`는 SSE용 Fetch 쿠키에 영향을 주고, WebSocket 인증을 설정하지는 않아요.
 
-정상 EOF에서는 buffered event를 계속 비울 수 있습니다. Fatal parser, transform, overflow 오류는 buffer를 지우고 active body를 취소하며 iteration을 reject하고 `stream.closed`를 `code: 'error'`로 settle합니다.
+## 관련 레시피
 
-## 최종 종료
-
-`stream.closed`는 판별 union으로 resolve됩니다.
-
-```typescript
-type EventStreamCloseInfo =
-  | { code: 'eof'; reason?: string; cause?: unknown }
-  | { code: 'aborted'; reason?: string; cause?: unknown }
-  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
-```
-
-- `eof`는 응답 body가 정상적으로 끝났다는 뜻입니다.
-- `aborted`에는 명시적인 `stream.close(...)` 또는 취소 경로가 포함됩니다.
-- `error`는 재시도가 중단됐거나 최종 stream 오류가 발생했다는 뜻입니다. 이 branch에는 공개 `errorCode`가 항상 포함됩니다.
-
-`EventStreamErrorCode`에는 안정적인 값 여섯 개가 있습니다.
-
-| Error code                  | 의미                                                                    |
-| --------------------------- | ----------------------------------------------------------------------- |
-| `INVALID_RESPONSE`          | status, content type, response error 또는 response body가 잘못됐습니다. |
-| `MESSAGE_PROCESSING_FAILED` | event transform 또는 lifecycle callback이 실패했습니다.                 |
-| `PARSER_LIMIT_EXCEEDED`     | endpoint 소유 parser buffer limit을 초과했습니다.                       |
-| `QUEUE_OVERFLOW`            | 파싱된 event가 endpoint 소유 queue bound를 초과했습니다.                |
-| `TIMEOUT`                   | transport attempt가 설정된 timeout에 도달했습니다.                      |
-| `TRANSPORT_ERROR`           | 기타 최종 네트워크, stream read 또는 retry policy failure입니다.        |
-
-`stream.close(reason)`은 idempotent합니다. 활성 트랜스포트 작업을 abort하고 새 push에 대해 큐를 닫으며 `stream.closed`를 settle합니다. Iterator `return()`은 reason `iterator-return`으로 같은 close path를 사용합니다.
-
-일반 로그에는 `close.code`와 `error` branch의 `close.errorCode`만 기록하세요. 명시적인 redaction 및 보존 정책 없이 `reason`, `cause`, raw event, stream URL을 기록하지 마세요.
-
-스트림을 연 애플리케이션 경계가 종료도 소유합니다. 클라이언트나 framework 프로바이더가 자동으로 닫아 주지 않습니다.
-
-## 다음 단계
-
-- [WebSocket](/ko-KR/core/web-socket)에서는 양방향 세션과 명시적 재연결을 설명합니다.
-- [인터셉터](/ko-KR/core/interceptors)에서는 SSE header 변경과 생명주기 관찰을 설명합니다.
-- [오류](/ko-KR/core/errors)에서는 시작 응답의 가용성을 설명합니다.
+- [SSE 스트림 소비하기](../recipes/consume-sse.md)
+- [HTTP 호출 취소하기](../recipes/cancel-http.md)

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../../internal/http_request'
-import { applyRequestContentType, detectHttpContentType, serializeHttpBody } from './body'
+import { applyRequestContentType, resolveHttpBodyContentType, serializeHttpBody } from './body'
 
 describe('http utils', () => {
   test('should keep native body types as-is when serializing', () => {
@@ -49,28 +49,28 @@ describe('http utils', () => {
       },
     })
 
-    expect(detectHttpContentType(formData)).toBeNull()
-    expect(detectHttpContentType(arrayBuffer)).toBe('application/octet-stream')
-    expect(detectHttpContentType(blob)).toBe(blob.type)
-    expect(detectHttpContentType(new Blob(['hello']))).toBe('application/octet-stream')
+    expect(resolveHttpBodyContentType(formData)).toBeNull()
+    expect(resolveHttpBodyContentType(arrayBuffer)).toBe('application/octet-stream')
+    expect(resolveHttpBodyContentType(blob)).toBe(blob.type)
+    expect(resolveHttpBodyContentType(new Blob(['hello']))).toBe('application/octet-stream')
     if (typeof File !== 'undefined') {
       const textFile = new File(['hello'], 'hello.txt', { type: 'text/plain' })
-      expect(detectHttpContentType(textFile)).toBe(textFile.type)
-      expect(detectHttpContentType(new File(['hello'], 'hello.bin'))).toBe('application/octet-stream')
+      expect(resolveHttpBodyContentType(textFile)).toBe(textFile.type)
+      expect(resolveHttpBodyContentType(new File(['hello'], 'hello.bin'))).toBe('application/octet-stream')
     }
-    expect(detectHttpContentType(searchParams)).toBe('application/x-www-form-urlencoded;charset=UTF-8')
-    expect(detectHttpContentType(stream)).toBe('application/octet-stream')
-    expect(detectHttpContentType('hello')).toBe('text/plain;charset=UTF-8')
-    expect(detectHttpContentType({ ok: true })).toBe('application/json')
-    expect(detectHttpContentType(['a', 'b'])).toBe('application/json')
-    expect(detectHttpContentType(true)).toBe('application/json')
-    expect(detectHttpContentType(1)).toBe('application/json')
-    expect(detectHttpContentType(null)).toBe('application/json')
+    expect(resolveHttpBodyContentType(searchParams)).toBe('application/x-www-form-urlencoded;charset=UTF-8')
+    expect(resolveHttpBodyContentType(stream)).toBe('application/octet-stream')
+    expect(resolveHttpBodyContentType('hello')).toBe('text/plain;charset=UTF-8')
+    expect(resolveHttpBodyContentType({ ok: true })).toBe('application/json')
+    expect(resolveHttpBodyContentType(['a', 'b'])).toBe('application/json')
+    expect(resolveHttpBodyContentType(true)).toBe('application/json')
+    expect(resolveHttpBodyContentType(1)).toBe('application/json')
+    expect(resolveHttpBodyContentType(null)).toBe('application/json')
   })
 
   test('should return null content type for unsupported bodies', () => {
-    expect(detectHttpContentType(undefined)).toBeNull()
-    expect(detectHttpContentType((() => 'noop') as never)).toBeNull()
+    expect(resolveHttpBodyContentType(undefined)).toBeNull()
+    expect(resolveHttpBodyContentType((() => 'noop') as never)).toBeNull()
   })
 
   test('should apply final request content type from body after headers', () => {

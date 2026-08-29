@@ -1,7 +1,7 @@
 import type { DefinitionError, TransportError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED, ERR_TIMEOUT } from '../error'
 
-export const ABORT_TIMEOUT_CONFLICT_MESSAGE = 'with.abort and with.timeout cannot be used together'
+export const ABORT_TIMEOUT_CONFLICT_MESSAGE = 'abort and timeout cannot be used together'
 const MAX_TIMER_DELAY_MS = 2_147_483_647
 
 export type UseCancellationConfig =
@@ -103,9 +103,27 @@ export function mergeAbortSignals(controller: AbortSignal, signals: (AbortSignal
     return controller
   }
 
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined
   if (hasTimeout) {
-    merged.push(AbortSignal.timeout(timeout))
+    const timeoutController = new AbortController()
+    timeoutTimer = setTimeout(() => {
+      timeoutController.abort(ERR_TIMEOUT)
+    }, timeout)
+    merged.push(timeoutController.signal)
   }
 
-  return AbortSignal.any(merged)
+  const combined = AbortSignal.any(merged)
+  if (timeoutTimer !== undefined) {
+    const timer = timeoutTimer
+    const clear = () => {
+      clearTimeout(timer)
+    }
+    if (combined.aborted) {
+      clear()
+    } else {
+      combined.addEventListener('abort', clear, { once: true })
+    }
+  }
+
+  return combined
 }

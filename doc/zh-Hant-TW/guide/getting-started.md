@@ -1,54 +1,64 @@
 ---
-title: 開始使用
-description: 安裝 Defjs、定義型別化 HTTP 端點、建立用戶端，並從自己的應用程式呼叫。
+title: '開始使用：一個 HTTP 請求'
+description: 定義 GET /users/:id，對本機 Fetch handle 跑一次，再指向真實 API。
 ---
 
-# 開始使用
+# 開始使用：一個 HTTP 請求
 
-Defjs 讓應用程式只需要定義一次 API 契約，之後就能重用同一套型別化輸入、執行階段解碼與明確的傳輸結果。
+你會定義 `GET /users/:id`，透過明確的 client 執行，並解碼 `200` 與已宣告的 `404`。本機 handler 讓第一次執行離線就能跑；換成真實服務時，command 不用改。
 
-## 安裝
+## Step 1 — 安裝
 
-在應用程式加入 core 套件：
+`@defjs/core` 是 ESM，需要 Node.js 22+、Bun 或 Deno。Node 直接跑 `.ts`，package.json 寫 `"type": "module"`。瀏覽器環境仍要有 bundler 與 Fetch。
+
+::: tabs
+== bun
+
+```sh
+bun add @defjs/core
+```
+
+== npm
+
+```sh
+npm install @defjs/core
+```
+
+== pnpm
 
 ```sh
 pnpm add @defjs/core
 ```
 
-如果專案使用其他套件管理工具，請改用對應的 npm、Yarn 或 Bun 指令。`@defjs/core` 採用 ESM。在 Node.js 執行時，目前套件 metadata 要求 Node 22 以上。
-
-打包後的 ESM HTTP consumer 已在 Node.js 22、24、26、Bun 1.3.14 與 Deno 2.9.5 完成實測。編譯應用程式後，對應的命令形式如下：
+== yarn
 
 ```sh
-node dist/index.js
-bun run dist/index.js
-deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+yarn add @defjs/core
 ```
 
-Deno 命令使用 `node_modules` 中已安裝的套件；請將網路權限替換為應用程式實際需要的精確 API host。Bun 與 Deno 實測涵蓋文件所述的 HTTP 範圍，不代表所有平台 API 或 transport。瀏覽器 build 使用一般 bundler，以及平台提供的必要 Fetch 與 WebSocket 能力。
+== deno
 
-跨 runtime 測試只應斷言 `error.kind`、`error.code` 等穩定的 Defjs 欄位。不要依賴特定引擎的原生 `Error` message 或 JSON parse 文字；Node.js、Bun 與 Deno 可能採用不同格式。
+```sh
+deno add npm:@defjs/core
+```
 
-只在應用程式確實需要時安裝轉接器：
-
-| 應用情境               | 套件                                                                                      |
-| ---------------------- | ----------------------------------------------------------------------------------------- |
-| React 18+              | `@defjs/core`、`@defjs/react`、`react`                                                    |
-| Vue 3+                 | `@defjs/core`、`@defjs/vue`、`vue`                                                        |
-| 伺服器端 OpenTelemetry | `@defjs/core`、`@defjs/opentelemetry-server`、`@opentelemetry/api`、`@opentelemetry/core` |
-
-::: tip 文件要和安裝版本一致
-這些頁面描述目前文件版本對應的 API。請先確認應用程式實際安裝的版本。如果 export 或 option 不同，請查看該版本的文件與 release notes，不要混用不同版本的範例。
 :::
 
-## 定義第一個請求
+## Step 2 — 定義請求
 
-假設你的 API 提供 `GET /users/:id`。請把 base URL 與 response Struct 換成自己服務的實際契約。
+建立 `src/get-user.ts`。`struct.request(...)` 把 path 值跟 query、headers、body 分開。
 
-```typescript
-import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+```ts get-user.ts
+import { defineRequest, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
 
 const getUser = defineRequest({
   method: 'GET',
@@ -57,57 +67,161 @@ const getUser = defineRequest({
     path: struct.object({ id: struct.number() }),
   }),
   output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
   ],
 })
 
-async function loadUser(id: number) {
-  const [error, user, response] = await client.execute(getUser({ path: { id } }))
+const command = getUser({ path: { id: 7 } })
+void command
+```
 
-  if (error) {
-    console.error(error.kind, error.code)
-    return
+`defineRequest(...)` 回傳 builder。呼叫 `getUser(...)` 會建立要傳給 `client.execute(...)` 的不透明 command。
+
+## Step 3 — 本機執行
+
+接上 client 本機的 Fetch handle，就能在沒有網路的情況下跑。Defjs 仍會驗證 input、建立 `Request`、依狀態碼分派，並剖析 body。
+
+```ts get-user.ts
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+  ],
+})
+
+const handle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
   }
 
-  console.log(user.name, response.status)
+  return Response.json({ message: 'User not found' }, { status: 404 })
 }
 
-void loadUser(7)
-```
+const client = createClient(withEndpoint('https://api.example.test'), withHTTPHandle(handle))
 
-`defineRequest(...)` 會回傳**指令建構器**。呼叫 `getUser(...)` 後會建立一個**指令**，其中保存端點定義與本次呼叫的輸入。接著，`client.execute(...)` 會回傳 HTTP 三元素 tuple：
+const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }), {
+  timeout: 5_000,
+})
 
-```typescript
-;[error, result, response]
-```
-
-成功時，`error` 是 `null`、`result` 是解碼後的輸出資料，而 `response` 是 Defjs 的 `HttpResponse` wrapper。失敗時，`result` 是 `undefined`；若完全沒收到回應，response wrapper 也會是 `undefined`。
-
-### 自動保留 status literal
-
-`defineRequest(...)` 對 `output` 使用 const generic，因此 inline 陣列項目與群組 status 陣列會自動保留 literal 值。區分推導出的 2xx 成功 body 與非 2xx 錯誤 body 時，不再需要 `as const`。
-
-也可以使用物件形式的 output：
-
-```typescript
-const output = {
-  '200': struct.object({ id: struct.number() }),
-  '404': struct.object({ message: struct.string() }),
+if (error) {
+  if (error.kind === 'http' && error.status === 404) {
+    console.log(error.data.message)
+  } else {
+    console.error(error.kind, error.code)
+  }
+} else {
+  console.log(`Loaded ${user.name} from ${response.status}`)
 }
 ```
 
-## 接到你的應用程式
+執行：
 
-把端點定義放在描述服務 API 的 module，再從 component、route handler、job 或 store 重用指令建構器。請在真正擁有 endpoint、credential、攔截器與生命週期的邊界建立用戶端：
+::: tabs
+== bun
 
-- 瀏覽器應用程式通常可以共用一個用戶端；
-- 伺服器端渲染中，如果 header、cookie、使用者或 tenant 會隨請求改變，應為每個請求建立用戶端；
-- 開啟 SSE 或 WebSocket 資源的程式碼，也必須負責消費並關閉它。
+```sh
+bun src/get-user.ts
+```
 
-## 下一步
+== npm
 
-- [指令](/zh-Hant-TW/core/commands)說明自動請求對應與自訂的結構描述綁定投影。
-- [錯誤](/zh-Hant-TW/core/errors)說明三種傳輸 tuple 與 `RequestError` union。
-- [HTTP](/zh-Hant-TW/core/http)涵蓋 URL 解析、request body、輸出解碼、取消與 XSRF 行為。
-- [範例](/zh-Hant-TW/guide/examples)把這些契約組合成由應用程式管理資源的實作方式。
+```sh
+node src/get-user.ts
+```
+
+== pnpm
+
+```sh
+node src/get-user.ts
+```
+
+== yarn
+
+```sh
+node src/get-user.ts
+```
+
+== deno
+
+```sh
+deno run src/get-user.ts
+```
+
+:::
+
+```txt
+Loaded Ada from 200
+```
+
+試一個不存在的使用者 — 把 path id 改成 `8` 再跑一次：
+
+```txt
+User not found
+```
+
+成功時：`error` 是 `null`，`user` 是 `200` Struct 輸出，`response` 是 `HttpResponse`。已宣告的 `404`：`error.kind` 是 `'http'`，`error.status` 是 `404`，`error.data` 是型別化的 `NotFound`。失敗時第二項是 `undefined`。
+
+## Step 4 — 指向真實 API
+
+服務有實作 `GET /v1/users/:id` 且 body 對得上時，拿掉 `withHTTPHandle(...)`，設好真實的 base URL。
+
+```ts
+import { createClient, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const localHandle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
+  }
+
+  return Response.json({ message: 'User not found' }, { status: 404 })
+}
+
+const localClient = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(localHandle))
+const realClient = createClient(withEndpoint('https://api.example.com/v1'))
+void localClient
+void realClient
+```
+
+同一個 command。換的是 client。
+
+## 結果不一樣時
+
+- 壞 input / 無效 build / 互相衝突的取消選項 → `REQUEST_VALIDATION_FAILED`
+- 已宣告的非 2xx → `HTTP_STATUS`，帶型別化的 `error.data`
+- 已宣告但解碼失敗的 body → `RESPONSE_VALIDATION_FAILED`
+- 沒宣告的狀態碼 → `UNDECLARED_STATUS`（在 body 解碼之前）
+- Fetch 失敗 / 取消 / 逾時 → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+
+`timeout` 必須是 `1..2_147_483_647` 的正 safe integer。不要同時傳 `abort` 跟 `timeout`；`signal` 可以跟其中一個搭配。取消只告訴你呼叫端看到什麼 — 不代表伺服器寫入有沒有提交。
+
+## 接下來的 recipes
+
+- [已宣告 404 的 GET](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [取消 HTTP 呼叫](../recipes/cancel-http.md)
+- [消費 SSE 串流](../recipes/consume-sse.md)
+- [開啟 WebSocket session](../recipes/websocket-session.md)
+- [用本機 Fetch handle 測試](../recipes/test-with-handle.md)

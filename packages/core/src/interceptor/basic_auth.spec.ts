@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../http'
-import { makeFakeHandler } from '../http/transport/test_handler'
+import { makeFakeHandler } from '../../test/make_fake_handler'
 import type { EventStreamHandle } from '../sse/transport/event_stream'
 import type { BasicCredential } from './basic_auth'
 import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './basic_auth'
-import { makeInterceptorChain, makeSSEInterceptorChain } from './interceptor'
+import { makeChain } from './interceptor'
 
 describe('Basic Auth Interceptor', () => {
   const credential: BasicCredential = {
@@ -19,7 +19,7 @@ describe('Basic Auth Interceptor', () => {
       method: 'GET',
     }
     const interceptor = basicAuthHttpInterceptor(() => credential)
-    const chain = makeInterceptorChain([interceptor.fn])
+    const chain = makeChain([interceptor.fn])
     const handler = makeFakeHandler({
       response: {
         status: 200,
@@ -35,6 +35,35 @@ describe('Basic Auth Interceptor', () => {
     await chain(hq, handler)
   })
 
+  test('basicAuthHttpInterceptor should not mutate incoming headers', async () => {
+    const headers = new Headers({ 'x-request-id': 'req-1' })
+    const hq: HttpRequest = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/v1/user',
+      headers,
+      method: 'GET',
+    }
+    const interceptor = basicAuthHttpInterceptor(() => credential)
+    const chain = makeChain([interceptor.fn])
+    const handler = makeFakeHandler({
+      response: {
+        status: 200,
+        statusText: 'OK',
+      },
+      onRequestBefore: (req) => {
+        expect(req.headers).not.toBe(headers)
+        expect(req.headers?.get('Authorization')).toEqual(`Basic ${btoa(`${credential.username}:${credential.password}`)}`)
+        expect(req.headers?.get('x-request-id')).toBe('req-1')
+      },
+    })
+
+    await chain(hq, handler)
+
+    expect(hq.headers).toBe(headers)
+    expect(headers.has('Authorization')).toBe(false)
+    expect(headers.get('x-request-id')).toBe('req-1')
+  })
+
   test('basicAuthHttpInterceptor should accept custom encode', async () => {
     const hq: HttpRequest = {
       baseEndpoint: 'https://example.com',
@@ -44,7 +73,7 @@ describe('Basic Auth Interceptor', () => {
     const interceptor = basicAuthHttpInterceptor(() => credential, {
       encode: (data) => btoa(`${data.username}:${data.password}`),
     })
-    const chain = makeInterceptorChain([interceptor.fn])
+    const chain = makeChain([interceptor.fn])
     const handler = makeFakeHandler({
       response: {
         status: 200,
@@ -66,7 +95,7 @@ describe('Basic Auth Interceptor', () => {
       method: 'GET',
     }
     const interceptor = basicAuthSSEInterceptor(() => credential)
-    const chain = makeSSEInterceptorChain([interceptor.fn])
+    const chain = makeChain([interceptor.fn])
 
     let capturedRequest: HttpRequest | undefined
     const fakeSSEHandler = async (req: HttpRequest) => {

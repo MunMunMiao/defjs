@@ -1,226 +1,214 @@
 ---
-title: OpenTelemetry Server
-description: Instrument outbound Defjs HTTP, SSE, and WebSocket clients with an application-supplied OpenTelemetry Tracer and optional Meter.
+title: OpenTelemetry server
+description: Turn on outbound Defjs transport instrumentation with your own Tracer and optional Meter.
 ---
 
-# `@defjs/opentelemetry-server`
+# OpenTelemetry server
 
-Despite its package name, this adapter instruments outbound Defjs client work. It is not inbound server instrumentation and does not initialize an OpenTelemetry SDK.
+Turn outbound instrumentation on when you create the client. `@defjs/opentelemetry-server` appends HTTP, SSE, and WebSocket interceptors. It is **not** inbound server instrumentation, and it does **not** initialize an OpenTelemetry SDK.
 
-The application owns:
+## Basic Setup
 
-- SDK and provider setup;
-- exporter and processor configuration;
-- context manager and active-context setup;
-- sampling, attribute policy, and redaction;
-- force-flush and shutdown.
+Initialize the SDK elsewhere. Pass its API objects in:
 
-Pass an application-supplied `Tracer` and optional `Meter` to `withOpenTelemetryServer(...)`.
-
-## Configure the Client
-
-```typescript
+```typescript twoslash
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
-// Initialize and register the application's SDK/providers before this point.
 const tracer = trace.getTracer('orders-service')
 const meter = metrics.getMeter('orders-service')
+const readOrders = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders',
+})
 
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
+
+const [error] = await client.execute(readOrders())
+if (error) console.error(error.kind, error.code)
+```
+
+`tracer` is required. `meter` is optional — omit it to disable package metrics. No `propagator` → the adapter builds a composite W3C Trace Context + W3C Baggage propagator. It does not read or initialize global SDK config for you.
+
+`withOpenTelemetryServer(options)` returns a core `ClientOption`. Apply it at `createClient` time so one interceptor is appended per enabled transport. HTTP, SSE, and WebSocket are enabled by default; `{ enabled: false }` disables one transport.
+
+The adapter can create transport telemetry even when the request fails at the transport layer. Whether anything is exported depends on your SDK and exporters.
+
+## Scope
+
+You own SDK init, providers, exporters, processors, context, sampling, redaction, flush, and shutdown. This package consumes the `Tracer`, optional `Meter`, and optional `TextMapPropagator` you pass in. It does not include a redactor or a sensitive-key policy.
+
+No caching, retries, message-level spans, or application command-outcome policy. Intended for server-side Node.js. Published package needs Node.js 22+, peers `@defjs/core`, `@opentelemetry/api` 1.x, `@opentelemetry/core` 2.x.
+
+Public API: `withOpenTelemetryServer` plus `OpenTelemetryServerOptions`, `OpenTelemetryServerHttpOptions`, `OpenTelemetryServerSSEOptions`, `OpenTelemetryServerWebSocketOptions`.
+
+## Options and hooks
+
+Hooks sit next to the transport they change. The synchronous `startSpanHook(request)` runs before span creation and returns initial `Attributes`; application attributes are applied last, so they may override built-in values. `requestHook` and `responseHook` receive the already-created span and may return `void` or a promise. A hook failure records `defjs.otel.hook.error` and does **not** stop the client operation; a failed start hook falls back to the built-in initial attributes.
+
+```typescript twoslash
+import { createClient, createResolvedRequestUrl, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withOpenTelemetryServer({
     tracer,
-    meter,
-    webSocket: {
-      queryPropagation: false,
+    http: {
+      startSpanHook(request) {
+        const attributes = { 'app.operation': request.operation ?? 'unclassified' }
+        if (!request.baseEndpoint) return attributes
+        const url = createResolvedRequestUrl(request.baseEndpoint, request.endpoint)
+        if (request.queryString) url.search = request.queryString
+        url.searchParams.delete('access_token')
+        return { ...attributes, 'url.full': url.href }
+      },
+      requestHook(span, request) {
+        span.setAttribute('app.request.started', true)
+      },
+      responseHook(span, response) {
+        span.setAttribute('app.status', response.status)
+      },
     },
+    sse: { enabled: false },
+    webSocket: { enabled: false },
+  }),
+)
+
+void client
+```
+
+Hook signatures:
+
+- All three transports: `startSpanHook(request): Attributes` (synchronous, before span creation)
+- HTTP: `requestHook(span, request)` and `responseHook(span, response, request)`
+- SSE: `requestHook(span, request)` and `responseHook(span, stream, request)`
+- WebSocket: `requestHook(span, request)` and `responseHook(span, session, request)`
+
+An empty transport object enables that transport. Old boolean transport switches and old top-level hooks are rejected — use transport option objects and transport-scoped hooks.
+
+## Operation identity and propagation
+
+Set a static `operation` on `defineRequest`, `defineEventStream`, or `defineWebSocket` when the command has a stable identity. The adapter uses it in span names and as `defjs.operation`. It never derives identity from a resolved path, identifier, tenant, or query string:
+
+```typescript twoslash
+import { defineEventStream, defineRequest, defineWebSocket, struct } from '@defjs/core'
+
+const readOrders = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders',
+})
+const orderEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  operation: 'orders.watch',
+  path: '/orders/events',
+  events: { update: struct.json(struct.object({ id: struct.number() })) },
+})
+const orderSocket = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  operation: 'orders.connect',
+  path: '/orders/socket',
+  incoming: { update: struct.object({ id: struct.number() }) },
+})
+
+void readOrders
+void orderEvents
+void orderSocket
+```
+
+Span names become `GET orders.read`, `SSE orders.watch`, `WebSocket orders.connect`. Without `operation`, fallback is method / `SSE` / `WebSocket`, and `defjs.operation` is omitted.
+
+HTTP and SSE inject propagated fields into request headers. Existing `Headers` instances are reused and mutated; otherwise a new `Headers` is created. WebSocket query propagation is **opt-in** (browsers can’t add arbitrary handshake headers):
+
+```ts
+import { createClient, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withOpenTelemetryServer({
+    tracer,
+    webSocket: { queryPropagation: true },
   }),
 )
 ```
 
-The adapter adds one interceptor for each enabled transport. Options run in normal client order, so placement relative to other interceptors controls which work the spans wrap.
+With `queryPropagation`, propagator fields append to the connection query string. Review URL logging, proxy visibility, access logs, baggage, and retention first. `requireParentSpan: true` skips span creation, propagation, hooks, and metrics when there’s no active parent, then calls `next` unchanged.
 
-### Operation Identity
+## HTTP, SSE, and WebSocket semantics
 
-Set `operation` statically on each endpoint definition. It is the low-cardinality identity used by spans and metrics:
+The adapter measures transport lifetimes, not every stage of command interpretation.
 
-```typescript
-const readOrder = defineRequest({
-  method: 'GET',
-  operation: 'orders.read',
-  path: '/orders/:id',
-  // input and output omitted
-})
-```
+- **HTTP** — span begins in the HTTP interceptor and ends when it gets the Defjs `HttpResponse`. Status dispatch, representation checks, and Struct decode happen after. A later `RESPONSE_VALIDATION_FAILED` or `UNDECLARED_STATUS` cannot update the ended transport span.
+- **SSE** — span stays open until `stream.closed` settles. Records `sse.connected`, then `sse.closed` / `sse.aborted` / `sse.error`. One logical stream (including reconnects) → one span. No per-event spans.
+- **WebSocket** — span stays open until `session.closed` settles. Events: `websocket.connected`, `websocket.closed`, `websocket.error`. Reconnecting physical sockets stay part of the logical session. No per-message spans.
 
-With an operation, span names are `GET orders.read`, `SSE orders.watch`, or `WebSocket orders.connect`, and `defjs.operation` is recorded. Without one, the previous fallback remains unchanged: the HTTP method, `SSE`, or `WebSocket`, with no operation attribute. Never infer identity from a resolved URL or path containing identifiers, and do not copy resolved URLs into custom telemetry or logs.
+Need the final command result, not only transport? Wrap `client.execute(...)` in an application span:
 
-## Options
+```typescript twoslash
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { SpanStatusCode, trace } from '@opentelemetry/api'
 
-```typescript
-interface OpenTelemetryServerOptions {
-  tracer: Tracer
-  meter?: Meter
-  propagator?: TextMapPropagator
-  requireParentSpan?: boolean
-  http?: OpenTelemetryServerHttpOptions
-  sse?: OpenTelemetryServerSSEOptions
-  webSocket?: OpenTelemetryServerWebSocketOptions
-}
-```
+const tracer = trace.getTracer('orders-service')
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer }))
+const readOrders = defineRequest({ method: 'GET', operation: 'orders.read', path: '/orders' })
 
-Each transport option accepts `enabled?: boolean`, `requestHook`, and `responseHook`. WebSocket also accepts `queryPropagation?: boolean`.
-
-All three transports are enabled by default. Use an option object to disable one:
-
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  http: { enabled: false },
-  sse: { enabled: true },
-  webSocket: { enabled: false },
-})
-```
-
-Old boolean transport fields, top-level hooks, and `webSocketQueryPropagation` are rejected at runtime with migration errors. Current forms are transport option objects, transport-scoped hooks, and `webSocket.queryPropagation`.
-
-## Propagation
-
-When `propagator` is omitted, the package creates its own `CompositePropagator` containing W3C Trace Context and W3C Baggage propagators. It does not read the global propagator configuration.
-
-HTTP and SSE inject every field produced by that propagator into request headers. When `req.headers` is already a `Headers` instance, the current implementation reuses and mutates that instance. Otherwise it creates a new `Headers` object. WebSocket query propagation defaults to `false`. Only `queryPropagation: true` opts in; because browser sockets cannot add arbitrary handshake headers, it appends every field produced by the propagator to the connection query string.
-
-Before it creates a span, each interceptor also calls `propagator.extract(...)` on the request headers. Treat that carrier as trusted, application-owned input. Do not let an untrusted caller supply `traceparent`, `tracestate`, or `baggage`: those fields can replace the active parent context. Remove or normalize untrusted propagation fields before the request reaches this interceptor.
-
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  webSocket: {
-    queryPropagation: true,
-  },
-})
-```
-
-Review URL propagation before enabling it. Trace context and baggage can be recorded by browsers, proxies, access logs, and telemetry systems. A custom propagator can add more fields than `traceparent`. Prefer a protocol-reviewed first message or a short-lived, single-use connection ticket when the server supports either.
-
-`requireParentSpan: true` checks for an active parent span before the interceptor does any instrumentation. When no active span exists, it skips span creation, propagation, hooks, and metrics, then calls the next handler unchanged.
-
-## Hook Behavior
-
-Hooks receive the transport-specific span and request/result:
-
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  http: {
-    requestHook(span, request) {
-      span.setAttribute('app.operation', 'list-orders')
-    },
-    responseHook(span, response, request) {
-      span.setAttribute('app.operation', request.operation ?? 'unclassified')
-      span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
-    },
-  },
-})
-```
-
-The third argument is the original transport `HttpRequest`. Read its explicit `operation`; do not reconstruct identity from `request.endpoint`, a resolved URL, or a path.
-
-Hooks may return `void` or `Promise<void>` and remain non-blocking. Synchronous throws and asynchronous rejections are caught and recorded as `defjs.otel.hook.error` without stopping the client operation; failures while recording that telemetry are also isolated.
-
-Use allowlisted, low-cardinality attributes. Do not attach raw headers, query strings, bodies, baggage, event IDs, message payloads, or credentials.
-
-## HTTP Semantics
-
-The HTTP interceptor creates a `SpanKind.CLIENT` span and records:
-
-- `${method} ${operation}` as the span name and `defjs.operation` when the endpoint declares a static operation;
-- the request method alone as the unchanged fallback when no operation is declared;
-- `http.request.method`;
-- `url.full`;
-- `server.address` and optional `server.port`;
-- `http.response.status_code` only when a response status was received.
-
-The adapter uses stable HTTP client attribute and metric names. This is not a claim of complete HTTP semantic-convention compliance.
-
-HTTP span status and `error.type` follow these rules:
-
-- status `100` through `399` leaves span status unset and does not set `error.type`;
-- status `400` and above marks the client span `ERROR` and sets `error.type` to the status code string;
-- a Defjs status-0 transport result does not set `http.response.status_code`; caller cancellation leaves status unset, timeout uses `ERROR` / `TIMEOUT`, and other transport failures use `ERROR` / `NETWORK_ERROR`;
-- an error thrown through the interceptor marks the span `ERROR`, records the exception, and uses its `Error.name` or another low-cardinality type fallback as `error.type`.
-
-The HTTP span ends when the HTTP interceptor receives the Defjs `HttpResponse`. High-level output status dispatch and Struct decoding happen after that interceptor returns. A later `RESPONSE_VALIDATION_FAILED` or `UNDECLARED_STATUS` therefore cannot update the ended span.
-
-When telemetry must represent the final command outcome, create an application span around `client.execute(...)` and classify the returned tuple:
-
-```ts
-import { SpanStatusCode } from '@opentelemetry/api'
-
-const outcome = await tracer.startActiveSpan('defjs.command', async (span) => {
+const outcome = await tracer.startActiveSpan('orders.command', async (span) => {
   try {
-    const outcome = await client.execute(command)
+    const outcome = await client.execute(readOrders())
     const [error] = outcome
     if (error) {
       span.setAttribute('error.type', error.code)
       span.setStatus({ code: SpanStatusCode.ERROR })
     }
     return outcome
-  } catch (error) {
-    span.setAttribute('error.type', error instanceof Error ? error.name : typeof error)
-    span.setStatus({ code: SpanStatusCode.ERROR })
-    throw error
   } finally {
     span.end()
   }
 })
+
+void outcome
 ```
 
-This outer span is application-owned command telemetry; the plugin continues to emit only its lower-level transport span.
+Outer span is yours. The plugin still reports the lower-level transport span — two different questions.
 
-When a Meter is supplied, HTTP records `http.client.request.duration` in seconds. Attributes include the method, server address/port, optional response status, and optional `error.type`. The metric applies the same response-status and `error.type` classification as the HTTP span.
+## Reference
 
-## SSE Semantics
+When `meter` is supplied:
 
-After SSE startup succeeds, the span stays open until `stream.closed` settles. It records `sse.connected`, then one of `sse.closed`, `sse.aborted`, or `sse.error` on covered close paths.
+| Metric                                       | Meaning                                          |
+| -------------------------------------------- | ------------------------------------------------ |
+| `http.client.request.duration`               | HTTP request duration (seconds)                  |
+| `defjs.client.sse.connect.duration`          | Time until SSE handle returned                   |
+| `defjs.client.sse.connection.duration`       | Handle return → terminal close                   |
+| `defjs.client.sse.active_streams`            | Logical SSE handles with pending `closed`        |
+| `defjs.client.websocket.connect.duration`    | Time until WebSocket session returned            |
+| `defjs.client.websocket.connection.duration` | Session return → terminal close                  |
+| `defjs.client.websocket.active_connections`  | Logical WebSocket sessions with pending `closed` |
 
-Meter-backed SSE instruments:
+Active SSE/WebSocket instruments count logical resources (including reconnect gaps), not physical sockets or individual HTTP attempts.
 
-| Metric                                 | Meaning                                                           |
-| -------------------------------------- | ----------------------------------------------------------------- |
-| `defjs.client.sse.connect.duration`    | Time until the logical stream handle is returned.                 |
-| `defjs.client.sse.connection.duration` | Time from handle return until terminal close.                     |
-| `defjs.client.sse.active_streams`      | Number of logical handles whose `closed` promise has not settled. |
+HTTP spans record method, resolved `url.full`, server address/port when available, and response status when received. The default `url.full` resolves `request.endpoint` against optional `request.baseEndpoint`; it does not append an independent `request.queryString`. This is a construction boundary, not sanitization. Use `startSpanHook` to construct a complete or redacted application-owned URL when needed. Status `400+` → span status `ERROR` with status string as `error.type`. Status `100..399` leaves span status unset. Status-zero transport outcome has no response status; cancel leaves status unset; timeout/other transport failures use `TIMEOUT` or `NETWORK_ERROR`. Metrics use stable dimensions: method, static operation, server address/port, response status, low-cardinality error type.
 
-These are Defjs custom metrics. The active counter includes time spent between physical reconnect attempts. It does not count currently open HTTP connections.
+SSE/WebSocket connection metrics record connect time, logical connection duration, active resource count, `defjs.result`, operation, server address/port, and low-cardinality failure types. No request/response bodies, message payloads, queue lengths, or per-message spans by default.
 
-## WebSocket Semantics
+Treat `url.full` and `recordException(...)` as potentially sensitive. Defjs does not redact them for you. Keep operation names and hook attributes allowlisted; redact in `startSpanHook` or SDK processors/exporters. Don’t copy raw URLs, query strings, headers, baggage, or payloads into custom telemetry without reviewing privacy, cardinality, retention, and redaction.
 
-After startup succeeds, the WebSocket span stays open until `session.closed` settles. It records `websocket.connected`, then `websocket.closed` or `websocket.error` on covered paths.
+WebSocket query propagation can expose trace context and baggage to browsers, proxies, access logs, and telemetry. It is not a credential channel. `withCredentials(true)` is Fetch credentials for HTTP/SSE — not WebSocket auth.
 
-Meter-backed WebSocket instrumentation uses:
+The adapter does not init/shut down the SDK, and does not dispose the core client or transport handles. You flush telemetry and close HTTP/SSE/WebSocket work. See [Interceptors](../core/interceptors.md), [SSE](../core/sse.md), and [WebSocket](../core/web-socket.md).
 
-| Metric                                       | Meaning                                                            |
-| -------------------------------------------- | ------------------------------------------------------------------ |
-| `defjs.client.websocket.connect.duration`    | Time until the logical session is returned.                        |
-| `defjs.client.websocket.connection.duration` | Time from session return until terminal close.                     |
-| `defjs.client.websocket.active_connections`  | Number of logical sessions whose `closed` promise has not settled. |
+## Related recipes
 
-The metric name says connections, but the implementation counts logical sessions, including reconnect delay gaps. It does not count physical sockets.
-
-Generic WebSocket semantic conventions are not stable here. The package does not create a span per message or record payloads and queue lengths by default.
-
-## Sensitive Data and Coverage Limits
-
-Default `url.full` is resolved from the request endpoint and base endpoint rather than the serialized query string, but resolved paths can still contain sensitive identifiers. It is transport metadata, never an operation-identity source. Keep `operation` static, do not copy resolved URLs into custom telemetry or logs, and configure SDK/exporter redaction before exporting URL attributes. WebSocket propagation separately appends fields to the actual query string.
-
-`recordException(...)` receives thrown errors and selected close causes. Error messages and stacks can expose sensitive data. Configure SDK-level processors and exporter redaction accordingly; this adapter does not sanitize exceptions for the application.
-
-Before deploying, validate this adapter with the SDK, exporters, processors, context manager, and automatic instrumentation used by your service. Check end-to-end baggage, redaction, shutdown/flush, and duplicate spans under real traffic.
-
-## Next
-
-- [Interceptors](../core/interceptors.md) explains ordering around other client interceptors.
-- [SSE](../core/sse.md) and [WebSocket](../core/web-socket.md) explain the logical handle/session lifetimes counted here.
+- [Test with a local Fetch handle](../recipes/test-with-handle.md)
+- [Consume an SSE stream](../recipes/consume-sse.md)
+- [Open a WebSocket session](../recipes/websocket-session.md)

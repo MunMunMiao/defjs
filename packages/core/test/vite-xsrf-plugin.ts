@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Hono } from 'hono'
 import type { Plugin } from 'vite'
-import { registerXsrfRoutes } from './xsrf-middleware'
+import { registerXsrfRoutes } from './xsrf-middleware.ts'
 
 function toRequest(req: IncomingMessage, body: Buffer): Request {
   const host = req.headers.host ?? 'localhost'

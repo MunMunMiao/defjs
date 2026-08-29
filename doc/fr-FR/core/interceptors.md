@@ -1,29 +1,42 @@
 ---
 title: Intercepteurs
-description: Filtrez les intercepteurs par transport, composez-les en ordre « oignon » et appliquez des politiques bornées d'authentification et de relance.
+description: Empile la politique HTTP, SSE et WebSocket à la frontière du transport en ordre oignon.
 ---
 
 # Intercepteurs
 
-Les intercepteurs encadrent la frontière du transport. HTTP, SSE et WebSocket possèdent chacun un type d'intercepteur et un type de résultat distincts.
+Ajoute des en-têtes d’auth, short-circuit des fenêtres de maintenance, ou relance des lectures safe — sans toucher à la validation de commande. Chaque transport a sa propre chaîne. Tu reçois un `HttpRequest` ; tu renvoies le résultat de ce transport (`HttpResponse`, handle de flux d’événements, ou session WebSocket). La validation d’entrée tourne avant la chaîne ; le dispatch par statut et les résultats décodés après.
 
-| Fabrique                     | Requête       | Résultat de `next`                    |
+## Basic Setup
+
+```typescript twoslash
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+
+const audit = createHttpInterceptor(async (request, next) => {
+  const started = performance.now()
+  const response = await next(request)
+  console.info(request.operation ?? request.method, response.status, Math.round(performance.now() - started))
+  return response
+})
+
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(audit))
+void client
+```
+
+## Ordre oignon
+
+`withInterceptors(...items)` accepte des intercepteurs mixtes. Le client filtre par `kind` pour le transport sélectionné et garde l’ordre relatif d’enregistrement. Chaque intercepteur peut tourner avant et après `next` :
+
+| Factory                      | Requête       | Résultat de `next`                    |
 | ---------------------------- | ------------- | ------------------------------------- |
 | `createHttpInterceptor`      | `HttpRequest` | `Promise<HttpResponse<unknown>>`      |
 | `createSSEInterceptor`       | `HttpRequest` | `Promise<EventStreamHandle<unknown>>` |
 | `createWebSocketInterceptor` | `HttpRequest` | `Promise<WebSocketSessionLike>`       |
 
-Enregistrez des intercepteurs de transports différents avec `withInterceptors(...)`. Le client les filtre selon `kind` et conserve leur ordre d'enregistrement au sein de chaque transport.
+```typescript twoslash
+import { createHttpInterceptor } from '@defjs/core'
 
-```typescript
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(httpLogger, sseAuth, socketObserver))
-```
-
-## Ordre « oignon »
-
-À l'aller, la requête suit l'ordre d'enregistrement. Au retour, la chaîne se déroule en sens inverse :
-
-```typescript
+const order: string[] = []
 const first = createHttpInterceptor(async (request, next) => {
   order.push('first:before')
   const response = await next(request)
@@ -38,28 +51,27 @@ const second = createHttpInterceptor(async (request, next) => {
   return response
 })
 
-// first:before -> second:before -> transport
-//               <- second:after <- first:after
+// Request: first:before → second:before → transport
+// Return: second:after → first:after
+void [first, second, order]
 ```
 
-Plusieurs appels à `withInterceptors(...)` ajoutent les intercepteurs à la suite :
+Plusieurs appels `withInterceptors(...)` append. Mets l’observation large hors de la mutation/retry plus étroite quand la couche externe doit voir le résultat final.
 
-```typescript
-createClient(withInterceptors(first), withInterceptors(second, third))
-```
+## Cloner et ajouter des en-têtes de requête
 
-Un intercepteur WebSocket ne peut appeler `next` qu'une seule fois. Si la chaîne échoue après avoir créé une session, Core règle cette session non livrée avant de renvoyer l'erreur originale de l'intercepteur. Si la chaîne réussit avec une autre session short-circuit, Core ferme la session créée ; un wrapper reste associé en déléguant la Promise `closed` originale.
+Traite le `HttpRequest` entrant comme appartenant à la chaîne. Clone `Headers` avant de les changer ; passe une nouvelle requête à `next` :
 
-## Cloner les requêtes correctement
+```typescript twoslash
+import { createHttpInterceptor } from '@defjs/core'
 
-Considérez la requête reçue comme appartenant à la chaîne. Créez un nouvel objet `Headers` avant de modifier les en-têtes :
+function readAccessToken(): string | undefined {
+  return undefined
+}
 
-```typescript
-const auth = createHttpInterceptor((request, next) => {
-  const token = getAccessToken()
-  if (!token) {
-    return next(request)
-  }
+const bearer = createHttpInterceptor((request, next) => {
+  const token = readAccessToken()
+  if (!token) return next(request)
 
   const headers = new Headers(request.headers)
   headers.set('Authorization', `Bearer ${token}`)
@@ -67,20 +79,22 @@ const auth = createHttpInterceptor((request, next) => {
 })
 ```
 
-Appliquez le même principe aux en-têtes SSE. Les constructeurs WebSocket des navigateurs ne peuvent pas envoyer d'en-têtes de handshake arbitraires ; modifier `request.headers` dans un intercepteur WebSocket n'authentifie donc pas une connexion navigateur.
+Même pattern pour SSE. Le WebSocket navigateur ne peut pas ajouter d’en-têtes de handshake arbitraires — changer `request.headers` n’authentifiera pas un socket navigateur. Utilise plutôt protocole, politique URL/query, ou un handshake supporté par le serveur.
 
-Pour remplacer un corps HTTP, copiez la requête avec le spread puis remplacez `body`. La frontière Fetch détecte que les anciennes métadonnées de type de contenu ne correspondent plus au nouveau corps. Ne réutilisez pas un `ReadableStream` déjà consommé.
+Quand tu remplaces un body HTTP, remplace `body` sur la requête copiée. Fetch ignore les métadonnées content-type périmées quand la valeur du body a changé. Ne réutilise pas un body `ReadableStream` consommé.
 
-## Court-circuiter la chaîne
+## Short-circuit une requête
 
-Un intercepteur peut ignorer `next`, mais il doit renvoyer le type de résultat attendu par son transport. Pour HTTP, `makeResponse(...)` crée un wrapper Defjs :
+Tu peux sauter `next`, mais tu dois renvoyer le type de résultat attendu. Pour HTTP, `makeResponse(...)` construit un wrapper compatible :
 
-```typescript
+```typescript twoslash
 import { createHttpInterceptor, makeResponse } from '@defjs/core'
 
-declare const isMaintenanceWindow: () => boolean
+function isMaintenanceWindow(): boolean {
+  return false
+}
 
-const maintenanceGate = createHttpInterceptor(async (request, next) => {
+const maintenanceGate = createHttpInterceptor(async (_request, next) => {
   if (isMaintenanceWindow()) {
     return makeResponse({
       status: 503,
@@ -89,22 +103,83 @@ const maintenanceGate = createHttpInterceptor(async (request, next) => {
     })
   }
 
-  return next(request)
+  return next(_request)
 })
 ```
 
-La couche de commande traite toujours cette réponse selon son statut et sa Struct de sortie. Déclarez ce statut s'il appartient au contrat de l'endpoint.
+La couche commande dispatche encore par statut. Déclare `503` dans `output` quand les appelants ont besoin d’`error.data` typé. Short-circuiter SSE ou WebSocket demande un handle/session compatible complet (promesses de fermeture, état live, propriété). Les objets partiels ne sont pas une politique valide.
 
-Court-circuiter SSE ou WebSocket nécessite un handle ou une session entièrement compatible, y compris pour la sémantique de fermeture. C'est généralement plus complexe que de renvoyer une réponse HTTP synthétique.
+## Relancer des lectures safe
 
-## Conserver les getters dynamiques
+Les retries changent le comportement. Garde la politique étroite — cet exemple relance les `GET` / `HEAD` / `OPTIONS` rejouables pour les statuts `0`, `502`, `503`, `504`, plafonne `Retry-After` à 30s, et s’arrête après deux retries ou sur abort :
 
-N'enveloppez pas une session WebSocket avec `{ ...session }`. Le spread lit `state` et `connection` une seule fois et transforme leurs getters dynamiques en valeurs figées. Déléguez explicitement chaque membre :
+```typescript twoslash
+import { createHttpInterceptor, type HttpRequest, type HttpResponse } from '@defjs/core'
 
-```typescript
+const retryableMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
+const retryableStatuses = new Set([0, 502, 503, 504])
+
+function isReplayable(request: HttpRequest): boolean {
+  return typeof ReadableStream === 'undefined' || !(request.body instanceof ReadableStream)
+}
+
+function retryAfterMs(response: HttpResponse<unknown>): number {
+  const value = response.headers.get('retry-after')
+  if (!value) return 250
+
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 30_000)
+
+  const date = Date.parse(value)
+  return Number.isNaN(date) ? 250 : Math.min(Math.max(0, date - Date.now()), 30_000)
+}
+
+function waitForRetryAfter(response: HttpResponse<unknown>, signal?: AbortSignal): Promise<void> {
+  const delay = retryAfterMs(response)
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason)
+      return
+    }
+
+    const timer = setTimeout(done, delay)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(signal?.reason)
+    }
+
+    function done() {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
+  })
+}
+
+const retrySafeReads = createHttpInterceptor(async (request, next) => {
+  if (!retryableMethods.has(request.method.toUpperCase()) || !isReplayable(request)) return next(request)
+
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await next(request)
+    if (!retryableStatuses.has(response.status) || attempt >= 2) return response
+    await waitForRetryAfter(response, request.abort)
+  }
+})
+```
+
+Les erreurs d’intercepteur/Fetch throwées ne sont pas relancées par cette boucle. Le statut `0` est la réponse d’échec de transport à la frontière Fetch. Relancer `POST` / `PUT` / `PATCH` / `DELETE` demande des octets rejouables, le support serveur, un contrat d’idempotence et une politique de statut revue.
+
+## Wrapper des sessions WebSocket
+
+Un intercepteur WebSocket peut appeler `next` au plus une fois. Si tu wrap la session, délègue explicitement les getters live et les membres de cycle de vie :
+
+```typescript twoslash
 import { createWebSocketInterceptor } from '@defjs/core'
 
-const wrappedSession = createWebSocketInterceptor(async (request, next) => {
+const preserveSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
@@ -119,8 +194,11 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
     },
     closed: session.closed,
     receive: session.receive,
-    close(code, reason) {
+    close(code?: number, reason?: string) {
       session.close(code, reason)
+    },
+    [Symbol.asyncDispose]() {
+      return session[Symbol.asyncDispose]()
     },
     onRuntimeError(listener) {
       return session.onRuntimeError(listener)
@@ -128,144 +206,36 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
     onStateChange(listener) {
       return session.onStateChange(listener)
     },
-    send(message) {
+    send(message: unknown) {
       session.send(message)
     },
   }
 })
 ```
 
-Le wrapper doit aussi préserver la responsabilité de la ressource. Il ne doit ni remplacer `closed`, ni masquer `close`, ni détacher l'itérable entrant, sauf comportement volontaire et documenté par l'application.
+Spreader une session snapshot `state` / `connection` / `bufferedAmount` une fois. Préserve `closed`, `receive`, `close`, `[Symbol.asyncDispose]()` et le cleanup des écouteurs sauf si tu changes délibérément la propriété. Le wrapper doit renvoyer le même disposer interne que l’exemple, pas une autre Promise. C’est un changement breaking à la compilation pour les implémentations structurelles personnalisées de `WebSocketSessionLike` ; recevoir seulement des sessions Defjs n’ajoute aucun appel runtime.
 
-## Journalisation bornée
+## Référence
 
-Préférez un nom d'opération fixe et un petit ensemble de champs contrôlés :
+Les factories renvoient des valeurs de transport taguées :
 
-```typescript
-function timingInterceptor(operation: string) {
-  return createHttpInterceptor(async (request, next) => {
-    const startedAt = performance.now()
-    const response = await next(request)
+- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
+- `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
+- `basicAuthHttpInterceptor(provider, options?)` — credentials Basic sur HTTP
+- `basicAuthSSEInterceptor(provider, options?)` — credentials Basic sur SSE
 
-    console.info('outbound request completed', {
-      durationMs: Math.round(performance.now() - startedAt),
-      operation,
-      status: response.status,
-    })
+`HttpRequest` peut inclure `endpoint`, `baseEndpoint`, `method`, `headers`, `body`, `queryParams`, `queryString`, `abort`, `timeout` et `operation` statique. C’est une valeur d’intégration transport — pas l’entrée parsée de l’appelant. Garde la validation de commande, la validation de sortie et le mapping d’erreurs de domaine dans leurs couches.
 
-    return response
-  })
-}
-```
+Les observateurs SSE/WebSocket sont des hooks de cycle de vie, pas du contrôle de flux. Désabonne les écouteurs WebSocket quand le propriétaire se termine. Les échecs d’observateur suivent le contrat du transport ; un intercepteur lui-même peut throw ou reject.
 
-Par défaut, ne journalisez ni URL d'endpoint, ni chaînes de requête, ni en-têtes, ni corps, ni causes brutes, ni ID d'événement SSE, ni payloads WebSocket.
+Journalise une allowlist revue : `operation` statique, méthode, statut, durée, code d’erreur stable. Ne journalise pas par défaut les URL résolues, query strings, en-têtes d’auth, corps, causes brutes, IDs d’événements SSE ou payloads WebSocket.
 
-## Retenter les requêtes HTTP avec prudence
+Les credentials Basic sont en base64, pas chiffrés. Utilise TLS, garde les providers de credentials scopés à la requête sur un serveur, ne journalise jamais l’en-tête généré. L’encodeur par défaut est `globalThis.btoa` ; passe `BasicAuthInterceptorOptions.encode` quand le runtime n’a pas `btoa` ou a besoin d’un encodeur revu.
 
-Toute nouvelle tentative modifie le comportement de l'application. L'exemple suivant se limite à `GET`, `HEAD` et `OPTIONS`. Il ne retente que les statuts `0`, `502`, `503` et `504`, respecte `Retry-After`, s'arrête rapidement lors d'une annulation et refuse un corps sous forme de flux.
+Un intercepteur peut appliquer une politique de transport. Ce n’est pas de la validation d’entrée, de l’autorisation, ni de la propriété de ressource. Le code qui démarre un travail SSE/WebSocket long-lived utilise encore `await using` ou annule, ferme et attend manuellement la promesse terminale. Le HTTP ordinaire reste request-scoped et est géré avec son timeout / `AbortSignal` ; `Client` n’est pas `AsyncDisposable`.
 
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpResponse } from '@defjs/core'
+## Recettes liées
 
-const RETRYABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
-const RETRYABLE_STATUSES = new Set([0, 502, 503, 504])
-
-function isReplayable(request: HttpRequest): boolean {
-  return !(typeof ReadableStream !== 'undefined' && request.body instanceof ReadableStream)
-}
-
-function retryAfterMs(response: HttpResponse<unknown>): number | undefined {
-  const value = response.headers.get('retry-after')
-  if (!value) {
-    return undefined
-  }
-
-  const seconds = Number(value)
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return seconds * 1_000
-  }
-
-  const at = Date.parse(value)
-  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
-}
-
-async function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    throw signal.reason
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(finish, ms)
-
-    function finish() {
-      signal?.removeEventListener('abort', abort)
-      resolve()
-    }
-
-    function abort() {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', abort)
-      reject(signal?.reason)
-    }
-
-    signal?.addEventListener('abort', abort, { once: true })
-    if (signal?.aborted) {
-      abort()
-    }
-  })
-}
-
-function retrySafeHttp(maxRetries = 2) {
-  return createHttpInterceptor(async (request, next) => {
-    if (!RETRYABLE_METHODS.has(request.method.toUpperCase()) || !isReplayable(request)) {
-      return next(request)
-    }
-
-    for (let retry = 0; ; retry += 1) {
-      const response = await next(request)
-      if (!RETRYABLE_STATUSES.has(response.status) || retry >= maxRetries) {
-        return response
-      }
-
-      const fallback = Math.min(250 * 2 ** retry, 5_000)
-      const delay = Math.min(retryAfterMs(response) ?? fallback, 30_000)
-      await abortableWait(delay, request.abort)
-    }
-  })
-}
-```
-
-Cet intercepteur ne retente pas les exceptions levées par d'autres intercepteurs, faute de pouvoir les classer de façon fiable. Le statut `0` est le wrapper d'échec de transport produit par la frontière Fetch Defjs.
-
-N'ajoutez pas automatiquement les méthodes d'écriture. Retenter `POST`, `PUT`, `PATCH` ou `DELETE` exige un contrat d'idempotence applicatif, des corps rejouables, une prise en charge côté serveur et une politique de statuts contrôlée.
-
-## Authentification Basic
-
-L'entrée racine exporte `basicAuthHttpInterceptor(...)` et `basicAuthSSEInterceptor(...)`.
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(
-    basicAuthHttpInterceptor(() => credentials),
-    basicAuthSSEInterceptor(() => credentials),
-  ),
-)
-```
-
-Les identifiants Basic sont seulement encodés en base64, pas chiffrés. Utilisez TLS. L'encodeur par défaut utilise `globalThis.btoa`, qui peut être indisponible et n'accepte qu'un jeu de caractères limité. Fournissez `options.encode` si l'environnement ne possède pas `btoa` ou si les identifiants nécessitent une implémentation UTF-8/base64 validée.
-
-Les fournisseurs d'identifiants s'exécutent lorsqu'une requête traverse l'intercepteur. Gardez les identifiants serveur dans la portée de la requête et ne journalisez pas l'en-tête produit.
-
-## Sécurité des observateurs et callbacks
-
-Les intercepteurs SSE et WebSocket peuvent attacher des observateurs de cycle de vie aux handles renvoyés. Désinscrivez les listeners WebSocket lorsque leur propriétaire disparaît. WebSocket dirige l'échec d'un listener d'état vers les observateurs d'erreur, transmet à `reportError` l'échec d'un de ces observateurs et traite un prédicat de reconnexion qui lève comme une erreur terminale de session.
-
-Un intercepteur peut lever une exception ou rejeter une promesse. Le transport haut niveau peut normaliser certains échecs en `RequestError`, mais le code d'un intercepteur ne doit pas supposer que l'exécution ne rejettera jamais.
-
-## Étapes suivantes
-
-- [Client](/fr-FR/core/client) explique l'enregistrement et la composition des options.
-- [HTTP](/fr-FR/core/http) décrit le wrapper Fetch et le comportement du statut 0.
-- [SSE](/fr-FR/core/sse) et [WebSocket](/fr-FR/core/web-socket) détaillent le cycle de vie de chaque transport.
+- [Tester avec un handle Fetch local](../recipes/test-with-handle.md)
+- [Annuler un appel HTTP](../recipes/cancel-http.md)

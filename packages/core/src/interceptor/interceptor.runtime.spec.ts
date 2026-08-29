@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../http'
 import type { EventStreamHandle } from '../sse/transport/event_stream'
 import type { SSEInterceptorFn } from './interceptor'
-import { createSSEInterceptor, makeSSEInterceptorChain } from './interceptor'
+import { createSSEInterceptor, makeChain } from './interceptor'
 
 describe('SSE interceptor chain', () => {
   test('should apply SSE interceptors and pass modified request to handler', async () => {
@@ -34,7 +34,7 @@ describe('SSE interceptor chain', () => {
       return {} as EventStreamHandle<unknown>
     }
 
-    const chain = makeSSEInterceptorChain(interceptors)
+    const chain = makeChain(interceptors)
     await chain(baseRequest, fakeSSEHandler)
 
     expect(callOrder).toEqual(['first', 'second'])
@@ -52,7 +52,7 @@ describe('SSE interceptor chain', () => {
       return { ...stream, wrapped: true } as unknown as EventStreamHandle<unknown>
     }
 
-    const chain = makeSSEInterceptorChain([interceptor])
+    const chain = makeChain([interceptor])
     const result = await chain({ endpoint: '/events', method: 'GET' }, async () => fakeStream)
 
     expect((result as unknown as { wrapped: boolean }).wrapped).toBe(true)

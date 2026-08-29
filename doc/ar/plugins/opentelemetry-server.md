@@ -1,200 +1,214 @@
 ---
-title: OpenTelemetry Server
-description: أضف instrumentation لأعمال عملاء Defjs الصادرة في HTTP وSSE وWebSocket باستخدام Tracer يوفّره التطبيق وMeter اختياري.
+title: OpenTelemetry server
+description: فعّل أجهزة نقل Defjs الصادرة بـ Tracer الخاص بك وMeter اختياري.
 ---
 
-# `@defjs/opentelemetry-server`
+# OpenTelemetry server
 
-على الرغم من اسم الحزمة، يضيف هذا المحول instrumentation لأعمال عميل Defjs الصادرة. فهو ليس instrumentation للطلبات الواردة إلى الخادم، ولا يهيئ OpenTelemetry SDK.
+فعّل الأجهزة الصادرة عندما تنشئ العميل. `@defjs/opentelemetry-server` يُلحق معترضات HTTP وSSE وWebSocket. **ليس** أجهزة خادم واردة، و**لا** يهيئ OpenTelemetry SDK.
 
-يملك التطبيق:
+## الإعداد الأساسي
 
-- إعداد SDK وproviders؛
-- إعداد exporters وprocessors؛
-- context manager وإعداد active context؛
-- sampling وسياسة attributes وحجب البيانات الحساسة؛
-- force-flush وshutdown.
+هيئ الـ SDK في مكان آخر. مرّر كائنات API الخاصة به:
 
-مرّر `Tracer` يوفّره التطبيق و`Meter` اختياريًا إلى `withOpenTelemetryServer(...)`.
-
-## إعداد العميل
-
-```typescript
+```typescript twoslash
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
-// Initialize and register the application's SDK/providers before this point.
 const tracer = trace.getTracer('orders-service')
 const meter = metrics.getMeter('orders-service')
+const readOrders = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders',
+})
 
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
+
+const [error] = await client.execute(readOrders())
+if (error) console.error(error.kind, error.code)
+```
+
+`tracer` مطلوب. `meter` اختياري — احذفه لتعطيل مقاييس الحزمة. بلا `propagator` → المحوّل يبني ناشرًا مركّبًا لـ W3C Trace Context + W3C Baggage. لا يقرأ أو يهيئ إعداد SDK العام نيابةً عنك.
+
+`withOpenTelemetryServer(options)` يُرجع `ClientOption` للنواة. طبّقه عند `createClient` حتى يُلحق معترض واحد لكل وسيلة نقل مفعّلة. HTTP وSSE وWebSocket مفعّلة افتراضيًا؛ `{ enabled: false }` يعطّل وسيلة نقل واحدة.
+
+المحوّل يمكن أن ينشئ قياس نقل حتى عندما يفشل الطلب عند طبقة النقل. ما إذا صُدّر شيء يعتمد على SDK والمصدّرين لديك.
+
+## النطاق
+
+أنت تملك تهيئة SDK والمزوّدين والمصدّرين والمعالجات والسياق والعيّنة والحجب والإفراغ والإيقاف. هذه الحزمة تستهلك `Tracer` و`Meter` الاختياري و`TextMapPropagator` الاختياري الذي تمرّره. لا تتضمن redactor أو سياسة مفاتيح حساسة.
+
+بلا تخزين مؤقت أو إعادة محاولات أو spans على مستوى الرسالة أو سياسة نتيجة أمر التطبيق. مقصود لـ Node.js من جانب الخادم. الحزمة المنشورة تحتاج Node.js 22+، وpeers `@defjs/core` و`@opentelemetry/api` 1.x و`@opentelemetry/core` 2.x.
+
+الواجهة العامة: `withOpenTelemetryServer` مع `OpenTelemetryServerOptions` و`OpenTelemetryServerHttpOptions` و`OpenTelemetryServerSSEOptions` و`OpenTelemetryServerWebSocketOptions`.
+
+## الخيارات والخطافات
+
+الخطافات تجلس بجانب وسيلة النقل التي تغيّرها. يعمل `startSpanHook(request)` المتزامن قبل إنشاء span ويعيد `Attributes` أولية؛ تُطبّق سمات التطبيق أخيرًا ويمكنها تجاوز المدمجة. تستقبل `requestHook` و`responseHook` الـ span المنشأ بالفعل ويمكنهما إعادة `void` أو Promise. فشل أي hook يسجّل `defjs.otel.hook.error` ولا يوقف العملية؛ فشل start hook يرجع إلى السمات المدمجة.
+
+```typescript twoslash
+import { createClient, createResolvedRequestUrl, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withOpenTelemetryServer({
     tracer,
-    meter,
-    webSocket: {
-      queryPropagation: false,
+    http: {
+      startSpanHook(request) {
+        const attributes = { 'app.operation': request.operation ?? 'unclassified' }
+        if (!request.baseEndpoint) return attributes
+        const url = createResolvedRequestUrl(request.baseEndpoint, request.endpoint)
+        if (request.queryString) url.search = request.queryString
+        url.searchParams.delete('access_token')
+        return { ...attributes, 'url.full': url.href }
+      },
+      requestHook(span, request) {
+        span.setAttribute('app.request.started', true)
+      },
+      responseHook(span, response) {
+        span.setAttribute('app.status', response.status)
+      },
     },
+    sse: { enabled: false },
+    webSocket: { enabled: false },
+  }),
+)
+
+void client
+```
+
+توقيعات الخطاف:
+
+- جميع وسائل النقل الثلاث: `startSpanHook(request): Attributes` (متزامن، قبل إنشاء span)
+- HTTP: `requestHook(span, request)` و`responseHook(span, response, request)`
+- SSE: `requestHook(span, request)` و`responseHook(span, stream, request)`
+- WebSocket: `requestHook(span, request)` و`responseHook(span, session, request)`
+
+كائن نقل فارغ يفعّل تلك الوسيلة. مفاتيح النقل البوليانية القديمة والخطافات العلوية القديمة مرفوضة — استخدم كائنات خيارات النقل والخطافات محدودة بالنقل.
+
+## هوية العملية والانتشار
+
+اضبط `operation` ثابتًا على `defineRequest` أو `defineEventStream` أو `defineWebSocket` عندما يملك الأمر هوية مستقرة. المحوّل يستخدمها في أسماء الـ span وكـ `defjs.operation`. لا يستنتج الهوية أبدًا من مسار محلول أو معرّف أو مستأجر أو سلسلة استعلام:
+
+```typescript twoslash
+import { defineEventStream, defineRequest, defineWebSocket, struct } from '@defjs/core'
+
+const readOrders = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders',
+})
+const orderEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  operation: 'orders.watch',
+  path: '/orders/events',
+  events: { update: struct.json(struct.object({ id: struct.number() })) },
+})
+const orderSocket = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  operation: 'orders.connect',
+  path: '/orders/socket',
+  incoming: { update: struct.object({ id: struct.number() }) },
+})
+
+void readOrders
+void orderEvents
+void orderSocket
+```
+
+أسماء الـ span تصبح `GET orders.read` و`SSE orders.watch` و`WebSocket orders.connect`. بلا `operation`، الاحتياطي هو الطريقة / `SSE` / `WebSocket`، و`defjs.operation` يُحذف.
+
+HTTP وSSE يحقنان الحقول المنتشرة في رؤوس الطلب. مثيلات `Headers` الموجودة تُعاد استخدامها وتُعدَّل؛ وإلا يُنشأ `Headers` جديد. انتشار استعلام WebSocket **اختياري** (المتصفحات لا يمكنها إضافة رؤوس مصافحة عشوائية):
+
+```ts
+import { createClient, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withOpenTelemetryServer({
+    tracer,
+    webSocket: { queryPropagation: true },
   }),
 )
 ```
 
-يضيف المحول interceptor واحدًا لكل transport مفعّل. تعمل الخيارات بترتيب العميل المعتاد، لذلك يحدد موضعها بالنسبة إلى المعترضات الأخرى أي عمل تغلّفه spans.
+مع `queryPropagation`، حقول الناشر تُلحق بسلسلة استعلام الاتصال. راجع تسجيل URL ورؤية الوكيل وسجلات الوصول وbaggage والاحتفاظ أولاً. `requireParentSpan: true` يتخطى إنشاء الـ span والانتشار والخطافات والمقاييس عندما لا يوجد والد نشط، ثم يستدعي `next` بلا تغيير.
 
-### هوية العملية
+## دلالات HTTP وSSE وWebSocket
 
-عيّن `operation` بقيمة ثابتة في تعريف كل endpoint. فهي الهوية منخفضة cardinality التي تستخدمها spans وmetrics:
+المحوّل يقيس أعمار النقل، لا كل مرحلة من تفسير الأمر.
 
-```typescript
-const readOrder = defineRequest({
-  method: 'GET',
-  operation: 'orders.read',
-  path: '/orders/:id',
-  // input and output omitted
+- **HTTP** — الـ span يبدأ في معترض HTTP وينتهي عندما يحصل على `HttpResponse` من Defjs. توزيع الحالة وفحوص التمثيل وفك Struct تحدث بعده. `RESPONSE_VALIDATION_FAILED` أو `UNDECLARED_STATUS` لاحق لا يمكنه تحديث span النقل المنتهي.
+- **SSE** — الـ span يبقى مفتوحًا حتى يستقر `stream.closed`. يسجّل `sse.connected`، ثم `sse.closed` / `sse.aborted` / `sse.error`. تدفق منطقي واحد (بما في ذلك إعادة الاتصال) → span واحد. بلا spans لكل حدث.
+- **WebSocket** — الـ span يبقى مفتوحًا حتى يستقر `session.closed`. الأحداث: `websocket.connected` و`websocket.closed` و`websocket.error`. المقابس المادية المعيدة للاتصال تبقى جزءًا من الجلسة المنطقية. بلا spans لكل رسالة.
+
+تحتاج نتيجة الأمر النهائية، لا النقل فقط؟ غلّف `client.execute(...)` في span تطبيق:
+
+```typescript twoslash
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { SpanStatusCode, trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer }))
+const readOrders = defineRequest({ method: 'GET', operation: 'orders.read', path: '/orders' })
+
+const outcome = await tracer.startActiveSpan('orders.command', async (span) => {
+  try {
+    const outcome = await client.execute(readOrders())
+    const [error] = outcome
+    if (error) {
+      span.setAttribute('error.type', error.code)
+      span.setStatus({ code: SpanStatusCode.ERROR })
+    }
+    return outcome
+  } finally {
+    span.end()
+  }
 })
+
+void outcome
 ```
 
-عند وجود operation تصبح أسماء spans مثل `GET orders.read` و`SSE orders.watch` و`WebSocket orders.connect`، وتُسجّل `defjs.operation`. عند غيابها يبقى fallback السابق: method لـ HTTP أو `SSE` أو `WebSocket` بلا صفة operation. لا تستنتج الهوية من resolved URL أو path يحوي identifiers، ولا تنسخ resolved URLs إلى telemetry أو logs.
+الـ span الخارجي لك. الإضافة ما زالت تُبلّغ عن span النقل الأدنى — سؤالان مختلفان.
 
-## الخيارات
+## المرجع
 
-```typescript
-interface OpenTelemetryServerOptions {
-  tracer: Tracer
-  meter?: Meter
-  propagator?: TextMapPropagator
-  requireParentSpan?: boolean
-  http?: OpenTelemetryServerHttpOptions
-  sse?: OpenTelemetryServerSSEOptions
-  webSocket?: OpenTelemetryServerWebSocketOptions
-}
-```
+عندما يُمرَّر `meter`:
 
-يقبل خيار كل transport الحقل `enabled?: boolean` و`requestHook` و`responseHook`. وتقبل WebSocket أيضًا `queryPropagation?: boolean`.
+| المقياس                                      | المعنى                                   |
+| -------------------------------------------- | ---------------------------------------- |
+| `http.client.request.duration`               | مدة طلب HTTP (ثوانٍ)                     |
+| `defjs.client.sse.connect.duration`          | الوقت حتى إرجاع معالج SSE                |
+| `defjs.client.sse.connection.duration`       | إرجاع المعالج → الإغلاق النهائي          |
+| `defjs.client.sse.active_streams`            | معالجات SSE منطقية بـ `closed` معلّق     |
+| `defjs.client.websocket.connect.duration`    | الوقت حتى إرجاع جلسة WebSocket           |
+| `defjs.client.websocket.connection.duration` | إرجاع الجلسة → الإغلاق النهائي           |
+| `defjs.client.websocket.active_connections`  | جلسات WebSocket منطقية بـ `closed` معلّق |
 
-تكون وسائل النقل الثلاث مفعلة افتراضيًا. استخدم option object لتعطيل واحدة:
+أدوات SSE/WebSocket النشطة تعدّ الموارد المنطقية (بما في ذلك فجوات إعادة الاتصال)، لا المقابس المادية أو محاولات HTTP الفردية.
 
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  http: { enabled: false },
-  sse: { enabled: true },
-  webSocket: { enabled: false },
-})
-```
+spans HTTP تسجّل الطريقة و`url.full` المحلول وعنوان/منفذ الخادم عند التوفر وحالة الاستجابة عند الاستلام. افتراضيًا يحل `url.full` فقط `request.endpoint` مقابل `request.baseEndpoint` الاختياري، ولا يضيف `request.queryString` مستقلًا. هذا حد بناء لا تنقيح؛ استخدم `startSpanHook` لبناء URL كامل أو منقّح يملكه التطبيق. الحالة `400+` → حالة span `ERROR` مع سلسلة الحالة كـ `error.type`. الحالة `100..399` تترك حالة الـ span غير مضبوطة. نتيجة نقل الحالة صفر بلا حالة استجابة؛ الإلغاء يترك الحالة غير مضبوطة؛ مهلة/أعطال نقل أخرى تستخدم `TIMEOUT` أو `NETWORK_ERROR`. المقاييس تستخدم أبعادًا مستقرة: الطريقة، العملية الثابتة، عنوان/منفذ الخادم، حالة الاستجابة، نوع خطأ منخفض الكاردينالية.
 
-تُرفض حقول transport المنطقية القديمة والـ hooks العلوية و`webSocketQueryPropagation` وقت التشغيل مع أخطاء migration. الأشكال الحالية هي transport option objects وhooks ضمن نطاق transport و`webSocket.queryPropagation`.
+مقاييس اتصال SSE/WebSocket تسجّل وقت الاتصال ومدة الاتصال المنطقي وعدد الموارد النشطة و`defjs.result` والعملية وعنوان/منفذ الخادم وأنواع فشل منخفضة الكاردينالية. بلا أجسام طلب/استجابة أو حمولات رسائل أو أطوال طابور أو spans لكل رسالة افتراضيًا.
 
-## نشر السياق
+عامل `url.full` و`recordException(...)` كحسّاسين محتملين. Defjs لا ينقحهما نيابةً عنك. أبقِ أسماء العمليات وسمات الخطاف في قائمة مسموح؛ احجب في `startSpanHook` أو معالجات/مصدّري SDK. لا تنسخ عناوين URL الخام أو سلاسل الاستعلام أو الرؤوس أو baggage أو الحمولات إلى قياس مخصص دون مراجعة الخصوصية والكاردينالية والاحتفاظ والحجب.
 
-عند حذف `propagator`، تنشئ الحزمة `CompositePropagator` خاصًا بها يحتوي W3C Trace Context وW3C Baggage propagators. ولا تقرأ إعداد propagator العام.
+انتشار استعلام WebSocket يمكن أن يعرّض سياق التتبّع وbaggage للمتصفحات والوكلاء وسجلات الوصول والقياس. ليس قناة اعتماد. `withCredentials(true)` هو بيانات اعتماد Fetch لـ HTTP/SSE — وليست مصادقة WebSocket.
 
-تحقن HTTP وSSE كل حقل ينتجه propagator في request headers. إذا كانت `req.headers` كائن `Headers` أصلًا، يعيد التنفيذ الحالي استخدام الكائن نفسه ويعدّله مباشرة؛ وإلا ينشئ كائن `Headers` جديدًا. يكون WebSocket query propagation مساويًا لـ `false` افتراضيًا. ولا يحدث الحقن إلا عند ضبط `queryPropagation: true`؛ ولأن browser sockets لا تستطيع إضافة handshake headers اعتباطية، تُلحق عندئذ كل حقل ينتجه propagator بـ connection query string.
+المحوّل لا يهيئ/يوقف SDK، ولا يتخلص من عميل النواة أو معالجات النقل. أنت تفرغ القياس وتغلق عمل HTTP/SSE/WebSocket. انظر [المعترضات](../core/interceptors.md) و[SSE](../core/sse.md) و[WebSocket](../core/web-socket.md).
 
-قبل إنشاء span، يستدعي كل interceptor أيضًا `propagator.extract(...)` على request headers. تعامل مع هذا carrier على أنه input موثوق يملكه التطبيق. لا تسمح لمصدر غير موثوق بإرسال `traceparent` أو `tracestate` أو `baggage`، لأن هذه الحقول قد تستبدل active parent context. احذف حقول النشر غير الموثوقة أو طبّعها قبل وصول الطلب إلى هذا interceptor.
+## وصفات ذات صلة
 
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  webSocket: {
-    queryPropagation: true,
-  },
-})
-```
-
-راجع نشر URL قبل تمكين query propagation. قد تسجّل المتصفحات وproxies وaccess logs وأنظمة telemetry قيم trace context وbaggage، وقد يضيف custom propagator حقولًا أكثر من `traceparent`. فضّل first message جرى تدقيقه ضمن البروتوكول أو connection ticket قصيرة العمر وأحادية الاستخدام عندما يدعم الخادم أحدهما.
-
-عندما تكون `requireParentSpan: true`، تبحث المعترضات عن active parent span قبل أي instrumentation. إذا لم يوجد، تتجاوز إنشاء span والنشر والـ hooks والـ metrics، ثم تستدعي handler التالي من دون تعديل.
-
-## سلوك Hooks
-
-تستقبل hooks الـ span والطلب أو النتيجة الخاصة بوسيلة النقل:
-
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  http: {
-    requestHook(span, request) {
-      span.setAttribute('app.operation', 'list-orders')
-    },
-    responseHook(span, response, request) {
-      span.setAttribute('app.operation', request.operation ?? 'unclassified')
-      span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
-    },
-  },
-})
-```
-
-الوسيط الثالث هو كائن `HttpRequest` الأصلي للـ transport. استخدم `operation` الصريحة منه، ولا تعِد بناء الهوية من `request.endpoint` أو resolved URL أو path.
-
-يمكن أن تعيد الـ hooks القيمة `void` أو `Promise<void>` وتظل غير حاجبة. يُلتقط كل من الرمي المتزامن والرفض غير المتزامن ويُسجل كـ `defjs.otel.hook.error` من دون إيقاف عملية العميل، كما تُعزل أخطاء تسجيل telemetry نفسها.
-
-استخدم attributes من allowlist منخفضة cardinality. لا تُرفق headers أو query strings أو bodies أو baggage أو event IDs أو message payloads خامًا.
-
-## دلالات HTTP
-
-ينشئ HTTP interceptor span من نوع `SpanKind.CLIENT` ويسجل:
-
-- الاسم `${method} ${operation}` والصفة `defjs.operation` عندما يعلن endpoint عن operation ثابتة؛
-- method الطلب وحده كـ fallback سابق دون تغيير عند غياب operation؛
-- `http.request.method`؛
-- `url.full`؛
-- `server.address` و`server.port` الاختياري؛
-- `http.response.status_code` فقط عند استلام status فعلي لـ response.
-
-لا يعني هذا توافقًا كاملًا مع HTTP semantic conventions.
-
-يتبع status لـ HTTP span و`error.type` القواعد التالية:
-
-- status من `100` إلى `399` يترك status لـ span غير معيّن ولا يضبط `error.type`؛
-- status من `400` فما فوق يضع client span في `ERROR` ويضبط `error.type` على نص status code؛
-- نتيجة transport من Defjs ذات status 0 لا تضبط `http.response.status_code`؛ يترك إلغاء caller الـ status غير معيّن ولا يضبط `error.type`، ويستخدم timeout القيمتين `ERROR` / `TIMEOUT`، وتستخدم إخفاقات transport الأخرى `ERROR` / `NETWORK_ERROR`؛
-- error يُرمى عبر interceptor يضع span في `ERROR`، ويسجل exception، ويستخدم `Error.name` أو fallback آخر منخفض cardinality كـ `error.type`.
-
-ينتهي HTTP span عندما يستقبل HTTP interceptor كائن `HttpResponse` من Defjs. يحدث توزيع output status عالي المستوى وفك Struct بعد عودة interceptor. لذلك لا يستطيع `RESPONSE_VALIDATION_FAILED` أو `UNDECLARED_STATUS` لاحق تحديث span الذي انتهى.
-
-عند توفير Meter، تسجل HTTP المقياس `http.client.request.duration` بالثواني. تشمل attributes الـ method وserver address/port وresponse status الاختياري و`error.type` الاختياري. يطبق المقياس تصنيف response status و`error.type` نفسه الذي يطبقه HTTP span.
-
-## دلالات SSE
-
-بعد نجاح بدء SSE، يبقى span مفتوحًا حتى تستقر `stream.closed`. يسجل `sse.connected` ثم واحدًا من `sse.closed` أو `sse.aborted` أو `sse.error` في مسارات الإغلاق المغطاة.
-
-عند توفير Meter، يستخدم SSE المقاييس التالية:
-
-| المقياس                                | المعنى                                                              |
-| -------------------------------------- | ------------------------------------------------------------------- |
-| `defjs.client.sse.connect.duration`    | الوقت حتى إعادة مقبض stream المنطقي.                                |
-| `defjs.client.sse.connection.duration` | الوقت من إعادة المقبض إلى الإغلاق النهائي.                          |
-| `defjs.client.sse.active_streams`      | عدد المقابض المنطقية التي لم تستقر Promise الخاصة بـ `closed` فيها. |
-
-هذه مقاييس مخصصة لـ Defjs. يشمل active counter الوقت بين محاولات reconnect الفعلية. ولا يعد اتصالات HTTP المفتوحة حاليًا.
-
-## دلالات WebSocket
-
-بعد نجاح البدء، يبقى WebSocket span مفتوحًا حتى تستقر `session.closed`. يسجل `websocket.connected` ثم `websocket.closed` أو `websocket.error` في المسارات المغطاة.
-
-يستخدم WebSocket مع Meter المقاييس التالية:
-
-| المقياس                                      | المعنى                                                              |
-| -------------------------------------------- | ------------------------------------------------------------------- |
-| `defjs.client.websocket.connect.duration`    | الوقت حتى إعادة الجلسة المنطقية.                                    |
-| `defjs.client.websocket.connection.duration` | الوقت من إعادة session إلى الإغلاق النهائي.                         |
-| `defjs.client.websocket.active_connections`  | عدد الجلسات المنطقية التي لم تستقر Promise الخاصة بـ `closed` فيها. |
-
-يقول اسم المقياس connections، لكن التنفيذ يعد الجلسات المنطقية، بما فيها فترات تأخير reconnect. ولا يعد physical sockets.
-
-لا توجد هنا generic WebSocket semantic conventions مستقرة. لا تنشئ الحزمة span لكل رسالة ولا تسجل payloads أو queue lengths افتراضيًا.
-
-## البيانات الحساسة وحدود التغطية
-
-تُحل `url.full` الافتراضية من request endpoint وbase endpoint بدل serialized query string، لكن قد تظل paths المحلولة تحتوي identifiers حساسة. هذه transport metadata وليست مصدرًا لهوية operation. أبقِ `operation` ثابتة، ولا تنسخ resolved URLs إلى telemetry أو logs، واضبط redaction في SDK/exporter قبل تصدير URL attributes. وتضيف WebSocket propagation الحقول منفصلة إلى query string الفعلية.
-
-تستقبل `recordException(...)` الأخطاء المرمية وبعض أسباب الإغلاق. قد تكشف رسائل الأخطاء وstacks بيانات حساسة. اضبط processors وحجب البيانات الحساسة على مستوى SDK وexporter وفقًا لذلك؛ لا ينقّح هذا المحول exceptions نيابة عن التطبيق.
-
-قبل النشر، اختبر هذا adapter مع SDK وexporters وprocessors وcontext manager وautomatic instrumentation التي تستخدمها خدمتك. تحقّق من baggage من الطرف إلى الطرف، وحجب البيانات الحساسة، وshutdown/flush، وتكرار spans تحت traffic فعلي.
-
-## التالي
-
-- تشرح [المعترضات](/ar/core/interceptors) الترتيب حول معترضات العميل الأخرى.
-- تشرح [SSE](/ar/core/sse) و[WebSocket](/ar/core/web-socket) أعمار المقابض والجلسات المنطقية التي تعدها هذه المقاييس.
+- [الاختبار بـ Fetch محلي](../recipes/test-with-handle.md)
+- [استهلاك تدفق SSE](../recipes/consume-sse.md)
+- [فتح جلسة WebSocket](../recipes/websocket-session.md)

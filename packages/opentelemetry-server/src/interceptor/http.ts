@@ -1,11 +1,11 @@
 import type { HttpRequest, HttpResponse } from '@defjs/core'
 import { createHttpInterceptor } from '@defjs/core'
-import type { Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
+import type { Attributes, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
 import { context, trace } from '@opentelemetry/api'
 import { headersGetter, headersSetter } from '../propagation/carrier'
 import type { HttpClientMetrics } from '../telemetry/metrics'
 import { createHttpMetricAttributes, durationSeconds } from '../telemetry/metrics'
-import { createHttpSpan, runSpanHook, setSpanError, setSpanHttpResponse } from '../telemetry/trace'
+import { createHttpSpan, resolveStartSpanHook, runSpanHook, setSpanError, setSpanHttpResponse } from '../telemetry/trace'
 import { resolveHttpUrl } from '../telemetry/url'
 
 export interface HttpInterceptorOptions {
@@ -13,13 +13,14 @@ export interface HttpInterceptorOptions {
   propagator: TextMapPropagator
   metrics?: HttpClientMetrics
   requireParentSpan?: boolean
+  startSpanHook?: (request: HttpRequest) => Attributes
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
   responseHook?: (span: Span, res: HttpResponse<unknown>, req: HttpRequest) => Promise<void> | void
 }
 
 export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptions): ReturnType<typeof createHttpInterceptor> {
   return createHttpInterceptor(async (req, next) => {
-    const { tracer, propagator, metrics, requireParentSpan, requestHook, responseHook } = options
+    const { tracer, propagator, metrics, requireParentSpan, startSpanHook, requestHook, responseHook } = options
 
     if (requireParentSpan && !trace.getActiveSpan()) {
       return next(req)
@@ -27,14 +28,17 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
 
     const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
     const { url, serverAddress, serverPort } = resolveHttpUrl(req.endpoint, req.baseEndpoint)
+    const startSpanHookResult = resolveStartSpanHook(startSpanHook, req)
+    const span = createHttpSpan(tracer, req.method, url, parentCtx, req.operation, {
+      ...(serverAddress ? { 'server.address': serverAddress } : {}),
+      ...(serverPort ? { 'server.port': serverPort } : {}),
+      ...(startSpanHookResult.ok ? startSpanHookResult.attributes : {}),
+    })
 
-    const span = createHttpSpan(tracer, req.method, url, parentCtx, req.operation)
-
-    if (serverAddress) {
-      span.setAttribute('server.address', serverAddress)
-    }
-    if (serverPort) {
-      span.setAttribute('server.port', serverPort)
+    if (!startSpanHookResult.ok) {
+      runSpanHook(span, 'startSpanHook', () => {
+        throw startSpanHookResult.error
+      })
     }
 
     runSpanHook(span, 'requestHook', () => requestHook?.(span, req))

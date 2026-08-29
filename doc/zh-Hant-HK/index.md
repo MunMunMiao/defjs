@@ -1,71 +1,66 @@
 ---
-layout: home
-
-hero:
-  name: Defjs
-  text: HTTP、SSE 與 WebSocket 的類型化 command
-  tagline: 以 Struct 定義 wire shape，明確建立 client，並保留每種 transport 各自的結果與生命週期語義。
-  actions:
-    - theme: brand
-      text: 開始使用
-      link: /zh-Hant-HK/guide/getting-started
-    - theme: alt
-      text: 在 GitHub 查看
-      link: https://github.com/defjs/defjs
-
-features:
-  - title: Endpoint 契約
-    details: 明確區分 endpoint 定義、command builder 與 command。Struct 會在 runtime 解碼呼叫方輸入及 transport 資料。
-  - title: 按 transport 區分結果
-    details: HTTP、SSE 與 WebSocket 都回傳 error-first 三項 tuple；第三項分別是 response wrapper、startup-open 快照及 startup-connection 快照。
-  - title: Interceptor 鏈
-    details: 在 client 註冊 HTTP、SSE 與 WebSocket interceptor。每種 transport 只會選取自己的 interceptor，並按洋蔥順序執行。
-  - title: 明確生命週期
-    details: SSE 可以重試網絡及讀取錯誤；WebSocket reconnect 則要明確啟用。應用程式仍要自行負責迭代、取消與 terminal close。
-  - title: Runtime decoding
-    details: 用驅動 TypeScript inference 的同一套 Struct contract，decode input、response、stream event 同 WebSocket message。
-  - title: 應用程式整合
-    details: 透過 Vue 或 React 共用 client，亦可在 server-side service 加入 outbound OpenTelemetry instrumentation。
+title: Defjs
+description: Typed HTTP、SSE 同 WebSocket commands，配明確 client 同 error-first results。
 ---
 
-## 建立 Typed API Client
+# Defjs
 
-先描述應用程式要呼叫的 HTTP、SSE 或 WebSocket contract。Defjs 會把定義變成 command builder、在 runtime 驗證資料，並清楚保留 transport result。
+Define 一個 endpoint，build 一個 opaque command，然後 execute。HTTP、SSE、WebSocket 同一套形狀。
 
-HTTP 核心流程很短：為自己的 API 建立 client、定義 endpoint、呼叫 command builder，再執行 command。
-
-```typescript
+```ts get-health.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-
-const getUser = defineRequest({
+const getHealth = defineRequest({
   method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  path: '/health',
+  output: { 200: struct.object({ ok: struct.boolean() }) },
 })
 
-const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
-
-if (error) {
-  console.error(error.kind, error.code)
-} else {
-  console.log(user.name, response.status)
-}
+const [error, result, response] = await client.execute(getHealth())
+if (!error) console.log(result.ok, response.status)
 ```
 
-把 client 指向應用程式實際使用的 service，並確保 Struct 配合該 service 的真實 response contract。Credentials、UI state、retry、cancellation 同 resource cleanup 仍由應用程式負責。
+Defjs 唔會幫你 cache results、自動 retry，亦唔會喺你忘記時幫你 close streams。Cancellation 同 cleanup 係你自己嘅責任。
 
-## 接著讀
+## 揀傳輸方式
 
-- [快速上手](/zh-Hant-HK/guide/getting-started)：安裝 package，並在應用程式完成第一個 typed request。
-- [Client](/zh-Hant-HK/core/client)：option 組合規則與三個 `execute` overload。
-- [Commands](/zh-Hant-HK/core/commands)：endpoint definition、command builder、command 同 schema-bound projection。
-- [HTTP](/zh-Hant-HK/core/http)、[SSE](/zh-Hant-HK/core/sse) 同 [WebSocket](/zh-Hant-HK/core/web-socket)：各 transport 的行為與 lifecycle responsibility。
-- [Vue](/zh-Hant-HK/plugins/vue)、[React](/zh-Hant-HK/plugins/react) 同 [OpenTelemetry Server](/zh-Hant-HK/plugins/opentelemetry-server)：把 Defjs 接入應用程式 framework 同 telemetry setup。
+| 你需要                            | 由呢度開始                        | 成功時嘅 result                              |
+| --------------------------------- | --------------------------------- | -------------------------------------------- |
+| Request + 按 status 分嘅 response | [HTTP](./core/http.md)            | Decoded data + `HttpResponse`                |
+| 長駐嘅 server event feed          | [SSE](./core/sse.md)              | 一條 stream + startup `open` snapshot        |
+| Bidirectional session             | [WebSocket](./core/web-socket.md) | 一個 session + startup `connection` snapshot |
+
+第一次嚟？先睇 [Getting Started](./guide/getting-started.md)，再拎一篇 [recipe](./recipes/get-declared-404.md)。想知「點解」？run 完先再睇 [Design Decisions](./guide/design-decisions.md)。
+
+## 揀 package
+
+| Package                       | 幾時用                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------- |
+| `@defjs/core`                 | `createClient`（HTTP + SSE + WebSocket）或 `createClient`（淨係 HTTP）                |
+| `@defjs/react`                | `ClientProvider` / `useClient` — 睇 [React](./plugins/react.md)                       |
+| `@defjs/vue`                  | Plugin + `injectClient` — 睇 [Vue](./plugins/vue.md)                                  |
+| `@defjs/opentelemetry-server` | Outbound spans/metrics — 睇 [OpenTelemetry Server](./plugins/opentelemetry-server.md) |
+
+## Result 形狀
+
+三種傳輸都 return error-first 三項 tuple。位置一樣；意思唔一樣：
+
+- HTTP → `[error, data, response]`
+- SSE → `[error, stream, open]`
+- WebSocket → `[error, session, connection]`
+
+Startup 失敗時第二項係 `undefined`。第三項只會喺嗰個 transport 已經產出 response 或 snapshot 時出現。詳情睇 [Errors](./core/errors.md)。
+
+## Ownership 一句講晒
+
+HTTP stale 就 abort。SSE close 完之後 `await stream.closed`。WebSocket close 完之後 `await session.closed`。喺 server 上面，如果 options 會 capture cookies、auth 或 tenant data，就喺 request boundary 入面 create client。Log 之前先 redact URLs、headers 同 bodies。
+
+## Related recipes
+
+- [GET with a declared 404](./recipes/get-declared-404.md)
+- [POST JSON](./recipes/post-json.md)
+- [Cancel an HTTP call](./recipes/cancel-http.md)
+- [Consume an SSE stream](./recipes/consume-sse.md)
+- [Open a WebSocket session](./recipes/websocket-session.md)
+- [Test with a local Fetch handle](./recipes/test-with-handle.md)

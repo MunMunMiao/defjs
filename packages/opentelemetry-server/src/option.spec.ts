@@ -118,6 +118,52 @@ describe('withOpenTelemetryServer', () => {
     expect(config.http.handle).toBe(config.sse.handle)
   })
 
+  test('should route each startSpanHook only to its transport', async () => {
+    const { tracer } = createMockTracer()
+    const httpStartSpanHook = vi.fn(() => ({ 'app.transport': 'http' }))
+    const sseStartSpanHook = vi.fn(() => ({ 'app.transport': 'sse' }))
+    const webSocketStartSpanHook = vi.fn(() => ({ 'app.transport': 'webSocket' }))
+    const config = makeConfig()
+
+    withOpenTelemetryServer({
+      tracer,
+      http: { startSpanHook: httpStartSpanHook },
+      sse: { startSpanHook: sseStartSpanHook },
+      webSocket: { startSpanHook: webSocketStartSpanHook },
+    })(config)
+
+    const httpRequest = makeHttpRequest()
+    await httpInterceptor(config).fn(httpRequest, async () => makeHttpResponse())
+    expect(httpStartSpanHook).toHaveBeenCalledWith(httpRequest)
+    expect(sseStartSpanHook).not.toHaveBeenCalled()
+    expect(webSocketStartSpanHook).not.toHaveBeenCalled()
+
+    const sseRequest = makeSSERequest()
+    await sseInterceptor(config).fn(sseRequest, async () => makeSSEStream())
+    expect(sseStartSpanHook).toHaveBeenCalledWith(sseRequest)
+    expect(webSocketStartSpanHook).not.toHaveBeenCalled()
+
+    const webSocketRequest = makeWsRequest()
+    await webSocketInterceptor(config).fn(webSocketRequest, async () => makeWsSession())
+    expect(webSocketStartSpanHook).toHaveBeenCalledWith(webSocketRequest)
+  })
+
+  test('should keep initial transport attributes when startSpanHook is omitted', async () => {
+    const { tracer } = createMockTracer()
+    const config = makeConfig()
+    withOpenTelemetryServer({ tracer })(config)
+
+    await httpInterceptor(config).fn(makeHttpRequest(), async () => makeHttpResponse())
+    await sseInterceptor(config).fn(makeSSERequest(), async () => makeSSEStream())
+    await webSocketInterceptor(config).fn(makeWsRequest(), async () => makeWsSession())
+
+    expect(vi.mocked(tracer.startSpan).mock.calls.map((call) => call[1]?.attributes?.['url.full'])).toEqual([
+      'https://api.example.com/test',
+      'https://api.example.com/events',
+      'wss://api.example.com/ws',
+    ])
+  })
+
   test('should disable all interceptors when all transports are disabled', () => {
     const config = makeConfig()
     const option = withOpenTelemetryServer({
@@ -129,19 +175,6 @@ describe('withOpenTelemetryServer', () => {
     option(config)
 
     expect(config.interceptors).toHaveLength(0)
-  })
-
-  test('should reject removed top-level and boolean transport options at runtime', () => {
-    const { tracer } = createMockTracer()
-
-    expect(() => withOpenTelemetryServer({ tracer, http: false as never })).toThrow('http: false has been removed')
-    expect(() => withOpenTelemetryServer({ tracer, sse: false as never })).toThrow('sse: false has been removed')
-    expect(() => withOpenTelemetryServer({ tracer, webSocket: false as never })).toThrow('webSocket: false has been removed')
-    expect(() => withOpenTelemetryServer({ tracer, requestHook: vi.fn() } as never)).toThrow('requestHook has been moved')
-    expect(() => withOpenTelemetryServer({ tracer, responseHook: vi.fn() } as never)).toThrow('responseHook has been moved')
-    expect(() => withOpenTelemetryServer({ tracer, webSocketQueryPropagation: false } as never)).toThrow(
-      'webSocketQueryPropagation has been moved',
-    )
   })
 
   test('should accept external meter', () => {

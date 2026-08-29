@@ -3,15 +3,24 @@ import type { App, InjectionKey, Plugin } from 'vue'
 import { inject } from 'vue'
 
 /**
- * Injection key for the HTTP client instance.
+ * Vue injection key for the Defjs {@link Client} provided by {@link createClientPlugin}.
+ *
+ * Prefer {@link injectClient} over calling `inject(HTTP_CLIENT)` directly.
  */
 export const HTTP_CLIENT: InjectionKey<Client> = Symbol('HTTP_CLIENT')
 
 /**
- * Create a Vue Plugin that provides an existing HTTP Client instance.
+ * Create a Vue plugin that provides an existing Defjs client via {@link HTTP_CLIENT}.
  *
- * @param client - The Client instance to provide
- * @returns A Vue Plugin object
+ * Does not create, cache, or dispose the client — pass an instance from `createClient`.
+ *
+ * @param client - The Client instance to provide to the app.
+ * @returns A Vue `Plugin` for `app.use(...)`.
+ *
+ * @example
+ * ```ts
+ * app.use(createClientPlugin(client))
+ * ```
  */
 export function createClientPlugin(client: Client): Plugin {
   return {
@@ -22,15 +31,20 @@ export function createClientPlugin(client: Client): Plugin {
 }
 
 /**
- * Inject the HTTP Client instance from the Vue application context.
+ * Inject the Defjs client provided by {@link createClientPlugin}.
  *
- * @returns The injected Client instance
- * @throws Error if no client is provided
+ * @returns The injected `Client` instance.
+ * @throws If no client was provided (plugin not installed).
+ *
+ * @example
+ * ```ts
+ * const client = injectClient()
+ * ```
  */
 export function injectClient(): Client {
   const client = inject(HTTP_CLIENT)
   if (!client) {
-    throw new Error('No HTTP client provided. Did you forget to call app.use(createClientPlugin(client))?')
+    throw new Error('No Defjs client provided. Did you forget to call app.use(createClientPlugin(client))?')
   }
   return client
 }

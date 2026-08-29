@@ -1,9 +1,7 @@
-import { createClient, defineEventStream, defineRequest, defineWebSocket, struct, withEndpoint } from '@defjs/core'
+import { createClient, defineEventStream, defineRequest, defineWebSocket, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
 import { SpanStatusCode } from '@opentelemetry/api'
 import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
-import { Hono } from 'hono'
 import { describe, expect, inject, test } from 'vitest'
-import { startHonoTestServer } from '../../test/hono-test-server'
 import { withOpenTelemetryServer } from './src/option'
 import type { MockSpan } from './src/test-utils'
 import { createMockTracer } from './src/test-utils'
@@ -100,13 +98,13 @@ describe('e2e: opentelemetry-server with real test server', () => {
     expect(span.ended).toBe(true)
   })
 
-  test('HTTP TCP refusal returns NETWORK_ERROR and records a response-less error span', async () => {
-    const refusedServer = await startHonoTestServer(new Hono())
-    const host = refusedServer.host
-    await refusedServer.close()
-
+  test('HTTP transport rejection returns NETWORK_ERROR and records a response-less error span', async () => {
     const { tracer, spans } = createMockTracer()
-    const client = createClient(withEndpoint(host), withOpenTelemetryServer({ tracer, propagator: createPropagator() }))
+    const client = createClient(
+      withEndpoint('https://example.invalid'),
+      withHTTPHandle(() => Promise.reject(new TypeError('fetch failed'))),
+      withOpenTelemetryServer({ tracer, propagator: createPropagator() }),
+    )
     const useUnavailable = defineRequest({ method: 'GET', path: '/unavailable' })
 
     const [error, result, response] = await client.execute(useUnavailable())

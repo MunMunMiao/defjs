@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../../http'
-import { concatChunks, getContentLength, getContentType, parseBody } from './utils'
+import { concatChunks, getContentLength, getContentType, parseBytesBody } from './utils'
 
 describe('Handler util', () => {
   test('should concatenate chunks', () => {
@@ -16,7 +16,7 @@ describe('Handler util', () => {
         endpoint: '/v1/user',
         method: 'GET',
       }
-      expect(parseBody({ request, contentType: '', content: new Uint8Array([]) })).toBeNull()
+      expect(parseBytesBody(request.responseType, new Uint8Array([]), '')).toBeNull()
     })
 
     test('should be null when content is set to empty', async () => {
@@ -25,7 +25,7 @@ describe('Handler util', () => {
         method: 'GET',
         responseType: 'json',
       }
-      expect(parseBody({ request, contentType: '', content: new Uint8Array([]) })).toBeNull()
+      expect(parseBytesBody(request.responseType, new Uint8Array([]), '')).toBeNull()
     })
 
     test('should be json when content and response type set', async () => {
@@ -37,7 +37,7 @@ describe('Handler util', () => {
       const responseBody = { id: 1 }
       const response = Response.json(responseBody)
       const content = await response.arrayBuffer().then((buffer) => new Uint8Array(buffer))
-      expect(parseBody({ request, contentType: '', content })).toEqual(responseBody)
+      expect(parseBytesBody(request.responseType, content, '')).toEqual(responseBody)
     })
 
     test('should be text when content and response type set', async () => {
@@ -49,7 +49,7 @@ describe('Handler util', () => {
       const responseText = 'Hello Word!'
       const response = new Response(responseText)
       const content = await response.arrayBuffer().then((buffer) => new Uint8Array(buffer))
-      expect(parseBody({ request, contentType: '', content })).toEqual(responseText)
+      expect(parseBytesBody(request.responseType, content, '')).toEqual(responseText)
     })
 
     test('should be blob when content and response type set', async () => {
@@ -66,7 +66,7 @@ describe('Handler util', () => {
       })
       const contentType = getContentType(response.headers)
       const content = await response.arrayBuffer().then((buffer) => new Uint8Array(buffer))
-      expect(parseBody({ request, contentType, content })).toBeInstanceOf(Blob)
+      expect(parseBytesBody(request.responseType, content, contentType)).toBeInstanceOf(Blob)
     })
 
     test('should be arrayBuffer when content and response type set', async () => {
@@ -83,7 +83,7 @@ describe('Handler util', () => {
       })
       const contentType = getContentType(response.headers)
       const content = await response.arrayBuffer().then((buffer) => new Uint8Array(buffer))
-      expect(parseBody({ request, contentType, content })).toBeInstanceOf(ArrayBuffer)
+      expect(parseBytesBody(request.responseType, content, contentType)).toBeInstanceOf(ArrayBuffer)
     })
 
     test('should return exact arraybuffer range for typed array views', () => {
@@ -95,7 +95,7 @@ describe('Handler util', () => {
       const backing = new Uint8Array([0, 1, 2, 3, 4])
       const content = backing.subarray(1, 4)
 
-      const result = parseBody({ request, contentType: '', content })
+      const result = parseBytesBody(request.responseType, content, '')
 
       expect(result).toBeInstanceOf(ArrayBuffer)
       expect(Array.from(new Uint8Array(result as ArrayBuffer))).toEqual([1, 2, 3])
@@ -113,7 +113,7 @@ describe('Handler util', () => {
         },
       })
       const contentType = getContentType(response.headers)
-      expect(parseBody({ request, contentType, content: new Uint8Array(0) })).toBeNull()
+      expect(parseBytesBody(request.responseType, new Uint8Array(0), contentType)).toBeNull()
     })
   })
 

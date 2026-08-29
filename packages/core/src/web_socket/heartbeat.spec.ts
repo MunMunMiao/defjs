@@ -70,6 +70,37 @@ describe('heartbeat', () => {
     vi.useRealTimers()
   })
 
+  test('should call the heartbeat message factory without a receiver', () => {
+    vi.useFakeTimers()
+    const socket = createMockSocket()
+    const session = createMockSession(socket)
+    const onFatal = vi.fn()
+    function message(this: unknown) {
+      expect(this).toBeUndefined()
+      return { type: 'ping' }
+    }
+
+    startHeartbeat(socket, session, { intervalMs: 100, message }, { ping: struct.object({}) }, onFatal, WebSocket.OPEN)
+
+    vi.advanceTimersByTime(100)
+    expect(onFatal).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  test('should ignore a falsy non-function heartbeat message at the runtime boundary', () => {
+    vi.useFakeTimers()
+    const socket = createMockSocket()
+    const session = createMockSession(socket)
+    const onFatal = vi.fn()
+
+    startHeartbeat(socket, session, { intervalMs: 100, message: false as never }, undefined, onFatal, WebSocket.OPEN)
+
+    vi.advanceTimersByTime(100)
+    expect(socket.send).not.toHaveBeenCalled()
+    expect(onFatal).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
   test('should not send when outgoing serialization stops the active heartbeat runtime', () => {
     vi.useFakeTimers()
     const socket = createMockSocket()

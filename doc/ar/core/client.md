@@ -1,151 +1,88 @@
 ---
 title: العميل
-description: أنشئ عملاء صريحين، وركّب الخيارات، ونفّذ أوامر خاصة بكل وسيلة نقل، وافحص الإعداد الحي.
+description: أنشئ عميلًا صريحًا، ركّب الخيارات، نفّذ الأوامر، وامتلك التنظيف.
 ---
 
 # العميل
 
-أنشئ `Client` صراحة ومرّره إلى الكود الذي ينفّذ الأوامر.
+`Client` يحمل إعداد نقطة النهاية + النقل ويوزّع أوامر HTTP وSSE وWebSocket. لا يخزّن، ولا يعيد المحاولة تلقائيًا، ولا يرعى التدفقات المفتوحة.
 
-```typescript
+## الإعداد الأساسي
+
+```typescript twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
 ```
 
-يخزّن العميل الإعداد ويوجّه أوامر HTTP وSSE وWebSocket. ولا يملك registry عامًا أو مدير دورة حياة يعمل في الخلفية.
+## ركّب الخيارات
 
-## تركيب الخيارات
+الخيارات تُطبَّق من اليسار إلى اليمين. المُعيِّنات تستبدل؛ `withInterceptors(...items)` يُلحق.
 
-تعمل الخيارات من اليسار إلى اليمين.
+```typescript twoslash
+import { createClient, createHttpInterceptor, withCredentials, withEndpoint, withInterceptors } from '@defjs/core'
 
-```typescript
-const client = createClient(
-  withEndpoint('https://old.example.com'),
-  withEndpoint('https://api.example.com'),
-  withInterceptors(operationLogger),
-  withInterceptors(authInterceptor, retryInterceptor),
-)
-```
-
-نقطة النهاية النهائية هي `https://api.example.com`. وترتيب المعترضات هو `operationLogger` ثم `authInterceptor` ثم `retryInterceptor`.
-
-يتبع التركيب ثلاث قواعد:
-
-1. تستبدل دوال setter قيمتها. يشمل ذلك `withEndpoint` وtransport handles وquery serializer وcredentials وإعداد XSRF وإعدادات SSE أو WebSocket المفردة.
-2. تُلحق `withInterceptors(...items)` العناصر. وتحافظ الاستدعاءات المتعددة على ترتيب إضافة المعترضات.
-3. تستبدل `withSSEOptions(...)` و`withWebSocketOptions(...)` سطحيًا كل حقل علوي معرّف. ولا تدمجان كائنات reconnect أو heartbeat المتداخلة بعمق.
-
-في المثال التالي، يستبدل كائن reconnect الثاني الأول. ولا يحتفظ بـ `attempts: 5`.
-
-```typescript
-const client = createClient(
-  withWebSocketOptions({
-    reconnect: { attempts: 5, delayMs: 500 },
-  }),
-  withWebSocketOptions({
-    reconnect: { delayMs: 2_000 },
-  }),
-)
-```
-
-تتجاهل دوال الخيارات المجمّعة الخصائص التي تساوي `undefined`. وكل خاصية علوية أخرى تُمرّر تستبدل القيمة الحالية كاملة.
-
-### خيارات Core
-
-| الخيار                           | الأثر                                                                      |
-| -------------------------------- | -------------------------------------------------------------------------- |
-| `withEndpoint(url)`              | يضبط نقطة النهاية الأساسية المطلقة لكل وسائل النقل.                        |
-| `withHTTPHandle(fetch)`          | يستبدل تنفيذ Fetch الخاص بـ HTTP.                                          |
-| `withSSEHandle(fetch)`           | يستبدل تنفيذ Fetch الخاص بـ SSE.                                           |
-| `withWebSocketHandle(WebSocket)` | يستبدل منشئ WebSocket.                                                     |
-| `withInterceptors(...items)`     | يُلحق معترضات مختلطة لوسائل النقل.                                         |
-| `withQueryParamsSerializer(fn)`  | يستبدل تسلسل query في HTTP وSSE وWebSocket.                                |
-| `withCredentials(boolean)`       | يستخدم Fetch `credentials: 'include'` في HTTP وSSE عندما تكون القيمة true. |
-| `withXSRF(options?)`             | يضبط حقن token الخاص بـ XSRF في HTTP.                                      |
-| `withSSEOptions(options)`        | يستبدل سطحيًا حقول SSE المعرّفة.                                           |
-| `withWebSocketOptions(options)`  | يستبدل سطحيًا حقول WebSocket المعرّفة.                                     |
-
-تضبط دوال SSE وWebSocket المفردة حقلًا علويًا مقابلًا واحدًا. تسرد صفحات وسائل النقل قيمها الافتراضية وآثارها على دورة الحياة.
-
-## تنفيذ الأوامر
-
-لدى `Client.execute` ثلاثة overloads. يعيد كل واحد منها tuple يبدأ بالخطأ ويتكون من ثلاثة عناصر.
-
-يجب أن تكون قيمة `timeout` لتنفيذ HTTP وSSE وWebSocket عددًا صحيحًا موجبًا وآمنًا ضمن `1..2_147_483_647`؛ وتؤدي القيم `0` أو السالبة أو الكسرية أو `NaN` أو `Infinity` أو التي تتجاوز الحد إلى `REQUEST_VALIDATION_FAILED` قبل إنشاء أي مورد request أو stream أو socket.
-
-### HTTP
-
-```typescript
-const [error, data, response] = await client.execute(requestCommand, {
-  signal,
-  timeout: 5_000,
+const audit = createHttpInterceptor(async (request, next) => {
+  const started = performance.now()
+  const response = await next(request)
+  console.info(request.operation ?? request.method, response.status, Math.round(performance.now() - started))
+  return response
 })
+
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(audit), withCredentials(true))
+void client
 ```
 
-العنصر الثالث هو غلاف `HttpResponse` من Defjs عندما تتوفر استجابة. تشمل خيارات HTTP `abort` أو `timeout`، والاسم الإضافي `signal`، و`context`، ومراقبي تقدم الرفع والتنزيل.
+المعترضات المختلطة تُصفّى حسب وسيلة النقل عند التنفيذ؛ الترتيب النسبي بين النوع المختار يبقى.
 
-### SSE
+## نفّذ حسب وسيلة النقل
 
-```typescript
-const [error, stream, startupOpen] = await client.execute(streamCommand, {
-  signal,
+- HTTP → `[error, data, response]`
+- SSE → `[error, stream, open]` (`open` لقطة البدء؛ `stream.open` يمكن أن يتغيّر بعد إعادة الاتصال)
+- WebSocket → `[error, session, connection]`
+
+تنفيذ WebSocket يمكن أن يتجاوز `beforeConnect` و`heartbeat` و`protocols` و`reconnect`. يجب أن يكون `timeout` عددًا صحيحًا آمنًا موجبًا في `1..2_147_483_647`.
+
+أنت تملك التنظيف: أجهض HTTP، أغلق SSE + `await stream.closed`، أغلق WebSocket + `await session.closed`.
+
+## احقن نقل اختبار
+
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({ path: struct.object({ id: struct.number() }) }),
+  output: { 200: struct.object({ id: struct.number(), name: struct.string() }) },
 })
+
+const handle: typeof fetch = async () => Response.json({ id: 7, name: 'Ada' })
+const client = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(handle))
+const [error, user] = await client.execute(getUser({ path: { id: 7 } }))
+if (!error) console.log(user.name)
 ```
 
-العنصر الثالث هو لقطة فتح تم التحقق منها عند البدء. أما `stream.open` فهو getter حي منفصل يمكن أن يتغير بعد محاولات reconnect. يقبل تنفيذ SSE الإلغاء و`HttpContext`، بينما يأتي إعداد reconnect من خيارات العميل. وينتمي الحدان الإلزاميان `maxBufferSize` و`maxQueueSize` إلى تعريف كل event stream.
+## النطاق على الخادم مقابل المتصفح
 
-### WebSocket
+على الخادم، أنشئ العميل داخل حدود الطلب عندما تلتقط الخيارات أو إغلاقات المعترض المصادقة أو ملفات تعريف الارتباط أو المستخدمين أو المستأجرين. هوية العميل ليست حد أمان بذاتها.
 
-```typescript
-const [error, session, startupConnection] = await client.execute(socketCommand, {
-  signal,
-  reconnect: { attempts: 3 },
-})
-```
+## المرجع
 
-العنصر الثالث هو لقطة اتصال البدء. أما `session.connection` فهو getter حي وقد يصف محاولة اتصال فعلية لاحقة. يقبل تنفيذ WebSocket الإلغاء، إلى جانب `beforeConnect` وheartbeat وprotocols وreconnect لكل تنفيذ. وينتمي الحد الإلزامي `maxIncomingQueueSize` والحد الاختياري `maxOutgoingQueueSize` إلى تعريف كل WebSocket. ولا يقبل التنفيذ `HttpContext`.
+| المساعد                                                                                                       | الأثر                                                      |
+| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `withEndpoint(url)`                                                                                           | نقطة نهاية أساس مطلقة لكل وسائل النقل                      |
+| `withHTTPHandle(fetch)`                                                                                       | استبدل Fetch لـ HTTP                                       |
+| `withSSEHandle(fetch)`                                                                                        | استبدل Fetch لـ SSE                                        |
+| `withWebSocketHandle(WebSocket)`                                                                              | استبدل مُنشئ WebSocket                                     |
+| `withInterceptors(...items)`                                                                                  | ألحق معترضات مختلطة                                        |
+| `withQueryParamsSerializer(fn)`                                                                               | استبدل تسلسل الاستعلام                                     |
+| `withCredentials(boolean)`                                                                                    | Fetch `credentials: 'include'` لـ HTTP/SSE عندما يكون true |
+| `withXSRF(options?)`                                                                                          | ملف تعريف ارتباط XSRF لـ HTTP → رأس                        |
+| `withSSEReconnect` / `withSSEOnInvalidEvent`                                                                  | مفاتيح SSE                                                 |
+| `withWebSocketReconnect` / `withWebSocketHeartbeat` / `withWebSocketProtocols` / `withWebSocketBeforeConnect` | مفاتيح WebSocket                                           |
 
-راجع [الأخطاء](/ar/core/errors) لمعرفة فروع الفشل الدقيقة، وصفحات [HTTP](/ar/core/http) و[SSE](/ar/core/sse) و[WebSocket](/ar/core/web-socket) لتفاصيل دورة حياة كل وسيلة نقل.
+## وصفات ذات صلة
 
-## نطاق العميل
-
-يمكن لتطبيق متصفح الاحتفاظ بعميل على مستوى module عندما لا تحتوي نقطة النهاية وclosures إلا على حالة آمنة للمتصفح ومستقلة عن الطلب.
-
-```typescript
-export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
-```
-
-لا تعِد استخدام عميل خادم بين الطلبات عندما تلتقط خياراته أو معترضاته authorization أو cookies أو بيانات tenant أو user أو request context. أنشئ ذلك العميل داخل حد طلب الخادم.
-
-لا يملك `Client` دالة `dispose()`. وهو لا يتتبع الطلبات أو streams أو sessions النشطة. يجب على الكود الذي يبدأ العمل إلغاء طلب HTTP، أو إغلاق مقبض SSE، أو إغلاق جلسة WebSocket عند حد دورة الحياة المقابل.
-
-## الفحص المتقدم
-
-استخدم `isClient(value)` لاختبار علامة العميل وقت التشغيل.
-
-```typescript
-import { isClient } from '@defjs/core'
-
-export function keepClient(value: unknown) {
-  return isClient(value) ? value : undefined
-}
-```
-
-تعيد `getClientConfig(client)` كائن الإعداد الحي القابل للتعديل والموجود داخل العميل. ليست snapshot ولا view للقراءة فقط.
-
-```typescript
-import { getClientConfig, type Client } from '@defjs/core'
-
-export function interceptorCount(client: Client): number {
-  return getClientConfig(client).interceptors.length
-}
-```
-
-يغيّر تعديل هذا الكائن عمليات التنفيذ اللاحقة ويتجاوز تركيب الخيارات المعتاد. فضّل استخدامه للتشخيص أو لكود تكامل خضع لمراجعة دقيقة. ترمي `getClientConfig` خطأ `TypeError` عندما لا يكون الوسيط عميلًا صالحًا.
-
-## التالي
-
-- تعرّف [الأوامر](/ar/core/commands) القيم الممررة إلى `execute`.
-- تشرح [المعترضات](/ar/core/interceptors) الترشيح وترتيب البصلة.
-- تغطي [السياق](/ar/core/context) metadata ضمن نطاق الطلب لـ HTTP وSSE.
+- [الاختبار بـ Fetch محلي](../recipes/test-with-handle.md)
+- [إلغاء استدعاء HTTP](../recipes/cancel-http.md)

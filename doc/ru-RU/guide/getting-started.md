@@ -1,54 +1,64 @@
 ---
-title: Начало работы
-description: Установите Defjs, опишите типизированный HTTP-эндпоинт, создайте клиент и вызовите его из приложения.
+title: 'Начало работы: один HTTP-запрос'
+description: Опиши GET /users/:id, прогони через локальный Fetch handle, потом укажи на реальный API.
 ---
 
-# Начало работы
+# Начало работы: один HTTP-запрос
 
-Defjs позволяет один раз описать контракт API, а затем использовать его в приложении с типизированным вводом, декодированием во время выполнения и явными результатами транспорта.
+Ты опишешь `GET /users/:id`, выполнишь через явный клиент и декодируешь и `200`, и объявленный `404`. Локальный handler держит первый прогон офлайн; команда не меняется, когда подставишь настоящий сервис.
 
-## Установка
+## Шаг 1 — Установка
 
-Добавьте core-пакет в приложение:
+`@defjs/core` — ESM и хочет Node.js 22+, Bun или Deno. Node запускает `.ts` напрямую — в package.json нужен `"type": "module"`. В браузере по-прежнему нужны бандлер и Fetch.
+
+::: tabs
+== bun
+
+```sh
+bun add @defjs/core
+```
+
+== npm
+
+```sh
+npm install @defjs/core
+```
+
+== pnpm
 
 ```sh
 pnpm add @defjs/core
 ```
 
-Если проект использует другой менеджер пакетов, выполните аналогичную команду npm, Yarn или Bun. `@defjs/core` поставляется как ESM. При запуске в Node.js текущие метаданные пакета требуют Node 22 или новее.
-
-Упакованные ESM-потребители HTTP проверены с Node.js 22, 24 и 26, Bun 1.3.14 и Deno 2.9.5. После компиляции приложения используйте команды следующего вида:
+== yarn
 
 ```sh
-node dist/index.js
-bun run dist/index.js
-deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+yarn add @defjs/core
 ```
 
-Команда Deno использует пакеты, уже установленные в `node_modules`; замените сетевое разрешение точными хостами API, которые нужны приложению. Проверки Bun и Deno охватывают документированную часть HTTP, а не все API платформы или транспорты. Браузерные сборки используют обычный bundler и необходимые возможности Fetch и WebSocket платформы.
+== deno
 
-Кросс-платформенные тесты должны проверять стабильные поля Defjs, например `error.kind` и `error.code`. Не полагайтесь на зависящие от движка сообщения нативного `Error` или текст ошибок разбора JSON: Node.js, Bun и Deno могут форматировать эти детали по-разному.
+```sh
+deno add npm:@defjs/core
+```
 
-Устанавливайте адаптер только тогда, когда он нужен приложению:
-
-| Конфигурация            | Пакеты                                                                                    |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| React 18+               | `@defjs/core`, `@defjs/react`, `react`                                                    |
-| Vue 3+                  | `@defjs/core`, `@defjs/vue`, `vue`                                                        |
-| Серверный OpenTelemetry | `@defjs/core`, `@defjs/opentelemetry-server`, `@opentelemetry/api`, `@opentelemetry/core` |
-
-::: tip Используйте документацию установленной версии
-Эти страницы описывают API текущей версии документации. Проверьте версию, установленную в приложении. Если export или option отличается, используйте документацию и примечания к выпуску этой версии, а не смешивайте примеры разных версий.
 :::
 
-## Опишите первый запрос
+## Шаг 2 — Опиши запрос
 
-Предположим, ваш API предоставляет `GET /users/:id`. Замените базовый URL и Struct ответа реальным контрактом своего сервиса.
+Создай `src/get-user.ts`. `struct.request(...)` держит path отдельно от query, headers и body.
 
-```typescript
-import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+```ts get-user.ts
+import { defineRequest, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
 
 const getUser = defineRequest({
   method: 'GET',
@@ -57,57 +67,161 @@ const getUser = defineRequest({
     path: struct.object({ id: struct.number() }),
   }),
   output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
   ],
 })
 
-async function loadUser(id: number) {
-  const [error, user, response] = await client.execute(getUser({ path: { id } }))
+const command = getUser({ path: { id: 7 } })
+void command
+```
 
-  if (error) {
-    console.error(error.kind, error.code)
-    return
+`defineRequest(...)` возвращает builder. Вызов `getUser(...)` собирает непрозрачную команду, которую ты передашь в `client.execute(...)`.
+
+## Шаг 3 — Выполни локально
+
+Подключи клиентский Fetch handle — можно бежать без сети. Defjs всё равно валидирует input, собирает `Request`, диспатчит по статусу и парсит тело.
+
+```ts get-user.ts
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+  ],
+})
+
+const handle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
   }
 
-  console.log(user.name, response.status)
+  return Response.json({ message: 'User not found' }, { status: 404 })
 }
 
-void loadUser(7)
-```
+const client = createClient(withEndpoint('https://api.example.test'), withHTTPHandle(handle))
 
-`defineRequest(...)` возвращает **фабрику команды**. Вызов `getUser(...)` создаёт **команду**, в которой хранятся описание эндпоинта и входные данные вызова. Затем `client.execute(...)` возвращает трёхэлементный HTTP-кортеж:
+const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }), {
+  timeout: 5_000,
+})
 
-```typescript
-;[error, result, response]
-```
-
-При успехе `error` равен `null`, `result` содержит декодированный результат, а `response` — обёртку Defjs `HttpResponse`. При ошибке `result` равен `undefined`; если ответ не был получен, обёртка ответа тоже равна `undefined`.
-
-### Литералы статусов сохраняются автоматически
-
-`defineRequest(...)` использует const generic для `output`, поэтому inline-элементы массива и сгруппированные массивы статусов автоматически сохраняют литеральные значения. Для разделения выведенных тел успешных ответов 2xx и ошибок остальных статусов `as const` не нужен.
-
-Поддерживается и объектная форма `output`:
-
-```typescript
-const output = {
-  '200': struct.object({ id: struct.number() }),
-  '404': struct.object({ message: struct.string() }),
+if (error) {
+  if (error.kind === 'http' && error.status === 404) {
+    console.log(error.data.message)
+  } else {
+    console.error(error.kind, error.code)
+  }
+} else {
+  console.log(`Loaded ${user.name} from ${response.status}`)
 }
 ```
 
-## Подключите к приложению
+Запусти:
 
-Храните описания эндпоинтов в модулях, которые отражают API вашего сервиса. Используйте их фабрики команд в компонентах, route handler, фоновых задачах или store. Создавайте клиент на границе, которая владеет endpoint, учётными данными, перехватчиками и жизненным циклом.
+::: tabs
+== bun
 
-- Браузерное приложение обычно может использовать один общий клиент.
-- При серверном рендеринге создавайте клиент на каждый запрос, если меняются заголовки, cookies, пользователь или tenant.
-- Код, открывающий SSE или WebSocket, должен также читать и закрывать этот ресурс.
+```sh
+bun src/get-user.ts
+```
 
-## Что дальше
+== npm
 
-- [Команды](/ru-RU/core/commands) — автоматическое отображение запроса и пользовательские проекции, привязанные к схеме.
-- [Ошибки](/ru-RU/core/errors) — кортежи всех трёх транспортов и объединение `RequestError`.
-- [HTTP](/ru-RU/core/http) — разрешение URL, тела запросов, декодирование ответа, отмена и поведение XSRF.
-- [Примеры](/ru-RU/guide/examples) — рецепты, где этими контрактами управляет приложение.
+```sh
+node src/get-user.ts
+```
+
+== pnpm
+
+```sh
+node src/get-user.ts
+```
+
+== yarn
+
+```sh
+node src/get-user.ts
+```
+
+== deno
+
+```sh
+deno run src/get-user.ts
+```
+
+:::
+
+```txt
+Loaded Ada from 200
+```
+
+Попробуй отсутствующего пользователя — смени path id на `8` и запусти снова:
+
+```txt
+User not found
+```
+
+При успехе: `error` — `null`, `user` — Struct-output для `200`, `response` — `HttpResponse`. При объявленном `404`: `error.kind` — `'http'`, `error.status` — `404`, а `error.data` типизирован как `NotFound`. Второй элемент кортежа при ошибке — `undefined`.
+
+## Шаг 4 — Укажи на реальный API
+
+Убери `withHTTPHandle(...)` и поставь настоящий base URL, когда сервис реализует `GET /v1/users/:id` с такими телами.
+
+```ts
+import { createClient, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const localHandle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
+  }
+
+  return Response.json({ message: 'User not found' }, { status: 404 })
+}
+
+const localClient = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(localHandle))
+const realClient = createClient(withEndpoint('https://api.example.com/v1'))
+void localClient
+void realClient
+```
+
+Та же команда. Другой клиент.
+
+## Когда результат другой
+
+- Плохой input / невалидная сборка / конфликтующие cancel-опции → `REQUEST_VALIDATION_FAILED`
+- Объявленный non-2xx → `HTTP_STATUS` с типизированным `error.data`
+- Объявленное тело не декодируется → `RESPONSE_VALIDATION_FAILED`
+- Статус без объявления → `UNDECLARED_STATUS` (до decode тела)
+- Падение Fetch / отмена / таймаут → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+
+`timeout` — положительное safe integer в `1..2_147_483_647`. Не передавай `abort` и `timeout` вместе; `signal` можно комбинировать с любым из них. Отмена говорит, что увидел вызывающий — не то, закоммитил ли сервер запись.
+
+## Дальше по рецептам
+
+- [GET с объявленным 404](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [Отменить HTTP-вызов](../recipes/cancel-http.md)
+- [Читать SSE-стрим](../recipes/consume-sse.md)
+- [Открыть WebSocket-сессию](../recipes/websocket-session.md)
+- [Тест с локальным Fetch handle](../recipes/test-with-handle.md)

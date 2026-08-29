@@ -1,6 +1,6 @@
 import type { EventStreamCloseInfo, EventStreamHandle, HttpRequest } from '@defjs/core'
 import { createSSEInterceptor } from '@defjs/core'
-import type { Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
+import type { Attributes, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
 import { context, trace } from '@opentelemetry/api'
 import { headersGetter, headersSetter } from '../propagation/carrier'
 import type { SSEClientMetrics } from '../telemetry/metrics'
@@ -10,7 +10,7 @@ import {
   createServerMetricAttributes,
   durationSeconds,
 } from '../telemetry/metrics'
-import { addSpanEvent, createSSESpan, endSpan, runSpanHook, setSpanError } from '../telemetry/trace'
+import { addSpanEvent, createSSESpan, endSpan, resolveStartSpanHook, runSpanHook, setSpanError } from '../telemetry/trace'
 import { resolveUrl } from '../telemetry/url'
 
 export interface SSEInterceptorOptions {
@@ -18,13 +18,14 @@ export interface SSEInterceptorOptions {
   propagator: TextMapPropagator
   metrics?: SSEClientMetrics
   requireParentSpan?: boolean
+  startSpanHook?: (request: HttpRequest) => Attributes
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
   responseHook?: (span: Span, stream: EventStreamHandle<unknown>, req: HttpRequest) => Promise<void> | void
 }
 
 export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions): ReturnType<typeof createSSEInterceptor> {
   return createSSEInterceptor(async (req, next) => {
-    const { tracer, propagator, metrics, requireParentSpan, requestHook, responseHook } = options
+    const { tracer, propagator, metrics, requireParentSpan, startSpanHook, requestHook, responseHook } = options
 
     if (requireParentSpan && !trace.getActiveSpan()) {
       return next(req)
@@ -32,8 +33,13 @@ export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions
 
     const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
     const url = resolveUrl(req.endpoint, req.baseEndpoint)
-
-    const span = createSSESpan(tracer, url, parentCtx, req.operation)
+    const startSpanHookResult = resolveStartSpanHook(startSpanHook, req)
+    const span = createSSESpan(tracer, url, parentCtx, req.operation, startSpanHookResult.ok ? startSpanHookResult.attributes : undefined)
+    if (!startSpanHookResult.ok) {
+      runSpanHook(span, 'startSpanHook', () => {
+        throw startSpanHookResult.error
+      })
+    }
     const spanCtx = trace.setSpan(parentCtx, span)
     const headers = req.headers instanceof Headers ? req.headers : new Headers(req.headers)
     propagator.inject(spanCtx, headers, headersSetter)

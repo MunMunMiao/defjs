@@ -1,72 +1,75 @@
 ---
 title: HTTP
-description: Собирайте HTTP-URL и тела, выбирайте Struct по статусу ответа, отменяйте работу, настраивайте credentials и XSRF и учитывайте границу Fetch.
+description: Опиши запрос, выполни, ветвись по статусу и отменяй через signal или timeout.
 ---
 
 # HTTP
 
-`defineRequest(...)` создаёт фабрику HTTP-команды. Описания и проекции входных данных разобраны в разделе [«Команды»](/ru-RU/core/commands); эта страница посвящена сетевому поведению и жизненному циклу HTTP.
+Опиши → выполни → ветвись по кортежу → отмени, когда экран ушёл. Весь HTTP-цикл.
 
-## Клиентский вход только для HTTP
+## Базовая настройка
 
-`@defjs/core/http` — дополнительная точка входа только для HTTP. Она экспортирует `createHttpClient(...)` вместе с HTTP-командами и совместимыми с HTTP опциями клиента:
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-```typescript
-import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
-
-const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
-```
-
-Используйте её, если потребитель намеренно поддерживает только HTTP. Она не заменяет корневой вход: `createClient(...)` из `@defjs/core` остаётся клиентом для команд HTTP, SSE и WebSocket.
-
-## Построение URL
-
-`withEndpoint(...)` должен получать абсолютный базовый URL. Его путь сохраняется как каталог:
-
-```typescript
-const client = createClient(withEndpoint('https://api.example.com/v1'))
-
-const listUsers = defineRequest({
+const client = createClient(withEndpoint('https://api.example.com'))
+const getUser = defineRequest({
   method: 'GET',
-  path: '/users',
+  path: '/users/:id',
+  input: struct.request({ path: struct.object({ id: struct.number() }) }),
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ],
 })
 
-// Resolves to https://api.example.com/v1/users
+const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
+if (error?.kind === 'http' && error.status === 404) {
+  console.log(error.data.message)
+} else if (!error) {
+  console.log(data.name, response.status)
+}
 ```
 
-Если завершающего слеша нет, он добавляется к базовому пути. Query и hash базового эндпоинта отбрасываются.
+## Собери URL
 
-Значение `path` у эндпоинта — относительный путь контракта. Начальный слеш допустим: перед разрешением его удаляют, поэтому базовый каталог не заменяется. Реализация отклоняет:
+`withEndpoint(...)` нужен валидный абсолютный URL. Pathname эндпоинта остаётся как directory; query и hash отбрасываются до разрешения команды.
 
-- абсолютные URL и URL, начинающиеся с `//`;
-- пути с `?`;
-- пути с `#`.
+```ts
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-Плейсхолдеры пути записываются как `:name`:
-
-```typescript
+const client = createClient(withEndpoint('https://api.example.com/v1'))
 const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({
     path: struct.object({ id: struct.string() }),
+    query: struct.object({ fields: struct.string().optional() }),
   }),
 })
+
+const command = getUser({ path: { id: 'a/b' }, query: { fields: 'name' } })
+void client.execute(command)
+// → https://api.example.com/v1/users/a%2Fb?fields=name
 ```
 
-Передавайте в плейсхолдеры исходные значения. Defjs сериализует каждый скаляр, отклоняет пустое значение и целые значения `.` или `..`, а затем ровно один раз применяет `encodeURIComponent` перед подстановкой. `/`, `?`, `#`, `%`, пробелы и Unicode остаются внутри одного сегмента пути. Не кодируйте значения заранее: `%` считается исходным вводом и кодируется как `%25`.
+Path placeholders — сырые scalars, кодируются ровно один раз. Пустые значения и `.` / `..` отклоняются. Слэши, `?`, `#`, `%`, пробелы и Unicode в одном placeholder остаются одним encoded сегментом — не пре-кодируй.
 
-## Кодирование запроса
+Path определения не может содержать `?` или `#`, и не может быть absolute или protocol-relative. Default query encoder принимает scalars и массивы scalars. Nested/complex query values нужен `withQueryParamsSerializer(...)`, иначе сборка падает.
 
-Для прямого отображения на сетевые части используйте `struct.request(...)`:
+## Закодируй input
 
-```typescript
-const createUser = defineRequest({
-  method: 'POST',
-  path: '/organizations/:organizationId/users',
+`struct.request(...)` держит path, query, headers и body отдельно. Wrapper тела выбирает codec и content type:
+
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
+const updateUser = defineRequest({
+  method: 'PATCH',
+  path: '/users/:id',
   input: struct.request({
-    path: struct.object({ organizationId: struct.string() }),
-    query: struct.object({ notify: struct.boolean().optional() }),
+    path: struct.object({ id: struct.number() }),
     headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
     body: struct.json(
       struct.object({
@@ -74,163 +77,96 @@ const createUser = defineRequest({
       }),
     ),
   }),
+  output: {
+    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
+  },
 })
-```
 
-Struct тела выбирает кодирование и Content-Type по умолчанию:
-
-| Struct тела                | Тело в сети           | `Content-Type` по умолчанию                       |
-| -------------------------- | --------------------- | ------------------------------------------------- |
-| `struct.json(inner)`       | `JSON.stringify(...)` | `application/json`                                |
-| `struct.text()`            | Строка                | `text/plain;charset=UTF-8`                        |
-| `struct.urlencoded(shape)` | `URLSearchParams`     | `application/x-www-form-urlencoded;charset=UTF-8` |
-| `struct.formData(shape)`   | `FormData`            | Задаётся платформой вместе с boundary             |
-| `struct.blob()`            | `Blob`                | Тип Blob или `application/octet-stream`           |
-| `struct.arrayBuffer()`     | `ArrayBuffer`         | `application/octet-stream`                        |
-
-В пользовательском `build` доступны соответствующие методы HTTP-билдера. Методы-сеттеры заменяют часть запроса; `addHeaders`, `addFormData` и `addFormUrlEncoded` дополняют текущую часть. Все значения должны происходить из проекции, привязанной к схеме.
-
-### Значения query
-
-Стандартный кодировщик query принимает плоские скалярные значения и массивы скаляров. Вложенные объекты приводят к ошибке при построении запроса.
-
-`withQueryParamsSerializer((params, rawParams) => string)` меняет представление уже принятых плоских значений. Он получает `URLSearchParams` и закодированную плоскую запись. Вложенные query-объекты от этого не становятся допустимыми: их отклоняют до сериализации.
-
-Псевдонимы становятся исходящими ключами query, пути и заголовков. Вызывающий код по-прежнему использует логические имена полей Struct.
-
-## Статусы и декодирование output
-
-`output` сопоставляет коды статуса со Struct ответа:
-
-```typescript
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
+const [error, user] = await client.execute(
+  updateUser({
+    path: { id: 7 },
+    headers: { requestId: 'request-42' },
+    body: { displayName: 'Ada' },
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-    { status: 409, body: struct.object({ conflict: struct.string() }) },
-  ],
-})
+)
+if (error) console.error(error.code)
+else console.log(user.id)
 ```
 
-Во время выполнения Struct выбирается по точному статусу. Если `output` объявлен, любой несовпавший статус приводит к `UNDECLARED_STATUS`. Тела объявленных 2xx образуют объединение успешных данных. `defineRequest(...)` использует const-дженерик, поэтому inline-статусы сохраняют литеральные значения без `as const`; в объединении HTTP-ошибок каждый статус не-2xx остаётся связан со своим телом `error.data`.
+Алиасы переписывают только outbound wire-ключи. Распарсенные значения и input команд держат логические имена.
 
-```typescript
-const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+| Wrapper                    | Runtime body      | Default content type                                           |
+| -------------------------- | ----------------- | -------------------------------------------------------------- |
+| `struct.json(inner)`       | JSON string       | `application/json`                                             |
+| `struct.text()`            | string            | `text/plain;charset=UTF-8`                                     |
+| `struct.urlencoded(shape)` | `URLSearchParams` | `application/x-www-form-urlencoded;charset=UTF-8`              |
+| `struct.formData(shape)`   | `FormData`        | Platform multipart boundary; Defjs чистит stale `Content-Type` |
+| `struct.blob()`            | `Blob`            | Blob type или `application/octet-stream`                       |
+| `struct.arrayBuffer()`     | `ArrayBuffer`     | `application/octet-stream`                                     |
 
-if (statusError?.kind === 'http') {
-  if (statusError.status === 404) {
-    console.error(statusError.data.message)
-  } else {
-    // status равен 409, а data — объявленное тело конфликта.
-    console.error(statusError.data.conflict)
-  }
+Кастомный `build` даёт те же location/codec setters. Финальная запись тела побеждает (value + content-type metadata). High-level команды не превращают произвольный объект в body — объяви wrapper или используй matching setter.
+
+## Диспатч по статусу
+
+`output` — map статус → Struct или `{ status, body }[]`. С `output` и без `responseType` representation по умолчанию `json`. Явные типы: `json`, `text`, `blob`, `arraybuffer`.
+
+Порядок операций:
+
+1. Status `0` → transport error.
+2. Нет `output` → 2xx успех с `data === undefined`; non-2xx → `HTTP_STATUS` с `error.data === undefined`. Тело не декодируется.
+3. С `output` точный объявленный статус выбирает свой Struct. Array form: более поздний match перекрывает более ранний grouped match.
+4. Необъявленный статус → `UNDECLARED_STATUS` **до** decode тела.
+5. Сбой representation → `RESPONSE_VALIDATION_FAILED`, без partial data.
+6. Декодированный объявленный 2xx → результат; декодированный объявленный non-2xx → типизированный `error.data` на `HTTP_STATUS`.
+
+У `HttpResponse` есть `url`, `status`, `statusText`, `headers`, `body`, `error` и `ok`. `ok` значит только `200 <= status < 300`. Это значение Defjs, не native `Response`. Без `output` `responseType` не разрешён.
+
+## Отмени работу
+
+Опции execute принимают `signal` плюс либо `abort`, либо `timeout`. **`abort` и `timeout` взаимоисключающие.** `signal` можно комбинировать с любым из них.
+
+```ts
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
+const command = defineRequest({ method: 'GET', path: '/report' })()
+const controller = new AbortController()
+const pending = client.execute(command, { signal: controller.signal, timeout: 5_000 })
+
+controller.abort('screen closed')
+const [error] = await pending
+if (error?.kind === 'transport' && error.code === 'ABORTED') {
+  console.log('caller cancellation')
 }
 ```
 
-`response.ok` означает только `status >= 200 && status < 300`. Он не говорит об успешном декодировании `output`, бизнес-проверке или авторизации.
-
-Если `output` объявлен, а `responseType` не указан, ответ по умолчанию разбирается как `json`. Явные режимы: `json`, `text`, `blob` и `arraybuffer`. Затем выбранный Struct выполняет структурное декодирование. Без `output` нельзя указать `responseType`, данные результата равны `undefined`, а у возвращённой обёртки ответа `body: null`. Runtime по мере возможности отменяет body ответа, а не читает и не декодирует его.
-
-Результат команды классифицируется в фиксированном порядке: transport failure при status 0 → отсутствие `output` → точное совпадение status или `UNDECLARED_STATUS` → `response.error` → декодирование Struct. Поэтому ошибки представления body могут возникать только при объявленном `output`; ветвь с необъявленным status по-прежнему имеет приоритет, если Fetch записал такую ошибку.
-
-### Ошибки представления тела
-
-Если для точно совпавшего объявленного output JSON или другой codec тела завершается ошибкой, Fetch сохраняет исходное исключение в `HttpResponse.error`. Выполнение команды останавливается до применения выходного Struct и возвращает `[RESPONSE_VALIDATION_FAILED, undefined, response]`; исключение остаётся в `cause`, а типизированное `error.data` не создаётся.
-
-Обычный ответ не-2xx не заполняет `response.error`: его статус представлен полями `status` и `ok`. Если статус не-2xx и тело объявлены, а тело корректно, Struct декодируется, и итоговая ошибка `HTTP_STATUS` сохраняет типизированное тело в `error.data`.
-
-## Результат HTTP
-
-```typescript
-const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
-```
-
-При успехе `response` — обёртка Defjs `HttpResponse`, тело которой соответствует `data`. При ошибке доступность ответа зависит от того, насколько далеко дошло выполнение. Полная классификация приведена в разделе [«Ошибки»](/ru-RU/core/errors).
-
-## Отмена и тайм-аут
-
-HTTP принимает при выполнении `abort`, `signal` и `timeout`:
-
-```typescript
-const controller = new AbortController()
-
-const [error] = await client.execute(command, {
-  signal: controller.signal,
-  timeout: 5_000,
-})
-```
-
-`signal` объединяется с внутренним сигналом клиента и положительным тайм-аутом. Отдельное поле `abort` — альтернативный сигнал отмены, сохранённый текущим API. Одновременно передавать `abort` и `timeout` нельзя: результатом будет `REQUEST_VALIDATION_FAILED`. `signal` можно сочетать с любым из них.
-
-Для выполнения HTTP, SSE и WebSocket параметр `timeout` должен быть положительным безопасным целым числом в диапазоне `1..2_147_483_647`; `0`, отрицательные и дробные значения, `NaN`, `Infinity` и значения выше предела возвращают `REQUEST_VALIDATION_FAILED` до создания ресурса request, stream или socket.
-
-Распознанная отмена создаёт `ABORTED`. Причина от `AbortSignal.timeout(...)` или тайм-аут выполнения создают `TIMEOUT`. Другие сбои Fetch создают `NETWORK_ERROR`.
+`timeout` — положительное safe integer в `1..2_147_483_647`. Узнанная отмена → `ABORTED`; execution timeout → `TIMEOUT`; другие сбои Fetch/interceptor → `NETWORK_ERROR`. Cancel после того, как сервер принял write, **не** доказывает откат записи.
 
 ## Credentials и XSRF
 
-`withCredentials(true)` задаёт Fetch `credentials: 'include'` для HTTP и SSE. Значение `false` оставляет опцию Fetch незаданной, а не принудительно включает `omit`. Эта настройка не добавляет заголовок `Authorization` и не настраивает аутентификацию WebSocket.
+`withCredentials(true)` ставит Fetch `credentials: 'include'` для HTTP и SSE. Он не создаёт `Authorization` и не настраивает WebSocket auth. `false` оставляет credentials unspecified.
 
-`withXSRF(...)` действует только на HTTP-запросы. Значения по умолчанию:
+`withXSRF(...)` — только HTTP. Defaults: `cookieName: 'XSRF-TOKEN'`, `headerName: 'X-XSRF-TOKEN'`. Header инжектится только для non-safe methods, только если вызывающий его ещё не поставил, и только для same-origin browser requests. Пропускает `GET`, `HEAD`, `OPTIONS`, `TRACE`. Вне браузера передай синхронный request-scoped `tokenProvider`, если нужна injection.
 
-```typescript
-withXSRF({
-  cookieName: 'XSRF-TOKEN',
-  headerName: 'X-XSRF-TOKEN',
-})
-```
+Держи credentials, XSRF tokens и query strings вне routine логов. Не используй query params как общий канал credentials.
 
-Для безопасных по RFC методов `GET`, `HEAD`, `OPTIONS` и `TRACE` добавление токена пропускается. Для всех остальных методов, включая небезопасные пользовательские методы наподобие `PROPPATCH`, перед добавлением выполняются те же проверки существующего заголовка, same-origin и токена. Уже существующий настроенный заголовок сохраняется. В браузере cookie ищется только для запросов к тому же origin. Вне браузера передайте синхронный `tokenProvider`; он имеет приоритет перед чтением cookie.
+## Progress и граница Fetch
 
-```typescript
-import type { HttpRequest } from '@defjs/core'
+`onDownloadProgress` бежит, пока читается явное response representation. `lengthComputable` true только при положительном `Content-Length`. Нет `responseType` → нет decode тела → нет body-read progress.
 
-declare const readRequestScopedToken: (request: HttpRequest) => string | null
+`onUploadProgress` смотрит на `ReadableStream<Uint8Array>` request body, пока Fetch его читает. Обычные body wrappers не дают raw stream setter — upload progress в основном для low-level construction.
 
-withXSRF({
-  tokenProvider: ({ request }) => readRequestScopedToken(request),
-})
-```
+`fetchHandler(httpRequest, fetchImpl?)` — более низкая Fetch-граница: собирает native `Request`, вызывает Fetch, читает representation, возвращает `HttpResponse`. Он **не** валидирует input команды, не диспатчит `output` и не гоняет interceptors. Полезен для injected transport tests — не замена `client.execute`.
 
-На сервере держите провайдер токена в области запроса. `withCredentials(true)` не даёт JavaScript доступ к cross-origin cookie в браузере и не включает добавление XSRF-заголовка для cross-origin запроса.
+## Пределы replay
 
-## Наблюдатели прогресса
+Defjs **не** auto-retry HTTP. Ретрай read всё равно нуждается в проверенной timeout/network/duplicate политике. Ретрай mutation нуждается в replayable bytes, поддержке сервера, idempotency key, привязанном к auth scope + request bytes, и receiver duplicate policy.
 
-`onDownloadProgress` сообщает число байтов при чтении тела Fetch-ответа. `lengthComputable` равен `true` только при положительном `Content-Length`.
+Граница client/command/Fetch не знает, закоммитился ли failed write. Держи replay-решения в приложении или проверенном interceptor. Interceptors могут short-circuit или заменить low-level request; финальные status и body всё равно должны удовлетворять контракту команды.
 
-```typescript
-declare const updateProgress: (value: number | undefined) => void
+## Связанные рецепты
 
-const [error, file] = await client.execute(downloadFile(), {
-  onDownloadProgress({ loaded, total, lengthComputable }) {
-    updateProgress(lengthComputable ? loaded / total : undefined)
-  },
-})
-```
-
-`onUploadProgress` наблюдает только за телом запроса типа `ReadableStream<Uint8Array>`. Текущие высокоуровневые фабрики команд предоставляют сеттеры проекций для Blob и ArrayBuffer, но не для сырого потока. Поэтому стандартного рабочего примера `defineRequest` с потоком, необходимым этой опции, сейчас нет. Не выдавайте вручную созданный поток за поддерживаемое высокоуровневое тело команды.
-
-Колбэки прогресса выполняются на пути чтения или записи транспорта. Они должны быть быстрыми и не выбрасывать ошибки.
-
-## Низкоуровневая граница Fetch
-
-`fetchHandler(httpRequest, fetchImpl?)` экспортируется. Он преобразует Defjs `HttpRequest` в нативный `Request`, вызывает Fetch, разбирает выбранное представление ответа и возвращает обёртку Defjs `HttpResponse`. Сбои Fetch становятся обёртками со статусом 0.
-
-Прямой вызов `fetchHandler` обходит:
-
-- декодирование входа команды и проекцию запроса;
-- выбор HTTP-output по статусу и декодирование Struct;
-- оркестрацию клиентских перехватчиков;
-- преобразование в высокоуровневый кортеж `RequestError`.
-
-Это экспортированная низкоуровневая граница, а не рекомендуемый сценарий команд. Обязательства по её долгосрочной стабильности здесь не определены.
-
-## Что дальше
-
-- [Перехватчики](/ru-RU/core/interceptors) — клонирование запросов, короткое замыкание и повторы.
-- [Ошибки](/ru-RU/core/errors) — ошибки HTTP-статуса, транспорта и описания.
-- [Struct](/ru-RU/core/struct) — строгое структурное декодирование.
+- [GET с объявленным 404](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [Отменить HTTP-вызов](../recipes/cancel-http.md)
+- [Тест с локальным Fetch handle](../recipes/test-with-handle.md)

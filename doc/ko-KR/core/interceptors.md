@@ -1,29 +1,42 @@
 ---
 title: 인터셉터
-description: 트랜스포트별로 인터셉터를 필터링하고 어니언 순서로 조합하며 요청을 안전하게 복제하고 작업을 short-circuit하고 제한적인 인증·재시도 정책을 구현합니다.
+description: HTTP, SSE, WebSocket 정책을 전송 경계에서 onion 순서로 쌓아요.
 ---
 
 # 인터셉터
 
-인터셉터는 트랜스포트 경계를 감쌉니다. HTTP, SSE, WebSocket에는 각각 별도의 인터셉터 kind와 결과 타입이 있습니다.
+인증 헤더를 더하거나, 점검 창을 short-circuit하거나, 안전한 읽기를 재시도해요 — 명령 검증은 건드리지 않고. 전송마다 체인이 따로 있어요. `HttpRequest`를 받고, 그 전송의 결과(`HttpResponse`, 이벤트 스트림 핸들, WebSocket 세션)를 돌려줘요. 입력 검증은 체인 전에, status 디스패치와 디코딩된 결과는 그 후에 돌아요.
 
-| Factory                      | 요청          | `next` 결과                           |
+## Basic Setup
+
+```typescript twoslash
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+
+const audit = createHttpInterceptor(async (request, next) => {
+  const started = performance.now()
+  const response = await next(request)
+  console.info(request.operation ?? request.method, response.status, Math.round(performance.now() - started))
+  return response
+})
+
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(audit))
+void client
+```
+
+## Onion 순서
+
+`withInterceptors(...items)`는 혼합 인터셉터를 받아요. 클라이언트는 선택된 전송의 `kind`로 걸러내고 상대 등록 순서를 유지해요. 각 인터셉터는 `next` 전후에 돌 수 있어요.
+
+| Factory                      | Request       | Result from `next`                    |
 | ---------------------------- | ------------- | ------------------------------------- |
 | `createHttpInterceptor`      | `HttpRequest` | `Promise<HttpResponse<unknown>>`      |
 | `createSSEInterceptor`       | `HttpRequest` | `Promise<EventStreamHandle<unknown>>` |
 | `createWebSocketInterceptor` | `HttpRequest` | `Promise<WebSocketSessionLike>`       |
 
-여러 트랜스포트의 인터셉터를 `withInterceptors(...)`로 함께 등록하세요. 클라이언트는 `kind`를 기준으로 필터링하고 각 트랜스포트 안에서 등록 순서를 보존합니다.
+```typescript twoslash
+import { createHttpInterceptor } from '@defjs/core'
 
-```typescript
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(httpLogger, sseAuth, socketObserver))
-```
-
-## 어니언 순서
-
-요청은 등록 순서로 진행하고 반환은 반대 순서로 풀립니다.
-
-```typescript
+const order: string[] = []
 const first = createHttpInterceptor(async (request, next) => {
   order.push('first:before')
   const response = await next(request)
@@ -38,28 +51,27 @@ const second = createHttpInterceptor(async (request, next) => {
   return response
 })
 
-// first:before -> second:before -> transport
-//               <- second:after <- first:after
+// Request: first:before → second:before → transport
+// Return: second:after → first:after
+void [first, second, order]
 ```
 
-`withInterceptors(...)`를 여러 번 호출하면 뒤에 추가합니다.
+`withInterceptors(...)`를 여러 번 호출하면 추가돼요. 바깥 레이어가 최종 결과를 봐야 할 때는 넓은 관측을 좁은 변경/재시도 밖에 두세요.
 
-```typescript
-createClient(withInterceptors(first), withInterceptors(second, third))
-```
+## 복제하고 요청 헤더 더하기
 
-WebSocket 인터셉터는 `next`를 한 번만 호출할 수 있습니다. session 생성 후 chain이 실패하면 Core는 전달되지 않은 session을 종료한 뒤 원래 interceptor error를 반환합니다. chain이 다른 short-circuit session으로 성공하면 생성된 session을 닫습니다. wrapper는 원래 `closed` Promise를 위임해 연결을 유지합니다.
+들어오는 `HttpRequest`는 체인이 소유한다고 보세요. 바꾸기 전에 `Headers`를 복제하고, 새 요청을 `next`에 넘기세요.
 
-## 요청을 안전하게 복제하기
+```typescript twoslash
+import { createHttpInterceptor } from '@defjs/core'
 
-들어온 요청은 체인이 소유하는 값으로 다루세요. header를 바꾸기 전에 새 `Headers` 객체를 만듭니다.
+function readAccessToken(): string | undefined {
+  return undefined
+}
 
-```typescript
-const auth = createHttpInterceptor((request, next) => {
-  const token = getAccessToken()
-  if (!token) {
-    return next(request)
-  }
+const bearer = createHttpInterceptor((request, next) => {
+  const token = readAccessToken()
+  if (!token) return next(request)
 
   const headers = new Headers(request.headers)
   headers.set('Authorization', `Bearer ${token}`)
@@ -67,20 +79,22 @@ const auth = createHttpInterceptor((request, next) => {
 })
 ```
 
-SSE header에도 같은 패턴을 사용합니다. 브라우저 WebSocket constructor는 임의의 handshake header를 보낼 수 없으므로 WebSocket 인터셉터에서 `request.headers`를 바꿔도 브라우저 연결이 인증되지는 않습니다.
+SSE도 같은 패턴이에요. 브라우저 WebSocket은 임의 handshake 헤더를 추가할 수 없어요 — `request.headers`를 바꿔도 브라우저 소켓을 인증하지 못해요. 프로토콜, URL/query 정책, 또는 서버가 지원하는 handshake를 쓰세요.
 
-HTTP body를 교체할 때는 요청을 spread하고 `body`를 교체하세요. Fetch 경계는 이전 body의 content-type metadata가 새 body에 더 이상 맞지 않음을 감지합니다. 이미 소비된 `ReadableStream` body를 재사용하지 마세요.
+HTTP body를 바꿀 때는 복사한 요청의 `body`를 교체해요. body 값이 바뀌면 Fetch는 낡은 content-type 메타데이터를 무시해요. 이미 소비된 `ReadableStream` body를 재사용하지 마세요.
 
-## Short-circuit
+## 요청 short-circuit하기
 
-인터셉터는 `next`를 건너뛸 수 있지만 해당 트랜스포트가 기대하는 결과 타입을 반환해야 합니다. HTTP에서는 `makeResponse(...)`로 Defjs 래퍼를 만들 수 있습니다.
+`next`를 건너뛸 수 있지만, 기대하는 결과 타입을 돌려줘야 해요. HTTP에서는 `makeResponse(...)`가 호환 래퍼를 만들어요.
 
-```typescript
+```typescript twoslash
 import { createHttpInterceptor, makeResponse } from '@defjs/core'
 
-declare const isMaintenanceWindow: () => boolean
+function isMaintenanceWindow(): boolean {
+  return false
+}
 
-const maintenanceGate = createHttpInterceptor(async (request, next) => {
+const maintenanceGate = createHttpInterceptor(async (_request, next) => {
   if (isMaintenanceWindow()) {
     return makeResponse({
       status: 503,
@@ -89,22 +103,85 @@ const maintenanceGate = createHttpInterceptor(async (request, next) => {
     })
   }
 
-  return next(request)
+  return next(_request)
 })
 ```
 
-일반 커맨드 계층은 이 응답에도 status와 output Struct를 적용합니다. 엔드포인트 계약의 일부라면 해당 status를 선언하세요.
+명령 레이어는 여전히 status로 디스패치해요. 호출자가 타입이 잡힌 `error.data`가 필요하면 `output`에 `503`을 선언해요. SSE나 WebSocket을 short-circuit하려면 완전한 호환 핸들/세션이 필요해요 (종료 프로미스, live 상태, 소유권, `[Symbol.asyncDispose]`). 부분 객체는 유효한 정책이 아니에요. 구조적인 `EventStreamHandle`과 `WebSocketSessionLike` 구현은 이제 컴파일 시 표준 disposer도 필요하고, Defjs 핸들을 받기만 하는 소비자에는 새 런타임 호출 요구가 없어요.
 
-SSE나 WebSocket을 short-circuit하려면 종료 의미까지 갖춘 완전하고 호환되는 핸들 또는 세션이 필요합니다. 보통 synthetic HTTP 응답을 반환하는 것보다 훨씬 많은 작업이 필요합니다.
+## 안전한 읽기 재시도
 
-## 라이브 session getter 보존
+재시도는 동작을 바꿔요. 정책을 좁게 유지하세요 — 이 예는 재생 가능한 `GET` / `HEAD` / `OPTIONS`를 status `0`, `502`, `503`, `504`에 대해 재시도하고, `Retry-After`를 30초로 제한하며, 두 번 재시도하거나 abort에서 멈춰요.
 
-WebSocket 세션을 `{ ...session }`으로 감싸지 마세요. spread는 `state`와 `connection`을 한 번 읽어 라이브 getter를 오래된 값으로 바꿉니다. 모든 member를 명시적으로 위임하세요.
+```typescript twoslash
+import { createHttpInterceptor, type HttpRequest, type HttpResponse } from '@defjs/core'
 
-```typescript
+const retryableMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
+const retryableStatuses = new Set([0, 502, 503, 504])
+
+function isReplayable(request: HttpRequest): boolean {
+  return typeof ReadableStream === 'undefined' || !(request.body instanceof ReadableStream)
+}
+
+function retryAfterMs(response: HttpResponse<unknown>): number {
+  const value = response.headers.get('retry-after')
+  if (!value) return 250
+
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 30_000)
+
+  const date = Date.parse(value)
+  return Number.isNaN(date) ? 250 : Math.min(Math.max(0, date - Date.now()), 30_000)
+}
+
+function waitForRetryAfter(response: HttpResponse<unknown>, signal?: AbortSignal): Promise<void> {
+  const delay = retryAfterMs(response)
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason)
+      return
+    }
+
+    const timer = setTimeout(done, delay)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(signal?.reason)
+    }
+
+    function done() {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
+  })
+}
+
+const retrySafeReads = createHttpInterceptor(async (request, next) => {
+  if (!retryableMethods.has(request.method.toUpperCase()) || !isReplayable(request)) return next(request)
+
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await next(request)
+    if (!retryableStatuses.has(response.status) || attempt >= 2) return response
+    await waitForRetryAfter(response, request.abort)
+  }
+})
+```
+
+던져진 인터셉터/Fetch 오류는 이 루프에서 재시도하지 않아요. status `0`은 Fetch 경계의 전송 실패 응답이에요. `POST` / `PUT` / `PATCH` / `DELETE` 재시도에는 재생 가능한 바이트, 서버 지원, 멱등성 계약, 검토된 status 정책이 필요해요.
+
+이 샘플 밖에서 interceptor가 throw하거나 reject하면 호출자에게 `kind: 'definition'` / `INTERCEPTOR_FAILED`로 반환돼요. [오류](./errors.md)를 참고하세요.
+
+## WebSocket 세션 감싸기
+
+WebSocket 인터셉터는 `next`를 최대 한 번만 호출할 수 있어요. 세션을 감싸면 live getter와 수명 멤버를 명시적으로 위임하세요.
+
+```typescript twoslash
 import { createWebSocketInterceptor } from '@defjs/core'
 
-const wrappedSession = createWebSocketInterceptor(async (request, next) => {
+const preserveSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
@@ -119,8 +196,11 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
     },
     closed: session.closed,
     receive: session.receive,
-    close(code, reason) {
+    close(code?: number, reason?: string) {
       session.close(code, reason)
+    },
+    [Symbol.asyncDispose]() {
+      return session[Symbol.asyncDispose]()
     },
     onRuntimeError(listener) {
       return session.onRuntimeError(listener)
@@ -128,144 +208,36 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
     onStateChange(listener) {
       return session.onStateChange(listener)
     },
-    send(message) {
+    send(message: unknown) {
       session.send(message)
     },
   }
 })
 ```
 
-wrapper는 리소스 소유권도 그대로 보존해야 합니다. 애플리케이션이 의도적으로 정하고 문서화한 동작이 아니라면 `closed`를 교체하거나 `close`를 막거나 incoming iterable을 분리하지 마세요.
+세션을 spread하면 `state` / `connection` / `bufferedAmount`가 한 번만 스냅샷돼요. 소유권을 일부러 바꾸지 않는 한 `closed`, `receive`, `close`, 정확한 `[Symbol.asyncDispose]()` 위임, 리스너 정리를 보존하세요. Wrapper는 관계없는 resolved promise가 아니라 내부 session의 teardown promise를 반환해야 해요. 체인이 전달되지 않는 세션을 만들면 Core가 settle하고 닫아요. 성공한 인터셉터가 다른 세션을 돌려주면 Core는 만든 세션을 버려요.
 
-## 제한적인 로깅
+## Reference
 
-고정된 operation 이름과 검토된 소수의 필드만 사용하세요.
+팩토리는 태그가 달린 전송 값을 돌려줘요.
 
-```typescript
-function timingInterceptor(operation: string) {
-  return createHttpInterceptor(async (request, next) => {
-    const startedAt = performance.now()
-    const response = await next(request)
+- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
+- `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
+- `basicAuthHttpInterceptor(provider, options?)` — HTTP용 Basic 자격 증명
+- `basicAuthSSEInterceptor(provider, options?)` — SSE용 Basic 자격 증명
 
-    console.info('outbound request completed', {
-      durationMs: Math.round(performance.now() - startedAt),
-      operation,
-      status: response.status,
-    })
+`HttpRequest`에는 `endpoint`, `baseEndpoint`, `method`, `headers`, `body`, `queryParams`, `queryString`, `abort`, `timeout`, 정적 `operation`이 있을 수 있어요. 전송 통합 값이지 호출자의 파싱된 입력이 아니에요. 명령 검증, 출력 검증, 도메인 오류 매핑은 각자 레이어에 두세요.
 
-    return response
-  })
-}
-```
+SSE/WebSocket 옵저버는 수명 훅이지 제어 흐름이 아니에요. 소유자가 끝날 때 WebSocket 리스너를 구독 해제하세요. 옵저버 실패는 전송 계약을 따르고, 인터셉터 자체는 throw하거나 reject할 수 있어요.
 
-기본적으로 엔드포인트 URL, query string, header, body, 원본 cause, SSE event ID, WebSocket payload를 로그에 넣지 마세요.
+검토된 허용 목록만 로그하세요. 정적 `operation`, 메서드, status, 기간, 안정적인 오류 코드요. 기본적으로 해석된 URL, query 문자열, 인증 헤더, body, 원본 cause, SSE 이벤트 ID, WebSocket 페이로드는 로그하지 마세요.
 
-## HTTP는 보수적으로 재시도하기
+Basic 자격 증명은 base64이지 암호가 아니에요. TLS를 쓰고, 서버에서는 자격 증명 provider를 요청 범위로 두고, 생성된 헤더를 절대 로그하지 마세요. 기본 인코더는 `globalThis.btoa`예요. 런타임에 `btoa`가 없거나 검토된 인코더가 필요하면 `BasicAuthInterceptorOptions.encode`를 넘기세요.
 
-재시도는 애플리케이션 동작을 바꿉니다. 다음 예제는 `GET`, `HEAD`, `OPTIONS`만 허용하고 status `0`, `502`, `503`, `504`만 재시도합니다. `Retry-After`를 따르고, abort되면 바로 멈추며, stream body는 거부합니다.
+인터셉터는 전송 정책을 강제할 수 있어요. 입력 검증, 인가, 리소스 소유권은 아니에요. 장기 작업을 시작한 코드는 `await using`을 쓰거나 수동으로 닫고 종료 프로미스를 await해요. 일반 HTTP는 request-scoped이고 timeout / `AbortSignal`로 관리하므로 `Client`는 `AsyncDisposable`이 아니에요.
 
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpResponse } from '@defjs/core'
+## 관련 레시피
 
-const RETRYABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
-const RETRYABLE_STATUSES = new Set([0, 502, 503, 504])
-
-function isReplayable(request: HttpRequest): boolean {
-  return !(typeof ReadableStream !== 'undefined' && request.body instanceof ReadableStream)
-}
-
-function retryAfterMs(response: HttpResponse<unknown>): number | undefined {
-  const value = response.headers.get('retry-after')
-  if (!value) {
-    return undefined
-  }
-
-  const seconds = Number(value)
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return seconds * 1_000
-  }
-
-  const at = Date.parse(value)
-  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
-}
-
-async function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    throw signal.reason
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(finish, ms)
-
-    function finish() {
-      signal?.removeEventListener('abort', abort)
-      resolve()
-    }
-
-    function abort() {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', abort)
-      reject(signal?.reason)
-    }
-
-    signal?.addEventListener('abort', abort, { once: true })
-    if (signal?.aborted) {
-      abort()
-    }
-  })
-}
-
-function retrySafeHttp(maxRetries = 2) {
-  return createHttpInterceptor(async (request, next) => {
-    if (!RETRYABLE_METHODS.has(request.method.toUpperCase()) || !isReplayable(request)) {
-      return next(request)
-    }
-
-    for (let retry = 0; ; retry += 1) {
-      const response = await next(request)
-      if (!RETRYABLE_STATUSES.has(response.status) || retry >= maxRetries) {
-        return response
-      }
-
-      const fallback = Math.min(250 * 2 ** retry, 5_000)
-      const delay = Math.min(retryAfterMs(response) ?? fallback, 30_000)
-      await abortableWait(delay, request.abort)
-    }
-  })
-}
-```
-
-이 인터셉터는 throw된 인터셉터 오류를 안전하게 분류할 수 없어 재시도하지 않습니다. status `0`은 Defjs Fetch 경계의 트랜스포트 실패 래퍼입니다.
-
-별다른 검토 없이 write method까지 허용 범위를 넓히지 마세요. `POST`, `PUT`, `PATCH`, `DELETE` 재시도에는 애플리케이션 수준 idempotency 계약, replay 가능한 body, 서버 지원, 검토된 status 정책이 필요합니다.
-
-## Basic 인증
-
-root entry는 `basicAuthHttpInterceptor(...)`와 `basicAuthSSEInterceptor(...)`를 export합니다.
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(
-    basicAuthHttpInterceptor(() => credentials),
-    basicAuthSSEInterceptor(() => credentials),
-  ),
-)
-```
-
-Basic 자격 증명은 base64로 인코딩될 뿐 암호화되지 않습니다. TLS를 사용하세요. 기본 encoder는 `globalThis.btoa`를 사용하는데, 이 함수가 없을 수 있고 제한된 문자 범위만 받습니다. 런타임에 `btoa`가 없거나 자격 증명에 검토된 UTF-8/base64 구현이 필요하면 `options.encode`를 전달하세요.
-
-credential provider는 요청이 인터셉터를 통과할 때 실행됩니다. 서버 자격 증명은 요청 범위로 유지하고 생성된 header를 로그에 남기지 마세요.
-
-## Observer와 callback의 안전성
-
-SSE와 WebSocket 인터셉터는 반환된 핸들에 생명주기 observer를 붙일 수 있습니다. 소유 범위가 끝나면 WebSocket listener를 구독 해제하세요. WebSocket은 state listener 실패를 runtime-error observer에 알리고, 그 observer의 실패를 `reportError`로 전달하며, reconnect predicate throw를 최종 session error로 처리합니다.
-
-인터셉터는 throw하거나 reject할 수 있습니다. high-level 트랜스포트가 일부 실패를 `RequestError`로 정규화할 수 있지만, 인터셉터 코드는 모든 경우에 promise가 절대 reject하지 않는다고 가정하면 안 됩니다.
-
-## 다음 단계
-
-- [클라이언트](/ko-KR/core/client)에서는 등록과 옵션 조합을 설명합니다.
-- [HTTP](/ko-KR/core/http)에서는 Fetch 래퍼와 status 0 동작을 설명합니다.
-- [SSE](/ko-KR/core/sse)와 [WebSocket](/ko-KR/core/web-socket)에서는 트랜스포트 생명주기를 설명합니다.
+- [로컬 Fetch 핸들로 테스트하기](../recipes/test-with-handle.md)
+- [HTTP 호출 취소하기](../recipes/cancel-http.md)

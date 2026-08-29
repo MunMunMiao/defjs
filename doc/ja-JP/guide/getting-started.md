@@ -1,54 +1,64 @@
 ---
-title: はじめに
-description: Defjs をインストールし、型付き HTTP エンドポイントを定義して、アプリケーションから呼び出します。
+title: 'はじめに: 1 つの HTTP リクエスト'
+description: GET /users/:id を定義し、ローカル Fetch ハンドルで動かし、そのあと実 API に向けます。
 ---
 
-# はじめに
+# はじめに: 1 つの HTTP リクエスト
 
-Defjs を使うと、アプリケーションが呼び出す API 契約を一度定義し、型付き入力、実行時デコード、明示的なトランスポート結果とともに再利用できます。
+`GET /users/:id` を定義し、明示的なクライアント経由で実行して、`200` と宣言済みの `404` の両方をデコードします。ローカルハンドラで最初の実行はオフラインのままにしておけます。実サービスに差し替えてもコマンドは同じです。
 
-## インストール
+## Step 1 — インストール
 
-アプリケーションに Core パッケージを追加します。
+`@defjs/core` は ESM で、Node.js 22+、Bun、Deno が必要です。Node は `.ts` をそのまま実行します。package.json に `"type": "module"` を書いてください。ブラウザーでもバンドラーと Fetch は要ります。
+
+::: tabs
+== bun
+
+```sh
+bun add @defjs/core
+```
+
+== npm
+
+```sh
+npm install @defjs/core
+```
+
+== pnpm
 
 ```sh
 pnpm add @defjs/core
 ```
 
-別のパッケージマネージャーを使うプロジェクトでは、npm、Yarn、Bun の同等コマンドを使ってください。`@defjs/core` は ESM です。Node.js で実行する場合、現在のパッケージメタデータは Node 22 以降を要求します。
-
-パッケージ化した ESM HTTP consumer は Node.js 22、24、26、Bun 1.3.14、Deno 2.9.5 で実行確認済みです。アプリケーションのコンパイル後は、次の形式のコマンドで実行します。
+== yarn
 
 ```sh
-node dist/index.js
-bun run dist/index.js
-deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+yarn add @defjs/core
 ```
 
-Deno コマンドは `node_modules` にインストール済みのパッケージを使います。ネットワーク権限は、アプリケーションが必要とする正確な API ホストに置き換えてください。Bun と Deno の確認範囲は文書化された HTTP 部分であり、すべてのプラットフォーム API や transport ではありません。ブラウザ build は通常の bundler と、プラットフォームに必要な Fetch および WebSocket 機能を使います。
+== deno
 
-runtime 間のテストでは、`error.kind` や `error.code` など Defjs の安定したフィールドだけを検証してください。エンジン固有のネイティブ `Error` メッセージや JSON parse の文言には依存しないでください。Node.js、Bun、Deno では詳細の形式が異なる場合があります。
+```sh
+deno add npm:@defjs/core
+```
 
-アプリケーションで必要なアダプターだけを追加します。
-
-| 構成                     | パッケージ                                                                                |
-| ------------------------ | ----------------------------------------------------------------------------------------- |
-| React 18+                | `@defjs/core`、`@defjs/react`、`react`                                                    |
-| Vue 3+                   | `@defjs/core`、`@defjs/vue`、`vue`                                                        |
-| サーバー側 OpenTelemetry | `@defjs/core`、`@defjs/opentelemetry-server`、`@opentelemetry/api`、`@opentelemetry/core` |
-
-::: tip インストールしたバージョンに合うドキュメントを使う
-このページは、このドキュメント版の API を説明しています。アプリケーションに入っているバージョンを確認してください。export や option が異なる場合は、別バージョンの例を混ぜず、そのバージョンのドキュメントとリリースノートを使います。
 :::
 
-## 最初のリクエストを定義する
+## Step 2 — リクエストを定義する
 
-API が `GET /users/:id` を提供しているとします。ベース URL とレスポンス Struct は、自分のサービスの実際の契約に置き換えてください。
+`src/get-user.ts` を作ります。`struct.request(...)` は path の値を query・headers・body から分けておきます。
 
-```typescript
-import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+```ts get-user.ts
+import { defineRequest, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
 
 const getUser = defineRequest({
   method: 'GET',
@@ -57,57 +67,161 @@ const getUser = defineRequest({
     path: struct.object({ id: struct.number() }),
   }),
   output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
   ],
 })
 
-async function loadUser(id: number) {
-  const [error, user, response] = await client.execute(getUser({ path: { id } }))
+const command = getUser({ path: { id: 7 } })
+void command
+```
 
-  if (error) {
-    console.error(error.kind, error.code)
-    return
+`defineRequest(...)` はビルダーを返します。`getUser(...)` を呼ぶと、`client.execute(...)` に渡す不透明なコマンドができます。
+
+## Step 3 — ローカルで実行する
+
+クライアントローカルの Fetch ハンドルを繋ぎ、ネットワークなしで動かします。Defjs はそれでも入力検証、`Request` の組み立て、status による振り分け、ボディのパースを行います。
+
+```ts get-user.ts
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+  ],
+})
+
+const handle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
   }
 
-  console.log(user.name, response.status)
+  return Response.json({ message: 'User not found' }, { status: 404 })
 }
 
-void loadUser(7)
-```
+const client = createClient(withEndpoint('https://api.example.test'), withHTTPHandle(handle))
 
-`defineRequest(...)` は**コマンドビルダー**を返します。`getUser(...)` を呼び出すと、エンドポイント定義と呼び出し入力を保持する**コマンド**が作られます。続いて `client.execute(...)` が、HTTP 用の 3 要素タプルを返します。
+const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }), {
+  timeout: 5_000,
+})
 
-```typescript
-;[error, result, response]
-```
-
-成功時は `error` が `null`、`result` がデコード済みの出力データ、`response` が Defjs の `HttpResponse` ラッパーです。失敗時は `result` が `undefined` になります。レスポンスを受信する前に失敗した場合は、レスポンスラッパーも `undefined` です。
-
-### ステータスリテラルは自動的に保持されます
-
-`defineRequest(...)` は `output` に const generic を使うため、inline の配列要素とグループ化したステータス配列はリテラル値を自動的に保持します。推論された 2xx 成功ボディと 2xx 以外のエラーボディを分けるために `as const` は不要です。
-
-オブジェクト形式の `output` も使えます。
-
-```typescript
-const output = {
-  '200': struct.object({ id: struct.number() }),
-  '404': struct.object({ message: struct.string() }),
+if (error) {
+  if (error.kind === 'http' && error.status === 404) {
+    console.log(error.data.message)
+  } else {
+    console.error(error.kind, error.code)
+  }
+} else {
+  console.log(`Loaded ${user.name} from ${response.status}`)
 }
 ```
 
-## アプリケーションに組み込む
+実行します。
 
-エンドポイント定義は、サービス API を表すモジュールに置きます。そのコマンドビルダーをコンポーネント、route handler、job、store から再利用してください。endpoint、認証情報、インターセプター、ライフサイクルを管理する境界でクライアントを作ります。
+::: tabs
+== bun
 
-- ブラウザーアプリケーションでは、通常 1 つのクライアントを共有できます。
-- サーバーレンダリングでは、ヘッダー、Cookie、ユーザー、テナントがリクエストごとに変わる場合、リクエストスコープのクライアントを作ります。
-- SSE や WebSocket を開くコードは、そのリソースの消費とクローズも担当します。
+```sh
+bun src/get-user.ts
+```
 
-## 次に読む
+== npm
 
-- [Commands](/ja-JP/core/commands) — リクエストの自動マッピングとカスタムのスキーマに束縛されたプロジェクション
-- [Errors](/ja-JP/core/errors) — 3 種類のトランスポートタプルと `RequestError` ユニオン
-- [HTTP](/ja-JP/core/http) — URL 解決、リクエストボディ、出力デコード、キャンセル、XSRF
-- [Examples](/ja-JP/guide/examples) — 各契約を組み合わせ、アプリケーション側で所有する実用例
+```sh
+node src/get-user.ts
+```
+
+== pnpm
+
+```sh
+node src/get-user.ts
+```
+
+== yarn
+
+```sh
+node src/get-user.ts
+```
+
+== deno
+
+```sh
+deno run src/get-user.ts
+```
+
+:::
+
+```txt
+Loaded Ada from 200
+```
+
+いないユーザーも試してみましょう — path の id を `8` にしてもう一度実行します。
+
+```txt
+User not found
+```
+
+成功時は `error` が `null`、`user` が `200` の Struct 出力、`response` が `HttpResponse` です。宣言済み `404` では `error.kind` が `'http'`、`error.status` が `404`、`error.data` は型付きの `NotFound` です。失敗時、タプルの 2 番目は `undefined` です。
+
+## Step 4 — 実 API に向ける
+
+サービスが `GET /v1/users/:id` とそのボディを実装しているなら、`withHTTPHandle(...)` を外して本当のベース URL を設定します。
+
+```ts
+import { createClient, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const localHandle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
+  }
+
+  return Response.json({ message: 'User not found' }, { status: 404 })
+}
+
+const localClient = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(localHandle))
+const realClient = createClient(withEndpoint('https://api.example.com/v1'))
+void localClient
+void realClient
+```
+
+同じコマンド。違うクライアント。
+
+## 結果が違うとき
+
+- 悪い入力 / 無効な build / 衝突するキャンセル options → `REQUEST_VALIDATION_FAILED`
+- 宣言済みの non-2xx → 型付き `error.data` 付きの `HTTP_STATUS`
+- 宣言済みボディがデコードできない → `RESPONSE_VALIDATION_FAILED`
+- 宣言のない status → `UNDECLARED_STATUS`（ボディデコードの前）
+- Fetch 失敗 / キャンセル / タイムアウト → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+
+`timeout` は `1..2_147_483_647` の正の安全な整数である必要があります。`abort` と `timeout` を同時に渡さないでください。`signal` はどちらとも組み合わせられます。キャンセルは呼び出し側が何を観測したかを伝えます — サーバー側の書き込みがコミットしたかどうかではありません。
+
+## 次のレシピ
+
+- [宣言済み 404 付きの GET](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [HTTP 呼び出しをキャンセルする](../recipes/cancel-http.md)
+- [SSE ストリームを消費する](../recipes/consume-sse.md)
+- [WebSocket セッションを開く](../recipes/websocket-session.md)
+- [ローカル Fetch ハンドルでテストする](../recipes/test-with-handle.md)

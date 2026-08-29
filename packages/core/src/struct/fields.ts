@@ -9,10 +9,6 @@ export interface ResolvedStructField {
   readonly wireKey: string
 }
 
-export function getWireKey(fieldKey: string, alias: string | undefined): string {
-  return alias ?? fieldKey
-}
-
 export function resolveStructFields(struct: RuntimeStruct, definition: ObjectDefinition): readonly ResolvedStructField[] {
   const cached = definition.cache.fields
   if (cached) {
@@ -28,7 +24,7 @@ export function resolveStructFields(struct: RuntimeStruct, definition: ObjectDef
         alias,
         key,
         struct: runtime,
-        wireKey: getWireKey(key, alias),
+        wireKey: alias ?? key,
       })
     }),
   )

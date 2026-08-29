@@ -1,54 +1,64 @@
 ---
-title: 快速上手
-description: 安裝 Defjs、定義 typed HTTP endpoint、建立 client，再由自己的應用程式呼叫。
+title: 'Getting Started: 一個 HTTP request'
+description: Define GET /users/:id，用 local Fetch handle run 一次，之後再指去真實 API。
 ---
 
-# 快速上手
+# Getting Started: 一個 HTTP request
 
-Defjs 讓應用程式只需定義一次 API contract，之後便可重用同一套 typed input、runtime decoding 同清楚的 transport result。
+你會 define `GET /users/:id`，用明確嘅 client 去 execute，同時 decode `200` 同 declared `404`。Local handler 令第一次 run 可以 offline；換真實 service 時 command 唔使改。
 
-## 安裝
+## Step 1 — Install
 
-在應用程式加入 core package：
+`@defjs/core` 係 ESM，要 Node.js 22+、Bun 或 Deno。Node 直接 run `.ts`，package.json 寫 `"type": "module"`。Browser 仍然要你自己嘅 bundler 同 Fetch。
+
+::: tabs
+== bun
+
+```sh
+bun add @defjs/core
+```
+
+== npm
+
+```sh
+npm install @defjs/core
+```
+
+== pnpm
 
 ```sh
 pnpm add @defjs/core
 ```
 
-如果 project 使用其他 package manager，請改用相應的 npm、Yarn 或 Bun 指令。`@defjs/core` 是 ESM。在 Node.js 執行時，目前 package metadata 要求 Node 22 或以上。
-
-打包後的 ESM HTTP consumer 已在 Node.js 22、24、26、Bun 1.3.14 及 Deno 2.9.5 完成實測。編譯應用程式後，相應指令形式如下：
+== yarn
 
 ```sh
-node dist/index.js
-bun run dist/index.js
-deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+yarn add @defjs/core
 ```
 
-Deno 指令使用 `node_modules` 中已安裝的 package；請把 network permission 換成應用程式實際需要的精確 API host。Bun 及 Deno 實測只涵蓋文件所述 HTTP 範圍，並不代表所有 platform API 或 transport。Browser build 使用一般 bundler，以及平台提供的必要 Fetch 與 WebSocket 能力。
+== deno
 
-跨 runtime 測試只應 assert `error.kind`、`error.code` 等穩定 Defjs field。不要依賴特定 engine 的 native `Error` message 或 JSON parse 文本；Node.js、Bun 及 Deno 可能採用不同格式。
+```sh
+deno add npm:@defjs/core
+```
 
-只在應用程式真正需要時安裝 adapter：
-
-| 應用場景                  | Packages                                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------- |
-| React 18+                 | `@defjs/core`、`@defjs/react`、`react`                                                    |
-| Vue 3+                    | `@defjs/core`、`@defjs/vue`、`vue`                                                        |
-| Server-side OpenTelemetry | `@defjs/core`、`@defjs/opentelemetry-server`、`@opentelemetry/api`、`@opentelemetry/core` |
-
-::: tip 文件要配合已安裝版本
-這些頁面描述目前文件版本對應的 API。先確認應用程式實際安裝的版本。如果 export 或 option 不同，請查看該版本的文件及 release notes，不要混用不同版本的範例。
 :::
 
-## 定義第一個 Request
+## Step 2 — Define 個 request
 
-假設你的 API 提供 `GET /users/:id`。請把 base URL 同 response Struct 換成自己 service 的實際 contract。
+Create `src/get-user.ts`。`struct.request(...)` 會將 path values 同 query、headers、body 分開。
 
-```typescript
-import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+```ts get-user.ts
+import { defineRequest, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
 
 const getUser = defineRequest({
   method: 'GET',
@@ -57,57 +67,161 @@ const getUser = defineRequest({
     path: struct.object({ id: struct.number() }),
   }),
   output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
   ],
 })
 
-async function loadUser(id: number) {
-  const [error, user, response] = await client.execute(getUser({ path: { id } }))
+const command = getUser({ path: { id: 7 } })
+void command
+```
 
-  if (error) {
-    console.error(error.kind, error.code)
-    return
+`defineRequest(...)` return 嘅係 builder。Call `getUser(...)` 會 build 出你之後傳去 `client.execute(...)` 嘅 opaque command。
+
+## Step 3 — 喺本機 execute
+
+Wire 一個 client-local Fetch handle，等你可以唔使 network 都 run 到。Defjs 仍然會 validate input、build `Request`、按 status dispatch，再 parse body。
+
+```ts get-user.ts
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+  ],
+})
+
+const handle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
   }
 
-  console.log(user.name, response.status)
+  return Response.json({ message: 'User not found' }, { status: 404 })
 }
 
-void loadUser(7)
-```
+const client = createClient(withEndpoint('https://api.example.test'), withHTTPHandle(handle))
 
-`defineRequest(...)` 回傳一個 **command builder**。呼叫 `getUser(...)` 會建立一個 **command**，內含 endpoint 定義和這次呼叫的 input。之後，`client.execute(...)` 會回傳 HTTP 三項 tuple：
+const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }), {
+  timeout: 5_000,
+})
 
-```typescript
-;[error, result, response]
-```
-
-成功時，`error` 是 `null`，`result` 是解碼後的 output data，`response` 是 Defjs `HttpResponse` wrapper。失敗時，`result` 是 `undefined`；如果未收到 response，response wrapper 亦是 `undefined`。
-
-### 自動保留 status literal
-
-`defineRequest(...)` 對 `output` 使用 const generic，因此 inline array item 及分組 status array 會自動保留 literal value。要區分推斷出的 2xx success body 與非 2xx error body，不再需要 `as const`。
-
-亦可使用 object 形式的 `output`：
-
-```typescript
-const output = {
-  '200': struct.object({ id: struct.number() }),
-  '404': struct.object({ message: struct.string() }),
+if (error) {
+  if (error.kind === 'http' && error.status === 404) {
+    console.log(error.data.message)
+  } else {
+    console.error(error.kind, error.code)
+  }
+} else {
+  console.log(`Loaded ${user.name} from ${response.status}`)
 }
 ```
 
-## 接入你的應用程式
+Run 佢：
 
-把 endpoint definition 放在描述 service API 的 module，再由 component、route handler、job 或 store 重用 command builder。請在真正擁有 endpoint、credentials、interceptors 同 lifecycle 的 boundary 建立 client：
+::: tabs
+== bun
 
-- Browser application 通常可以共用一個 client；
-- Server rendering 中，如果 headers、cookies、user 或 tenant 會隨 request 改變，應為每個 request 建立 client；
-- 開啟 SSE 或 WebSocket resource 的 code，亦要負責 consume 同 close。
+```sh
+bun src/get-user.ts
+```
 
-## 下一步
+== npm
 
-- [Commands](/zh-Hant-HK/core/commands)：自動 request mapping 與自訂 schema-bound projection。
-- [Errors](/zh-Hant-HK/core/errors)：三種 transport tuple 與 `RequestError` union。
-- [HTTP](/zh-Hant-HK/core/http)：URL 解析、request body、output 解碼、取消與 XSRF 行為。
-- [範例](/zh-Hant-HK/guide/examples)：把這些 contract 組合成由應用程式管理的實作範例。
+```sh
+node src/get-user.ts
+```
+
+== pnpm
+
+```sh
+node src/get-user.ts
+```
+
+== yarn
+
+```sh
+node src/get-user.ts
+```
+
+== deno
+
+```sh
+deno run src/get-user.ts
+```
+
+:::
+
+```txt
+Loaded Ada from 200
+```
+
+試吓 missing user — 將 path id 改做 `8`，再 run 一次：
+
+```txt
+User not found
+```
+
+Success 時：`error` 係 `null`，`user` 係 `200` Struct output，`response` 係 `HttpResponse`。Declared `404`：`error.kind` 係 `'http'`，`error.status` 係 `404`，`error.data` 有 typed `NotFound`。失敗時 tuple 第二項係 `undefined`。
+
+## Step 4 — 指去真實 API
+
+Service 已經實作 `GET /v1/users/:id` 同嗰啲 bodies 之後，掉走 `withHTTPHandle(...)`，再 set 真實 base URL。
+
+```ts
+import { createClient, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const localHandle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
+  }
+
+  return Response.json({ message: 'User not found' }, { status: 404 })
+}
+
+const localClient = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(localHandle))
+const realClient = createClient(withEndpoint('https://api.example.com/v1'))
+void localClient
+void realClient
+```
+
+同一個 command。唔同 client。
+
+## Result 唔同時
+
+- Bad input / invalid build / 衝突嘅 cancel options → `REQUEST_VALIDATION_FAILED`
+- Declared non-2xx → `HTTP_STATUS`，連 typed `error.data`
+- Declared body decode 唔到 → `RESPONSE_VALIDATION_FAILED`
+- Status 冇 declare → `UNDECLARED_STATUS`（喺 body decode 之前）
+- Fetch fail / cancel / timeout → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+
+`timeout` 一定要係 `1..2_147_483_647` 入面嘅 positive safe integer。唔好同時傳 `abort` 同 `timeout`；`signal` 可以同其中一個一齊用。Cancellation 淨係話你 caller 見到咩 — 唔證明 server write 有冇 commit。
+
+## Next recipes
+
+- [GET with a declared 404](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [Cancel an HTTP call](../recipes/cancel-http.md)
+- [Consume an SSE stream](../recipes/consume-sse.md)
+- [Open a WebSocket session](../recipes/websocket-session.md)
+- [Test with a local Fetch handle](../recipes/test-with-handle.md)

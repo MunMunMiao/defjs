@@ -1,72 +1,75 @@
 ---
 title: HTTP
-description: HTTP URL とボディの構築、レスポンス Struct の選択、キャンセル、認証情報、XSRF、Fetch 境界を説明します。
+description: リクエストを定義して実行し、status で分岐し、signal または timeout でキャンセルします。
 ---
 
 # HTTP
 
-`defineRequest(...)` は HTTP コマンドビルダーを作ります。定義と入力プロジェクションは [Commands](/ja-JP/core/commands) を参照してください。このページでは HTTP の通信形式とライフサイクルを扱います。
+定義 → 実行 → タプルで分岐 → 画面が消えたらキャンセル。それが HTTP のループ全体です。
 
-## HTTP 専用 client entry
+## Basic Setup
 
-`@defjs/core/http` は追加の HTTP 専用 entry point です。HTTP command と HTTP 対応 client option とともに `createHttpClient(...)` を export します。
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-```typescript
-import { createHttpClient, defineRequest, struct, withEndpoint } from '@defjs/core/http'
-
-const httpClient = createHttpClient(withEndpoint('https://api.example.com'))
-```
-
-consumer が意図的に HTTP だけをサポートする場合に使います。root entry を置き換えるものではありません。`@defjs/core` の `createClient(...)` は引き続き HTTP、SSE、WebSocket command 用の client です。
-
-## URL の構築
-
-`withEndpoint(...)` には絶対ベース URL が必要です。そのパスはディレクトリとして保持されます。
-
-```typescript
-const client = createClient(withEndpoint('https://api.example.com/v1'))
-
-const listUsers = defineRequest({
+const client = createClient(withEndpoint('https://api.example.com'))
+const getUser = defineRequest({
   method: 'GET',
-  path: '/users',
+  path: '/users/:id',
+  input: struct.request({ path: struct.object({ id: struct.number() }) }),
+  output: [
+    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
+    { status: 404, body: struct.object({ message: struct.string() }) },
+  ],
 })
 
-// Resolves to https://api.example.com/v1/users
+const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
+if (error?.kind === 'http' && error.status === 404) {
+  console.log(error.data.message)
+} else if (!error) {
+  console.log(data.name, response.status)
+}
 ```
 
-ベースパスの末尾にスラッシュがなければ追加されます。ベースエンドポイントに含まれるクエリとハッシュは破棄されます。
+## URL を解決する
 
-エンドポイントの `path` は相対的な契約パスです。先頭のスラッシュは受け付けますが、解決前に取り除くためベースディレクトリを置き換えません。ランタイムは次の値を拒否します。
+`withEndpoint(...)` には有効な絶対 URL が必要です。エンドポイントの pathname はディレクトリとして残り、query と hash はコマンド解決の前に捨てられます。
 
-- 絶対 URL とプロトコル相対 URL
-- `?` を含むパス
-- `#` を含むパス
+```ts
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-パスプレースホルダーには `:name` を使います。
-
-```typescript
+const client = createClient(withEndpoint('https://api.example.com/v1'))
 const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({
     path: struct.object({ id: struct.string() }),
+    query: struct.object({ fields: struct.string().optional() }),
   }),
 })
+
+const command = getUser({ path: { id: 'a/b' }, query: { fields: 'name' } })
+void client.execute(command)
+// → https://api.example.com/v1/users/a%2Fb?fields=name
 ```
 
-プレースホルダーには未加工の値を渡します。Defjs は各スカラーを文字列化し、空の値と値全体が `.` または `..` の場合を拒否してから、置換前に `encodeURIComponent` を正確に 1 回適用します。`/`、`?`、`#`、`%`、空白、Unicode は 1 つのパスセグメント内に保たれます。値を事前にエンコードしないでください。`%` は未加工の入力として扱われ、`%25` にエンコードされます。
+path のプレースホルダは生のスカラーで、ちょうど一度エンコードされます。空の値と `.` / `..` は拒否されます。1 つのプレースホルダ内のスラッシュ、`?`、`#`、`%`、空白、Unicode は、1 つのエンコード済みセグメントのままです — 事前エンコードしないでください。
 
-## リクエストのエンコーディング
+定義の path に `?` や `#` は入れられず、絶対やプロトコル相対にもできません。デフォルトの query エンコーダはスカラーとスカラーの配列を受け付けます。入れ子/複雑な query 値は `withQueryParamsSerializer(...)` が要り、なければ組み立てに失敗します。
 
-通信形式へ直接割り当てる場合は `struct.request(...)` を使います。
+## 入力をエンコードする
 
-```typescript
-const createUser = defineRequest({
-  method: 'POST',
-  path: '/organizations/:organizationId/users',
+`struct.request(...)` は path、query、headers、body を分けておきます。ボディラッパーがコーデックと content type を選びます。
+
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
+const updateUser = defineRequest({
+  method: 'PATCH',
+  path: '/users/:id',
   input: struct.request({
-    path: struct.object({ organizationId: struct.string() }),
-    query: struct.object({ notify: struct.boolean().optional() }),
+    path: struct.object({ id: struct.number() }),
     headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
     body: struct.json(
       struct.object({
@@ -74,163 +77,96 @@ const createUser = defineRequest({
       }),
     ),
   }),
+  output: {
+    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
+  },
 })
-```
 
-ボディ Struct がエンコーディングとデフォルトの Content-Type を決めます。
-
-| ボディ Struct              | 通信上のボディ        | デフォルトの `Content-Type`                        |
-| -------------------------- | --------------------- | -------------------------------------------------- |
-| `struct.json(inner)`       | `JSON.stringify(...)` | `application/json`                                 |
-| `struct.text()`            | 文字列                | `text/plain;charset=UTF-8`                         |
-| `struct.urlencoded(shape)` | `URLSearchParams`     | `application/x-www-form-urlencoded;charset=UTF-8`  |
-| `struct.formData(shape)`   | `FormData`            | boundary を含めてプラットフォームが設定            |
-| `struct.blob()`            | `Blob`                | Blob タイプ、未設定なら `application/octet-stream` |
-| `struct.arrayBuffer()`     | `ArrayBuffer`         | `application/octet-stream`                         |
-
-カスタム `build` では、対応する HTTP ビルダーメソッドを使えます。setter メソッドはリクエストの該当部分を置き換えます。`addHeaders`、`addFormData`、`addFormUrlEncoded` は現在値へ追加します。すべての値はスキーマに束縛されたプロジェクションに由来する必要があります。
-
-### クエリ値
-
-デフォルトのクエリエンコーダーが受け付けるのは、フラットなスカラー値とスカラー配列です。入れ子のオブジェクトはリクエスト構築中に失敗します。
-
-`withQueryParamsSerializer((params, rawParams) => string)` は、受け付け済みのフラットな値をどう文字列化するか変更できます。`URLSearchParams` のビューと、エンコード済みのフラットなレコードを受け取ります。入れ子のクエリオブジェクトを有効にはできません。シリアライザーが呼ばれる前に拒否されます。
-
-エイリアスは送信時のクエリ、パス、ヘッダーのキーになります。呼び出し側は引き続き Struct の論理フィールド名を使います。
-
-## ステータスと出力デコード
-
-`output` はステータスコードをレスポンス Struct に対応させます。
-
-```typescript
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
+const [error, user] = await client.execute(
+  updateUser({
+    path: { id: 7 },
+    headers: { requestId: 'request-42' },
+    body: { displayName: 'Ada' },
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-    { status: 409, body: struct.object({ conflict: struct.string() }) },
-  ],
-})
+)
+if (error) console.error(error.code)
+else console.log(user.id)
 ```
 
-ランタイムはステータスが完全一致する Struct を選びます。`output` が宣言されている場合、未対応のステータスはすべて `UNDECLARED_STATUS` になります。宣言済み 2xx ボディが成功データのユニオンです。`defineRequest(...)` は const generic を使うため、inline のステータスは `as const` なしでリテラルを保持します。HTTP エラーのユニオンでは、2xx 以外の各ステータスと対応する `error.data` ボディの関連も保持されます。
+エイリアスは送信ワイヤのキーだけ書き換えます。パース済みの値とコマンド入力は論理名のままです。
 
-```typescript
-const [statusError] = await client.execute(getUser({ path: { id: 42 } }))
+| ラッパー                   | 実行時ボディ      | デフォルト content type                                                   |
+| -------------------------- | ----------------- | ------------------------------------------------------------------------- |
+| `struct.json(inner)`       | JSON 文字列       | `application/json`                                                        |
+| `struct.text()`            | string            | `text/plain;charset=UTF-8`                                                |
+| `struct.urlencoded(shape)` | `URLSearchParams` | `application/x-www-form-urlencoded;charset=UTF-8`                         |
+| `struct.formData(shape)`   | `FormData`        | プラットフォームの multipart boundary。Defjs は古い `Content-Type` を消す |
+| `struct.blob()`            | `Blob`            | Blob の type、または `application/octet-stream`                           |
+| `struct.arrayBuffer()`     | `ArrayBuffer`     | `application/octet-stream`                                                |
 
-if (statusError?.kind === 'http') {
-  if (statusError.status === 404) {
-    console.error(statusError.data.message)
-  } else {
-    // status は 409、data は宣言済みの conflict ボディです。
-    console.error(statusError.data.conflict)
-  }
+カスタム `build` も同じ location/codec の setter を公開します。最後のボディ書き込みが勝ちます（値 + content-type メタデータ）。高レベルコマンドは任意オブジェクトをボディに変えません — ラッパーを宣言するか、対応する setter を使ってください。
+
+## status で振り分ける
+
+`output` は status → Struct のマップ、または `{ status, body }[]` です。`output` があり `responseType` がないとき、表現のデフォルトは `json` です。明示タイプは `json`、`text`、`blob`、`arraybuffer`。
+
+処理順:
+
+1. status `0` → トランスポートエラー。
+2. `output` なし → 2xx は `data === undefined` で成功。non-2xx → `error.data === undefined` の `HTTP_STATUS`。ボディはデコードされない。
+3. `output` ありなら、厳密に宣言された status がその Struct を選ぶ。配列形では、後の一致が先のグループ一致を上書き。
+4. 未宣言 status → ボディデコードの**前**に `UNDECLARED_STATUS`。
+5. 表現失敗 → `RESPONSE_VALIDATION_FAILED`。部分データなし。
+6. デコード済みの宣言 2xx → 結果。デコード済みの宣言 non-2xx → `HTTP_STATUS` 上の型付き `error.data`。
+
+`HttpResponse` は `url`、`status`、`statusText`、`headers`、`body`、`error`、`ok` を持ちます。`ok` は `200 <= status < 300` だけを意味します。Defjs の値であり、ネイティブ `Response` ではありません。`output` なしでは `responseType` は使えません。
+
+## 作業をキャンセルする
+
+実行 options は `signal` に加えて `abort` か `timeout` のどちらかを取ります。**`abort` と `timeout` は排他です。** `signal` はどちらとも組み合わせられます。
+
+```ts
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
+const command = defineRequest({ method: 'GET', path: '/report' })()
+const controller = new AbortController()
+const pending = client.execute(command, { signal: controller.signal, timeout: 5_000 })
+
+controller.abort('screen closed')
+const [error] = await pending
+if (error?.kind === 'transport' && error.code === 'ABORTED') {
+  console.log('caller cancellation')
 }
 ```
 
-`response.ok` が示すのは `status >= 200 && status < 300` だけです。出力デコード、アプリケーション検証、認可の成功を意味しません。
+`timeout` は `1..2_147_483_647` の正の安全な整数である必要があります。認識されたキャンセル → `ABORTED`。実行タイムアウト → `TIMEOUT`。その他の Fetch/インターセプター失敗 → `NETWORK_ERROR`。サーバーが書き込みを受け付けたあとのキャンセルは、書き込みがロールバックされたことの**証明にはなりません**。
 
-`output` があり `responseType` を省略した場合、レスポンスはデフォルトで `json` としてパースされます。明示できる形式は `json`、`text`、`blob`、`arraybuffer` です。その後、選択された Struct が構造デコードを行います。`output` を省略する場合は `responseType` を指定できず、結果データは `undefined` で、返されるレスポンスラッパーは `body: null` になります。ランタイムはレスポンスボディを読み込んだりデコードしたりせず、best-effort でキャンセルします。
+## 資格情報と XSRF
 
-コマンド結果の分類には固定の優先順位があります。ステータス 0 の transport failure → `output` なし → ステータスの完全一致または `UNDECLARED_STATUS` → `response.error` → Struct デコードの順です。そのため、ボディ表現エラーは `output` が宣言されている場合にのみ発生します。Fetch がそのエラーを記録しても、未宣言ステータスの分岐が引き続き優先されます。
+`withCredentials(true)` は HTTP と SSE で Fetch `credentials: 'include'` を立てます。`Authorization` は作らず、WebSocket 認証も設定しません。`false` は credentials を未指定のままにします。
 
-### 表現エラー
+`withXSRF(...)` は HTTP 専用です。デフォルトは `cookieName: 'XSRF-TOKEN'`、`headerName: 'X-XSRF-TOKEN'`。ヘッダー注入は非セーフメソッドのみ、呼び出し側がすでに立てていないときのみ、同一オリジンのブラウザーリクエストのみです。`GET`、`HEAD`、`OPTIONS`、`TRACE` はスキップします。ブラウザー外では、注入が要るなら同期のリクエストスコープ `tokenProvider` を渡してください。
 
-宣言済み output とステータスが完全一致した場合に JSON または別のボディ codec が失敗すると、Fetch は元の例外を `HttpResponse.error` に保持します。コマンド実行は出力 Struct を適用する前に停止し、`[RESPONSE_VALIDATION_FAILED, undefined, response]` を返します。元の例外は `cause` に残り、型付きの `error.data` は生成されません。
+資格情報、XSRF トークン、query 文字列は日常ログに出さないでください。query パラメータを一般的な資格情報チャネルにしないでください。
 
-通常の 2xx 以外のレスポンスは `response.error` を設定しません。ステータスは `status` と `ok` で表します。2xx 以外のステータスとボディが宣言済みでボディが有効なら Struct がデコードされ、結果の `HTTP_STATUS` エラーは型付きボディを `error.data` に保持します。
+## 進捗と Fetch 境界
 
-## HTTP の実行結果
+`onDownloadProgress` は、明示的なレスポンス表現を読んでいるあいだ動きます。`lengthComputable` は正の `Content-Length` があるときだけ true です。`responseType` なし → ボディデコードなし → ボディ読み取り進捗なし。
 
-```typescript
-const [error, data, response] = await client.execute(getUser({ path: { id: 42 } }))
-```
+`onUploadProgress` は、Fetch が読む `ReadableStream<Uint8Array>` リクエストボディを監視します。通常のボディラッパーは生ストリーム setter を公開しません — アップロード進捗は主に低レベル組み立て向けです。
 
-成功時の `response` は Defjs の `HttpResponse` ラッパーで、ボディは `data` と一致します。失敗時にレスポンスが存在するかは、処理がどこまで進んだかで変わります。正確な分類は [Errors](/ja-JP/core/errors) を参照してください。
+`fetchHandler(httpRequest, fetchImpl?)` はより低レベルの Fetch 境界です。ネイティブ `Request` を作り、Fetch を呼び、表現を読み、`HttpResponse` を返します。コマンド入力の検証、`output` の振り分け、インターセプター実行は**しません**。注入トランスポートのテストには便利ですが、`client.execute` の代わりにはなりません。
 
-## キャンセルとタイムアウト
+## リプレイの限界
 
-HTTP 実行は `abort`、`signal`、`timeout` を受け取ります。
+Defjs は HTTP を**自動リトライしません**。読み取りのリトライでも、レビュー済みのタイムアウト/ネットワーク/重複方針が要ります。ミューテーションのリトライには、再生可能なバイト、サーバー側の支持、認証スコープ + リクエストバイトに束縛された冪等キー、受信側の重複方針が要ります。
 
-```typescript
-const controller = new AbortController()
+クライアント/コマンド/Fetch 境界は、失敗した書き込みがコミットしたかを知りません。リプレイ判断はアプリかレビュー済みインターセプターに置いてください。インターセプターは低レベルリクエストをショートサーキットしたり差し替えたりできますが、最終の status とボディはコマンドの契約を満たす必要があります。
 
-const [error] = await client.execute(command, {
-  signal: controller.signal,
-  timeout: 5_000,
-})
-```
+## 関連レシピ
 
-`signal` はクライアント内部の signal、および正のタイムアウトとマージされます。別フィールドの `abort` は、現在の API に残っている代替キャンセル signal です。`abort` と `timeout` を同時に渡すと `REQUEST_VALIDATION_FAILED` になります。`signal` はどちらとも組み合わせられます。
-
-HTTP、SSE、WebSocket 実行の `timeout` は `1..2_147_483_647` の範囲にある正の安全な整数でなければならず、`0`、負数、小数、`NaN`、`Infinity`、上限を超える値を指定すると、request、stream、socket のリソースを作成する前に `REQUEST_VALIDATION_FAILED` になります。
-
-認識されたキャンセルは `ABORTED` になります。`AbortSignal.timeout(...)` の理由または実行タイムアウトは `TIMEOUT`、その他の Fetch 失敗は `NETWORK_ERROR` です。
-
-## 認証情報と XSRF
-
-`withCredentials(true)` は HTTP と SSE で Fetch の `credentials: 'include'` を設定します。`false` の場合は Fetch オプションを未指定のままにし、`omit` を強制しません。この設定は `Authorization` ヘッダーを追加せず、WebSocket 認証も設定しません。
-
-`withXSRF(...)` は HTTP リクエストにだけ適用されます。デフォルト値は次のとおりです。
-
-```typescript
-withXSRF({
-  cookieName: 'XSRF-TOKEN',
-  headerName: 'X-XSRF-TOKEN',
-})
-```
-
-RFC で安全とされるメソッド `GET`、`HEAD`、`OPTIONS`、`TRACE` では注入をスキップします。`PROPPATCH` のようなカスタムの安全でないメソッドを含むそれ以外のすべてのメソッドでは、注入前に既存ヘッダー、同一オリジン、トークンに関する同じガードが適用されます。設定対象のヘッダーがすでにあれば維持します。ブラウザーでの Cookie 参照は同一オリジンのリクエストに限られます。ブラウザー以外では同期 `tokenProvider` を指定してください。Cookie の参照より優先されます。
-
-```typescript
-import type { HttpRequest } from '@defjs/core'
-
-declare const readRequestScopedToken: (request: HttpRequest) => string | null
-
-withXSRF({
-  tokenProvider: ({ request }) => readRequestScopedToken(request),
-})
-```
-
-サーバーのトークンプロバイダーはリクエストスコープに保ってください。`withCredentials(true)` を設定しても、クロスオリジンのブラウザー Cookie を JavaScript から読めるようにはなりません。また、クロスオリジンへ XSRF ヘッダーを注入することもありません。
-
-## 進捗オブザーバー
-
-`onDownloadProgress` は Fetch レスポンスボディの読み取り中にバイト数を通知します。`lengthComputable` が `true` になるのは、正の `Content-Length` がある場合だけです。
-
-```typescript
-declare const updateProgress: (value: number | undefined) => void
-
-const [error, file] = await client.execute(downloadFile(), {
-  onDownloadProgress({ loaded, total, lengthComputable }) {
-    updateProgress(lengthComputable ? loaded / total : undefined)
-  },
-})
-```
-
-`onUploadProgress` が観測するのは、`ReadableStream<Uint8Array>` のリクエストボディだけです。現在の高レベルコマンドビルダーには Blob と ArrayBuffer 用のプロジェクション setter はありますが、生のストリームを設定する setter はありません。そのため、このオプションが必要とするストリームを標準の `defineRequest` 例から渡すことはできません。構築したストリームを、動作する高レベルコマンドボディの例として示さないでください。
-
-進捗コールバックはトランスポートの読み書きの途中で実行されます。例外を送出しない軽い処理にしてください。
-
-## 低レベル Fetch 境界
-
-`fetchHandler(httpRequest, fetchImpl?)` はエクスポートされています。Defjs の `HttpRequest` をネイティブ `Request` へ変換し、Fetch を呼び、選択されたレスポンス表現をパースして、Defjs の `HttpResponse` ラッパーを返します。Fetch 失敗はステータス 0 のラッパーになります。
-
-`fetchHandler` を直接呼ぶと、次の処理を迂回します。
-
-- コマンド入力デコードとリクエストプロジェクション
-- HTTP 出力のステータスディスパッチと Struct デコード
-- クライアントインターセプターの連携処理
-- 高レベルの `RequestError` タプルへの変換
-
-これはエクスポートされた低レベル境界であり、推奨するコマンドワークフローではありません。長期的な安定性の方針は、ここでは確定していません。
-
-## 次に読む
-
-- [Interceptors](/ja-JP/core/interceptors) — リクエストの複製、ショートサーキット、再試行
-- [Errors](/ja-JP/core/errors) — HTTP ステータス、トランスポート、定義の失敗
-- [Struct](/ja-JP/core/struct) — 厳密な構造デコード
+- [宣言済み 404 付きの GET](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [HTTP 呼び出しをキャンセルする](../recipes/cancel-http.md)
+- [ローカル Fetch ハンドルでテストする](../recipes/test-with-handle.md)

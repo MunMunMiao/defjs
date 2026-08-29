@@ -1,9 +1,7 @@
-import { readFile, writeFile } from 'node:fs/promises'
 import { defineConfig, type UserConfig } from 'tsdown'
-import { copyPackageDocs } from '../../scripts/copy-package-docs.mjs'
 
 async function writeDistPackageJson(): Promise<void> {
-  const packageJson = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8')) as Record<string, unknown>
+  const packageJson = (await Bun.file(new URL('./package.json', import.meta.url)).json()) as Record<string, unknown>
 
   packageJson['main'] = './index.js'
   packageJson['module'] = './index.js'
@@ -21,8 +19,7 @@ async function writeDistPackageJson(): Promise<void> {
   delete packageJson['private']
   delete packageJson['publishConfig']
 
-  await writeFile(new URL('./dist/package.json', import.meta.url), `${JSON.stringify(packageJson, undefined, 2)}\n`)
-  await copyPackageDocs(new URL('.', import.meta.url))
+  await Bun.write(new URL('./dist/package.json', import.meta.url), `${JSON.stringify(packageJson, undefined, 2)}\n`)
 }
 
 export default defineConfig({
@@ -34,7 +31,7 @@ export default defineConfig({
   clean: true,
   dts: true,
   entry: {
-    index: 'src/public_api.ts',
+    index: 'src/index.ts',
   },
   inputOptions: {
     resolve: {

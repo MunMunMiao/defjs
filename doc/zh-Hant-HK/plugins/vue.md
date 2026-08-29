@@ -1,18 +1,21 @@
 ---
 title: Vue
-description: 透過 Vue injection 共用 Defjs client、按自己的 API 設定、保留 SSR request scope，並清理 transport resource。
+description: Install plugin，provide client，fetch 一個 user，reactive change 時 abort。
 ---
 
-# `@defjs/vue`
+# Vue
 
-此套件是 `@defjs/core` 的輕量 injection adapter。`createClientPlugin(client)` 提供由應用程式建立的 client，`injectClient()` 回傳最近的 instance，`HTTP_CLIENT` 用於 native subtree override；它不加入 client factory、cache、retry policy 或 resource lifecycle。
+將現有 `@defjs/core` client wire 入 Vue。你拎到 plugin、injection key 同 `injectClient()`。Package **唔會** create clients、cache results、retry commands，或者喺 unmount 時 close transport resources。
 
-## 安裝 Plugin
+## Basic Setup
 
-使用 `@defjs/core` 建立並設定 client，再為這個確切 instance 安裝 plugin：
+Install `@defjs/core`、`@defjs/vue` 同 Vue 3+。ESM；喺 Node run 時要 Node.js 22+：
 
-```typescript
-// main.ts
+`bun add @defjs/core @defjs/vue vue`
+
+Create client，install plugin，之後用 abort-on-change fetch：
+
+```typescript twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
@@ -25,155 +28,176 @@ app.use(createClientPlugin(client))
 app.mount('#app')
 ```
 
-plugin 只負責提供傳入的 instance，不會建立、複製、替換或 dispose client。
-
-## 注入 Nearest Client
-
-在 `setup`、`<script setup>` 或有效 injection context 內呼叫 `injectClient()`。缺少 `HTTP_CLIENT` 時會拋錯，並遵循 Vue 的 nearest-provider 規則。
-
-使用公開 key 和 Vue native `provide` 覆蓋某個 subtree：
-
-```vue
+```vue twoslash
 <script setup lang="ts">
-import { createClient, withEndpoint } from '@defjs/core'
-import { HTTP_CLIENT } from '@defjs/vue'
-import { provide } from 'vue'
-
-const scopedClient = createClient(withEndpoint('https://preview.example.com'))
-provide(HTTP_CLIENT, scopedClient)
-</script>
-
-<template>
-  <slot />
-</template>
-```
-
-## Interceptor Factory
-
-先建立 interceptor value，並用 core 的 `withInterceptors(...)` 組合，再安裝 plugin：
-
-```typescript
-import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
-import { createClientPlugin } from '@defjs/vue'
-
-const auth = createHttpInterceptor((request, next) => {
-  const headers = new Headers(request.headers)
-  headers.set('Authorization', `Bearer ${readAccessToken()}`)
-  return next({ ...request, headers })
-})
-
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
-app.use(createClientPlugin(client))
-```
-
-如果 interceptor factory 捕捉 request-scoped credential，應在建立該 client 的 request boundary 內呼叫。
-
-## 回應 Input 變更
-
-把 HTTP 工作綁定至真正觸發它的 reactive value。單用 `onMounted` 只會讀取初始 prop；`watch` 配合 cleanup 才可取消已被新值取代的工作：
-
-```vue
-<script setup lang="ts">
-import { ref, watch } from 'vue'
+import { defineRequest, struct } from '@defjs/core'
 import { injectClient } from '@defjs/vue'
-import { getUser } from './api'
+import { ref, watch } from 'vue'
 
 const props = defineProps<{ id: number }>()
 const client = injectClient()
-const name = ref('')
-const errorMessage = ref('')
+const name = ref('Loading...')
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
 
 watch(
   () => props.id,
   (id, _previousId, onCleanup) => {
-    const abort = new AbortController()
-    let current = true
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
 
-    onCleanup(() => {
-      current = false
-      abort.abort()
+    void client.execute(getUser({ path: { id } }), { signal: controller.signal }).then(([error, user]) => {
+      if (controller.signal.aborted) return
+      name.value = error ? 'Unable to load user.' : user.name
     })
-
-    void client
-      .execute(getUser({ path: { id } }), { signal: abort.signal })
-      .then(([error, user]) => {
-        if (!current) {
-          return
-        }
-
-        if (error) {
-          errorMessage.value = 'Unable to load user.'
-          return
-        }
-
-        errorMessage.value = ''
-        name.value = user.name
-      })
-      .catch(() => {
-        if (current) {
-          errorMessage.value = 'Unable to load user.'
-        }
-      })
   },
   { immediate: true },
 )
 </script>
 
 <template>
-  <p v-if="errorMessage">{{ errorMessage }}</p>
-  <p v-else>{{ name }}</p>
+  <span>{{ name }}</span>
 </template>
 ```
 
-Imported `getUser` command builder 擁有 endpoint contract；component 則負責在 `id` 改變或 unmount 時取消 request。
+`createClientPlugin(client)` provide 你傳入嘅 exact object。冇 clone，冇 disposal hook。Create client 時 configure core options 同 interceptors。
 
-## SSR Boundary
+`onCleanup` 喺 watcher 再 run 之前，同佢停嗰陣 run。開始 async work 之前先 register。Error-first tuple 仍然係 application data。
 
-browser app 可安裝一個 browser-safe client。SSR 應在每個 server request boundary 內建立獨立 core client，並只向對應 app 提供該 instance；不要跨 request 共用 header、cookie、tenant state 或 credential。
+## Inject 同 override
 
-```typescript
-// plugins/defjs.client.ts
+`injectClient()` 讀最近嘅 `HTTP_CLIENT` provider；冇就 throw。用 Vue 嘅 `provide(HTTP_CLIENT, childClient)` override 一個 subtree：
+
+```vue twoslash
+<script setup lang="ts">
 import { createClient, withEndpoint } from '@defjs/core'
-import { createClientPlugin } from '@defjs/vue'
+import { HTTP_CLIENT, injectClient } from '@defjs/vue'
+import { defineComponent, h, provide } from 'vue'
 
-export default defineNuxtPlugin((nuxtApp) => {
-  const client = createClient(withEndpoint(useRuntimeConfig().public.apiBase))
-  nuxtApp.vueApp.use(createClientPlugin(client))
+const childClient = createClient(withEndpoint('https://tenant.example.com'))
+const Child = defineComponent({
+  setup() {
+    const client = injectClient()
+    return () => h('span', client === childClient ? 'Child client is provided' : 'Unexpected client')
+  },
 })
+
+provide(HTTP_CLIENT, childClient)
+</script>
+
+<template>
+  <Child />
+</template>
 ```
 
-## Resource Ownership
+Nearest provider 贏。Descendants 拎 `childClient`；subtree 外嘅 siblings 繼續用 app-level client。
 
-安裝或卸載 plugin 不會 abort HTTP，也不會關閉 SSE 和 WebSocket resource。建立 client 的呼叫方擁有透過它啟動的全部工作。
+## 喺 watcher 之外 own HTTP work
 
-- 在 async startup 前或同時註冊 cleanup；
-- scope 結束時 abort startup；
-- disposal 後才到達的 handle 或 session 要立即關閉；
-- 持續讀取 `stream` 或 `session.receive`；
-- 對 active 資源呼叫 `stream.close(...)` 或 `session.close(...)`；
-- unsubscribe WebSocket observer。
+Composable 或者 component 喺 watcher 外開始嘅 work，用 `AbortController` + `onScopeDispose`。Abort startup 同 active work；assign reactive state 之前 check signal。Plugin 或者 injection scope 唔會推邊個 own 住 command。
 
-不要只為加入 state listener 就開啟 WebSocket，卻一直不讀取有限 incoming queue；overflow 會 fatal 終止 session。完整 lifecycle 規則見 [SSE](/zh-Hant-HK/core/sse) 與 [WebSocket](/zh-Hant-HK/core/web-socket)。
+當 scope own 住 client 時，browser-wide reuse 要 keep 佢 request-independent。如果佢 capture headers、cookies、users、tenants 或者 credentials，就喺相關 app/SSR request boundary create，同喺嗰度 provide。
 
-## API
+## Clean up realtime scope
 
-```typescript
-import type { Client } from '@defjs/core'
-import type { InjectionKey, Plugin } from 'vue'
+即使 scope 喺 mid-connect 消失，都要 close stream 或者 session。Abort startup，close 遲到嘅 handle，consume 唯一個 iterator，await terminal promise：
 
-declare const HTTP_CLIENT: InjectionKey<Client>
-declare function createClientPlugin(client: Client): Plugin
-declare function injectClient(): Client
+```vue twoslash
+<script setup lang="ts">
+import { defineEventStream, struct, type EventStreamHandle } from '@defjs/core'
+import { injectClient } from '@defjs/vue'
+import { onScopeDispose, ref } from 'vue'
+
+const client = injectClient()
+const messages = ref<string[]>([])
+const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.string() },
+})
+
+const controller = new AbortController()
+let disposed = false
+let stream: EventStreamHandle<string> | undefined
+
+const stop = () => {
+  disposed = true
+  controller.abort()
+  stream?.close('scope-disposed')
+}
+onScopeDispose(stop)
+
+void (async () => {
+  const [error, nextStream] = await client.execute(notifications(), { signal: controller.signal })
+  if (error) return
+
+  stream = nextStream
+  if (disposed) {
+    nextStream.close('scope-disposed')
+    await nextStream.closed
+    return
+  }
+
+  try {
+    for await (const event of nextStream) {
+      messages.value.push(event.data)
+    }
+  } finally {
+    nextStream.close('scope-finished')
+    await nextStream.closed
+  }
+})()
+</script>
+
+<template>
+  <ul>
+    <li v-for="message in messages" :key="message">{{ message }}</li>
+  </ul>
+</template>
 ```
 
-建立一個提供傳入 client instance 的 Vue plugin。
+WebSocket：同一套次序 — abort prep，close 遲到嘅 session，consume `session.receive`，unsubscribe `onStateChange` / `onRuntimeError`，close，await `session.closed`。Keep cleanup idempotent；disposal 同 iterator completion 可以撞埋一齊。
 
-回傳最近的 client；沒有 provider 時拋錯。
+## SSR scope
 
-用於 native subtree provider 的公開 injection key。
+`createClientPlugin(client)` 為一個 Vue app provide 一個 instance。Browser 上，當 endpoint、interceptors 同 captured state 可以 share 就 share。SSR 期間，當 headers、cookies、users、tenants 或者 credentials 唔同時，每個 request create 同 install 分開嘅 client。
 
-## 下一步
+App unmount、plugin removal 同 component scope disposal **唔會** abort HTTP、close SSE/WebSocket、unsubscribe listeners，或者 dispose core client。開始工作嘅 owner 一定要 finish 佢。
 
-- [Client](/zh-Hant-HK/core/client)：core option composition 與 client scope。
-- [Commands](/zh-Hant-HK/core/commands)：endpoint 定義與 command input。
-- [Interceptors](/zh-Hant-HK/core/interceptors)：core interceptor contract。
+## Reference
+
+`@defjs/vue` 嘅 public exports：
+
+```typescript twoslash
+import { HTTP_CLIENT, createClientPlugin, injectClient } from '@defjs/vue'
+
+type VueApi = {
+  HTTP_CLIENT: typeof HTTP_CLIENT
+  createClientPlugin: typeof createClientPlugin
+  injectClient: typeof injectClient
+}
+
+const api: VueApi = { HTTP_CLIENT, createClientPlugin, injectClient }
+void api
+```
+
+- `HTTP_CLIENT` — 畀 native `provide` / `inject` 用嘅 `InjectionKey<Client>`
+- `createClientPlugin(client)` — provide 嗰個 client 嘅 Vue `Plugin`
+- `injectClient()` — 最近嘅 `Client`，或者 throw
+
+Clients 同 options 喺 `@defjs/core` create。睇 [Client](../core/client.md)、[Commands](../core/commands.md)、[Interceptors](../core/interceptors.md)、[SSE](../core/sse.md) 同 [WebSocket](../core/web-socket.md)。
+
+## Related recipes
+
+- [GET with a declared 404](../recipes/get-declared-404.md)
+- [Cancel an HTTP call](../recipes/cancel-http.md)
+- [Consume an SSE stream](../recipes/consume-sse.md)
+- [Open a WebSocket session](../recipes/websocket-session.md)

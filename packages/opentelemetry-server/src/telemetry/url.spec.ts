@@ -10,6 +10,10 @@ describe('resolveUrl', () => {
     expect(resolveUrl('/test', 'https://api.example.com')).toBe('https://api.example.com/test')
   })
 
+  test('keeps base pathname when joining a rooted path', () => {
+    expect(resolveUrl('/users', 'https://api.example.com/staging')).toBe('https://api.example.com/staging/users')
+  })
+
   test('returns endpoint on invalid baseEndpoint', () => {
     expect(resolveUrl('/test', 'not-a-url')).toBe('/test')
   })
@@ -28,6 +32,12 @@ describe('resolveHttpUrl', () => {
     expect(result.url).toBe('https://api.example.com/test')
     expect(result.serverAddress).toBe('api.example.com')
     expect(result.serverPort).toBeUndefined()
+  })
+
+  test('keeps base pathname when joining a rooted path', () => {
+    const result = resolveHttpUrl('/users', 'https://api.example.com/staging')
+    expect(result.url).toBe('https://api.example.com/staging/users')
+    expect(result.serverAddress).toBe('api.example.com')
   })
 
   test('resolves with explicit port', () => {

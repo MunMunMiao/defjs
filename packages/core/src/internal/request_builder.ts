@@ -1,4 +1,4 @@
-import type { AnyStruct, ContentBoundaryDescriptor } from '../struct/types'
+import type { AnyStruct, RequestBodyDescriptor } from '../struct/types'
 import { mapAliasedObjectFields } from '../struct/codec/common'
 import { encodeValue } from '../struct/encode'
 import { resolveStructFields } from '../struct/fields'
@@ -251,10 +251,12 @@ function buildRequestShape<TInput>(input: TInput, definition: RequestDefinition,
   return state.snapshot
 }
 
-function setRequestShapeBody(state: RequestBuilderState, descriptor: ContentBoundaryDescriptor, bodyValue: unknown): void {
+function setRequestShapeBody(state: RequestBuilderState, descriptor: RequestBodyDescriptor, bodyValue: unknown): void {
   switch (descriptor.codec) {
     case 'json':
-      setJsonBody(state, encodeKeyedValue(descriptor.struct, bodyValue))
+      setJsonBody(state, encodeKeyedValue(descriptor.struct, bodyValue), {
+        contentType: descriptor.contentType,
+      })
       return
     case 'urlencoded':
       setFormUrlEncodedBody(state, encodeFlatRecord(descriptor.struct, bodyValue, 'urlencoded'))

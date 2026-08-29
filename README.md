@@ -17,14 +17,14 @@
 
 `def` is an abbreviation for `define`, so it can be read as `define js`.
 
-Defjs is a TypeScript library for defining typed HTTP, SSE, and WebSocket APIs and executing them across JavaScript runtimes.
+Defjs is a TypeScript library for defining typed HTTP, SSE, and WebSocket APIs over standard Web APIs.
 
 - Typed HTTP, SSE, and WebSocket command definitions.
 - Runtime validation and full TypeScript inference.
 - Streaming support.
 - Interceptor support.
 - Works in browser and server applications that provide the required platform transports.
-- The published packages require Node.js 22 or newer when running in Node.
+- Bun `1.4.0` is the repository's only development, test, build, packaging, and publishing runtime.
 - ESM. `@defjs/core` declares no runtime dependencies.
 
 ## Quick Start
@@ -32,7 +32,7 @@ Defjs is a TypeScript library for defining typed HTTP, SSE, and WebSocket APIs a
 Install the core package in your application:
 
 ```sh
-pnpm add @defjs/core
+bun add @defjs/core
 ```
 
 Use the documentation and release notes that match the version installed in your project.
@@ -68,7 +68,7 @@ if (error) {
 
 The full guides live in `doc/` and cover HTTP, SSE, WebSocket, Structs, interceptors, errors, React, Vue, and server-side OpenTelemetry integration.
 
-- Published packages bundle the matching English guides, so installed documentation stays aligned with the package artifact.
+- Each package tarball keeps its package `README.md` and the repository `LICENSE`; repository-wide guides and examples are not packed.
 - Contributors working from the current checkout can start with `doc/guide/getting-started.md`; these source docs can describe unreleased changes.
 - Choose one of the 11 language tracks from the documentation site.
 - Match the documentation to the package version installed in your application.
@@ -86,16 +86,29 @@ The full guides live in `doc/` and cover HTTP, SSE, WebSocket, Structs, intercep
 
 Repository commands are classified by scope. A command being exposed at the root does not mean every workspace should implement it.
 
-| Scope                          | Commands                                                                     | Execution model                                                                                      |
-| ------------------------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Repository-wide checks         | `pnpm fmt`, `pnpm fmt:check`, `pnpm lint`, `pnpm lint:fix`, `pnpm typecheck` | Run once from the repository root and scan the complete configured scope.                            |
-| Workspace aggregation          | `pnpm test`, `pnpm build`                                                    | The root delegates to workspace-owned tasks; `build` first runs the repository-wide type check once. |
-| Workspace-local lifecycle      | Package `build`/`test`, examples `test`, documentation `build`               | Each workspace handles only its own tests or output.                                                 |
-| Explicit, on-demand operations | Example `start`, documentation `dev`/`preview`, `changeset`, `release`       | Run directly when that operation is needed; these are not ordinary recursive quality checks.         |
+| Scope                          | Commands                                                                                 | Execution model                                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Repository-wide checks         | `bun run verify`, `bun run fmt`, `bun run fmt:check`, `bun run lint`, `bun run lint:fix` | `verify` is the complete CI and local pre-release gate, including packed-consumer verification.      |
+| Workspace aggregation          | `bun run test`, `bun run build`                                                          | The root delegates to workspace-owned tasks; `build` first runs the repository-wide type check once. |
+| Workspace-local lifecycle      | Package `build`/`test`, documentation `build`                                            | Each workspace handles only its own tests or output.                                                 |
+| Explicit, on-demand operations | `bun run test:release`, `bun run test:packed`, documentation `dev`/`preview`             | Focused checks remain available when the full gate is unnecessary.                                   |
 
-Formatting, linting, and TypeScript checking are repository-wide gates. Workspace manifests must not duplicate them, and CI must not invoke them through `pnpm -r`, `--recursive`, or per-package filters.
+Formatting, linting, and TypeScript checking are repository-wide gates. Workspace manifests must not duplicate them, and CI must not invoke them through `bun run --workspaces`, `--filter`, or per-package filters.
 
-Tests and builds are intentionally different. Their environments, configurations, and outputs belong to specific workspaces, so the root commands aggregate the relevant workspace lifecycle scripts. An example's `start` command is only an interactive runner and is never used as a test command.
+Tests and builds are intentionally different. Their environments, configurations, and outputs belong to specific workspaces, so the root commands aggregate the relevant workspace lifecycle scripts.
+
+## Release workflow
+
+Package versions live in their own manifests and advance independently. The repository does not use generated changeset files or coordinated workspace version bumps.
+
+Push one package-specific tag after its manifest version is merged to `main`:
+
+- `release-core-vX.Y.Z`
+- `release-opentelemetry-server-vX.Y.Z`
+- `release-react-vX.Y.Z`
+- `release-vue-vX.Y.Z`
+
+CI runs the full Bun verification gate on pull requests and `main`. The release workflow runs `bun ci`, validates the tag and selected manifest through `release-target.ts`, runs `bun --bun run build` only for that package, and publishes from its `dist` directory. It relies on successful `main` CI plus protected release tags and the `npm` environment. A Core patch within the adapters' `^0.4.0` peer range, such as `0.4.0` to `0.4.3`, does not require another adapter release; publish an adapter only when its own artifact, implementation, public metadata, or peer range changes.
 
 ### Dependency ownership
 
@@ -129,7 +142,7 @@ See the package READMEs and the metadata for the published releases you install 
 
 ## Adoption note
 
-Repository development baseline: Node `>=26`, `pnpm@11.6.0`, `engine-strict=true`.
+Repository development baseline: Bun `1.4.0`.
 
 These values describe this repository's contributor baseline, not a blanket requirement for every consumer application that installs a published package.
 

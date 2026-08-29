@@ -5,8 +5,8 @@ Server-side outbound OpenTelemetry integration for `@defjs/core` HTTP, SSE, and 
 **Core Positioning**:
 
 - **Outbound-only client instrumentation** — This package wraps defjs clients that make outbound requests. It is not inbound server instrumentation.
-- **Server environment** — Designed for server-side Node.js usage, not browser-only telemetry setup.
-- **Does not initialize the SDK** — This package does not initialize an OpenTelemetry SDK. Initialize the SDK in your application, then pass the tracer and optional meter into `withOpenTelemetryServer(...)`.
+- **Server environment** — Designed for server-side applications with an OpenTelemetry SDK, not browser-only telemetry setup.
+- **Does not initialize the SDK** — This package does not initialize an OpenTelemetry SDK. Register a `TracerProvider` (`setGlobalTracerProvider`, or your SDK's `start()`) then pass that tracer (and optional meter) into `withOpenTelemetryServer(...)`. `trace.getTracer(...)` with no provider is a silent no-op.
 - **Per-transport separation** — HTTP, SSE, and WebSocket each have independent interceptors, span lifecycles, and metric dimensions.
 
 ## Installation
@@ -14,24 +14,25 @@ Server-side outbound OpenTelemetry integration for `@defjs/core` HTTP, SSE, and 
 Install `@defjs/opentelemetry-server` with the matching `@defjs/core` release line and its OpenTelemetry peers:
 
 ```sh
-npm install @defjs/core @defjs/opentelemetry-server @opentelemetry/api @opentelemetry/core
+bun add @defjs/core @defjs/opentelemetry-server @opentelemetry/api @opentelemetry/core
 ```
 
-Initialize your application's OpenTelemetry SDK separately. The package provides interceptors and consumes the tracer and optional meter you pass to `withOpenTelemetryServer(...)`.
+The package is ESM and requires `@defjs/core` as a peer in the `^0.4.0` range. Its tarball retains this `README.md` and the repository `LICENSE`; repository-wide guides and examples remain outside the package.
+
+Initialize your application's OpenTelemetry SDK separately so a `TracerProvider` is registered. The package provides interceptors and consumes the tracer you pass; it does not emit spans on its own.
 
 ## Basic Usage
 
-Initialize the OpenTelemetry SDK in your application, get a `Tracer`, then pass it into `withOpenTelemetryServer(...)`:
+This package does not install a `TracerProvider`. `trace.getTracer('my-service')` without `trace.setGlobalTracerProvider(...)` (your SDK's `start()` usually does this) returns a no-op tracer: interceptors still wrap requests, but spans are silently discarded. Pass a recording tracer from your SDK, or register the provider first:
 
 ```typescript
-import { createClient, defineRequest, withEndpoint } from '@defjs/core'
+import { createClient, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { trace } from '@opentelemetry/api'
 
-// 1. Initialize the OpenTelemetry SDK in your application, then get a tracer
+// After your OpenTelemetry SDK has called setGlobalTracerProvider:
 const tracer = trace.getTracer('my-service')
 
-// 2. Inject the tracer into defjs client configuration
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withOpenTelemetryServer({
@@ -69,8 +70,10 @@ const client = createClient(
     requireParentSpan: false,
     http: {
       enabled: true,
+      startSpanHook(req) {
+        return { 'app.operation': req.operation ?? 'unclassified' }
+      },
       responseHook(span, res, req) {
-        span.setAttribute('app.operation', req.operation ?? 'unclassified')
         span.setAttribute('defjs.response.status_text', res.statusText)
       },
     },
@@ -118,19 +121,21 @@ With the safe default, trace context does not ride on the WebSocket URL. Use ano
 
 ### HTTP Options
 
-| Option         | Type                                        | Default     | Description                                                             |
-| -------------- | ------------------------------------------- | ----------- | ----------------------------------------------------------------------- |
-| `enabled`      | `boolean`                                   | `true`      | Enable HTTP tracing                                                     |
-| `requestHook`  | `(span, req) => void \| Promise<void>`      | `undefined` | Customize HTTP span before request, `req` is `HttpRequest`              |
-| `responseHook` | `(span, res, req) => void \| Promise<void>` | `undefined` | Customize HTTP span after response; `req` is the original `HttpRequest` |
+| Option          | Type                                        | Default     | Description                                                                    |
+| --------------- | ------------------------------------------- | ----------- | ------------------------------------------------------------------------------ |
+| `enabled`       | `boolean`                                   | `true`      | Enable HTTP tracing                                                            |
+| `startSpanHook` | `(req) => Attributes`                       | `undefined` | Add or override synchronous initial attributes before the HTTP span is created |
+| `requestHook`   | `(span, req) => void \| Promise<void>`      | `undefined` | Customize HTTP span before request, `req` is `HttpRequest`                     |
+| `responseHook`  | `(span, res, req) => void \| Promise<void>` | `undefined` | Customize HTTP span after response; `req` is the original `HttpRequest`        |
 
 ### SSE Options
 
-| Option         | Type                                           | Default     | Description                                                                          |
-| -------------- | ---------------------------------------------- | ----------- | ------------------------------------------------------------------------------------ |
-| `enabled`      | `boolean`                                      | `true`      | Enable SSE tracing                                                                   |
-| `requestHook`  | `(span, req) => void \| Promise<void>`         | `undefined` | Customize SSE span before stream request                                             |
-| `responseHook` | `(span, stream, req) => void \| Promise<void>` | `undefined` | Customize SSE span after stream handle returned; `req` is the original `HttpRequest` |
+| Option          | Type                                           | Default     | Description                                                                          |
+| --------------- | ---------------------------------------------- | ----------- | ------------------------------------------------------------------------------------ |
+| `enabled`       | `boolean`                                      | `true`      | Enable SSE tracing                                                                   |
+| `startSpanHook` | `(req) => Attributes`                          | `undefined` | Add or override synchronous initial attributes before the SSE span is created        |
+| `requestHook`   | `(span, req) => void \| Promise<void>`         | `undefined` | Customize SSE span before stream request                                             |
+| `responseHook`  | `(span, stream, req) => void \| Promise<void>` | `undefined` | Customize SSE span after stream handle returned; `req` is the original `HttpRequest` |
 
 ### WebSocket Options
 
@@ -138,14 +143,15 @@ With the safe default, trace context does not ride on the WebSocket URL. Use ano
 | ------------------ | ----------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`          | `boolean`                                       | `true`      | Enable WebSocket tracing                                                                                                            |
 | `queryPropagation` | `boolean`                                       | `false`     | Inject trace context and baggage into the WebSocket URL query string. Enable only after reviewing URL logging and disclosure risks. |
+| `startSpanHook`    | `(req) => Attributes`                           | `undefined` | Add or override synchronous initial attributes before the WebSocket span is created                                                 |
 | `requestHook`      | `(span, req) => void \| Promise<void>`          | `undefined` | Customize WebSocket span before connection request                                                                                  |
 | `responseHook`     | `(span, session, req) => void \| Promise<void>` | `undefined` | Customize WebSocket span after session returned; `req` is the original `HttpRequest`                                                |
 
-> **Hook Exception Handling**: Hooks may return `void` or `Promise<void>`. If `requestHook` or `responseHook` throws or rejects, the error is recorded on the span's `defjs.otel.hook.error` event without blocking the hook caller, and the client request/stream/session **continues normally**.
+> **Hook timing and failures**: `startSpanHook(request)` is synchronous and runs before span creation. Its attributes are applied after built-in attributes. If it throws, Defjs creates the span with built-in attributes, records `defjs.otel.hook.error`, and the client request/stream/session continues normally. `requestHook` and `responseHook` run after creation and may return `void` or `Promise<void>`; their throws/rejections are recorded without blocking the operation.
 >
 > Each `responseHook` receives the original transport `HttpRequest` as its third argument. Read its explicit `operation`; do not reconstruct identity from its endpoint or a resolved URL.
 >
-> **Attribute hygiene**: Prefer explicit allowlists, redaction, and stable low-cardinality attributes in `requestHook` / `responseHook`. Do not attach resolved URLs, raw query strings, request or response bodies, full headers, baggage values, or message payloads unless your application has already reviewed privacy, cardinality, retention, and redaction requirements.
+> **Attribute hygiene**: This package has no built-in redactor or sensitive-key policy. Prefer explicit allowlists, application-owned redaction, and stable low-cardinality attributes in hooks. Do not attach resolved URLs, raw query strings, request or response bodies, full headers, baggage values, or message payloads unless your application has already reviewed privacy, cardinality, retention, and redaction requirements.
 
 ## HTTP Semantic Conventions and Metrics
 
@@ -164,7 +170,26 @@ HTTP span status and `error.type` follow these rules:
 - a Defjs status-0 transport result does not set `http.response.status_code`; caller cancellation leaves status unset, timeout uses `ERROR` / `TIMEOUT`, and other transport failures use `ERROR` / `NETWORK_ERROR`;
 - an error thrown through the interceptor marks the span `ERROR`, records the exception, and uses its `Error.name` or another low-cardinality type fallback as `error.type`.
 
-In the current implementation, `url.full` is resolved from `req.endpoint` and the optional `req.baseEndpoint`; it does not append `req.queryString`. This is an implementation boundary, not an identity source or a guarantee that URLs are safe. Resolved paths can contain sensitive or high-cardinality identifiers. Keep operation names static, do not copy `url.full` into custom telemetry or logs, and apply SDK/exporter redaction before exporting URL attributes.
+In the current implementation, `url.full` is resolved from `req.endpoint` and the optional `req.baseEndpoint`; it does not append `req.queryString`. This is an implementation boundary, not sanitization, an identity source, or a guarantee that URLs are safe. Applications that need a complete or redacted URL can override the initial value explicitly:
+
+```ts
+import { createResolvedRequestUrl } from '@defjs/core'
+
+withOpenTelemetryServer({
+  tracer,
+  http: {
+    startSpanHook(req) {
+      if (!req.baseEndpoint) return {}
+      const url = createResolvedRequestUrl(req.baseEndpoint, req.endpoint)
+      if (req.queryString) url.search = req.queryString
+      url.searchParams.delete('access_token')
+      return { 'url.full': url.href }
+    },
+  },
+})
+```
+
+Resolved paths can contain sensitive or high-cardinality identifiers. Keep operation names static and apply application or SDK/exporter redaction before exporting URL attributes.
 
 When `meter` is provided, the following stable metrics are collected:
 
@@ -259,7 +284,7 @@ By default, **per-message spans are not created**, and **message payloads, messa
 
 ## What's Next
 
-- [OpenTelemetry guide](docs/plugins/opentelemetry-server.md) — complete plugin boundaries and examples
-- [Client](docs/core/client.md) — `createClient` and full transport configuration
-- [SSE](docs/core/sse.md) — `defineEventStream` and streaming event consumption
-- [WebSocket](docs/core/web-socket.md) — `defineWebSocket` and real-time communication
+- [OpenTelemetry guide](https://defjs.org/plugins/opentelemetry-server) — complete plugin boundaries and examples
+- [Client](https://defjs.org/core/client) — `createClient` and full transport configuration
+- [SSE](https://defjs.org/core/sse) — `defineEventStream` and streaming event consumption
+- [WebSocket](https://defjs.org/core/web-socket) — `defineWebSocket` and real-time communication

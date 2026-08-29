@@ -8,6 +8,6 @@
       "@defjs/vue": ["./packages/vue/src"]
     }
   },
-  "include": ["*.ts", "*.mts", "*.cts", "test/**/*.ts", "packages/**/*.ts", "examples/**/*.ts", "doc/.vitepress/**/*.ts"],
+  "include": ["*.ts", "*.mts", "*.cts", "test/**/*.ts", "packages/**/*.ts", "doc/.vitepress/**/*.ts"],
   "exclude": ["node_modules", "**/dist", "**/coverage", "doc/.vitepress/cache", "doc/.vitepress/dist"]
 }

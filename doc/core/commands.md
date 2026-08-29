@@ -1,286 +1,79 @@
 ---
 title: Commands
-description: Define endpoints, create command builders and commands, map Struct input to the wire, and infer HTTP output types.
+description: Define endpoints, build opaque commands, map inputs, and infer transport results.
 ---
 
 # Commands
 
-Defjs uses three related stages:
+One definition → builder → opaque command → `client.execute`. Same pipeline for HTTP, SSE, and WebSocket.
 
-1. An **endpoint definition** describes a stable HTTP, SSE, or WebSocket contract.
-2. A **command builder** is the function returned by `defineRequest`, `defineEventStream`, or `defineWebSocket`.
-3. A **command** is the value returned when you call that builder with input. Pass the command to `client.execute(...)`.
+## Basic Setup
 
-```typescript
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-})
+```typescript twoslash
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
-const command = getUser({ path: { id: 42 } })
-const result = await client.execute(command)
+const client = createClient(withEndpoint('https://api.example.com'))
+const health = defineRequest({ method: 'GET', path: '/health' })
+const [error, data, response] = await client.execute(health())
+if (!error) console.log(data, response.status)
 ```
 
-Here, the object passed to `defineRequest` is the endpoint definition, `getUser` is the command builder, and `command` is the command.
+## Choose a definition
 
-## HTTP Endpoint Definitions
+| Definition               | Contract                                                      | Successful value                         |
+| ------------------------ | ------------------------------------------------------------- | ---------------------------------------- |
+| `defineRequest(...)`     | Method, relative path, optional input, optional status output | Decoded data + `HttpResponse`            |
+| `defineEventStream(...)` | Path, buffer/queue limits, event-name → Struct map            | `EventStreamHandle` + open snapshot      |
+| `defineWebSocket(...)`   | Path, incoming map, optional outgoing map, queue limit        | `WebSocketSession` + connection snapshot |
 
-`defineRequest(...)` accepts these fields:
+No `input` → builder takes no argument. With `input` → pass the Struct value even if every nested field is optional. Optional `path` / `query` / `headers` sections may be omitted; a section with a required field may not. A body wrapper present means the body is required.
 
-| Field          | Meaning                                                                                                     |
-| -------------- | ----------------------------------------------------------------------------------------------------------- |
-| `method`       | HTTP method string.                                                                                         |
-| `operation`    | Optional explicit static low-cardinality identity for telemetry and diagnostics.                            |
-| `path`         | Relative endpoint path, with optional `:name` placeholders.                                                 |
-| `input`        | Struct used for structural decoding of command input.                                                       |
-| `build`        | Schema-bound projection from input fields to request parts. Requires `input`.                               |
-| `output`       | Status-to-Struct mapping for response decoding and result inference.                                        |
-| `responseType` | Optional `json`, `text`, `blob`, or `arraybuffer` mode only when `output` is declared; otherwise forbidden. |
+Keep commands opaque. Don’t dig into tags or symbols.
 
-`operation?: string` is also available on SSE and WebSocket definitions. Set it explicitly from the endpoint contract, for example `users.lookup`; do not derive it from a rendered path, URL, user or tenant data, request IDs, or other high-cardinality values.
+## Automatic request mapping
 
-Use `struct.request(...)` when command fields map directly to wire sections:
+Use `struct.request(...)` when logical input already has path / query / headers / body:
 
-```typescript
+```typescript twoslash
 import { defineRequest, struct } from '@defjs/core'
 
 const createUser = defineRequest({
   method: 'POST',
-  path: '/organizations/:organizationId/users',
+  path: '/users',
   input: struct.request({
-    path: struct.object({
-      organizationId: struct.string().alias('organization_id'),
-    }),
-    query: struct.object({
-      notify: struct.boolean().optional(),
-    }),
-    headers: struct.object({
-      requestId: struct.string().alias('x-request-id'),
-    }),
-    body: struct.json(
-      struct.object({
-        displayName: struct.string().alias('display_name'),
-      }),
-    ),
+    body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: [
-    { status: 201, body: struct.object({ id: struct.number() }) },
-    { status: 409, body: struct.object({ message: struct.string() }) },
-  ],
+  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
 })
-
-const command = createUser({
-  path: { organizationId: 'acme' },
-  query: { notify: true },
-  headers: { requestId: 'request-42' },
-  body: { displayName: 'Ada' },
-})
+void createUser
 ```
 
-Callers use logical field names. Aliases select the wire keys.
-
-## Command Builder Optionality
-
-A builder with no `input` accepts no argument:
-
-```typescript
-const health = defineRequest({ method: 'GET', path: '/health' })
-health()
-```
-
-When `input` is declared, the root command argument remains required. Within `struct.request(...)`, a `path`, `query`, or `headers` section whose fields are all optional or nullish can be omitted as a whole. Parsing normalizes each omitted section to `{}`. A section containing any required field remains required; body sections also remain required even when their inner object fields are optional.
-
-```typescript
-const search = defineRequest({
-  method: 'GET',
-  path: '/search',
-  input: struct.request({
-    query: struct.object({ q: struct.string() }),
-  }),
-})
-
-search({ query: { q: 'docs' } })
-// search() // TypeScript error: an argument is required.
-// search({ query: {} }) // TypeScript and runtime error: q is required.
-```
-
-All-optional request sections can be omitted, but the command argument itself is still present:
-
-```typescript
-const OptionalSections = struct.request({
-  path: struct.object({ locale: struct.string().optional() }),
-  query: struct.object({ page: struct.number().optional() }),
-  headers: struct.object({ traceId: struct.string().optional() }),
-})
-const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
-
-list({})
-list({ query: { page: 2 } })
-
-const [optionalError, normalized] = struct.parse(OptionalSections, {})
-if (optionalError) throw optionalError
-// normalized is { path: {}, query: {}, headers: {} }.
-
-const filtered = defineRequest({
-  method: 'GET',
-  path: '/items',
-  input: struct.request({
-    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
-  }),
-})
-
-filtered({ query: { q: 'docs' } })
-// filtered({}) // TypeScript error: query contains required q.
-```
-
-This is structural presence and type validation, not application authorization, range, amount, format, or state-transition validation.
-
-## Automatic Request Building
-
-When `input` is a `struct.request(...)` and `build` is omitted, Defjs maps declared sections automatically:
-
-- `path` replaces path placeholders.
-- `query` becomes query parameters.
-- `headers` becomes request headers.
-- `body` uses its body wrapper.
-
-Request bodies must declare a supported boundary:
-
-```typescript
-struct.json(struct.object({ name: struct.string() }))
-struct.text()
-struct.urlencoded({ name: struct.string() })
-struct.formData({ file: struct.file() })
-struct.blob()
-struct.arrayBuffer()
-```
-
-Do not put a bare `struct.object(...)` in `request.body`; `struct.request(...)` rejects it. HTTP supports all body forms. SSE rejects a body section, and WebSocket rejects both headers and body sections.
+Aliases rewrite outbound wire keys only. Parsed values and command inputs keep logical names.
 
 ## Custom `build`
 
-Use `build(request, input)` when logical fields need different wire locations or keys. The `input` parameter is a **schema-bound projection**, not the parsed caller value.
+Reach for `build(request, input)` when the caller shape and wire shape differ. It’s a constrained projection — not a place to branch on auth policy or invent side effects.
 
-```typescript
-const createBatch = defineRequest({
-  method: 'POST',
-  path: '/accounts/:account_id/users',
-  input: struct.object({
-    accountId: struct.number(),
-    users: struct.array(
-      struct.object({
-        displayName: struct.string(),
-        email: struct.string(),
-      }),
-    ),
-  }),
-  build(request, input) {
-    request.setPathParams({ account_id: input.accountId })
-    request.setJson({
-      users: input.users.map((user) => ({
-        display_name: user.displayName,
-        email: user.email,
-      })),
-    })
-  },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
-})
-```
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-A projection can:
-
-- select declared fields;
-- choose target wire keys;
-- project an array one item to one item with `.map(...)`;
-- encode a selected object using its field aliases when it is bound into JSON.
-
-A projection cannot inspect caller values, branch on them, compute arbitrary transforms, change array cardinality, or inject literal values. For example, `request.setJson({ version: 'v1' })` is not a valid projection because `'v1'` did not come from the input binding view.
-
-Normalize and validate application data before creating the command. Keep `build` for declarative wire mapping.
-
-### Build Capabilities
-
-| Target                                                 | HTTP | SSE | WebSocket |
-| ------------------------------------------------------ | ---- | --- | --------- |
-| `setPathParams`, `setQueryParams`                      | Yes  | Yes | Yes       |
-| `setHeaders`, `addHeaders`                             | Yes  | Yes | No        |
-| JSON, text, HTML, form, Blob, ArrayBuffer body methods | Yes  | No  | No        |
-
-The TypeScript build context is transport-specific. Runtime checks also reject unsupported output if type checks were bypassed.
-
-## HTTP Output Inference
-
-`output` supports an object map or an array of status/body pairs:
-
-```typescript
-const User = struct.object({ id: struct.number() })
-const NotFound = struct.object({ message: struct.string() })
-const Conflict = struct.object({ conflict: struct.string() })
-
-const objectOutput = {
-  '200': User,
-  '404': NotFound,
-}
-
-const getUsers = defineRequest({
+const search = defineRequest({
   method: 'GET',
-  path: '/users',
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-    { status: [409, 422], body: Conflict },
-  ],
+  path: '/search',
+  input: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  build(request, input) {
+    request.withQuery({ q: input.q, page: input.page ?? 1 })
+  },
+  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
 })
+void search
 ```
 
-The HTTP success type is the union of declared 2xx bodies. `error.data` is correlated with the declared non-2xx status. `defineRequest(...)` uses a const generic, so inline status entries and grouped status arrays retain their literals without `as const`. After `client.execute(getUsers())`, checking `error.status === 404` narrows `error.data` to `NotFound`; the remaining `409 | 422` branch narrows it to `Conflict`.
+## Status output shapes
 
-When `output` is declared, every returned status must have a matching Struct. An unmatched 2xx or non-2xx status produces `UNDECLARED_STATUS`. When `output` is omitted, the response body is not read or decoded and is cancelled best-effort; the result is `undefined`.
+`output` can be a status → Struct map or an `{ status, body }[]`. Exact status wins. Array entries: a later match overrides an earlier grouped match. No matching declaration → `UNDECLARED_STATUS` (`kind: 'definition'`). `error.response` may still be present; that body is not Struct-decoded as success.
 
-## SSE and WebSocket Definitions
+## Related recipes
 
-`defineEventStream(...)` replaces HTTP `output` with an `events` map. Event names select Structs, and an optional `default` entry handles undeclared names at runtime.
-
-```typescript
-const notifications = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/notifications',
-  events: {
-    message: struct.json(struct.object({ text: struct.string() })),
-    default: struct.string(),
-  },
-})
-```
-
-`defineWebSocket(...)` declares `incoming` and optional `outgoing` message maps. Message envelopes use a `type` discriminator.
-
-```typescript
-const chat = defineWebSocket({
-  maxIncomingQueueSize: 100,
-  path: '/chat',
-  incoming: {
-    message: struct.object({ text: struct.string() }),
-  },
-  outgoing: {
-    send: struct.object({ text: struct.string() }),
-  },
-})
-```
-
-See [SSE](./sse.md) and [WebSocket](./web-socket.md) for decoding, queues, reconnect, and closure ownership.
-
-## Treat Commands as Opaque
-
-Application code should create commands and pass them to `Client.execute(...)`. Do not depend on transport tags or structural reflection.
-
-The root entry currently exports transport command interfaces and low-level executor functions. Those exports are not needed for the recommended workflow, and their long-term stability commitment is not established in this documentation. The command tag symbols and guard functions used by runtime dispatch are not root exports.
-
-## Next
-
-- [Client](./client.md) covers execution overloads and option composition.
-- [HTTP](./http.md) owns URL, encoding, response, and cancellation behavior.
-- [Struct](./struct.md) explains strict structural decoding.
+- [GET with a declared 404](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)

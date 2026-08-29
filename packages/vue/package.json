@@ -21,21 +21,18 @@
     "test": "vitest run --config vitest.config.ts --coverage"
   },
   "devDependencies": {
-    "@defjs/core": "workspace:^0.4.0",
+    "@defjs/core": "workspace:^",
     "@vitest/browser-playwright": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
-    "hono": "catalog:",
     "playwright": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "vue": "3.5.40"
   },
   "peerDependencies": {
-    "@defjs/core": "workspace:^0.4.0 || ^0.5.0",
+    "@defjs/core": "^0.4.0",
     "vue": ">=3.0.0"
-  },
-  "engines": {
-    "node": ">=22"
   }
 }

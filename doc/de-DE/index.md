@@ -1,71 +1,66 @@
 ---
-layout: home
-
-hero:
-  name: Defjs
-  text: Typisierte Commands für HTTP, SSE und WebSocket
-  tagline: Definiere Wire-Formen mit Structs, erstelle explizite Clients und behalte Ergebnisse und Lebenszyklen der einzelnen Transports im Blick.
-  actions:
-    - theme: brand
-      text: Erste Schritte
-      link: /de-DE/guide/getting-started
-    - theme: alt
-      text: Auf GitHub ansehen
-      link: https://github.com/defjs/defjs
-
-features:
-  - title: Endpunktverträge
-    details: Trenne Endpunktdefinitionen, Command-Builder und Commands. Structs dekodieren Eingaben der Aufrufer und Transportdaten zur Laufzeit.
-  - title: Transportspezifische Ergebnisse
-    details: HTTP, SSE und WebSocket liefern jeweils ein fehlerorientiertes Drei-Elemente-Tupel. An dritter Stelle steht je nach Transport ein Response-Wrapper, ein Snapshot der beim Start geöffneten SSE-Verbindung oder ein Snapshot der beim Start geöffneten WebSocket-Verbindung.
-  - title: Interceptor-Ketten
-    details: Registriere HTTP-, SSE- und WebSocket-Interceptors am Client. Jeder Transport filtert seine eigenen Interceptors und führt sie in Onion-Reihenfolge aus.
-  - title: Expliziter Lebenszyklus
-    details: SSE kann Netzwerk- und Lesefehler erneut versuchen. WebSocket-Reconnect ist optional. Die Anwendung bleibt für Iteration, Abbruch und endgültiges Schließen verantwortlich.
-  - title: Dekodierung zur Laufzeit
-    details: Dekodiere Eingaben, Responses, Stream-Events und WebSocket-Nachrichten mit denselben Struct-Verträgen, die auch die TypeScript-Inferenz steuern.
-  - title: Anwendungsintegrationen
-    details: Teile Clients über Vue oder React und ergänze serverseitige Dienste um ausgehende OpenTelemetry-Instrumentierung.
+title: Defjs
+description: Typisierte HTTP-, SSE- und WebSocket-Commands mit explizitem Client und Error-first-Ergebnissen.
 ---
 
-## Einen typisierten API-Client bauen
+# Defjs
 
-Beschreibe zuerst den HTTP-, SSE- oder WebSocket-Vertrag, den deine Anwendung aufruft. Defjs erzeugt daraus einen Command-Builder, prüft Daten zur Laufzeit und hält das Transportergebnis sichtbar.
+Definiere einen Endpoint, baue einen opaken Command und führe ihn aus. Dieselbe Form für HTTP, SSE und WebSocket.
 
-Der zentrale HTTP-Ablauf ist klein: Erstelle einen Client für deine API, definiere einen Endpunkt, rufe seinen Command-Builder auf und führe den Command aus.
-
-```typescript
+```ts get-health.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-
-const getUser = defineRequest({
+const getHealth = defineRequest({
   method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  path: '/health',
+  output: { 200: struct.object({ ok: struct.boolean() }) },
 })
 
-const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
-
-if (error) {
-  console.error(error.kind, error.code)
-} else {
-  console.log(user.name, response.status)
-}
+const [error, result, response] = await client.execute(getHealth())
+if (!error) console.log(result.ok, response.status)
 ```
 
-Richte den Client auf den Dienst deiner Anwendung und passe die Structs an dessen tatsächlichen Response-Vertrag an. Credentials, UI-Zustand, Retries, Abbruch und Ressourcenbereinigung bleiben Aufgabe deiner Anwendung.
+Defjs cached keine Ergebnisse, retried nicht für dich und schließt Streams nicht, wenn du es vergisst. Cancellation und Cleanup gehören dir.
 
-## Weiterlesen
+## Transport wählen
 
-- [Erste Schritte](/de-DE/guide/getting-started) installiert das Paket und führt deine Anwendung durch die erste typisierte Anfrage.
-- [Client](/de-DE/core/client) beschreibt die Optionskomposition und die drei `execute`-Overloads.
-- [Commands](/de-DE/core/commands) erklärt Endpunktdefinitionen, Command-Builder, Commands und schemagebundene Projektionen.
-- [HTTP](/de-DE/core/http), [SSE](/de-DE/core/sse) und [WebSocket](/de-DE/core/web-socket) dokumentieren Transportverhalten und Lifecycle-Verantwortung.
-- [Vue](/de-DE/plugins/vue), [React](/de-DE/plugins/react) und [OpenTelemetry Server](/de-DE/plugins/opentelemetry-server) zeigen die Einbindung in Framework und Telemetrie deiner Anwendung.
+| Du brauchst                          | Starte mit                        | Erfolgreiches Ergebnis                       |
+| ------------------------------------ | --------------------------------- | -------------------------------------------- |
+| Request + statusspezifische Response | [HTTP](./core/http.md)            | Dekodierte Daten + `HttpResponse`            |
+| Langlebiger Server-Event-Feed        | [SSE](./core/sse.md)              | Ein Stream + Startup-`open`-Snapshot         |
+| Bidirektionale Session               | [WebSocket](./core/web-socket.md) | Eine Session + Startup-`connection`-Snapshot |
+
+Neu hier? Mach [Erste Schritte](./guide/getting-started.md), dann schnapp dir ein [Rezept](./recipes/get-declared-404.md). Willst du das „Warum“? Lies [Entwurfsentscheidungen](./guide/design-decisions.md), nachdem du etwas laufen gelassen hast.
+
+## Paket wählen
+
+| Paket                         | Wann                                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `@defjs/core`                 | `createClient` (HTTP + SSE + WebSocket)                                                    |
+| `@defjs/react`                | `ClientProvider` / `useClient` — siehe [React](./plugins/react.md)                         |
+| `@defjs/vue`                  | Plugin + `injectClient` — siehe [Vue](./plugins/vue.md)                                    |
+| `@defjs/opentelemetry-server` | Ausgehende Spans/Metrics — siehe [OpenTelemetry Server](./plugins/opentelemetry-server.md) |
+
+## Ergebnisformen
+
+Alle drei Transports liefern ein Error-first-Tupel mit drei Einträgen. Positionen stimmen; Bedeutungen nicht:
+
+- HTTP → `[error, data, response]`
+- SSE → `[error, stream, open]`
+- WebSocket → `[error, session, connection]`
+
+Beim Startup-Fehler ist der zweite Eintrag `undefined`. Der dritte existiert nur, wenn dieser Transport zuerst eine Response oder ein Snapshot erzeugt hat. Siehe [Fehler](./core/errors.md).
+
+## Ownership in einem Atemzug
+
+Abort HTTP, wenn sie stale ist. Schließe SSE und `await stream.closed`. Schließe WebSocket und `await session.closed`. Auf einem Server erzeuge den Client innerhalb der Request-Grenze, wenn Options Cookies, Auth oder Tenant-Daten erfassen. Redact URLs, Headers und Bodies, bevor du sie loggst.
+
+## Verwandte Rezepte
+
+- [GET mit deklariertem 404](./recipes/get-declared-404.md)
+- [POST JSON](./recipes/post-json.md)
+- [HTTP-Aufruf abbrechen](./recipes/cancel-http.md)
+- [SSE-Stream konsumieren](./recipes/consume-sse.md)
+- [WebSocket-Session öffnen](./recipes/websocket-session.md)
+- [Mit lokalem Fetch-Handle testen](./recipes/test-with-handle.md)

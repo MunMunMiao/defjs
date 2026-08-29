@@ -1,12 +1,15 @@
+import type { FetchHandle } from '../../client/config'
 import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
+import { resolveOutputStruct, type RequestOutputShape } from '../../http/request'
 import { createFetchInitBase } from '../../http/transport/fetch_init'
 import { awaitWithSignal, mergeAbortSignals, resolveAbortedTransportError } from '../../internal/abort'
 import { AsyncQueue } from '../../internal/async_queue'
-import { createDeferred } from '../../internal/deferred'
+import { computeReconnectDelay, wait } from '../../internal/backoff'
 import type { HttpRequest } from '../../internal/http_request'
 import type { HttpResponse } from '../../internal/http_response'
 import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
+import { parseStructValue } from '../../struct/introspection'
 import type { EventStreamMessage } from './parser'
 import { createLineParser, createMessageParser, readStreamBytes, SSEParserLimitError } from './parser'
 
@@ -14,11 +17,13 @@ export const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream'
 export const LAST_EVENT_ID_HEADER = 'last-event-id'
 const DEFAULT_RETRY_INTERVAL = 1000
 
+/** Metadata available after an SSE response opens successfully. */
 export interface EventStreamOpenInfo {
-  response: HttpResponse<null>
+  response: HttpResponse<unknown>
   url: string
 }
 
+/** Fatal or recoverable error codes reported when an SSE stream closes with `code: 'error'`. */
 export type EventStreamErrorCode =
   | 'INVALID_RESPONSE'
   | 'MESSAGE_PROCESSING_FAILED'
@@ -32,15 +37,18 @@ interface EventStreamCloseInfoBase {
   cause?: unknown
 }
 
+/** How an SSE stream ended: clean EOF, abort, or an error with `errorCode`. */
 export type EventStreamCloseInfo =
   | (EventStreamCloseInfoBase & { code: 'eof' })
   | (EventStreamCloseInfoBase & { code: 'aborted' })
   | (EventStreamCloseInfoBase & { code: 'error'; errorCode: EventStreamErrorCode })
 
-export interface EventStreamHandle<TEvent = EventStreamMessage> extends AsyncIterable<TEvent> {
+/** Open SSE stream: iterate events, inspect open metadata, and close early. */
+export interface EventStreamHandle<TEvent = EventStreamMessage> extends AsyncIterable<TEvent>, AsyncDisposable {
   readonly open: EventStreamOpenInfo
   readonly closed: Promise<EventStreamCloseInfo>
   close(reason?: unknown): void
+  [Symbol.asyncDispose](): PromiseLike<void>
 }
 
 export interface SSEReconnectOptions {
@@ -58,7 +66,9 @@ export interface SSEReconnectOptions {
 }
 
 export interface FetchEventStreamOptions<TEvent = EventStreamMessage> {
-  fetch?: typeof fetch
+  fetch?: FetchHandle
+  /** Optional handshake status→body map for non-2xx opens; fills `error.data` when declared. */
+  handshakeOutput?: RequestOutputShape
   onopen?: (open: EventStreamOpenInfo) => void | Promise<void>
   onclose?: (open: EventStreamOpenInfo) => void | Promise<void>
   onerror?: (error: unknown, context: FetchEventStreamErrorContext) => number | null | undefined | Promise<number | null | undefined>
@@ -109,11 +119,11 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
   options: FetchEventStreamOptions<TEvent>,
 ): Promise<EventStreamHandle<TEvent>> {
   const queue = new AsyncQueue<TEvent>({ maxSize: options.maxQueueSize })
-  const closedDeferred = createDeferred<EventStreamCloseInfo>()
-  const openDeferred = createDeferred<EventStreamHandle<TEvent>>()
+  const closedDeferred = Promise.withResolvers<EventStreamCloseInfo>()
+  const openDeferred = Promise.withResolvers<EventStreamHandle<TEvent>>()
   const closeController = new AbortController()
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis)
-  const headers = cloneHeaders(request.headers)
+  const headers = new Headers(request.headers)
 
   if (!headers.has('Accept')) {
     headers.set('Accept', EVENT_STREAM_CONTENT_TYPE)
@@ -125,6 +135,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
   let retryCount = 0
   let lastEventId = ''
   let latestOpen: EventStreamOpenInfo | undefined
+  let disposeTask: Promise<void> | undefined
 
   const handle: EventStreamHandle<TEvent> = {
     get open() {
@@ -135,18 +146,9 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       return latestOpen
     },
     closed: closedDeferred.promise,
-    close(reason?: unknown) {
-      if (closeController.signal.aborted) {
-        return
-      }
-
-      closeController.abort(reason)
-      queue.close()
-      settleClosed({
-        code: 'aborted',
-        reason: toCloseReason(reason),
-        cause: reason,
-      })
+    close,
+    [Symbol.asyncDispose]() {
+      return disposeHandle()
     },
     [Symbol.asyncIterator]() {
       const iterator = queue[Symbol.asyncIterator]()
@@ -167,13 +169,48 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
   }
 
   // start() contains its terminal catch; this fallback only guards a type-invariant failure outside that catch.
-  void start().catch(
+  const lifecycleTask = start().catch(
     /* istanbul ignore next -- @preserve */
     (error: unknown) => {
       finishError(error)
     },
   )
   return openDeferred.promise
+
+  function disposeHandle(): Promise<void> {
+    return (disposeTask ??= Promise.resolve().then(disposeOnce))
+  }
+
+  async function disposeOnce(): Promise<void> {
+    let closeError: unknown
+    let hasCloseError = false
+    try {
+      handle.close()
+    } catch (error) {
+      hasCloseError = true
+      closeError = error
+      close()
+    }
+
+    await Promise.all([closedDeferred.promise, lifecycleTask])
+    if (hasCloseError) {
+      throw closeError
+    }
+  }
+
+  function close(reason?: unknown): void {
+    if (closeController.signal.aborted) {
+      return
+    }
+
+    closeController.abort(reason)
+    queue.close()
+    settleClosed({
+      code: 'aborted',
+      reason: toCloseReason(reason),
+      cause: reason,
+    })
+  }
 
   async function start(): Promise<void> {
     while (!closeController.signal.aborted) {
@@ -182,8 +219,12 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       let readerStarted = false
 
       try {
-        response = await fetchWithSignal(fetchImpl, createEventStreamRequest(request, headers, attemptAbort), attemptAbort)
-        const open = createOpenInfo(response)
+        response = await fetchWithSignal(
+          fetchImpl,
+          new Request(resolveRequestUrl(request), createEventStreamRequestInit(request, headers, attemptAbort)),
+          attemptAbort,
+        )
+        const open = await createOpenInfo(response, options.handshakeOutput)
         latestOpen = open
 
         validateOpenResponse(open)
@@ -334,11 +375,17 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       return null
     }
 
+    // Opt-in reconnect (match WebSocket): no reconnect object → do not retry.
+    const reconnect = options.reconnect
+    if (!reconnect) {
+      return null
+    }
+
     // 2. Check shouldReconnect
-    if (options.reconnect?.shouldReconnect) {
+    if (reconnect.shouldReconnect) {
       const should = await awaitWithSignal(
         () =>
-          options.reconnect?.shouldReconnect?.({
+          reconnect.shouldReconnect?.({
             attempt: retryCount,
             cause: error,
             lastEventId,
@@ -351,38 +398,20 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       }
     }
 
-    // 3. Check attempts limit
-    if (options.reconnect?.attempts !== undefined) {
-      if (retryCount > options.reconnect.attempts) {
-        return null
-      }
+    // 3. Check attempts limit (default 3 when reconnect is configured, like WebSocket)
+    const attempts = reconnect.attempts ?? 3
+    if (retryCount > attempts) {
+      return null
     }
 
-    // 4. Determine base delay
-    let baseDelay = typeof next === 'number' ? next : retryInterval
-
-    // 5. Apply exponential backoff / jitter / cap
-    const { reconnect } = options
-    if (reconnect) {
-      const factor = reconnect.factor ?? 1
-      if (factor > 1 && retryCount > 1) {
-        baseDelay *= Math.pow(factor, retryCount - 1)
-      }
-
-      if (reconnect.maxDelayMs !== undefined && baseDelay > reconnect.maxDelayMs) {
-        baseDelay = reconnect.maxDelayMs
-      }
-
-      if (reconnect.jitter !== undefined && reconnect.jitter > 0) {
-        baseDelay += Math.random() * reconnect.jitter
-      }
+    const delayMs = typeof next === 'number' ? next : retryInterval
+    const factor = reconnect.factor ?? 1
+    const jitter = reconnect.jitter ?? 0
+    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1) {
+      throw new RangeError('SSE reconnect jitter is out of range')
     }
-
-    if (!Number.isFinite(baseDelay)) {
-      throw new TypeError('SSE retry delay must be finite')
-    }
-
-    return Math.min(baseDelay, 2_147_483_647)
+    const maxDelayMs = reconnect.maxDelayMs ?? Number.POSITIVE_INFINITY
+    return computeReconnectDelay({ delayMs, factor, jitter, maxDelayMs }, retryCount)
   }
 
   async function observeFatalError(error: EventStreamFatalError, signal: AbortSignal): Promise<void> {
@@ -471,16 +500,7 @@ function getEventStreamErrorCode(error: unknown): EventStreamErrorCode {
   return getEventStreamFatalCode(error) ?? (error === ERR_TIMEOUT ? 'TIMEOUT' : 'TRANSPORT_ERROR')
 }
 
-function cloneHeaders(headers?: Headers): Headers {
-  return headers ? new Headers(headers) : new Headers()
-}
-
-function createEventStreamRequest(request: HttpRequest, headers: Headers, abort?: AbortSignal): Request {
-  const url = resolveRequestUrl(request)
-  return new Request(url, createEventStreamRequestInit(request, headers, abort))
-}
-
-async function fetchWithSignal(fetchImpl: typeof fetch, request: Request, signal: AbortSignal): Promise<Response> {
+async function fetchWithSignal(fetchImpl: FetchHandle, request: Request, signal: AbortSignal): Promise<Response> {
   return await awaitWithSignal(() => {
     const pending = Promise.resolve(fetchImpl(request))
     void pending
@@ -494,13 +514,29 @@ async function fetchWithSignal(fetchImpl: typeof fetch, request: Request, signal
   }, signal)
 }
 
-function createOpenInfo(response: Response): EventStreamOpenInfo {
-  const openResponse = makeResponse<null>({
+async function createOpenInfo(response: Response, handshakeOutput?: RequestOutputShape): Promise<EventStreamOpenInfo> {
+  let body: unknown = null
+
+  if (!response.ok && handshakeOutput) {
+    const struct = resolveOutputStruct(handshakeOutput, response.status)
+    if (struct) {
+      try {
+        const raw = await response.json()
+        body = parseStructValue(struct, raw)
+      } catch {
+        body = null
+      }
+    } else if (response.body) {
+      void response.body.cancel()
+    }
+  }
+
+  const openResponse = makeResponse<unknown>({
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
     url: response.url,
-    body: null,
+    body,
   })
 
   return {
@@ -637,33 +673,6 @@ function isQuotedTextChar(code: number): boolean {
 
 function isQuotedPairChar(code: number): boolean {
   return code === 0x09 || code === 0x20 || (code >= 0x21 && code <= 0x7e) || code >= 0x80
-}
-
-async function wait(ms: number, signal: AbortSignal): Promise<void> {
-  if (ms <= 0) {
-    return
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-
-    /* istanbul ignore next -- source-map skew: AbortSignal event handler body mapped to wrong line */
-    const onAbort = () => {
-      clearTimeout(timeout)
-      signal.removeEventListener('abort', onAbort)
-      reject(normalizeAbortReason(signal))
-    }
-
-    /* istanbul ignore next -- defensive: micro-race where signal aborts before listener is attached */
-    if (signal.aborted) {
-      onAbort()
-    } else {
-      signal.addEventListener('abort', onAbort, { once: true })
-    }
-  })
 }
 
 function normalizeAbortError(error: unknown, requestAbort?: AbortSignal, closeAbort?: AbortSignal): unknown {

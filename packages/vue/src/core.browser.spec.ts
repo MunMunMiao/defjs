@@ -299,7 +299,7 @@ describe('vue browser runtime', () => {
     app.config.warnHandler = () => {}
 
     try {
-      expect(() => app.mount(root)).toThrow('No HTTP client provided')
+      expect(() => app.mount(root)).toThrow('No Defjs client provided. Did you forget to call app.use(createClientPlugin(client))?')
     } finally {
       root.remove()
     }

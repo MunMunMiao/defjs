@@ -1,4 +1,7 @@
+import { defineRequest } from '../http'
 import type { HttpRequest } from '../internal/http_request'
+import { struct } from '../struct'
+import type { ClientWebSocketOptions } from './config'
 import type { Client, ClientConfig, ClientOptions, QueryParamsSerializer } from './index'
 
 // @ts-expect-error withWebSocketQueue was removed; endpoint definitions own queue limits
@@ -15,7 +18,6 @@ import {
   withWebSocketBeforeConnect,
   withWebSocketHandle,
   withWebSocketHeartbeat,
-  withWebSocketOptions,
   withWebSocketProtocols,
   withWebSocketReconnect,
   withXSRF,
@@ -36,18 +38,13 @@ const xsrfTokenProvider: XSRFTokenProvider = ({ request }: XSRFTokenProviderCont
 }
 type XsrfTokenProviderCases = Expect<Equal<typeof xsrfTokenProvider, (context: XSRFTokenProviderContext) => string | null | undefined>>
 
-const customFetch = Object.assign(
-  async (_input: RequestInfo | URL, _init?: RequestInit) =>
-    new Response(JSON.stringify({ ok: true }), {
-      headers: {
-        'content-type': 'application/json',
-      },
-      status: 200,
-    }),
-  {
-    preconnect: async () => undefined,
-  },
-) as typeof fetch
+const customFetch = async (_input: RequestInfo | URL, _init?: RequestInit) =>
+  new Response(JSON.stringify({ ok: true }), {
+    headers: {
+      'content-type': 'application/json',
+    },
+    status: 200,
+  })
 
 class MockWebSocket extends EventTarget {
   static CONNECTING = 0
@@ -89,6 +86,22 @@ const client = createClient(
 )
 
 type ClientCases = Expect<Equal<typeof client, Client>>
+type ClientAsyncDisposeCase = Expect<typeof Symbol.asyncDispose extends keyof Client ? false : true>
+
+const useGetUser = defineRequest({
+  method: 'GET',
+  path: '/users',
+  output: { 200: struct.object({ name: struct.string() }) },
+})
+const httpCommand = useGetUser()
+
+void client.execute(httpCommand, { timeout: 1, onUploadProgress: () => undefined })
+
+// @ts-expect-error abort and timeout cannot be used together on HTTP execute
+void client.execute(httpCommand, { abort: new AbortController().signal, timeout: 1 })
+
+type ExecuteOptions = NonNullable<Parameters<Client['execute']>[1]>
+type HttpExecuteHelpers = Expect<'onUploadProgress' extends keyof ExecuteOptions ? true : false>
 
 createClient(withWebSocketHandle(NodeWebSocket))
 
@@ -167,13 +180,11 @@ createClient(withEndpoint('https://api.example.com'), withWebSocketBeforeConnect
 
 void withWebSocketQueue
 
-createClient(
-  withEndpoint('https://api.example.com'),
-  withWebSocketOptions({
-    // @ts-expect-error client-level WebSocket queue configuration was removed
-    queue: { maxSize: 1 },
-  }),
-)
+const removedQueue: ClientWebSocketOptions = {
+  // @ts-expect-error client-level WebSocket queue configuration was removed
+  queue: { maxSize: 1 },
+}
+void removedQueue
 
 // @ts-expect-error withWebSocketReconnect attempts must be numeric
 createClient(withEndpoint('https://api.example.com'), withWebSocketReconnect({ attempts: '3' }))
@@ -184,4 +195,12 @@ createClient(withEndpoint('https://api.example.com'), withXSRF({ cookieName: 1 }
 // @ts-expect-error withXSRF tokenProvider must be synchronous and return a token or nullish value
 createClient(withEndpoint('https://api.example.com'), withXSRF({ tokenProvider: async () => 'token' }))
 
-export type Cases = ClientCases | OptionsCases | SerializerCases | XsrfTokenProviderCases | XsrfOptionsCases | XsrfConfigCases
+export type Cases =
+  | ClientAsyncDisposeCase
+  | ClientCases
+  | HttpExecuteHelpers
+  | OptionsCases
+  | SerializerCases
+  | XsrfTokenProviderCases
+  | XsrfOptionsCases
+  | XsrfConfigCases

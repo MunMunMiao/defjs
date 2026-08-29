@@ -21,14 +21,13 @@
     "test": "vitest run --config vitest.config.ts --coverage"
   },
   "devDependencies": {
-    "@defjs/core": "workspace:^0.4.0",
+    "@defjs/core": "workspace:^",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitest/browser-playwright": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
-    "hono": "catalog:",
     "playwright": "catalog:",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -38,10 +37,7 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@defjs/core": "workspace:^0.4.0 || ^0.5.0",
+    "@defjs/core": "^0.4.0",
     "react": ">=18.0.0"
-  },
-  "engines": {
-    "node": ">=22"
   }
 }

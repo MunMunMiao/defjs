@@ -1,16 +1,16 @@
 ---
 title: Struct
-description: 說明嚴格結構解碼、必填與可選輸入、alias 與 StructError 處理。
+description: 建模請求與回應形狀、剖析 unknowns，並編碼 wire bodies。
 ---
 
 # Struct
 
-Struct 用來描述嚴格結構解碼與 wire encoding。必填值遺漏或值無效時會失敗，不會產生預設值。
+把請求（與其回應）建成 Structs。你透過 `Infer` 拿到 TypeScript 型別，透過 `struct.parse(...)` 做執行階段檢查 — 不 throw，error-first tuple。
 
-從 root entry 使用 `struct` facade 與 `Infer<T>`：
+## Basic Setup
 
-```typescript
-import { struct, type Infer, type StructInput } from '@defjs/core'
+```typescript twoslash
+import { defineRequest, struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -19,50 +19,43 @@ const User = struct.object({
 })
 
 type User = Infer<typeof User>
-// { id: number; name: string; active: boolean }
+
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({
+    body: struct.json(
+      struct.object({
+        name: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  output: { 201: User },
+})
+
+const [parseError, user] = struct.parse(User, { id: 7, name: 'Ada', active: true })
+if (!parseError) console.log(user.name)
+void createUser
 ```
 
-## Constructor
+剖析輸出只保留已宣告欄位。缺少必填欄位、錯誤的 primitives、壞的巢狀值、錯誤的 tuple 長度，或不允許的 `null` → `StructError`，沒有部分值。Structs 不可變；`.optional()` 與同類方法回傳新的 Struct。
 
-常用 constructor 包括：
+## 必填、optional、null
 
-```typescript
-struct.string()
-struct.number()
-struct.boolean()
-struct.bigint()
-struct.date()
-struct.null()
-struct.literal('ready')
-struct.enum(['pending', 'done'])
-struct.array(struct.string())
-struct.tuple([struct.string(), struct.number()])
-struct.object({ id: struct.number() })
-struct.record(struct.number())
-struct.or(struct.string(), struct.number())
-struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
-struct.discriminatedUnion('kind', [
-  struct.object({ kind: struct.literal('click'), x: struct.number() }),
-  struct.object({ kind: struct.literal('key'), key: struct.string() }),
-])
-```
+Presence 與 nullability 是分開的：
 
-`struct.any()` 與 `struct.unknown()` 接受 `null`、`undefined` 以外的任何值；需要接受兩者時仍使用相同的 modifier。Binary constructor 包括 `struct.blob()`、`struct.file()` 與 `struct.arrayBuffer()`。
+| 宣告                         | 缺少／`undefined`            | `null` | 有效值      |
+| ---------------------------- | ---------------------------- | ------ | ----------- |
+| `struct.string()`            | 拒絕                         | 拒絕   | 接受 string |
+| `struct.string().optional()` | 接受；省略物件中不存在的欄位 | 拒絕   | 接受 string |
+| `struct.string().null()`     | 拒絕                         | 接受   | 接受 string |
+| `struct.string().nullish()`  | 接受；省略物件中不存在的欄位 | 接受   | 接受 string |
+| `struct.null()`              | 拒絕                         | 接受   | 拒絕其他值  |
 
-每個 Struct 都支援以下 modifier：
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-struct.string().optional()
-struct.string().null()
-struct.string().nullish()
-struct.string().alias('wire_name')
-```
-
-## 嚴格解析
-
-在指令以外解碼時使用 `struct.parse(schema, input)`。它回傳固定的 error-first 二元組：
-
-```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
@@ -70,192 +63,191 @@ const Profile = struct.object({
   note: struct.string().nullish(),
 })
 
-const [error, profile] = struct.parse(Profile, input)
-
-if (error) {
-  // profile is undefined
-  return
-}
+const [error, profile] = struct.parse(Profile, {
+  name: 'Ada',
+  biography: null,
+  note: undefined,
+})
+if (error) throw error
+console.log(profile.name, profile.nickname, profile.biography, profile.note)
 ```
 
-```typescript
-type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
-```
+在根層，optional 可以是 `undefined`。在物件裡，省略的 optional／nullish 欄位維持不存在。在 `struct.request(...)` 中，全 optional 的區段可以省略（正規化成 `{}`）；有必填欄位的區段仍必填。有 body wrapper → body 必填，就算內層欄位是 optional。
 
-所有 modifier 使用同一套規則：遺漏值與 `undefined` 只有在 `.optional()` 或 `.nullish()` 下才接受；明確 `null` 只有在 `.null()` 或 `.nullish()` 下才接受。`.null()` 不會讓值變成 optional。
+## Request body wrappers
 
-遺漏的 optional 與 nullish object field 會從輸出省略；在頂層則解碼為 `undefined`。未知 key 會被丟棄，解碼後的 object 與 record 使用 null prototype。
+`struct.request(...)` 拆開 `path`、`query`、`headers`、`body`。Bodies 需要明確的 codec：
 
-Node 的 strict deep equality 會比較 prototype，因此 Struct 解析結果不會與欄位相同的 object literal 深度相等。測試應明確斷言這個邊界，或只在斷言處建立 shallow copy：
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-```typescript
-import assert from 'node:assert/strict'
-
-const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
-assert.equal(error, null)
-assert.equal(Object.getPrototypeOf(profile), null)
-assert.deepEqual({ ...profile }, { name: 'Ada' })
-```
-
-Spread 只適用於這個淺層斷言；巢狀 Struct object 仍使用 null prototype。不要只為迎合測試 matcher 而在 production path 增加全域 normalize 或 clone。
-
-啟用 `exactOptionalPropertyTypes` 時，推導出的 object input 使用 exact optional property。呼叫端應省略 optional 或 nullish key，而不是明確賦值 `undefined`：
-
-```typescript
-const OptionalProfile = struct.object({
-  nickname: struct.string().optional(),
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/organizations/:organizationId/users',
+  input: struct.request({
+    path: struct.object({ organizationId: struct.string() }),
+    query: struct.object({ notify: struct.boolean().optional() }),
+    headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
+    body: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  }),
 })
 
-type OptionalProfileInput = StructInput<typeof OptionalProfile>
-
-const omitted: OptionalProfileInput = {}
-// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
-const explicitUndefined: OptionalProfileInput = { nickname: undefined }
-```
-
-執行階段面對 unknown input 時仍會防禦性接受 optional/nullish 欄位的明確 `undefined`，並從解析結果省略該 key；這項 normalization 不會放寬靜態呼叫端的 input type。
-
-## 必填 Object 與 Request 輸入
-
-除非欄位 Struct 是 optional 或 nullish，否則 object property 在 TypeScript 與執行階段都必填。`struct.request(...)` 中每個已宣告 section 也必填；未宣告的 section 不會出現在輸入型別中。
-
-```typescript
-const Input = struct.request({
-  path: struct.object({ id: struct.string() }),
-  query: struct.object({ page: struct.number().optional() }),
+const command = createUser({
+  path: { organizationId: 'acme' },
+  query: { notify: true },
+  headers: { requestId: 'request-42' },
+  body: { displayName: 'Ada' },
 })
-
-// { path: { id: string }; query: { page?: number } }
+void command
 ```
 
-省略 `query` 會報錯，`query: {}` 合法。遺漏必填欄位、明確 `undefined`、禁止的 `null` 或錯誤執行階段型別都會讓整次解析失敗，而且不回傳部分值。
+| Wrapper                    | 剖析後的值        | Wire 邊界                                                            |
+| -------------------------- | ----------------- | -------------------------------------------------------------------- |
+| `struct.json(inner)`       | 來自 `inner` 的值 | JSON 文字、`application/json`                                        |
+| `struct.text()`            | `string`          | 文字、`text/plain;charset=UTF-8`                                     |
+| `struct.urlencoded(shape)` | Shape 的物件      | `URLSearchParams`、`application/x-www-form-urlencoded;charset=UTF-8` |
+| `struct.formData(shape)`   | Shape 的物件      | `FormData`；平台設 multipart boundary                                |
+| `struct.blob()`            | `Blob`            | Blob type 或 `application/octet-stream`                              |
+| `struct.file()`            | `File`            | 原生 `File`（name + type）                                           |
+| `struct.arrayBuffer()`     | `ArrayBuffer`     | Buffer、`application/octet-stream`                                   |
 
-複合 Struct 在第一個確定的 issue 停止。Tuple 輸入長度必須與宣告完全一致。`struct.or(...)` 仍按順序嘗試 alternative，`struct.discriminatedUnion(...)` 仍選擇已宣告分支。
+`struct.file()` 是給 form fields 的值 Struct — 不是獨立的 `request.body`。Binary bodies 用 `struct.blob()` 與 `struct.arrayBuffer()`。裸的 object／array／primitive Structs 不能當 `request.body`。SSE 拒絕 `body`。WebSocket request input 拒絕 `body` 與 `headers`。
 
-Discriminator 欄位使用 alias 時，`struct.discriminatedUnion(...)` 會依 option 宣告順序讀取第一個實際存在的 wire discriminator。選中分支後，不再讀取後續 option 的 alias。
+## Aliases
 
-Struct 強制執行已宣告結構，不負責應用程式層級 authorization、range、amount、format 或 state transition 規則，也沒有公開 refine/range/format DSL。
+`.alias(...)` 把邏輯名稱與 wire 名稱分開。`struct.parse(...)` 用邏輯 keys。JSON 與 flat request codecs 會編碼 aliases；JSON 回應解碼把 wire keys 映回邏輯欄位。
 
-`struct.number()` 接受正負 `Infinity`；在 JavaScript number 中只排除 `NaN`。請在建立指令前，於應用程式程式碼中完成 finite、範圍與 domain 檢查。不要把這些檢查放進 `build`，因為 `build` 收到的是結構描述綁定投影，不是呼叫端執行階段值。
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-## Request Body
-
-`struct.request(...)` 會將可直接對應 wire 的 section 分組：
-
-```typescript
-const input = struct.request({
-  path: struct.object({ organizationId: struct.string() }),
-  query: struct.object({ includeDisabled: struct.boolean().optional() }),
-  headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
-  body: struct.json(
-    struct.object({
-      displayName: struct.string().alias('display_name'),
-    }),
-  ),
-})
-```
-
-Body boundary 如下：
-
-| Struct                     | 編碼              |
-| -------------------------- | ----------------- |
-| `struct.json(inner)`       | JSON              |
-| `struct.text()`            | 純文字            |
-| `struct.urlencoded(shape)` | `URLSearchParams` |
-| `struct.formData(shape)`   | `FormData`        |
-| `struct.blob()`            | `Blob`            |
-| `struct.arrayBuffer()`     | `ArrayBuffer`     |
-
-自動 request mapping 與各傳輸限制請見[指令](/zh-Hant-TW/core/commands)。
-
-## Alias
-
-`.alias(name)` 會變更 wire key，但不會改變 TypeScript 的邏輯 key。
-
-```typescript
-const UserBody = struct.object({
-  id: struct.number().alias('user_id'),
+const User = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
-if (logicalError) throw logicalError
+const [parseError, user] = struct.parse(User, { displayName: 'Ada' })
+if (parseError) throw parseError
+console.log(user.displayName)
 
-const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
-if (!wireKeyError) throw new Error('struct.parse must read logical keys')
+const [wireError] = struct.parse(User, { display_name: 'Ada' })
+console.log(wireError?.issues[0]?.path)
 ```
 
-`logicalUser` 使用 `{ id, displayName }`；`wireKeyError` 指向遺漏的邏輯 `id`。公開 `struct.parse` 只讀取邏輯值，不會把 wire key 當作 standalone parse input。
+| 邊界                                       | 欄位                      |
+| ------------------------------------------ | ------------------------- |
+| `struct.parse(User, ...)`                  | 邏輯 `displayName`        |
+| JSON request 編碼                          | Wire `display_name`       |
+| JSON 回應解碼                              | Wire → 邏輯 `displayName` |
+| Query、header、URL-encoded、multipart 編碼 | Wire alias 當 key         |
 
-Transport JSON 編碼與解碼才會套用 wire alias：
+Aliases 可作用在巢狀欄位、arrays、objects、unions、discriminators。應用程式碼用邏輯名稱；外部命名放在 Struct。
 
-```typescript
-import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+## 剖析失敗
 
-let requestWireBody: unknown
-const echoUser = defineRequest({
-  method: 'POST',
-  path: '/users',
-  input: struct.request({ body: struct.json(UserBody) }),
-  output: { 200: UserBody },
-})
-const client = createClient(
-  withEndpoint('https://example.test'),
-  withHTTPHandle(async (input, init) => {
-    requestWireBody = await new Request(input, init).json()
-    return Response.json({ user_id: 1, display_name: 'Ada' })
-  }),
-)
+`struct.parse(...)` 回傳 `[null, value]` 或 `[StructError, undefined]`。`StructError` 繼承 `Error`，並暴露 `issues`，以及 `format()`、`flatten()`、`prettify()`。
 
-const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
-if (requestError) throw requestError
-```
+```typescript twoslash
+import { struct, StructError } from '@defjs/core'
 
-`requestWireBody` 是 `{ user_id, display_name }`，`responseUser` 則還原為 `{ id, displayName }`。自動建構請求時，也會把 alias 套用到 outbound path、query、header、URL-encoded 與 multipart key；自訂 `build` 投影明確指定的目標 key 則維持原樣。
+const User = struct.object({ id: struct.number(), name: struct.string() })
+const [error, value] = struct.parse(User, { id: 'not-a-number' })
 
-## `StructError`
-
-結構解碼失敗會產生 `StructError`，通常出現在 `RequestError.cause`。
-
-```typescript
-import { StructError, type RequestError, type StructIssue } from '@defjs/core'
-
-export function structIssues(error: RequestError): readonly StructIssue[] {
-  if (error.kind === 'definition' && error.cause instanceof StructError) {
-    return error.cause.issues
-  }
-  return []
+if (error) {
+  console.log(error instanceof StructError)
+  console.log(error.issues[0]?.code, error.issues[0]?.path)
+  console.log(error.flatten().fieldErrors)
+  console.log(error.format(), error.prettify())
 }
+void value
 ```
 
-`StructError` 提供：
+`StructIssue` 有 `code`、`expected`、`message`、`path`、`received`。Issues 可能持有不可信 input — 記錄或回傳前先遮罩。`struct.parse(..., { errorMap })` 只覆蓋那一次 parse 的文案。
 
-- `issues`：原始 `StructIssue[]`；
-- `format()`：巢狀訊息樹；
-- `flatten()`：頂層 form 與 field message；
-- `prettify()`：方便閱讀的多行字串。
+Struct 驗證只做結構。沒有公開的 range、format、refinement、auth 或狀態轉移規則。那些檢查在建 command 之前做。
 
-`StructIssue.received` 可能包含輸入或回應資料，預設訊息也可能包含該值的表示形式。Path 與格式化後的 key 也可能來自不受信任的資料，record 尤其如此。記錄或回傳 `issues`、訊息、`format()`、`flatten()` 與 `prettify()` 前，必須先遮罩或審查。
+## Reference
 
-## 全域錯誤訊息
+`@defjs/core` 上的公開 constructors（internals 不是 facade API）：
 
-`setErrorMap(...)` 會替換整個 process 的訊息產生方式：
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-import { setErrorMap } from '@defjs/core'
+const Any = struct.any()
+const ArrayOfStrings = struct.array(struct.string())
+const Bytes = struct.arrayBuffer()
+const BigIntValue = struct.bigint()
+const BlobValue = struct.blob()
+const BooleanValue = struct.boolean()
+const DateValue = struct.date()
+const Discriminated = struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('created'), id: struct.number() }),
+  struct.object({ kind: struct.literal('deleted'), id: struct.number() }),
+])
+const Status = struct.enum(['draft', 'published'])
+const FileValue = struct.file()
+const Form = struct.formData({ file: struct.file() })
+const Combined = struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
+const JsonBody = struct.json(struct.object({ ok: struct.boolean() }))
+const Literal = struct.literal('ready')
+const NullValue = struct.null()
+const NumberValue = struct.number()
+const ObjectValue = struct.object({ id: struct.number() })
+const Union = struct.or(struct.string(), struct.number())
+const RecordValue = struct.record(struct.number())
+const Request = struct.request({ path: struct.object({ id: struct.number() }) })
+const StringValue = struct.string()
+const TextBody = struct.text()
+const Tuple = struct.tuple([struct.string(), struct.number()])
+const Unknown = struct.unknown()
+const FormUrlEncoded = struct.urlencoded({ name: struct.string() })
 
-setErrorMap((issue) => {
-  if (issue.code === 'invalid_type') {
-    return `Invalid value at ${issue.path.join('.')}`
-  }
-  return undefined
-})
+void [Any, ArrayOfStrings, Bytes, BigIntValue, BlobValue, BooleanValue, DateValue, Discriminated, Status, FileValue, Form, Combined]
+void [
+  JsonBody,
+  Literal,
+  NullValue,
+  NumberValue,
+  ObjectValue,
+  Union,
+  RecordValue,
+  Request,
+  StringValue,
+  TextBody,
+  Tuple,
+  Unknown,
+  FormUrlEncoded,
+]
 ```
 
-這個 map 是全域的，不屬於個別 client。變更後，同一個 JavaScript realm 裡每個 client 之後產生的 Struct issue 都會受影響。不要在 callback 裡放 request-specific state；共用 process 的應用程式也要協調安裝時機。
+| Constructor                      | Input                                   | 推導輸出                 |
+| -------------------------------- | --------------------------------------- | ------------------------ |
+| `struct.number()`                | 非 `NaN` 的 Number                      | `number`，含 ±`Infinity` |
+| `struct.date()`                  | `Date`、number 或 date string           | 有效的 `Date`            |
+| `struct.bigint()`                | `bigint` 或 `BigInt(...)` 接受的 string | `bigint`                 |
+| `struct.enum(...)`               | 已宣告的 string 或 number member        | 該 literal union         |
+| `struct.discriminatedUnion(...)` | 帶必填 literal discriminator 的物件     | 選定的 object 分支       |
+| `struct.or(...)`                 | 第一個相符分支；編碼會檢查歧義          | 分支輸出的 union         |
+| `struct.intersection(...)`       | 每個 member 都接受的值                  | 輸出的 intersection      |
+| `struct.record(value)`           | 值符合 `value` 的 plain object          | 剖析後值的 Record        |
+| `struct.tuple(items)`            | 長度恰好為宣告長度的陣列                | 固定長度 tuple           |
 
-## 下一步
+每個 Struct 都支援 `.alias(name)`、`.optional()`、`.null()`、`.nullish()`。`struct.discriminatedUnion` 需要帶必填 literal discriminator 的 object options，並拒絕重複。
 
-- [指令](/zh-Hant-TW/core/commands)把 Struct 欄位對應到 request 與 message。
-- [錯誤](/zh-Hant-TW/core/errors)說明 Struct failure 如何出現在執行 tuple。
-- [HTTP](/zh-Hant-TW/core/http)涵蓋回應解碼與 representation error。
+從 `@defjs/core` 匯入 `struct`、`Infer`、`Struct`、`StructError` 與相關公開型別。用 `struct.parse(...)` 當 parser。別匯入 `createObjectStruct`、definition symbols、codec internals，或 `packages/core/src`。
+
+Facade 的非 promise 注意事項：
+
+- Object／record 輸出用 null prototype — 別假設有 `Object.prototype` 方法。
+- 未知的物件 keys 會被丟掉。
+- `struct.number()` 拒絕 `NaN`，接受 infinities。
+- `struct.or(...)` 依序試分支；分支不同意時拒絕歧義編碼。
+- `struct.intersection(...)` 依宣告順序剖析 members。
+- Struct 驗證邊界；它不會快取、授權，或擁有傳輸資源。
+
+## 相關 recipes
+
+- [POST JSON](../recipes/post-json.md)
+- [已宣告 404 的 GET](../recipes/get-declared-404.md)

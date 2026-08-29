@@ -1,5 +1,5 @@
 import { encodeValue } from './encode'
-import { StructError } from './errors'
+import { runWithErrorMap, StructError, type ErrorMap } from './errors'
 import { resolveStructFields } from './fields'
 import { isStruct } from './guards'
 import { parseValue } from './parse'
@@ -44,14 +44,17 @@ export function encodeStructValue(struct: StructLike<unknown, unknown, boolean>,
 export function parseStructTuple<S extends StructLike<unknown, unknown, boolean>>(
   struct: S,
   value: unknown,
+  options?: { aliases?: boolean; errorMap?: ErrorMap },
 ): ParseResult<S['_struct']['output']> {
   assertStruct(struct, 'struct')
   const runtime = struct as unknown as RuntimeStruct
-  const result = parseValue(runtime, value, [], 'value')
-  if (result.ok) {
-    return [null, result.value as unknown as S['_struct']['output']]
-  }
-  return [new StructError([result.issue]), undefined]
+  return runWithErrorMap(options?.errorMap, () => {
+    const result = parseValue(runtime, value, [], 'value', options?.aliases === true)
+    if (result.ok) {
+      return [null, result.value as unknown as S['_struct']['output']]
+    }
+    return [new StructError([result.issue]), undefined]
+  })
 }
 
 export function parseStructValue(

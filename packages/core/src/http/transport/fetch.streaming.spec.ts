@@ -177,6 +177,13 @@ describe('Fetch handler streaming', () => {
       return
     }
 
+    class FailingRequest {
+      constructor() {
+        throw new TypeError('Request construction failed')
+      }
+    }
+
+    vi.stubGlobal('Request', FailingRequest)
     const cancel = vi.fn(() => new Promise<void>(() => undefined))
     const stream = new ReadableStream<Uint8Array>({ cancel })
     const fetchMock = vi.fn<typeof fetch>()
@@ -186,7 +193,7 @@ describe('Fetch handler streaming', () => {
           baseEndpoint: 'https://example.com',
           body: stream,
           endpoint: '/upload',
-          method: 'GET',
+          method: 'POST',
           uploadProgress: vi.fn(),
         },
         fetchMock,
@@ -402,6 +409,159 @@ describe('Fetch handler streaming', () => {
     await expect(reader?.cancel(networkError)).resolves.toBeUndefined()
     expect(cancel).toHaveBeenCalledExactlyOnceWith(networkError)
     expect(stream.locked).toBe(false)
+  })
+
+  test.each([
+    {
+      body: () => {
+        const formData = new FormData()
+        formData.append('name', 'miao')
+        return formData
+      },
+      name: 'FormData',
+    },
+    {
+      body: () => new Blob(['hello-upload'], { type: 'text/plain' }),
+      name: 'Blob',
+    },
+    {
+      body: () => new TextEncoder().encode('bytes-upload').buffer,
+      name: 'ArrayBuffer',
+    },
+  ])('should call uploadProgress for a $name body', async ({ body }) => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const progressEvents: Array<{ lengthComputable: boolean; loaded: number; total: number }> = []
+    const fetchMock = vi.fn(async (request: Request) => {
+      const reader = request.body?.getReader()
+      if (reader) {
+        while (true) {
+          const { done } = await reader.read()
+          if (done) {
+            break
+          }
+        }
+      }
+      return new Response('ok', {
+        headers: { 'content-type': 'text/plain' },
+        status: 200,
+      })
+    })
+
+    const response = await fetchHandler(
+      {
+        abort: new AbortController().signal,
+        baseEndpoint: 'https://example.com',
+        body: body(),
+        endpoint: '/upload',
+        method: 'POST',
+        responseType: 'text',
+        uploadProgress(event) {
+          progressEvents.push({
+            lengthComputable: event.lengthComputable,
+            loaded: event.loaded,
+            total: event.total,
+          })
+        },
+      },
+      fetchMock as unknown as typeof fetch,
+    )
+
+    expect(response.body).toBe('ok')
+    expect(progressEvents.length).toBeGreaterThanOrEqual(2)
+    expect(progressEvents[0]).toMatchObject({ lengthComputable: true, loaded: 0 })
+    expect(progressEvents[0]?.total).toBeGreaterThan(0)
+    const complete = progressEvents.at(-1)
+    expect(complete?.lengthComputable).toBe(true)
+    expect(complete?.loaded).toBe(complete?.total)
+    expect(complete?.total).toBeGreaterThan(0)
+  })
+
+  test('should skip upload wrapping for non-streamable bodies without a counted type', async () => {
+    const uploadProgress = vi.fn()
+    const fetchMock = vi.fn(async () => new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } }))
+
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        body: 'plain-text-body',
+        endpoint: '/upload',
+        method: 'POST',
+        responseType: 'text',
+        uploadProgress,
+      },
+      fetchMock as unknown as typeof fetch,
+    )
+
+    expect(response.body).toBe('ok')
+    expect(uploadProgress).not.toHaveBeenCalled()
+  })
+
+  test('should report upload progress for an empty Blob without a content type', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const progressEvents: Array<{ lengthComputable: boolean; loaded: number; total: number }> = []
+    const fetchMock = vi.fn(async (request: Request) => {
+      const reader = request.body?.getReader()
+      if (reader) {
+        while (true) {
+          const { done } = await reader.read()
+          if (done) {
+            break
+          }
+        }
+      }
+      return new Response('ok', { headers: { 'content-type': 'text/plain' }, status: 200 })
+    })
+
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        body: new Blob([]),
+        bodyContentType: 'application/octet-stream',
+        endpoint: '/upload',
+        method: 'POST',
+        responseType: 'text',
+        uploadProgress(event) {
+          progressEvents.push({
+            lengthComputable: event.lengthComputable,
+            loaded: event.loaded,
+            total: event.total,
+          })
+        },
+      },
+      fetchMock as unknown as typeof fetch,
+    )
+
+    expect(response.body).toBe('ok')
+    expect(progressEvents[0]).toEqual({ lengthComputable: false, loaded: 0, total: 0 })
+  })
+
+  test('should cancel a converted upload stream when the start observer throws', async () => {
+    if (!supportsStreamingRequestBody()) {
+      return
+    }
+
+    const observerError = new Error('start failed')
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        body: new Blob(['hello']),
+        endpoint: '/upload',
+        method: 'POST',
+        responseType: 'text',
+        async uploadProgress() {
+          throw observerError
+        },
+      },
+      vi.fn(async () => new Response('ok')) as unknown as typeof fetch,
+    )
+
+    expect(response.error).toBe(observerError)
   })
 })
 

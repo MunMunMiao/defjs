@@ -1,200 +1,214 @@
 ---
-title: OpenTelemetry Server
-description: 使用應用程式提供的 OpenTelemetry Tracer 與選用 Meter，觀測 outbound Defjs HTTP、SSE 與 WebSocket client。
+title: OpenTelemetry server
+description: 用你自己的 Tracer 與選填 Meter，開啟出站 Defjs 傳輸 instrumentation。
 ---
 
-# `@defjs/opentelemetry-server`
+# OpenTelemetry server
 
-儘管套件名稱含有 server，這個 adapter 觀測的是 outbound Defjs client 工作。它不是 inbound server instrumentation，也不會初始化 OpenTelemetry SDK。
+在建立 client 時開啟出站 instrumentation。`@defjs/opentelemetry-server` 會追加 HTTP、SSE、WebSocket interceptors。它**不是** inbound 伺服器 instrumentation，也**不會**初始化 OpenTelemetry SDK。
 
-應用程式負責：
+## Basic Setup
 
-- SDK 與 provider setup；
-- exporter 與 processor 設定；
-- context manager 與 active-context setup；
-- sampling、attribute policy 與敏感資料遮罩；
-- force-flush 與 shutdown。
+在別處初始化 SDK。把 API 物件傳進來：
 
-把應用程式提供的 `Tracer` 與選用的 `Meter` 傳給 `withOpenTelemetryServer(...)`。
-
-## 設定 Client
-
-```typescript
+```typescript twoslash
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
-// Initialize and register the application's SDK/providers before this point.
 const tracer = trace.getTracer('orders-service')
 const meter = metrics.getMeter('orders-service')
+const readOrders = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders',
+})
 
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
+
+const [error] = await client.execute(readOrders())
+if (error) console.error(error.kind, error.code)
+```
+
+`tracer` 必填。`meter` 選填 — 省略就關掉套件 metrics。沒有 `propagator` → adapter 會建 composite W3C Trace Context + W3C Baggage propagator。它不會替你讀或初始化全域 SDK 設定。
+
+`withOpenTelemetryServer(options)` 回傳 core `ClientOption`。在 `createClient` 時套用，讓每個啟用的傳輸追加一個 interceptor。HTTP、SSE、WebSocket 預設啟用；`{ enabled: false }` 關掉單一傳輸。
+
+即使請求在傳輸層失敗，adapter 仍可建立傳輸遙測。有沒有東西被匯出，取決於你的 SDK 與 exporters。
+
+## 範圍
+
+SDK init、providers、exporters、processors、context、sampling、redaction、flush、shutdown 由你負責。這個套件消費你傳入的 `Tracer`、選填 `Meter`、選填 `TextMapPropagator`。它不提供內建 redactor 或敏感 key 政策。
+
+沒有快取、重試、訊息層級 spans，或應用 command-outcome 政策。目標是伺服器端 Node.js。已發布套件需要 Node.js 22+，peers 是 `@defjs/core`、`@opentelemetry/api` 1.x、`@opentelemetry/core` 2.x。
+
+公開 API：`withOpenTelemetryServer`，以及 `OpenTelemetryServerOptions`、`OpenTelemetryServerHttpOptions`、`OpenTelemetryServerSSEOptions`、`OpenTelemetryServerWebSocketOptions`。
+
+## Options 與 hooks
+
+Hooks 放在它們會改動的傳輸旁邊。同步 `startSpanHook(request)` 會在建立 span 前執行並回傳初始 `Attributes`；應用程式 attributes 最後套用，因此可以覆寫內建值。`requestHook` 與 `responseHook` 收到已建立的 span，可以回傳 `void` 或 promise。Hook 失敗會記錄 `defjs.otel.hook.error`，且**不會**停掉 client 操作；start hook 失敗時會退回內建初始 attributes。
+
+```typescript twoslash
+import { createClient, createResolvedRequestUrl, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withOpenTelemetryServer({
     tracer,
-    meter,
-    webSocket: {
-      queryPropagation: false,
+    http: {
+      startSpanHook(request) {
+        const attributes = { 'app.operation': request.operation ?? 'unclassified' }
+        if (!request.baseEndpoint) return attributes
+        const url = createResolvedRequestUrl(request.baseEndpoint, request.endpoint)
+        if (request.queryString) url.search = request.queryString
+        url.searchParams.delete('access_token')
+        return { ...attributes, 'url.full': url.href }
+      },
+      requestHook(span, request) {
+        span.setAttribute('app.request.started', true)
+      },
+      responseHook(span, response) {
+        span.setAttribute('app.status', response.status)
+      },
     },
+    sse: { enabled: false },
+    webSocket: { enabled: false },
+  }),
+)
+
+void client
+```
+
+Hook 簽名：
+
+- 三種傳輸：`startSpanHook(request): Attributes`（同步，在建立 span 前）
+- HTTP：`requestHook(span, request)` 與 `responseHook(span, response, request)`
+- SSE：`requestHook(span, request)` 與 `responseHook(span, stream, request)`
+- WebSocket：`requestHook(span, request)` 與 `responseHook(span, session, request)`
+
+空的傳輸物件會啟用該傳輸。舊的 boolean 傳輸開關與舊的頂層 hooks 會被拒絕 — 改用傳輸 option 物件與傳輸範圍的 hooks。
+
+## 操作身分與 propagation
+
+當 command 有穩定身分時，在 `defineRequest`、`defineEventStream` 或 `defineWebSocket` 設 static `operation`。Adapter 用它做 span names，並當成 `defjs.operation`。它絕不會從解析後的 path、identifier、tenant 或 query string 推身分：
+
+```typescript twoslash
+import { defineEventStream, defineRequest, defineWebSocket, struct } from '@defjs/core'
+
+const readOrders = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders',
+})
+const orderEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  operation: 'orders.watch',
+  path: '/orders/events',
+  events: { update: struct.json(struct.object({ id: struct.number() })) },
+})
+const orderSocket = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  operation: 'orders.connect',
+  path: '/orders/socket',
+  incoming: { update: struct.object({ id: struct.number() }) },
+})
+
+void readOrders
+void orderEvents
+void orderSocket
+```
+
+Span names 會變成 `GET orders.read`、`SSE orders.watch`、`WebSocket orders.connect`。沒有 `operation` 時，fallback 是 method／`SSE`／`WebSocket`，並省略 `defjs.operation`。
+
+HTTP 與 SSE 把 propagated fields 注入 request headers。既有的 `Headers` 實例會被重用並 mutate；否則建立新的 `Headers`。WebSocket query propagation 是**選擇性開啟**（瀏覽器不能加任意 handshake headers）：
+
+```ts
+import { createClient, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withOpenTelemetryServer({
+    tracer,
+    webSocket: { queryPropagation: true },
   }),
 )
 ```
 
-Adapter 會為每個啟用的 transport 加入一個 interceptor。選項仍依一般 client order 執行，因此它和其他攔截器的相對位置，會決定 span 包住哪些工作。
+有 `queryPropagation` 時，propagator fields 會附加到連線 query string。先審 URL logging、proxy 可見性、access logs、baggage、retention。`requireParentSpan: true` 在沒有 active parent 時跳過 span 建立、propagation、hooks、metrics，然後原樣呼叫 `next`。
 
-### Operation Identity
+## HTTP、SSE、WebSocket 語意
 
-在每個 endpoint definition 靜態設定 `operation`。它是 span 與 metric 使用的低 cardinality identity：
+Adapter 量的是傳輸生命週期，不是 command 解讀的每一階段。
 
-```typescript
-const readOrder = defineRequest({
-  method: 'GET',
-  operation: 'orders.read',
-  path: '/orders/:id',
-  // input and output omitted
+- **HTTP** — span 在 HTTP interceptor 開始，拿到 Defjs `HttpResponse` 時結束。Status 分派、representation 檢查、Struct 解碼在之後。稍後的 `RESPONSE_VALIDATION_FAILED` 或 `UNDECLARED_STATUS` 無法更新已結束的傳輸 span。
+- **SSE** — span 維持開啟直到 `stream.closed` settle。記錄 `sse.connected`，然後 `sse.closed`／`sse.aborted`／`sse.error`。一個邏輯串流（含重連）→ 一個 span。沒有 per-event spans。
+- **WebSocket** — span 維持開啟直到 `session.closed` settle。事件：`websocket.connected`、`websocket.closed`、`websocket.error`。重連中的實體 sockets 仍屬邏輯 session。沒有 per-message spans。
+
+需要最終 command 結果，而不只是傳輸？把 `client.execute(...)` 包進應用 span：
+
+```typescript twoslash
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { SpanStatusCode, trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer }))
+const readOrders = defineRequest({ method: 'GET', operation: 'orders.read', path: '/orders' })
+
+const outcome = await tracer.startActiveSpan('orders.command', async (span) => {
+  try {
+    const outcome = await client.execute(readOrders())
+    const [error] = outcome
+    if (error) {
+      span.setAttribute('error.type', error.code)
+      span.setStatus({ code: SpanStatusCode.ERROR })
+    }
+    return outcome
+  } finally {
+    span.end()
+  }
 })
+
+void outcome
 ```
 
-有 operation 時，span name 分別是 `GET orders.read`、`SSE orders.watch` 或 `WebSocket orders.connect`，並記錄 `defjs.operation`。沒有 operation 時維持舊 fallback：名稱只用 HTTP method、`SSE` 或 `WebSocket`，且不記錄 operation attribute。不得從 resolved URL 或含 identifier 的 path 推斷 identity，也不要把 resolved URL 複製到 telemetry 或 log。
+外層 span 是你的。Plugin 仍會回報較低階的傳輸 span — 兩個不同問題。
 
-## 選項
+## Reference
 
-```typescript
-interface OpenTelemetryServerOptions {
-  tracer: Tracer
-  meter?: Meter
-  propagator?: TextMapPropagator
-  requireParentSpan?: boolean
-  http?: OpenTelemetryServerHttpOptions
-  sse?: OpenTelemetryServerSSEOptions
-  webSocket?: OpenTelemetryServerWebSocketOptions
-}
-```
+有提供 `meter` 時：
 
-每個 transport option 都接受 `enabled?: boolean`、`requestHook` 與 `responseHook`。WebSocket 另外接受 `queryPropagation?: boolean`。
+| Metric                                       | 意義                                            |
+| -------------------------------------------- | ----------------------------------------------- |
+| `http.client.request.duration`               | HTTP 請求持續時間（秒）                         |
+| `defjs.client.sse.connect.duration`          | 到 SSE handle 回傳為止的時間                    |
+| `defjs.client.sse.connection.duration`       | Handle 回傳 → 終端 close                        |
+| `defjs.client.sse.active_streams`            | 仍有 pending `closed` 的邏輯 SSE handles        |
+| `defjs.client.websocket.connect.duration`    | 到 WebSocket session 回傳為止的時間             |
+| `defjs.client.websocket.connection.duration` | Session 回傳 → 終端 close                       |
+| `defjs.client.websocket.active_connections`  | 仍有 pending `closed` 的邏輯 WebSocket sessions |
 
-三種傳輸預設都啟用。要停用其中一種，請傳入 option object：
+Active SSE／WebSocket instruments 計的是邏輯資源（含重連空檔），不是實體 sockets 或個別 HTTP attempts。
 
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  http: { enabled: false },
-  sse: { enabled: true },
-  webSocket: { enabled: false },
-})
-```
+HTTP spans 記錄 method、解析後的 `url.full`、可用時的 server address／port，以及收到時的回應 status。預設 `url.full` 會把 `request.endpoint` 相對於選填的 `request.baseEndpoint` 解析，不會附加獨立的 `request.queryString`。這是建構邊界，不是脫敏。需要完整或脫敏後的應用程式自有 URL 時，請用 `startSpanHook` 建構。Status `400+` → span status `ERROR`，並以 status string 當 `error.type`。Status `100..399` 不設 span status。Status-zero 傳輸結果沒有回應 status；取消不設 status；逾時／其他傳輸失敗用 `TIMEOUT` 或 `NETWORK_ERROR`。Metrics 用穩定維度：method、static operation、server address／port、回應 status、低基數錯誤型別。
 
-舊的 boolean transport field、top-level hook 與 `webSocketQueryPropagation` 會在 runtime 以 migration error 拒絕。目前的形式是 transport option object、transport-scoped hook，以及 `webSocket.queryPropagation`。
+SSE／WebSocket connection metrics 記錄 connect 時間、邏輯連線持續時間、active 資源數、`defjs.result`、operation、server address／port、低基數失敗型別。預設沒有 request／response bodies、訊息 payloads、queue 長度，或 per-message spans。
 
-## Propagation
+把 `url.full` 與 `recordException(...)` 當可能敏感。Defjs 不會替你遮罩。操作名稱與 hook attributes 維持 allowlist；在 `startSpanHook` 或 SDK processors／exporters 做遮罩。未經隱私、基數、retention、redaction 審查，別把原始 URLs、query strings、headers、baggage 或 payloads 複製進自訂遙測。
 
-省略 `propagator` 時，套件會自行建立一個包含 W3C Trace Context 與 W3C Baggage propagator 的 `CompositePropagator`，不會讀取 global propagator 設定。
+WebSocket query propagation 可能把 trace context 與 baggage 暴露給瀏覽器、proxies、access logs、遙測。它不是憑證通道。`withCredentials(true)` 是 HTTP／SSE 的 Fetch credentials — 不是 WebSocket auth。
 
-HTTP 與 SSE 會把 propagator 產生的每個欄位注入 request header。若 `req.headers` 已經是 `Headers` instance，目前實作會沿用並直接修改同一個 instance；否則才會建立新的 `Headers` 物件。WebSocket query propagation 預設為 `false`，只有明確設定 `queryPropagation: true` 才會啟用。由於瀏覽器 socket 無法加入任意 handshake header，啟用後會把 propagator 產生的每個欄位附加到 connection query string。
+Adapter 不會 init／shut down SDK，也不會 dispose core client 或傳輸 handles。你負責 flush 遙測並關閉 HTTP／SSE／WebSocket 工作。見 [Interceptors](../core/interceptors.md)、[SSE](../core/sse.md)、[WebSocket](../core/web-socket.md)。
 
-每個攔截器在建立 span 前，也會對 request header 呼叫 `propagator.extract(...)`。請只把這個 carrier 視為由應用程式控制的可信輸入。不要讓不可信來源傳入 `traceparent`、`tracestate` 或 `baggage`，否則這些欄位可能取代目前的 active parent context。請在 request 到達這個攔截器前，移除或正規化不可信的 propagation field。
+## 相關 recipes
 
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  webSocket: {
-    queryPropagation: true,
-  },
-})
-```
-
-啟用前必須審查部署環境的 URL propagation。Trace context 與 baggage 可能被瀏覽器、proxy、access log 與 telemetry system 記錄，custom propagator 也可能加入 `traceparent` 以外的欄位。伺服器支援時，優先使用經過通訊協定審查的首幀或短期一次性 connection ticket。
-
-`requireParentSpan: true` 會在攔截器進行任何 instrumentation 前檢查 active parent span。沒有 active span 時，它會略過 span creation、propagation、hook 與 metric，直接原樣呼叫下一個 handler。
-
-## Hook 行為
-
-Hook 會收到各 transport 對應的 span 與 request/result：
-
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  http: {
-    requestHook(span, request) {
-      span.setAttribute('app.operation', 'list-orders')
-    },
-    responseHook(span, response, request) {
-      span.setAttribute('app.operation', request.operation ?? 'unclassified')
-      span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
-    },
-  },
-})
-```
-
-第三個參數是原始 transport `HttpRequest`。請讀取明確的 `operation`，不要根據 `request.endpoint`、resolved URL 或 path 重建 identity。
-
-Hook 可以回傳 `void` 或 `Promise<void>`，但維持非阻塞 observer 語義。同步 throw 與非同步 rejection 都會被捕捉並記錄成 `defjs.otel.hook.error`，不會中斷 client operation；記錄 telemetry 本身的失敗也會被隔離。
-
-Attribute 請使用 allowlist 並保持低 cardinality。不要附加 raw header、query string、body、baggage、event ID、message payload 或 credential。
-
-## HTTP 語意
-
-HTTP interceptor 會建立 `SpanKind.CLIENT` span，並記錄：
-
-- endpoint 宣告 static operation 時，使用 `${method} ${operation}` 作為 span name，並記錄 `defjs.operation`；
-- 未宣告 operation 時，維持舊 fallback，只使用 request method；
-- `http.request.method`；
-- `url.full`；
-- `server.address` 與選用的 `server.port`；
-- 只在收到真實 response status 時記錄 `http.response.status_code`。
-
-這不代表完整遵循 HTTP semantic convention。
-
-HTTP span status 與 `error.type` 遵循以下規則：
-
-- status `100` 到 `399` 保持 span status 未設定，也不設定 `error.type`；
-- status `400` 以上會把 client span 標成 `ERROR`，並把 `error.type` 設為 status code 字串；
-- Defjs status 0 transport result 不設定 `http.response.status_code`；caller cancellation 保持 status 未設定，也不設定 `error.type`；timeout 使用 `ERROR` / `TIMEOUT`，其他 transport failure 使用 `ERROR` / `NETWORK_ERROR`；
-- 經由 interceptor throw 的 error 會把 span 標成 `ERROR`，記錄 exception，並使用它的 `Error.name` 或其他低 cardinality fallback 作為 `error.type`。
-
-HTTP interceptor 收到 Defjs `HttpResponse` 時，HTTP span 就會結束。High-level output status dispatch 與 Struct decoding 發生在 interceptor return 之後，因此稍後產生的 `RESPONSE_VALIDATION_FAILED` 或 `UNDECLARED_STATUS` 無法更新已結束的 span。
-
-提供 Meter 時，HTTP 會以秒為單位記錄 `http.client.request.duration`。Attribute 包含 method、server address/port、選用的 response status 與選用的 `error.type`。Metric 使用與 HTTP span 相同的 response status 和 `error.type` 分類。
-
-## SSE 語意
-
-SSE 成功啟動後，span 會保持開啟到 `stream.closed` settle。它先記錄 `sse.connected`，再依涵蓋到的 close path 記錄 `sse.closed`、`sse.aborted` 或 `sse.error`。
-
-有 Meter 時，SSE 會提供：
-
-| Metric                                 | 意義                                              |
-| -------------------------------------- | ------------------------------------------------- |
-| `defjs.client.sse.connect.duration`    | 到回傳邏輯 stream handle 為止的時間。             |
-| `defjs.client.sse.connection.duration` | 從回傳 handle 到終止關閉的時間。                  |
-| `defjs.client.sse.active_streams`      | `closed` promise 尚未 settle 的邏輯 handle 數量。 |
-
-這些是 Defjs 自訂 metric。Active counter 也會計入實體 reconnect attempt 之間的等待時間，並不是目前開啟的 HTTP connection 數量。
-
-## WebSocket 語意
-
-WebSocket 成功啟動後，span 會保持開啟到 `session.closed` settle。它先記錄 `websocket.connected`，再依涵蓋到的路徑記錄 `websocket.closed` 或 `websocket.error`。
-
-有 Meter 時，WebSocket 會提供：
-
-| Metric                                       | 意義                                               |
-| -------------------------------------------- | -------------------------------------------------- |
-| `defjs.client.websocket.connect.duration`    | 到回傳邏輯 session 為止的時間。                    |
-| `defjs.client.websocket.connection.duration` | 從回傳 session 到終止關閉的時間。                  |
-| `defjs.client.websocket.active_connections`  | `closed` promise 尚未 settle 的邏輯 session 數量。 |
-
-Metric 名稱雖然寫 connections，實作計算的是邏輯 session，連 reconnect delay gap 也算在內；它不計算實體 socket。
-
-這裡沒有穩定的通用 WebSocket semantic convention。套件不會為每個 message 建立 span，預設也不記錄 payload 或 queue length。
-
-## 敏感資料與涵蓋限制
-
-預設 `url.full` 從 request endpoint 與 base endpoint 解析，不包含 serialized query string；但 resolved path 仍可能含敏感 identifier。它只是 transport metadata，絕不是 operation identity 來源。請保持 `operation` static，不要把 resolved URL 複製到 telemetry 或 log，並在匯出 URL attribute 前設定 SDK/exporter redaction。WebSocket propagation 會另外把欄位附加到實際 query string。
-
-`recordException(...)` 會收到 thrown error 與部分 close cause。Error message 與 stack 可能暴露敏感資料。請在 SDK-level processor 與 exporter 設定敏感資料遮罩；這個 adapter 不會替應用程式清理 exception。
-
-部署前，請把 adapter 和服務實際使用的 SDK、exporter、processor、context manager、自動 instrumentation 一起驗證。用真實流量檢查端到端 baggage、敏感資料遮罩、shutdown/flush 與重複 span。
-
-## 下一步
-
-- [攔截器](/zh-Hant-TW/core/interceptors)說明它和其他 client interceptor 的順序。
-- [SSE](/zh-Hant-TW/core/sse)與 [WebSocket](/zh-Hant-TW/core/web-socket)說明這裡計算的邏輯 handle/session 生命週期。
+- [用本機 Fetch handle 測試](../recipes/test-with-handle.md)
+- [消費 SSE 串流](../recipes/consume-sse.md)
+- [開啟 WebSocket session](../recipes/websocket-session.md)

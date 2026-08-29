@@ -95,11 +95,22 @@ describe('parse.ts object and composite values', () => {
     expect(optionalNullValue).toBeUndefined()
 
     expect(parse(struct.string().null(), null)).toEqual([null, null])
+    expect(parse(struct.string().nullable(), null)).toEqual([null, null])
     expect(parse(struct.string().nullish(), null)).toEqual([null, null])
 
     const [numberErr, numberValue] = parse(struct.bigint(), 42)
     expect(numberErr).toBeInstanceOf(StructError)
     expect(numberValue).toBeUndefined()
+  })
+
+  test('parse reads logical keys by default and wire aliases when aliases is true', () => {
+    const User = struct.object({
+      displayName: struct.string().alias('display_name'),
+    })
+
+    expect(parse(User, { displayName: 'Ada' })).toEqual([null, { displayName: 'Ada' }])
+    expect(parse(User, { display_name: 'Ada' })[0]).toBeInstanceOf(StructError)
+    expect(parse(User, { display_name: 'Ada' }, { aliases: true })).toEqual([null, { displayName: 'Ada' }])
   })
 
   test('accepts null when literal and composite declarations explicitly allow it', () => {

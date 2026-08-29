@@ -1,15 +1,31 @@
-import type { HttpContext } from './context'
-
+/**
+ * How the HTTP response body should be parsed before struct validation.
+ * Defaults to `'json'` when an output shape is declared.
+ */
 export type HttpResponseType = 'arraybuffer' | 'blob' | 'json' | 'text'
 
+/**
+ * Progress snapshot for upload or download callbacks.
+ * Mirrors the familiar `ProgressEvent` shape (`loaded` / `total` / `lengthComputable`).
+ */
 export interface HttpProgressEvent {
   readonly lengthComputable: boolean
   readonly loaded: number
   readonly total: number
 }
 
+/**
+ * Callback invoked as request bytes are uploaded or response bytes are downloaded.
+ */
 export type HttpProgressFn = (event: HttpProgressEvent) => Promise<void> | void
 
+/**
+ * Normalized outgoing HTTP request used by handlers, interceptors, and `fetchHandler`.
+ *
+ * After `struct.json(...)` (or another body codec) runs during command build, `body` is
+ * already the wire value — for JSON that means a **JSON text string**. Sign HMAC / digests
+ * against that string (or other final bytes), not the original Struct input object.
+ */
 export interface HttpRequest {
   abort?: AbortSignal
   baseEndpoint?: string
@@ -17,7 +33,6 @@ export interface HttpRequest {
   bodyContentType?: string | null
   /** @internal Tracks which body value produced bodyContentType so interceptors cannot leave stale metadata behind. */
   bodyContentTypeSource?: unknown
-  context?: HttpContext
   downloadProgress?: HttpProgressFn
   endpoint: string
   headers?: Headers

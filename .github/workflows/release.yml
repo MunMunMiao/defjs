@@ -3,55 +3,34 @@ name: Release
 on:
   push:
     tags:
-      - 'release-*'
+      - 'release-core-v*'
+      - 'release-opentelemetry-server-v*'
+      - 'release-react-v*'
+      - 'release-vue-v*'
 
 permissions:
   contents: read
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  checks:
-    uses: ./.github/workflows/_checks.yml
-    secrets: inherit
-
   publish:
-    needs: checks
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
+    environment: npm
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          fetch-depth: 0
-      - uses: ./.github/actions/setup-pnpm-deps
-      - name: Verify release commit
-        shell: bash
-        run: |
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          main_sha="$(git rev-parse origin/main)"
-          if [[ "$GITHUB_SHA" != "$main_sha" ]]; then
-            echo "Release tag must point to the current main tip after the Version Packages PR is merged." >&2
-            echo "Tagged SHA: $GITHUB_SHA" >&2
-            echo "Current main SHA: $main_sha" >&2
-            exit 1
-          fi
-      - name: Verify Version Packages PR was consumed
-        shell: bash
-        run: |
-          if find .changeset -maxdepth 1 -type f -name '*.md' ! -name 'README.md' -print -quit | grep -q .; then
-            echo 'Unconsumed changesets remain. Merge the Version Packages PR before creating a release tag.' >&2
-            exit 1
-          fi
-      - name: Publish packages
-        uses: changesets/action@v1
-        with:
-          publish: pnpm run release
-          commitMode: github-api
+          bun-version: 1.4.0
+      - run: bun ci
+      - name: Resolve release target
+        id: target
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          PNPM_CONFIG_PROVENANCE: 'true'
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bun scripts/release-target.ts "$RELEASE_TAG"
+      - name: Build selected package
+        working-directory: ${{ steps.target.outputs.package_dir }}
+        run: bun --bun run build
+      - name: Publish selected package
+        working-directory: ${{ steps.target.outputs.package_dir }}/dist
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish --access public

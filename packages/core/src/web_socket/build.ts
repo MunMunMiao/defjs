@@ -1,22 +1,9 @@
 import type { QueryParamsSerializer } from '../client/config'
 import type { HttpRequest } from '../internal/http_request'
-import type { RequestBuild, RequestBuildHandler } from '../internal/request_builder'
-import { buildRequest } from '../internal/request_builder'
+import type { RequestBuild } from '../internal/request_builder'
 import type { RequestBuildValue } from '../internal/request_values'
 import { isRequestScalarValue, serializeRequestScalarValue } from '../internal/request_values'
 import { fillUrl, resolveRequestUrl } from '../internal/url'
-import type { AnyStruct } from '../struct'
-
-export function createWebSocketBuild<TInput extends AnyStruct | undefined>(
-  input: unknown,
-  build: RequestBuildHandler<TInput, 'webSocket'> | undefined,
-  inputStruct?: TInput,
-): RequestBuild {
-  return buildRequest(input, build, {
-    input: inputStruct,
-    transport: 'webSocket',
-  })
-}
 
 export function createWebSocketRequest(params: {
   abort: AbortSignal

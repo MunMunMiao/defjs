@@ -7,10 +7,10 @@ Supports Vue 3+.
 ## Install
 
 ```sh
-npm install @defjs/core @defjs/vue vue
+bun add @defjs/core @defjs/vue vue
 ```
 
-The package is ESM and requires Node.js 22 or newer when run in Node.
+The package is ESM and requires `@defjs/core` as a peer in the `^0.4.0` range. Its tarball retains this `README.md` and the repository `LICENSE`; repository-wide guides and examples remain outside the package.
 
 ## What this package does
 

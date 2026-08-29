@@ -1,185 +1,131 @@
 ---
-title: SSE
-description: Описывайте и декодируйте ограниченные Server-Sent Events, настраивайте переподключение и закрывайте принадлежащие вам потоки.
+title: Server-Sent Events
+description: Читай типизированный SSE-стрим, закрой его и дождись terminal closed promise.
 ---
 
-# SSE
+# Server-Sent Events
 
-`defineEventStream(...)` создаёт фабрику команды SSE. Эндпоинт объявляет путь и Struct для каждого имени события.
+Открой стрим, итерируй его и освободи принадлежащий handle через `await using`. Ручные `close()` и `closed` остаются доступны; клиенты и плагины не dispose’ят возвращённый стрим за тебя.
 
-```typescript
-import { defineEventStream, struct } from '@defjs/core'
+## Базовая настройка
 
+```typescript twoslash
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
   maxQueueSize: 100,
   path: '/notifications',
   events: {
-    message: struct.json(
-      struct.object({
-        id: struct.number(),
-        text: struct.string(),
-      }),
-    ),
-    heartbeat: struct.string(),
-  },
-})
-```
-
-По умолчанию используется метод `GET`. Эндпоинт может задать другой метод, но высокоуровневый контекст `build` для SSE не поддерживает тело запроса.
-
-## Декодирование событий
-
-Парсер SSE сначала выбирает `events[eventName]`, затем `events.default`, если он задан. Если совпадения нет, событие отбрасывается, а необязательный наблюдатель невалидных событий получает причину `missing-struct`.
-
-Поле SSE `data:` приходит как текст:
-
-- `struct.string()`, `struct.text()`, `struct.any()` и `struct.unknown()` получают текст;
-- `struct.number()` удаляет пробелы по краям и принимает конечное число;
-- `struct.boolean()` удаляет пробелы по краям и принимает только `true` или `false`;
-- `struct.json(inner)` разбирает JSON-текст, затем структурно декодирует его через `inner`.
-
-Обычный `struct.object(...)` не разбирает текст события, похожий на JSON. Оберните его в `struct.json(...)`.
-
-Struct `default` обрабатывает остальные имена:
-
-```typescript
-const events = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/events',
-  events: {
-    update: struct.json(struct.object({ version: struct.number() })),
-    default: struct.string(),
-  },
-})
-```
-
-Если Struct `default` отсутствует, тип `EventStreamData<TEvents>` представляет собой дискриминированное объединение объявленных имён событий. Ветвление по `event.event` сужает тип `event.data` до выходного типа соответствующего Struct. Когда `default` присутствует, его ветка сохраняет фактически переданное имя события в виде `event: string`; поэтому в потоках, где известные события сочетаются с `default`, остаётся эта широкая резервная ветка.
-
-## Входные данные и построение запроса
-
-Для секций пути, query и заголовков используйте `struct.request(...)`:
-
-```typescript
-const roomEvents = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/rooms/:roomId/events',
-  input: struct.request({
-    path: struct.object({ roomId: struct.string() }),
-    query: struct.object({ after: struct.string().optional() }),
-  }),
-  events: {
     message: struct.json(struct.object({ text: struct.string() })),
   },
 })
-```
 
-Пользовательский SSE `build` может задать параметры пути, query и заголовки. Он получает проекцию, привязанную к схеме. Через него нельзя задать тело или credentials. Настраивайте credentials на клиенте с помощью `withCredentials(...)`.
-
-## Кортеж запуска
-
-```typescript
-const [error, stream, startupOpen] = await client.execute(
-  roomEvents({
-    path: { roomId: 'general' },
-  }),
-)
-```
-
-Для выполнения HTTP, SSE и WebSocket параметр `timeout` должен быть положительным безопасным целым числом в диапазоне `1..2_147_483_647`; `0`, отрицательные и дробные значения, `NaN`, `Infinity` и значения выше предела возвращают `REQUEST_VALIDATION_FAILED` до создания ресурса request, stream или socket.
-
-SSE возвращает:
-
-```typescript
-type StreamAwaitResult<TEvent> =
-  | [error: null, stream: EventStreamHandle<TEvent>, open: StreamOpenInfo]
-  | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
-```
-
-При успехе третий элемент — проверенный снимок открытия при запуске. Его ответ прошёл проверку HTTP-статуса и Content-Type `text/event-stream`.
-
-`stream.open` — геттер с актуальным значением. Он хранит последний ответ логического потока, в том числе ответ более позднего переподключения, который затем не прошёл проверку статуса или Content-Type. Если важен первый снимок, храните `startupOpen` отдельно.
-
-По умолчанию не записывайте в журнал `startupOpen.url`, `stream.open.url` и URL ответа. В пути и query могут находиться чувствительные данные.
-
-## Чтение событий
-
-Владелец должен запустить итерацию и организовать закрытие в том же жизненном цикле:
-
-```typescript
-import type { Client } from '@defjs/core'
-
-declare const client: Client
-declare const showNotification: (message: { id: number; text: string }) => void
-
-async function consumeNotifications(signal: AbortSignal) {
-  const [error, stream, startupOpen] = await client.execute(notifications(), { signal })
-
-  if (error) {
-    console.error('notification stream startup failed', { kind: error.kind, code: error.code })
-    return
-  }
-
-  console.info('notification stream connected', {
-    status: startupOpen.response?.status,
-  })
-
-  try {
-    for await (const event of stream) {
-      switch (event.event) {
-        case 'message':
-          showNotification(event.data)
-          break
-        case 'heartbeat':
-          break
-        default: {
-          const exhaustive: never = event
-          void exhaustive
-        }
-      }
-    }
-  } finally {
-    await stream.closed
+const [error, stream] = await client.execute(notifications())
+if (error) {
+  console.error(error.code)
+} else {
+  await using ownedStream = stream
+  for await (const event of ownedStream) {
+    if (event.event === 'message') console.log(event.data.text)
   }
 }
 ```
 
-Успешный `execute` означает, что запуск завершён. Ошибки после запуска проявляются как отклонение итератора и через `stream.closed`; исходный элемент `error` в кортеже не меняется.
+## Опиши стрим
 
-Досрочный выход из цикла `for await` через `break`, `return` или выброшенную ошибку вызывает `return()` итератора. Поток автоматически закрывается со значением `{ code: 'aborted', reason: 'iterator-return' }`; ожидание `stream.closed` позволяет наблюдать это окончательное состояние. Вызывайте `stream.close(...)` явно, только когда владелец должен закрыть поток вне активной итерации.
+`defineEventStream(...)` нужен `events`, положительный safe-integer `maxBufferSize`, положительный safe-integer `maxQueueSize` и относительный `path`. Method по умолчанию `GET`.
 
-## Невалидные события
+Request input может иметь `path`, `query` и `headers` — не `body`. Кастомный `build` получает только path/query/header setters. Defjs шлёт `Accept: text/event-stream`, если ты ещё не поставил `Accept`.
 
-Настройте `onInvalidEvent` через `withSSEOnInvalidEvent(...)` или `withSSEOptions(...)`:
+Один логический стрим может охватить несколько физических Fetch-попыток. SSE по умолчанию ретраит транзиентные network и stream-read сбои даже без reconnect options; без лимита `attempts` эти ретраи unbounded. Ты всё равно получаешь один handle и один async iterator.
 
-```typescript
+## Открой и посмотри
+
+`client.execute(...)` resolves только после прохождения проверок status, content-type и body:
+
+```typescript twoslash
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
+const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.string() },
+})
+
+const [error, stream, startupOpen] = await client.execute(notifications())
+if (error) {
+  console.error(error.kind, error.code, startupOpen?.response.status)
+} else {
+  console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
+  stream.close('example-finished')
+  await stream.closed
+}
+```
+
+Response должен быть successful, media type essence `text/event-stream`, и иметь body. Non-2xx startup → `HTTP_STATUS`. Плохой content type или нет body → `RESPONSE_VALIDATION_FAILED`. Снимок response всё ещё может сидеть в третьем слоте кортежа, когда валидация падает после прихода response.
+
+`startupOpen` — начальный снимок. `stream.open` live и меняется на более поздних физических opens. Держи значение кортежа, когда важен первый response.
+
+```typescript twoslash
+import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+
+type StreamResult<T> =
+  | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
+  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+
+const result: StreamResult<string> | undefined = undefined
+void result
+```
+
+## Декодируй события
+
+Wire event name → `events[eventName]`; иначе `events.default`. Нет matching Struct → событие не доставляется. Нет SSE-поля `event` → логическое имя `message`.
+
+SSE `data` начинается как text. Selected Struct решает conversion:
+
+| Struct                                                                 | Conversion                                                 |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `struct.string()`, `struct.text()`, `struct.any()`, `struct.unknown()` | Остаётся text                                              |
+| `struct.number()`                                                      | Trimmed text должен быть finite number; пустой invalid     |
+| `struct.boolean()`                                                     | Trimmed text ровно `true` или `false`                      |
+| `struct.json(inner)`                                                   | Parse JSON, потом decode через `inner`                     |
+| Object, array, union, другие ordinary Structs                          | Decode text напрямую; JSON-looking text **не** auto-parsed |
+
+Emitted value: `event`, декодированный `data`, опциональный непустой `id`. С `default` неизвестные имена событий — `string` в inferred union.
+
+## Наблюдай invalid events
+
+Invalid/undeclared события дропаются, не ставятся в очередь. `withSSEOnInvalidEvent(...)` может наблюдать raw ID, имя, text data, плюс `missing-struct` или `validation-failed` и опциональный cause.
+
+```ts
+import { createClient, withEndpoint, withSSEOnInvalidEvent } from '@defjs/core'
+
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+  withSSEOnInvalidEvent(({ reason, message, cause, signal }) => {
     if (signal.aborted) return
-    recordInvalidEvent({ eventName: message.event, reason })
+    console.info('Dropped SSE event', {
+      reason,
+      event: message.event,
+      hasCause: cause !== undefined,
+    })
   }),
 )
 ```
 
-Наблюдатель получает:
+Observer бежит на transform boundary. Его сбой изолирован, пока active attempt signal не aborted. Держи его коротким; не считай raw event data trusted.
 
-- `reason: 'missing-struct' | 'validation-failed'`;
-- исходные `id`, имя и текст data события;
-- `cause` при ошибке декодирования.
-- `signal` активной попытки.
+## Reconnect
 
-Событие отбрасывается, но более позднее корректное событие всё ещё может быть доставлено. Ошибки наблюдателя изолированы, а abort прерывает ожидающего наблюдателя через `signal`. Делайте его быстрым и маскируйте исходные `id`, `data` и `cause`.
+Настройки reconnect кастомизируют default retry path — они не обязательны, чтобы включить ретраи. Нормальный EOF не ретраится. Network и stream-read сбои могут ретраиться. Status/content-type validation, parser limits, message transform failures, queue overflow и нормальный EOF — terminal для логического стрима.
 
-## Переподключение
+```ts
+import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
 
-SSE автоматически повторяет попытки после сетевых ошибок и ошибок чтения потока. Обычный EOF закрывает поток с `code: 'eof'` и не запускает переподключение.
-
-По умолчанию повторы начинаются с одной секунды и не ограничены по числу. Ограничьте их через `attempts`:
-
-```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withSSEReconnect({
@@ -187,79 +133,61 @@ const client = createClient(
     delayMs: 1_000,
     factor: 2,
     maxDelayMs: 30_000,
-    jitter: 250,
+    jitter: 0.5,
+    shouldReconnect({ attempt, open }) {
+      return attempt <= 5 && (open?.response.status ?? 0) !== 401
+    },
   }),
 )
 ```
 
-`attempts` — число повторов после первой попытки. `attempts: 0` отключает повторы. Параметр `attempt` для `shouldReconnect` начинается с 1 на первом повторе и накапливается в пределах логического потока; успешное физическое подключение его не сбрасывает.
+`attempts` считает ретраи после initial attempt; `attempts: 0` отключает retry. Нет лимита attempt → unbounded built-in retries. `delayMs` — начальный интервал; `factor` растёт; `maxDelayMs` caps base. SSE `jitter` — **0–1 multiplicative factor**, как WebSocket. Поле стрима `retry:` обновляет текущий интервал. Policy callback, вернувший false / throw / reject, заканчивает логический стрим.
 
-Задержка начинается с текущего интервала повтора. Сервер может изменить его через поле SSE `retry:`. `factor` задаёт экспоненциальный рост, а `maxDelayMs` ограничивает базовое значение. Затем `jitter` добавляет случайное число миллисекунд от нуля до указанного значения. Поскольку jitter добавляется после ограничения, итоговая задержка может превысить `maxDelayMs`, но менее чем на `jitter` миллисекунд.
+Последний распарсенный event ID становится `Last-Event-ID` на более поздней попытке. Знай replay-семантику сервера до unbounded reconnect.
 
-```typescript
-withSSEReconnect({
-  attempts: 5,
-  shouldReconnect({ attempt, lastEventId, cause, open }) {
-    return shouldRetryStream({ attempt, lastEventId, cause, status: open?.response.status })
-  },
-})
+## Лимиты buffer и queue
+
+Оба — положительные safe integers. Overflow fatal — без silent discard старых событий.
+
+| Limit           | Защищает                                               | Terminal code           |
+| --------------- | ------------------------------------------------------ | ----------------------- |
+| `maxBufferSize` | Incomplete/oversized SSE line/event при парсинге       | `PARSER_LIMIT_EXCEEDED` |
+| `maxQueueSize`  | События производятся быстрее, чем читает один consumer | `QUEUE_OVERFLOW`        |
+
+Fatal stream также чистит buffered events, отменяет active body, reject’ит iterator и resolves `stream.closed` с `code: 'error'`.
+
+## Close и dispose
+
+`EventStreamHandle`: один live opening snapshot, один terminal promise, один `close`, один async iterator и один стандартный async disposer.
+
+```typescript twoslash
+import type { EventStreamCloseInfo, EventStreamHandle, EventStreamOpenInfo } from '@defjs/core'
+
+interface StreamApi<T> extends AsyncIterable<T>, AsyncDisposable {
+  readonly open: EventStreamOpenInfo
+  readonly closed: Promise<EventStreamCloseInfo>
+  close(reason?: unknown): void
+  [Symbol.asyncDispose](): PromiseLike<void>
+}
+
+const handle = null as unknown as EventStreamHandle<string>
+const api: StreamApi<string> = handle
+void api
 ```
 
-В последующих попытках транспорт отправляет последний ID события в `Last-Event-ID`. Если `shouldReconnect` выбрасывает или отклоняет ошибку, повторы прекращаются, а ожидающий запуск или поток завершается этой ошибкой политики. Abort прерывает ожидающий предикат через сигнал активной попытки.
+Terminal codes: `eof`, `aborted` или `error`. Результат `error` также несёт `EventStreamErrorCode`: `INVALID_RESPONSE`, `MESSAGE_PROCESSING_FAILED`, `PARSER_LIMIT_EXCEEDED`, `QUEUE_OVERFLOW`, `TIMEOUT` или `TRANSPORT_ERROR`.
 
-Ошибки проверки HTTP/открытия, фатальные ошибки обработки сообщений и нормальный EOF отличаются от повторяемой сетевой ошибки или ошибки чтения. Не рассчитывайте, что любая окончательная ветка приведёт к переподключению.
+`close(reason)` abort’ит active attempt, закрывает очередь, settles как `aborted`. Loop `break` / `return` / throw вызывает iterator return и закрывает с `iterator-return`. Код, который execute’ит команду, владеет closure.
 
-## Ограничения, принадлежащие эндпоинту
+`await using` вызывает тот же owned close path и ждёт, пока остановятся чтение/reconnect Defjs и освободится active reader lock. Он не гарантирует завершение provider-controlled `ReadableStream.cancel()`, если его promise завис навсегда. Когда нужны reason или terminal result, по-прежнему можно явно вызвать `stream.close(reason)`, затем `await stream.closed`.
 
-У потока может быть только один потребитель async iterator. Создание второго итератора выбрасывает ошибку. Возврат итератора, включая ранний `break` из `for await`, автоматически закрывает поток с причиной `iterator-return`.
+Структурные реализации `EventStreamHandle` теперь обязаны предоставить `[Symbol.asyncDispose](): PromiseLike<void>` и связать его с тем же lifecycle. Для implementers это compile-time breaking change; consumers, которые только получают Defjs handle, не обязаны делать новый runtime-вызов.
 
-Каждое определение требует положительные безопасные целые `maxBufferSize` и `maxQueueSize`. Первое ограничивает каждую строку SSE и данные текущего события, второе — разобранные события в ожидании потребителя. Переполнение очереди фатально и не отбрасывает события молча.
+Минимальный поддерживаемый и проверенный в репозитории lib-контракт — `ES2022`, `ESNext.Disposable`, `DOM` и `DOM.Iterable` с зафиксированным TypeScript 7. Эта комбинация образует единый baseline; это не означает, что каждая declaration независимо требует все четыре элемента. Непроверенные старые compiler версии не обещаны. Обычный HTTP Client не является `AsyncDisposable`; управляй запросами через timeout или `AbortSignal`.
 
-```typescript
-const notifications = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/notifications',
-  events: { message: struct.json(notificationStruct) },
-})
-```
+Держи credentials, event data, event IDs, causes и stream URL вне routine логов. `withCredentials(true)` влияет на Fetch cookies для SSE; он не настраивает WebSocket auth.
 
-Нормальный EOF позволяет дочитать буфер. Фатальная ошибка parser, transform или overflow очищает буфер, отменяет активный body, отклоняет iteration и завершает `stream.closed` с `code: 'error'`.
+## Связанные рецепты
 
-## Окончательное закрытие
-
-`stream.closed` разрешается дискриминированным объединением:
-
-```typescript
-type EventStreamCloseInfo =
-  | { code: 'eof'; reason?: string; cause?: unknown }
-  | { code: 'aborted'; reason?: string; cause?: unknown }
-  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
-```
-
-- `eof` означает нормальное завершение тела ответа.
-- `aborted` включает явный вызов `stream.close(...)` и отмену.
-- `error` означает, что повторы закончились или возникла окончательная ошибка потока. Эта ветка всегда содержит публичный `errorCode`.
-
-`EventStreamErrorCode` имеет шесть стабильных значений:
-
-| Error code                  | Значение                                                               |
-| --------------------------- | ---------------------------------------------------------------------- |
-| `INVALID_RESPONSE`          | Некорректны статус, content type, ошибка ответа или тело ответа.       |
-| `MESSAGE_PROCESSING_FAILED` | Сбой преобразования события или callback жизненного цикла.             |
-| `PARSER_LIMIT_EXCEEDED`     | Превышен принадлежащий эндпоинту лимит буфера parser.                  |
-| `QUEUE_OVERFLOW`            | Разобранные события превысили принадлежащую эндпоинту границу очереди. |
-| `TIMEOUT`                   | Попытка транспорта достигла настроенного timeout.                      |
-| `TRANSPORT_ERROR`           | Другая окончательная ошибка сети, чтения потока или политики повторов. |
-
-`stream.close(reason)` идемпотентен. Он отменяет активную работу транспорта, запрещает новые добавления в очередь и разрешает `stream.closed`. `return()` итератора использует тот же путь закрытия с причиной `iterator-return`.
-
-В обычный журнал записывайте только `close.code` и, для ветки `error`, `close.errorCode`. Не записывайте `reason`, `cause`, необработанные события или URL потока без явной политики маскирования и хранения.
-
-Граница приложения, которая открыла поток, отвечает за его закрытие. Клиент или провайдер фреймворка не закрывает поток автоматически.
-
-## Что дальше
-
-- [WebSocket](/ru-RU/core/web-socket) — двунаправленные сеансы и явно включаемое переподключение.
-- [Перехватчики](/ru-RU/core/interceptors) — изменение заголовков SSE и наблюдение за жизненным циклом.
-- [Ошибки](/ru-RU/core/errors) — доступность ответа при ошибке запуска.
+- [Читать SSE-стрим](../recipes/consume-sse.md)
+- [Отменить HTTP-вызов](../recipes/cancel-http.md)

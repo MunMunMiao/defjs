@@ -1,71 +1,66 @@
 ---
-layout: home
-
-hero:
-  name: Defjs
-  text: HTTP, SSE, WebSocket를 위한 타입 기반 커맨드
-  tagline: Struct로 wire 형식을 정의하고 클라이언트를 명시적으로 생성해, 트랜스포트별 결과와 생명주기 의미를 분명하게 드러내세요.
-  actions:
-    - theme: brand
-      text: 시작하기
-      link: /ko-KR/guide/getting-started
-    - theme: alt
-      text: GitHub에서 보기
-      link: https://github.com/defjs/defjs
-
-features:
-  - title: 엔드포인트 계약
-    details: 엔드포인트 정의, 커맨드 빌더, 커맨드 값을 구분합니다. Struct는 호출자 입력과 트랜스포트 데이터를 런타임에 디코딩합니다.
-  - title: 트랜스포트별 결과
-    details: HTTP, SSE, WebSocket 모두 오류 우선 3요소 튜플을 반환합니다. 세 번째 요소는 각각 응답 래퍼, 시작 시점 open 스냅샷, 시작 시점 connection 스냅샷입니다.
-  - title: 인터셉터 체인
-    details: 클라이언트에 HTTP, SSE, WebSocket 인터셉터를 등록합니다. 각 트랜스포트는 자신에게 맞는 인터셉터만 골라 어니언 순서로 실행합니다.
-  - title: 명시적인 생명주기
-    details: SSE는 네트워크 오류와 읽기 실패를 재시도할 수 있습니다. WebSocket 재연결은 명시적으로 활성화해야 합니다. 순회, 취소, 최종 종료는 애플리케이션이 직접 관리합니다.
-  - title: 런타임 디코딩
-    details: TypeScript 추론에 쓰는 것과 같은 Struct 계약으로 입력, 응답, 스트림 이벤트, WebSocket 메시지를 디코딩합니다.
-  - title: 애플리케이션 통합
-    details: Vue나 React에서 클라이언트를 공유하고 서버 서비스의 outbound 작업에 OpenTelemetry 계측을 추가합니다.
+title: Defjs
+description: 명시적인 클라이언트와 error-first 결과로 타입을 갖춘 HTTP, SSE, WebSocket 명령을 다룹니다.
 ---
 
-## 타입이 지정된 API 클라이언트 만들기
+# Defjs
 
-애플리케이션이 호출할 HTTP, SSE, WebSocket 계약부터 정의하세요. Defjs는 이 정의를 커맨드 빌더로 만들고 런타임에 데이터를 검증하며 트랜스포트 결과를 명확하게 유지합니다.
+엔드포인트를 정의하고, opaque 명령을 만든 뒤 실행해요. HTTP, SSE, WebSocket이 같은 형태예요.
 
-HTTP 핵심 흐름은 짧습니다. API용 클라이언트를 만들고 엔드포인트를 정의한 뒤 커맨드 빌더를 호출해 커맨드를 실행합니다.
-
-```typescript
+```ts get-health.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-
-const getUser = defineRequest({
+const getHealth = defineRequest({
   method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  path: '/health',
+  output: { 200: struct.object({ ok: struct.boolean() }) },
 })
 
-const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
-
-if (error) {
-  console.error(error.kind, error.code)
-} else {
-  console.log(user.name, response.status)
-}
+const [error, result, response] = await client.execute(getHealth())
+if (!error) console.log(result.ok, response.status)
 ```
 
-클라이언트를 애플리케이션이 사용하는 서비스로 연결하고 Struct를 실제 응답 계약에 맞추세요. credential, UI 상태, 재시도, 취소, 리소스 정리는 여전히 애플리케이션이 맡습니다.
+Defjs는 결과를 캐시하지 않고, 대신 재시도하지 않으며, 잊은 스트림을 닫아주지도 않아요. 취소와 정리는 호출하는 쪽이 소유해요.
 
-## 다음 문서
+## 전송 방식 고르기
 
-- [시작하기](/ko-KR/guide/getting-started)는 패키지 설치부터 첫 타입 요청까지 안내합니다.
-- [클라이언트](/ko-KR/core/client)는 옵션 조합과 세 가지 `execute` 오버로드를 설명합니다.
-- [커맨드](/ko-KR/core/commands)는 엔드포인트 정의, 커맨드 빌더, 커맨드, 스키마 결합 프로젝션을 설명합니다.
-- [HTTP](/ko-KR/core/http), [SSE](/ko-KR/core/sse), [WebSocket](/ko-KR/core/web-socket)은 각 트랜스포트의 동작과 생명주기 책임을 설명합니다.
-- [Vue](/ko-KR/plugins/vue), [React](/ko-KR/plugins/react), [OpenTelemetry Server](/ko-KR/plugins/opentelemetry-server)는 Defjs를 애플리케이션 framework와 telemetry 설정에 연결하는 방법을 보여 줍니다.
+| 필요한 것                      | 여기서 시작                       | 성공 시 결과                              |
+| ------------------------------ | --------------------------------- | ----------------------------------------- |
+| 요청 + status별 응답           | [HTTP](./core/http.md)            | 디코딩된 data + `HttpResponse`            |
+| 오래 유지되는 서버 이벤트 피드 | [SSE](./core/sse.md)              | 스트림 하나 + 시작 시점 `open` 스냅샷     |
+| 양방향 세션                    | [WebSocket](./core/web-socket.md) | 세션 하나 + 시작 시점 `connection` 스냅샷 |
+
+처음이라면 [시작하기](./guide/getting-started.md)를 한 뒤 [레시피](./recipes/get-declared-404.md)를 골라 보세요. “왜?”가 궁금하면 뭔가를 돌려 본 다음에 [설계 결정](./guide/design-decisions.md)을 읽어요.
+
+## 패키지 고르기
+
+| 패키지                        | 언제                                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `@defjs/core`                 | `createClient` (HTTP + SSE + WebSocket)                                            |
+| `@defjs/react`                | `ClientProvider` / `useClient` — [React](./plugins/react.md)                       |
+| `@defjs/vue`                  | 플러그인 + `injectClient` — [Vue](./plugins/vue.md)                                |
+| `@defjs/opentelemetry-server` | 아웃바운드 span/metric — [OpenTelemetry Server](./plugins/opentelemetry-server.md) |
+
+## 결과 형태
+
+세 전송 모두 error-first 세 항목 튜플을 돌려줘요. 위치는 같고, 의미는 달라요.
+
+- HTTP → `[error, data, response]`
+- SSE → `[error, stream, open]`
+- WebSocket → `[error, session, connection]`
+
+시작에 실패하면 두 번째 항목은 `undefined`예요. 세 번째 항목은 그 전송이 먼저 응답이나 스냅샷을 만든 경우에만 있어요. [오류](./core/errors.md)를 보세요.
+
+## 소유권을 한 호흡으로
+
+HTTP는 더 이상 필요 없을 때 abort 해요. SSE는 닫고 `await stream.closed` 해요. WebSocket은 닫고 `await session.closed` 해요. 서버에서는 옵션이 쿠키, 인증, 테넌트 데이터를 담을 때 요청 경계 안에서 클라이언트를 만들어요. 로그하기 전에 URL, 헤더, body를 마스킹해요.
+
+## 관련 레시피
+
+- [선언된 404가 있는 GET](./recipes/get-declared-404.md)
+- [POST JSON](./recipes/post-json.md)
+- [HTTP 호출 취소하기](./recipes/cancel-http.md)
+- [SSE 스트림 소비하기](./recipes/consume-sse.md)
+- [WebSocket 세션 열기](./recipes/websocket-session.md)
+- [로컬 Fetch 핸들로 테스트하기](./recipes/test-with-handle.md)

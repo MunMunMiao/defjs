@@ -1,65 +1,64 @@
 ---
-title: Getting Started
-description: Install Defjs, define a typed HTTP endpoint, create a client, and call it from your application.
+title: 'Getting Started: one HTTP request'
+description: Define GET /users/:id, run it against a local Fetch handle, then point it at a real API.
 ---
 
-# Getting Started
+# Getting Started: one HTTP request
 
-Defjs lets your application describe an API contract once, then reuse that contract with typed input, runtime decoding, and explicit transport results.
+You’ll define `GET /users/:id`, execute it through an explicit client, and decode both `200` and declared `404`. The local handler keeps the first run offline; the command stays the same when you swap in a real service.
 
-## Install
+## Step 1 — Install
 
-Add the core package to your application:
+`@defjs/core` is ESM and wants Node.js 22+, Bun, or Deno. Node runs the `.ts` file directly — keep `"type": "module"` in package.json. In a browser you still need your bundler and Fetch.
+
+::: tabs
+== bun
+
+```sh
+bun add @defjs/core
+```
+
+== npm
+
+```sh
+npm install @defjs/core
+```
+
+== pnpm
 
 ```sh
 pnpm add @defjs/core
 ```
 
-Use the equivalent `npm`, Yarn, or Bun command if your project uses another package manager. `@defjs/core` is ESM. When you run it in Node.js, the current package metadata requires Node 22 or newer.
-
-If you link a package from a Defjs checkout with `file:` or a workspace link, build the packages before compiling or running an external consumer:
+== yarn
 
 ```sh
-pnpm install
-pnpm build
+yarn add @defjs/core
 ```
 
-The checkout package entry points to the generated `dist/` JavaScript and declaration files. Raw `src/*.ts` files are for the repository's TypeScript/bundler workflow; they are not a Node.js or Deno runtime entry. Published packages already contain the generated entries.
-
-In an isolated pnpm consumer, the package manager may block native build scripts or lack offline package metadata. Approve only the build dependency that the consumer actually needs with `pnpm approve-builds`, and retry installation with network access when metadata is unavailable; these are package-manager conditions, not Defjs runtime behavior.
-
-Packed ESM HTTP consumers were exercised with Node.js 22, 24, and 26, Bun 1.3.14, and Deno 2.9.5. After compiling your application, the corresponding command shapes are:
+== deno
 
 ```sh
-node dist/index.js
-bun run dist/index.js
-deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+deno add npm:@defjs/core
 ```
 
-The Deno command uses packages already installed in `node_modules`; replace the network permission with the exact API hosts your application needs. The Bun and Deno checks cover the documented HTTP slice, not every platform API or transport. Browser builds use their normal bundler and the required platform Fetch and WebSocket capabilities.
-
-Cross-runtime tests should assert stable Defjs fields such as `error.kind` and `error.code`. Do not depend on engine-specific native `Error` messages or JSON parse text; Node.js, Bun, and Deno can format those details differently.
-
-Add an adapter only when your application needs it:
-
-| Application setup         | Packages                                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------- |
-| React 18+                 | `@defjs/core`, `@defjs/react`, `react`                                                    |
-| Vue 3+                    | `@defjs/core`, `@defjs/vue`, `vue`                                                        |
-| Server-side OpenTelemetry | `@defjs/core`, `@defjs/opentelemetry-server`, `@opentelemetry/api`, `@opentelemetry/core` |
-
-::: tip Match the docs to your installed version
-These pages describe the current documentation source. Published packages bundle the matching English guides. Check the version installed in your application and do not mix examples across releases.
 :::
 
-## Define Your First Request
+## Step 2 — Define the request
 
-Assume your API exposes `GET /users/:id`. Replace the base URL and response Structs with the contract used by your own service.
+Create `src/get-user.ts`. `struct.request(...)` keeps path values separate from query, headers, and body.
 
-```typescript
-import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+```ts get-user.ts
+import { defineRequest, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
 
 const getUser = defineRequest({
   method: 'GET',
@@ -68,66 +67,163 @@ const getUser = defineRequest({
     path: struct.object({ id: struct.number() }),
   }),
   output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
   ],
 })
 
-async function loadUser(id: number) {
-  const [error, user, response] = await client.execute(getUser({ path: { id } }))
+const command = getUser({ path: { id: 7 } })
+void command
+```
 
-  if (error) {
-    console.error(error.kind, error.code)
-    return
+Prefer the `output` array for Getting Started and most recipes. Use a status→body map when you extract declarations into variables. A multi-status group like `status: [400, 409]` must stay in the array form.
+
+`defineRequest(...)` returns the builder. Calling `getUser(...)` builds the opaque command you’ll pass to `client.execute(...)`.
+
+## Step 3 — Execute it locally
+
+Wire a client-local Fetch handle so you can run without a network. Defjs still validates input, builds the `Request`, dispatches by status, and parses the body.
+
+```ts get-user.ts
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+  ],
+})
+
+const handle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
   }
 
-  console.log(user.name, response.status)
+  return Response.json({ message: 'User not found' }, { status: 404 })
 }
 
-void loadUser(7)
-```
+const client = createClient(withEndpoint('https://api.example.test'), withHTTPHandle(handle))
 
-`defineRequest(...)` returns a **command builder**. Calling `getUser(...)` creates a **command** that holds the endpoint definition and call input. `client.execute(...)` then returns an HTTP three-item tuple:
+const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }), {
+  timeout: 5_000,
+})
 
-```typescript
-;[error, result, response]
-```
-
-On success, `error` is `null`, `result` is decoded output data, and `response` is a Defjs `HttpResponse` wrapper. On failure, `result` is `undefined`; the response wrapper is also `undefined` when no response was received.
-
-Before adding a framework adapter, keep one owner for each piece of work:
-
-- forward the owner's `AbortSignal` and abort it when the request becomes stale or its scope ends;
-- handle the tuple at the application boundary, preserving `error.kind` and `error.code` for stable UI and logs;
-- close every SSE stream or WebSocket session that the owner opens, including a resource that arrives after disposal;
-- retry only replayable operations, and require an idempotency contract before replaying a write.
-
-### Status Literals Are Preserved Automatically
-
-`defineRequest(...)` uses a const generic for `output`, so inline array entries and grouped status arrays retain their literal values automatically. You do not need `as const` to separate inferred 2xx success bodies from non-2xx error bodies.
-
-Object-form output is also supported:
-
-```typescript
-const output = {
-  '200': struct.object({ id: struct.number() }),
-  '404': struct.object({ message: struct.string() }),
+if (error) {
+  if (error.kind === 'http' && error.status === 404) {
+    console.log(error.data.message)
+  } else {
+    console.error(error.kind, error.code)
+  }
+} else {
+  console.log(`Loaded ${user.name} from ${response.status}`)
 }
 ```
 
-## Put It in Your Application
+Run it:
 
-Keep endpoint definitions in modules that describe your service API. Reuse their command builders from components, route handlers, jobs, or stores. Create the client at the boundary that owns its endpoint, credentials, interceptors, and lifecycle:
+::: tabs
+== bun
 
-- a browser application can usually share one client;
-- server rendering should create a request-scoped client when headers, cookies, users, or tenants differ per request;
-- code that opens SSE or WebSocket resources must also consume and close them.
+```sh
+bun src/get-user.ts
+```
 
-For discoverability, keep a predictable service layout such as `api/users.ts` for endpoint builders and names such as `getUser`, `listUsers`, and `createUser`. The uniform `client.execute(command)` API stays easy to search when command names and modules describe the service operation.
+== npm
 
-## Next Steps
+```sh
+node src/get-user.ts
+```
 
-- [Commands](../core/commands.md) explains automatic request mapping and custom schema-bound projections.
-- [Errors](../core/errors.md) shows how to handle transport and HTTP failures in application code.
-- [HTTP](../core/http.md) covers URL resolution, request bodies, output decoding, cancellation, and XSRF behavior.
-- [Examples](./examples.md) provides complete recipes you can adapt to your own API and application boundaries.
+== pnpm
+
+```sh
+node src/get-user.ts
+```
+
+== yarn
+
+```sh
+node src/get-user.ts
+```
+
+== deno
+
+```sh
+deno run src/get-user.ts
+```
+
+:::
+
+```txt
+Loaded Ada from 200
+```
+
+Try a missing user — change the path id to `8` and run again:
+
+```txt
+User not found
+```
+
+On success: `error` is `null`, `user` is the `200` Struct output, `response` is an `HttpResponse`. On a declared `404`: `error.kind` is `'http'`, `error.status` is `404`, and `error.data` is typed `NotFound`. The second tuple item is `undefined` on failure.
+
+## Step 4 — Point at a real API
+
+Drop `withHTTPHandle(...)` and set the real base URL when the service implements `GET /v1/users/:id` with those bodies.
+
+```ts
+import { createClient, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const localHandle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
+  }
+
+  return Response.json({ message: 'User not found' }, { status: 404 })
+}
+
+const localClient = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(localHandle))
+const realClient = createClient(withEndpoint('https://api.example.com/v1'))
+void localClient
+void realClient
+```
+
+Same command. Different client.
+
+## When the result differs
+
+- Bad input / invalid build / conflicting cancel options → `REQUEST_VALIDATION_FAILED`
+- Declared non-2xx → `HTTP_STATUS` with typed `error.data`
+- Declared body that won’t decode → `RESPONSE_VALIDATION_FAILED`
+- Status with no declaration → `UNDECLARED_STATUS` (`kind: 'definition'`; `error.response` may still be present, body is not decoded as success)
+- Fetch fail / cancel / timeout → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+
+`timeout` must be a positive safe integer in `1..2_147_483_647`. Valid cancel shapes: `{ timeout }`, `{ abort }`, or `{ signal, timeout }` / `{ signal, abort }`. `{ abort, timeout }` together is invalid. Cancellation tells you what the caller saw — not whether a server write committed.
+
+## Next recipes
+
+- [GET with a declared 404](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [Cancel an HTTP call](../recipes/cancel-http.md)
+- [Consume an SSE stream](../recipes/consume-sse.md)
+- [Open a WebSocket session](../recipes/websocket-session.md)
+- [Test with a local Fetch handle](../recipes/test-with-handle.md)

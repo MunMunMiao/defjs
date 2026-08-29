@@ -1,7 +1,6 @@
 import type { WebSocketHandle } from '../client/config'
-import type { FnReturn } from '../internal/utility_types'
 import { serializeOutgoingWebSocketMessage } from './codec'
-import type { SocketStructs, WebSocketHeartbeatConfig, WebSocketOutgoingData } from './web_socket'
+import type { SocketStructs, WebSocketHeartbeatConfig, WebSocketOutgoingData, WebSocketOutgoingNormalizer } from './web_socket'
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647
 
@@ -23,6 +22,7 @@ export function startHeartbeat<TIncoming, TOutgoing extends SocketStructs | unde
   outgoing: TOutgoing,
   onFatal: (error: unknown) => void,
   openState: number,
+  normalizeOutgoing?: WebSocketOutgoingNormalizer,
 ): void {
   stopHeartbeat(sessionController)
   validateHeartbeatConfig(config)
@@ -30,8 +30,8 @@ export function startHeartbeat<TIncoming, TOutgoing extends SocketStructs | unde
     return
   }
 
-  let ackTimer: FnReturn<typeof setTimeout> | undefined
-  let interval: FnReturn<typeof setInterval> | undefined
+  let ackTimer: ReturnType<typeof setTimeout> | undefined
+  let interval: ReturnType<typeof setInterval> | undefined
   const runtime: HeartbeatRuntime<TIncoming> = {
     isAck: config.isAck,
     markAck() {
@@ -57,11 +57,12 @@ export function startHeartbeat<TIncoming, TOutgoing extends SocketStructs | unde
     }
 
     try {
-      const nextMessage = resolveHeartbeatMessage(config.message)
+      const message = config.message
+      const nextMessage = message ? message() : undefined
       if (!isActive() || typeof nextMessage === 'undefined') {
         return
       }
-      const serialized = serializeOutgoingWebSocketMessage(outgoing, nextMessage as WebSocketOutgoingData<TOutgoing>)
+      const serialized = serializeOutgoingWebSocketMessage(outgoing, nextMessage as WebSocketOutgoingData<TOutgoing>, normalizeOutgoing)
       if (!isActive()) {
         return
       }
@@ -104,14 +105,6 @@ export function validateHeartbeatConfig(config: { intervalMs: number; timeoutMs?
 export function stopHeartbeat<T>(sessionController: { heartbeat: HeartbeatRuntime<T> | undefined }): void {
   sessionController.heartbeat?.stop()
   sessionController.heartbeat = undefined
-}
-
-function resolveHeartbeatMessage<T>(message?: <R = T>() => R | unknown): T | undefined {
-  if (!message) {
-    return undefined
-  }
-
-  return message() as T
 }
 
 function assertTimerDelay(field: string, value: number): void {

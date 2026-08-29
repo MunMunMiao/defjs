@@ -1,575 +1,598 @@
-import { defineConfig } from 'vitepress'
+import { createFileSystemTypesCache } from '@shikijs/vitepress-twoslash/cache-fs'
+import { transformerTwoslash } from '@shikijs/vitepress-twoslash'
+import llmstxt from 'vitepress-plugin-llms'
+import { tabsMarkdownPlugin } from 'vitepress-plugin-tabs'
+import { defineConfig, type DefaultTheme } from 'vitepress'
+import { createApiSidebar } from './api-catalog.ts'
 
-const navEn = [
-  { text: 'Guide', link: '/guide/getting-started' },
-  { text: 'Core', link: '/core/client' },
-  {
-    text: 'Plugins',
-    items: [
-      { text: 'Vue', link: '/plugins/vue' },
-      { text: 'React', link: '/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/plugins/opentelemetry-server' },
-    ],
-  },
-]
-
-const sidebarEn = {
-  '/guide/': [
-    {
-      text: 'Guide',
-      items: [
-        { text: 'Getting Started', link: '/guide/getting-started' },
-        { text: 'Examples', link: '/guide/examples' },
-        { text: 'Design Decisions', link: '/guide/design-decisions' },
-      ],
-    },
-  ],
-  '/core/': [
-    {
-      text: 'Core',
-      items: [
-        { text: 'Client', link: '/core/client' },
-        { text: 'Commands', link: '/core/commands' },
-        { text: 'Context', link: '/core/context' },
-        { text: 'Errors', link: '/core/errors' },
-        { text: 'HTTP', link: '/core/http' },
-        { text: 'Interceptors', link: '/core/interceptors' },
-        { text: 'SSE', link: '/core/sse' },
-        { text: 'Struct', link: '/core/struct' },
-        { text: 'WebSocket', link: '/core/web-socket' },
-      ],
-    },
-  ],
-  '/plugins/': [
-    {
-      text: 'Plugins',
-      items: [
-        { text: 'Vue', link: '/plugins/vue' },
-        { text: 'React', link: '/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+type NavigationCopy = {
+  docs: string
+  startHere: string
+  recipes: string
+  why: string
+  concepts: string
+  reference: string
+  integrations: string
+  overview: string
+  gettingStarted: string
+  recipeGetDeclared404: string
+  recipePostJson: string
+  recipeCancelHttp: string
+  recipeConsumeSse: string
+  recipeWebsocketSession: string
+  recipeTestWithHandle: string
+  recipePublishHttpSdk: string
+  recipeRefreshBearerOnce: string
+  recipeEtagRevalidate: string
+  recipeGraphqlHttpEnvelope: string
+  designDecisions: string
+  client: string
+  commands: string
+  struct: string
+  errors: string
+  http: string
+  sse: string
+  webSocket: string
+  interceptors: string
+  vue: string
+  react: string
+  opentelemetry: string
 }
 
-const navZh = [
-  { text: '指南', link: '/zh-Hans/guide/getting-started' },
-  { text: '核心', link: '/zh-Hans/core/client' },
-  {
-    text: '插件',
-    items: [
-      { text: 'Vue', link: '/zh-Hans/plugins/vue' },
-      { text: 'React', link: '/zh-Hans/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/zh-Hans/plugins/opentelemetry-server' },
-    ],
-  },
-]
-
-const sidebarZh = {
-  '/zh-Hans/guide/': [
-    {
-      text: '指南',
-      items: [
-        { text: '快速开始', link: '/zh-Hans/guide/getting-started' },
-        { text: '示例', link: '/zh-Hans/guide/examples' },
-        { text: '设计决策', link: '/zh-Hans/guide/design-decisions' },
-      ],
-    },
-  ],
-  '/zh-Hans/core/': [
-    {
-      text: '核心',
-      items: [
-        { text: '客户端', link: '/zh-Hans/core/client' },
-        { text: '命令', link: '/zh-Hans/core/commands' },
-        { text: '上下文', link: '/zh-Hans/core/context' },
-        { text: '错误处理', link: '/zh-Hans/core/errors' },
-        { text: 'HTTP', link: '/zh-Hans/core/http' },
-        { text: '拦截器', link: '/zh-Hans/core/interceptors' },
-        { text: 'SSE', link: '/zh-Hans/core/sse' },
-        { text: 'Struct', link: '/zh-Hans/core/struct' },
-        { text: 'WebSocket', link: '/zh-Hans/core/web-socket' },
-      ],
-    },
-  ],
-  '/zh-Hans/plugins/': [
-    {
-      text: '插件',
-      items: [
-        { text: 'Vue', link: '/zh-Hans/plugins/vue' },
-        { text: 'React', link: '/zh-Hans/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/zh-Hans/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+type LocaleCopy = {
+  label: string
+  lang: string
+  description: string
+  dir?: string
+  navigation: NavigationCopy
+  footer: {
+    message: string
+    copyright: string
+  }
+  editLink: string
+  previous: string
+  next: string
+  searchPlaceholder?: string
 }
 
-const navZhTw = [
-  { text: '指南', link: '/zh-Hant-TW/guide/getting-started' },
-  { text: '核心', link: '/zh-Hant-TW/core/client' },
-  {
-    text: '外掛程式',
-    items: [
-      { text: 'Vue', link: '/zh-Hant-TW/plugins/vue' },
-      { text: 'React', link: '/zh-Hant-TW/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/zh-Hant-TW/plugins/opentelemetry-server' },
-    ],
-  },
-]
-
-const sidebarZhTw = {
-  '/zh-Hant-TW/guide/': [
-    {
-      text: '指南',
-      items: [
-        { text: '開始使用', link: '/zh-Hant-TW/guide/getting-started' },
-        { text: '範例', link: '/zh-Hant-TW/guide/examples' },
-        { text: '設計決策', link: '/zh-Hant-TW/guide/design-decisions' },
-      ],
-    },
-  ],
-  '/zh-Hant-TW/core/': [
-    {
-      text: '核心',
-      items: [
-        { text: '用戶端', link: '/zh-Hant-TW/core/client' },
-        { text: '指令', link: '/zh-Hant-TW/core/commands' },
-        { text: '脈絡', link: '/zh-Hant-TW/core/context' },
-        { text: '錯誤處理', link: '/zh-Hant-TW/core/errors' },
-        { text: 'HTTP', link: '/zh-Hant-TW/core/http' },
-        { text: '攔截器', link: '/zh-Hant-TW/core/interceptors' },
-        { text: 'SSE', link: '/zh-Hant-TW/core/sse' },
-        { text: 'Struct', link: '/zh-Hant-TW/core/struct' },
-        { text: 'WebSocket', link: '/zh-Hant-TW/core/web-socket' },
-      ],
-    },
-  ],
-  '/zh-Hant-TW/plugins/': [
-    {
-      text: '外掛程式',
-      items: [
-        { text: 'Vue', link: '/zh-Hant-TW/plugins/vue' },
-        { text: 'React', link: '/zh-Hant-TW/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/zh-Hant-TW/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+type Navigation = {
+  nav: DefaultTheme.NavItem[]
+  sidebar: DefaultTheme.Sidebar
 }
 
-const navZhHk = [
-  { text: '指南', link: '/zh-Hant-HK/guide/getting-started' },
-  { text: '核心', link: '/zh-Hant-HK/core/client' },
-  {
-    text: '外掛',
-    items: [
-      { text: 'Vue', link: '/zh-Hant-HK/plugins/vue' },
-      { text: 'React', link: '/zh-Hant-HK/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/zh-Hant-HK/plugins/opentelemetry-server' },
-    ],
-  },
-]
+const editLinkPattern = 'https://github.com/defjs/defjs/edit/main/doc/:path'
 
-const sidebarZhHk = {
-  '/zh-Hant-HK/guide/': [
-    {
-      text: '指南',
-      items: [
-        { text: '快速上手', link: '/zh-Hant-HK/guide/getting-started' },
-        { text: '範例', link: '/zh-Hant-HK/guide/examples' },
-        { text: '設計決策', link: '/zh-Hant-HK/guide/design-decisions' },
-      ],
+const routes = {
+  overview: '/',
+  gettingStarted: '/guide/getting-started',
+  designDecisions: '/guide/design-decisions',
+  recipeGetDeclared404: '/recipes/get-declared-404',
+  recipePostJson: '/recipes/post-json',
+  recipeCancelHttp: '/recipes/cancel-http',
+  recipeConsumeSse: '/recipes/consume-sse',
+  recipeWebsocketSession: '/recipes/websocket-session',
+  recipeTestWithHandle: '/recipes/test-with-handle',
+  recipePublishHttpSdk: '/recipes/publish-http-sdk',
+  recipeRefreshBearerOnce: '/recipes/refresh-bearer-once',
+  recipeEtagRevalidate: '/recipes/etag-revalidate',
+  recipeGraphqlHttpEnvelope: '/recipes/graphql-http-envelope',
+  client: '/core/client',
+  commands: '/core/commands',
+  errors: '/core/errors',
+  http: '/core/http',
+  interceptors: '/core/interceptors',
+  sse: '/core/sse',
+  struct: '/core/struct',
+  webSocket: '/core/web-socket',
+  vue: '/plugins/vue',
+  react: '/plugins/react',
+  opentelemetry: '/plugins/opentelemetry-server',
+  apiOverview: '/api/',
+  apiClient: '/api/client',
+  apiHttp: '/api/http',
+  apiStruct: '/api/struct',
+  apiErrors: '/api/errors',
+  apiInterceptors: '/api/interceptors',
+  apiSse: '/api/sse',
+  apiWebSocket: '/api/web-socket',
+} as const
+
+type Route = (typeof routes)[keyof typeof routes]
+
+const createNavigation = (prefix: string, copy: NavigationCopy): Navigation => {
+  const link = (route: Route) => `${prefix}${route}`
+  const sidebarLink = (text: string, route: Route): DefaultTheme.SidebarItem => ({
+    text,
+    link: link(route),
+  })
+  const sidebarGroup = (text: string, items: DefaultTheme.SidebarItem[]): DefaultTheme.SidebarItem => ({
+    text,
+    items,
+    collapsed: false,
+  })
+
+  // Docs | Recipes | Reference. One sidebar group per workspace package.
+  const docsActiveMatch = prefix ? `^${prefix}/(guide|core|plugins)/|^${prefix}/?$` : '^/(guide|core|plugins)/|^/$'
+
+  const apiSidebar: DefaultTheme.SidebarItem[] = createApiSidebar(prefix, copy.overview)
+
+  const docsSidebar = [
+    sidebarGroup(copy.startHere, [sidebarLink(copy.overview, routes.overview), sidebarLink(copy.gettingStarted, routes.gettingStarted)]),
+    sidebarGroup(copy.concepts, [
+      sidebarLink(copy.client, routes.client),
+      sidebarLink(copy.commands, routes.commands),
+      sidebarLink(copy.struct, routes.struct),
+      sidebarLink(copy.errors, routes.errors),
+      sidebarLink(copy.http, routes.http),
+      sidebarLink(copy.sse, routes.sse),
+      sidebarLink(copy.webSocket, routes.webSocket),
+      sidebarLink(copy.interceptors, routes.interceptors),
+    ]),
+    sidebarGroup(copy.why, [sidebarLink(copy.designDecisions, routes.designDecisions)]),
+    sidebarGroup(copy.integrations, [
+      sidebarLink(copy.vue, routes.vue),
+      sidebarLink(copy.react, routes.react),
+      sidebarLink(copy.opentelemetry, routes.opentelemetry),
+    ]),
+  ]
+
+  const recipesSidebar = [
+    sidebarGroup(copy.recipes, [
+      sidebarLink(copy.recipeGetDeclared404, routes.recipeGetDeclared404),
+      sidebarLink(copy.recipePostJson, routes.recipePostJson),
+      sidebarLink(copy.recipeCancelHttp, routes.recipeCancelHttp),
+      sidebarLink(copy.recipeConsumeSse, routes.recipeConsumeSse),
+      sidebarLink(copy.recipeWebsocketSession, routes.recipeWebsocketSession),
+      sidebarLink(copy.recipeTestWithHandle, routes.recipeTestWithHandle),
+      sidebarLink(copy.recipePublishHttpSdk, routes.recipePublishHttpSdk),
+      sidebarLink(copy.recipeRefreshBearerOnce, routes.recipeRefreshBearerOnce),
+      sidebarLink(copy.recipeEtagRevalidate, routes.recipeEtagRevalidate),
+      sidebarLink(copy.recipeGraphqlHttpEnvelope, routes.recipeGraphqlHttpEnvelope),
+    ]),
+  ]
+
+  const base = prefix || ''
+
+  return {
+    nav: [
+      {
+        text: copy.docs,
+        link: link(routes.gettingStarted),
+        activeMatch: docsActiveMatch,
+      },
+      {
+        text: copy.recipes,
+        link: link(routes.recipeGetDeclared404),
+        activeMatch: `${base}/recipes/`,
+      },
+      {
+        text: copy.reference,
+        link: link(routes.apiOverview),
+        activeMatch: `${base}/api/`,
+      },
+    ],
+    sidebar: {
+      [`${base}/guide/`]: docsSidebar,
+      [`${base}/core/`]: docsSidebar,
+      [`${base}/plugins/`]: docsSidebar,
+      [`${base}/`]: docsSidebar,
+      [`${base}/recipes/`]: recipesSidebar,
+      [`${base}/api/`]: apiSidebar,
     },
-  ],
-  '/zh-Hant-HK/core/': [
-    {
-      text: '核心',
-      items: [
-        { text: '用戶端', link: '/zh-Hant-HK/core/client' },
-        { text: '指令', link: '/zh-Hant-HK/core/commands' },
-        { text: '上下文', link: '/zh-Hant-HK/core/context' },
-        { text: '錯誤處理', link: '/zh-Hant-HK/core/errors' },
-        { text: 'HTTP', link: '/zh-Hant-HK/core/http' },
-        { text: '攔截器', link: '/zh-Hant-HK/core/interceptors' },
-        { text: 'SSE', link: '/zh-Hant-HK/core/sse' },
-        { text: 'Struct', link: '/zh-Hant-HK/core/struct' },
-        { text: 'WebSocket', link: '/zh-Hant-HK/core/web-socket' },
-      ],
-    },
-  ],
-  '/zh-Hant-HK/plugins/': [
-    {
-      text: '外掛',
-      items: [
-        { text: 'Vue', link: '/zh-Hant-HK/plugins/vue' },
-        { text: 'React', link: '/zh-Hant-HK/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/zh-Hant-HK/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+  }
 }
 
-const navDe = [
-  { text: 'Handbuch', link: '/de-DE/guide/getting-started' },
-  { text: 'Kern', link: '/de-DE/core/client' },
-  {
-    text: 'Plugins',
-    items: [
-      { text: 'Vue', link: '/de-DE/plugins/vue' },
-      { text: 'React', link: '/de-DE/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/de-DE/plugins/opentelemetry-server' },
-    ],
-  },
-]
+const createLocale = (prefix: string, copy: LocaleCopy) => {
+  const navigation = createNavigation(prefix, copy.navigation)
 
-const sidebarDe = {
-  '/de-DE/guide/': [
-    {
-      text: 'Handbuch',
-      items: [
-        { text: 'Erste Schritte', link: '/de-DE/guide/getting-started' },
-        { text: 'Beispiele', link: '/de-DE/guide/examples' },
-        { text: 'Design-Entscheidungen', link: '/de-DE/guide/design-decisions' },
-      ],
+  return {
+    label: copy.label,
+    lang: copy.lang,
+    description: copy.description,
+    ...(copy.dir ? { dir: copy.dir } : {}),
+    themeConfig: {
+      nav: navigation.nav,
+      sidebar: navigation.sidebar,
+      footer: copy.footer,
+      editLink: {
+        pattern: editLinkPattern,
+        text: copy.editLink,
+      },
+      docFooter: {
+        prev: copy.previous,
+        next: copy.next,
+      },
+      ...(copy.searchPlaceholder
+        ? {
+            search: {
+              provider: 'local' as const,
+              options: {
+                translations: {
+                  button: {
+                    buttonText: copy.searchPlaceholder,
+                    buttonAriaLabel: copy.searchPlaceholder,
+                  },
+                },
+              },
+            },
+          }
+        : {}),
     },
-  ],
-  '/de-DE/core/': [
-    {
-      text: 'Kern',
-      items: [
-        { text: 'Client', link: '/de-DE/core/client' },
-        { text: 'Befehle', link: '/de-DE/core/commands' },
-        { text: 'Kontext', link: '/de-DE/core/context' },
-        { text: 'Fehler', link: '/de-DE/core/errors' },
-        { text: 'HTTP', link: '/de-DE/core/http' },
-        { text: 'Interceptor', link: '/de-DE/core/interceptors' },
-        { text: 'SSE', link: '/de-DE/core/sse' },
-        { text: 'Struct', link: '/de-DE/core/struct' },
-        { text: 'WebSocket', link: '/de-DE/core/web-socket' },
-      ],
-    },
-  ],
-  '/de-DE/plugins/': [
-    {
-      text: 'Plugins',
-      items: [
-        { text: 'Vue', link: '/de-DE/plugins/vue' },
-        { text: 'React', link: '/de-DE/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/de-DE/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+  }
 }
 
-const navJa = [
-  { text: 'ガイド', link: '/ja-JP/guide/getting-started' },
-  { text: 'コア', link: '/ja-JP/core/client' },
-  {
-    text: 'プラグイン',
-    items: [
-      { text: 'Vue', link: '/ja-JP/plugins/vue' },
-      { text: 'React', link: '/ja-JP/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/ja-JP/plugins/opentelemetry-server' },
-    ],
-  },
-]
-
-const sidebarJa = {
-  '/ja-JP/guide/': [
-    {
-      text: 'ガイド',
-      items: [
-        { text: 'はじめに', link: '/ja-JP/guide/getting-started' },
-        { text: 'サンプル', link: '/ja-JP/guide/examples' },
-        { text: '設計上の決定事項', link: '/ja-JP/guide/design-decisions' },
-      ],
-    },
-  ],
-  '/ja-JP/core/': [
-    {
-      text: 'コア',
-      items: [
-        { text: 'Client', link: '/ja-JP/core/client' },
-        { text: 'Commands', link: '/ja-JP/core/commands' },
-        { text: 'Context', link: '/ja-JP/core/context' },
-        { text: 'Errors', link: '/ja-JP/core/errors' },
-        { text: 'HTTP', link: '/ja-JP/core/http' },
-        { text: 'Interceptors', link: '/ja-JP/core/interceptors' },
-        { text: 'SSE', link: '/ja-JP/core/sse' },
-        { text: 'Struct', link: '/ja-JP/core/struct' },
-        { text: 'WebSocket', link: '/ja-JP/core/web-socket' },
-      ],
-    },
-  ],
-  '/ja-JP/plugins/': [
-    {
-      text: 'プラグイン',
-      items: [
-        { text: 'Vue', link: '/ja-JP/plugins/vue' },
-        { text: 'React', link: '/ja-JP/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/ja-JP/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+const enNavigation: NavigationCopy = {
+  docs: 'Docs',
+  startHere: 'Start Here',
+  recipes: 'Recipes',
+  why: 'Why',
+  concepts: 'Concepts',
+  reference: 'Reference',
+  integrations: 'Integrations',
+  overview: 'Overview',
+  gettingStarted: 'Getting Started',
+  recipeGetDeclared404: 'GET with a declared 404',
+  recipePostJson: 'POST JSON',
+  recipeCancelHttp: 'Cancel an HTTP call',
+  recipeConsumeSse: 'Consume an SSE stream',
+  recipeWebsocketSession: 'Open a WebSocket session',
+  recipeTestWithHandle: 'Test with a local Fetch handle',
+  recipePublishHttpSdk: 'Publish an HTTP SDK',
+  recipeRefreshBearerOnce: 'Refresh Bearer once on 401',
+  recipeEtagRevalidate: 'Revalidate with ETag',
+  recipeGraphqlHttpEnvelope: 'Unwrap a GraphQL HTTP envelope',
+  designDecisions: 'Design Decisions',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
 }
 
-const navKo = [
-  { text: '가이드', link: '/ko-KR/guide/getting-started' },
-  { text: '코어', link: '/ko-KR/core/client' },
-  {
-    text: '플러그인',
-    items: [
-      { text: 'Vue', link: '/ko-KR/plugins/vue' },
-      { text: 'React', link: '/ko-KR/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/ko-KR/plugins/opentelemetry-server' },
-    ],
-  },
-]
-
-const sidebarKo = {
-  '/ko-KR/guide/': [
-    {
-      text: '가이드',
-      items: [
-        { text: '시작하기', link: '/ko-KR/guide/getting-started' },
-        { text: '예제', link: '/ko-KR/guide/examples' },
-        { text: '설계 결정', link: '/ko-KR/guide/design-decisions' },
-      ],
-    },
-  ],
-  '/ko-KR/core/': [
-    {
-      text: '코어',
-      items: [
-        { text: '클라이언트', link: '/ko-KR/core/client' },
-        { text: '커맨드', link: '/ko-KR/core/commands' },
-        { text: '컨텍스트', link: '/ko-KR/core/context' },
-        { text: '오류', link: '/ko-KR/core/errors' },
-        { text: 'HTTP', link: '/ko-KR/core/http' },
-        { text: '인터셉터', link: '/ko-KR/core/interceptors' },
-        { text: 'SSE', link: '/ko-KR/core/sse' },
-        { text: 'Struct', link: '/ko-KR/core/struct' },
-        { text: 'WebSocket', link: '/ko-KR/core/web-socket' },
-      ],
-    },
-  ],
-  '/ko-KR/plugins/': [
-    {
-      text: '플러그인',
-      items: [
-        { text: 'Vue', link: '/ko-KR/plugins/vue' },
-        { text: 'React', link: '/ko-KR/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/ko-KR/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+const zhHansNavigation: NavigationCopy = {
+  docs: '文档',
+  startHere: '从这里开始',
+  recipes: '示例',
+  why: '为什么这样设计',
+  concepts: '概念',
+  reference: 'API Reference',
+  integrations: '集成',
+  overview: '概览',
+  gettingStarted: '快速开始',
+  recipeGetDeclared404: '带声明 404 的 GET',
+  recipePostJson: 'POST JSON',
+  recipeCancelHttp: '取消一次 HTTP',
+  recipeConsumeSse: '消费一条 SSE',
+  recipeWebsocketSession: '打开 WebSocket 会话',
+  recipeTestWithHandle: '用本地 Fetch 测',
+  recipePublishHttpSdk: '发布 HTTP SDK',
+  recipeRefreshBearerOnce: '401 时刷新一次 Bearer',
+  recipeEtagRevalidate: '用 ETag 再验证',
+  recipeGraphqlHttpEnvelope: '拆 GraphQL HTTP 信封',
+  designDecisions: '设计取舍',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
 }
 
-const navAr = [
-  { text: 'الدليل', link: '/ar/guide/getting-started' },
-  { text: 'النواة', link: '/ar/core/client' },
-  {
-    text: 'الإضافات',
-    items: [
-      { text: 'Vue', link: '/ar/plugins/vue' },
-      { text: 'React', link: '/ar/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/ar/plugins/opentelemetry-server' },
-    ],
-  },
-]
-
-const sidebarAr = {
-  '/ar/guide/': [
-    {
-      text: 'الدليل',
-      items: [
-        { text: 'البدء السريع', link: '/ar/guide/getting-started' },
-        { text: 'أمثلة', link: '/ar/guide/examples' },
-        { text: 'قرارات التصميم', link: '/ar/guide/design-decisions' },
-      ],
-    },
-  ],
-  '/ar/core/': [
-    {
-      text: 'النواة',
-      items: [
-        { text: 'العميل', link: '/ar/core/client' },
-        { text: 'الأوامر', link: '/ar/core/commands' },
-        { text: 'السياق', link: '/ar/core/context' },
-        { text: 'الأخطاء', link: '/ar/core/errors' },
-        { text: 'HTTP', link: '/ar/core/http' },
-        { text: 'المعترضات', link: '/ar/core/interceptors' },
-        { text: 'SSE', link: '/ar/core/sse' },
-        { text: 'Struct', link: '/ar/core/struct' },
-        { text: 'WebSocket', link: '/ar/core/web-socket' },
-      ],
-    },
-  ],
-  '/ar/plugins/': [
-    {
-      text: 'الإضافات',
-      items: [
-        { text: 'Vue', link: '/ar/plugins/vue' },
-        { text: 'React', link: '/ar/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/ar/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+const zhHantTwNavigation: NavigationCopy = {
+  docs: '文件',
+  startHere: '從這裡開始',
+  recipes: '動手例子',
+  why: '為什麼這樣設計',
+  concepts: '概念',
+  reference: '查閱',
+  integrations: '整合',
+  overview: '概覽',
+  gettingStarted: '開始使用',
+  recipeGetDeclared404: '宣告 404 的 GET',
+  recipePostJson: 'POST JSON',
+  recipeCancelHttp: '取消一次 HTTP',
+  recipeConsumeSse: '消費一條 SSE',
+  recipeWebsocketSession: '打開 WebSocket session',
+  recipeTestWithHandle: '用本地 Fetch 測試',
+  recipePublishHttpSdk: '發布 HTTP SDK',
+  recipeRefreshBearerOnce: '401 時刷新一次 Bearer',
+  recipeEtagRevalidate: '用 ETag 再驗證',
+  recipeGraphqlHttpEnvelope: '拆 GraphQL HTTP 信封',
+  designDecisions: '設計取捨',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
 }
 
-const navEs = [
-  { text: 'Guía', link: '/es-ES/guide/getting-started' },
-  { text: 'Núcleo', link: '/es-ES/core/client' },
-  {
-    text: 'Plugins',
-    items: [
-      { text: 'Vue', link: '/es-ES/plugins/vue' },
-      { text: 'React', link: '/es-ES/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/es-ES/plugins/opentelemetry-server' },
-    ],
-  },
-]
-
-const sidebarEs = {
-  '/es-ES/guide/': [
-    {
-      text: 'Guía',
-      items: [
-        { text: 'Primeros Pasos', link: '/es-ES/guide/getting-started' },
-        { text: 'Ejemplos', link: '/es-ES/guide/examples' },
-        { text: 'Decisiones de Diseño', link: '/es-ES/guide/design-decisions' },
-      ],
-    },
-  ],
-  '/es-ES/core/': [
-    {
-      text: 'Núcleo',
-      items: [
-        { text: 'Cliente', link: '/es-ES/core/client' },
-        { text: 'Comandos', link: '/es-ES/core/commands' },
-        { text: 'Contexto', link: '/es-ES/core/context' },
-        { text: 'Errores', link: '/es-ES/core/errors' },
-        { text: 'HTTP', link: '/es-ES/core/http' },
-        { text: 'Interceptores', link: '/es-ES/core/interceptors' },
-        { text: 'SSE', link: '/es-ES/core/sse' },
-        { text: 'Struct', link: '/es-ES/core/struct' },
-        { text: 'WebSocket', link: '/es-ES/core/web-socket' },
-      ],
-    },
-  ],
-  '/es-ES/plugins/': [
-    {
-      text: 'Plugins',
-      items: [
-        { text: 'Vue', link: '/es-ES/plugins/vue' },
-        { text: 'React', link: '/es-ES/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/es-ES/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+const zhHantHkNavigation: NavigationCopy = {
+  docs: '文件',
+  startHere: '由呢度開始',
+  recipes: '手作例子',
+  why: '點解咁設計',
+  concepts: '概念',
+  reference: '查資料',
+  integrations: '整合',
+  overview: '概覽',
+  gettingStarted: '快速上手',
+  recipeGetDeclared404: '帶 declared 404 嘅 GET',
+  recipePostJson: 'POST JSON',
+  recipeCancelHttp: 'Cancel 一次 HTTP',
+  recipeConsumeSse: 'Consume 一條 SSE',
+  recipeWebsocketSession: '開一個 WebSocket session',
+  recipeTestWithHandle: '用本地 Fetch handle 測',
+  recipePublishHttpSdk: '發布 HTTP SDK',
+  recipeRefreshBearerOnce: '401 時刷新一次 Bearer',
+  recipeEtagRevalidate: '用 ETag 再驗證',
+  recipeGraphqlHttpEnvelope: '拆 GraphQL HTTP 信封',
+  designDecisions: '設計取捨',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
 }
 
-const navRu = [
-  { text: 'Руководство', link: '/ru-RU/guide/getting-started' },
-  { text: 'Ядро', link: '/ru-RU/core/client' },
-  {
-    text: 'Плагины',
-    items: [
-      { text: 'Vue', link: '/ru-RU/plugins/vue' },
-      { text: 'React', link: '/ru-RU/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/ru-RU/plugins/opentelemetry-server' },
-    ],
-  },
-]
-
-const sidebarRu = {
-  '/ru-RU/guide/': [
-    {
-      text: 'Руководство',
-      items: [
-        { text: 'Быстрый старт', link: '/ru-RU/guide/getting-started' },
-        { text: 'Примеры', link: '/ru-RU/guide/examples' },
-        { text: 'Проектные решения', link: '/ru-RU/guide/design-decisions' },
-      ],
-    },
-  ],
-  '/ru-RU/core/': [
-    {
-      text: 'Ядро',
-      items: [
-        { text: 'Клиент', link: '/ru-RU/core/client' },
-        { text: 'Команды', link: '/ru-RU/core/commands' },
-        { text: 'Контекст', link: '/ru-RU/core/context' },
-        { text: 'Ошибки', link: '/ru-RU/core/errors' },
-        { text: 'HTTP', link: '/ru-RU/core/http' },
-        { text: 'Перехватчики', link: '/ru-RU/core/interceptors' },
-        { text: 'SSE', link: '/ru-RU/core/sse' },
-        { text: 'Struct', link: '/ru-RU/core/struct' },
-        { text: 'WebSocket', link: '/ru-RU/core/web-socket' },
-      ],
-    },
-  ],
-  '/ru-RU/plugins/': [
-    {
-      text: 'Плагины',
-      items: [
-        { text: 'Vue', link: '/ru-RU/plugins/vue' },
-        { text: 'React', link: '/ru-RU/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/ru-RU/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+const deNavigation: NavigationCopy = {
+  docs: 'Docs',
+  startHere: 'Hier starten',
+  recipes: 'Rezepte',
+  why: 'Warum',
+  concepts: 'Konzepte',
+  reference: 'Referenz',
+  integrations: 'Integrationen',
+  overview: 'Überblick',
+  gettingStarted: 'Erste Schritte',
+  recipeGetDeclared404: 'GET mit deklariertem 404',
+  recipePostJson: 'JSON posten',
+  recipeCancelHttp: 'HTTP-Aufruf abbrechen',
+  recipeConsumeSse: 'SSE-Stream lesen',
+  recipeWebsocketSession: 'WebSocket-Session öffnen',
+  recipeTestWithHandle: 'Mit lokalem Fetch testen',
+  recipePublishHttpSdk: 'HTTP-SDK veröffentlichen',
+  recipeRefreshBearerOnce: 'Bearer einmal bei 401 erneuern',
+  recipeEtagRevalidate: 'Mit ETag revalidieren',
+  recipeGraphqlHttpEnvelope: 'GraphQL-HTTP-Envelope entpacken',
+  designDecisions: 'Designentscheidungen',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
 }
 
-const navFr = [
-  { text: 'Guide', link: '/fr-FR/guide/getting-started' },
-  { text: 'Cœur', link: '/fr-FR/core/client' },
-  {
-    text: 'Plugins',
-    items: [
-      { text: 'Vue', link: '/fr-FR/plugins/vue' },
-      { text: 'React', link: '/fr-FR/plugins/react' },
-      { text: 'OpenTelemetry Server', link: '/fr-FR/plugins/opentelemetry-server' },
-    ],
-  },
-]
+const jaNavigation: NavigationCopy = {
+  docs: 'ドキュメント',
+  startHere: 'まずここから',
+  recipes: 'レシピ',
+  why: 'なぜこうなのか',
+  concepts: '概念',
+  reference: 'リファレンス',
+  integrations: '連携',
+  overview: '概要',
+  gettingStarted: 'はじめよう',
+  recipeGetDeclared404: '404 を宣言した GET',
+  recipePostJson: 'JSON を POST する',
+  recipeCancelHttp: 'HTTP をキャンセルする',
+  recipeConsumeSse: 'SSE を読む',
+  recipeWebsocketSession: 'WebSocket を開く',
+  recipeTestWithHandle: 'ローカル Fetch で試す',
+  recipePublishHttpSdk: 'HTTP SDK を公開する',
+  recipeRefreshBearerOnce: '401 で Bearer を一度だけ更新',
+  recipeEtagRevalidate: 'ETag で再検証する',
+  recipeGraphqlHttpEnvelope: 'GraphQL HTTP 封筒をほどく',
+  designDecisions: '設計の判断',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
+}
 
-const sidebarFr = {
-  '/fr-FR/guide/': [
-    {
-      text: 'Guide',
-      items: [
-        { text: 'Démarrage', link: '/fr-FR/guide/getting-started' },
-        { text: 'Exemples', link: '/fr-FR/guide/examples' },
-        { text: 'Décisions de conception', link: '/fr-FR/guide/design-decisions' },
-      ],
-    },
-  ],
-  '/fr-FR/core/': [
-    {
-      text: 'Cœur',
-      items: [
-        { text: 'Client', link: '/fr-FR/core/client' },
-        { text: 'Commandes', link: '/fr-FR/core/commands' },
-        { text: 'Contexte', link: '/fr-FR/core/context' },
-        { text: 'Erreurs', link: '/fr-FR/core/errors' },
-        { text: 'HTTP', link: '/fr-FR/core/http' },
-        { text: 'Intercepteurs', link: '/fr-FR/core/interceptors' },
-        { text: 'SSE', link: '/fr-FR/core/sse' },
-        { text: 'Struct', link: '/fr-FR/core/struct' },
-        { text: 'WebSocket', link: '/fr-FR/core/web-socket' },
-      ],
-    },
-  ],
-  '/fr-FR/plugins/': [
-    {
-      text: 'Plugins',
-      items: [
-        { text: 'Vue', link: '/fr-FR/plugins/vue' },
-        { text: 'React', link: '/fr-FR/plugins/react' },
-        { text: 'OpenTelemetry Server', link: '/fr-FR/plugins/opentelemetry-server' },
-      ],
-    },
-  ],
+const koNavigation: NavigationCopy = {
+  docs: '문서',
+  startHere: '여기서 시작',
+  recipes: '레시피',
+  why: '왜 이렇게',
+  concepts: '개념',
+  reference: '참고',
+  integrations: '연동',
+  overview: '개요',
+  gettingStarted: '시작하기',
+  recipeGetDeclared404: '선언된 404가 있는 GET',
+  recipePostJson: 'JSON POST',
+  recipeCancelHttp: 'HTTP 취소하기',
+  recipeConsumeSse: 'SSE 읽기',
+  recipeWebsocketSession: 'WebSocket 열기',
+  recipeTestWithHandle: '로컬 Fetch로 테스트',
+  recipePublishHttpSdk: 'HTTP SDK 게시',
+  recipeRefreshBearerOnce: '401에서 Bearer 한 번 갱신',
+  recipeEtagRevalidate: 'ETag로 재검증',
+  recipeGraphqlHttpEnvelope: 'GraphQL HTTP 봉투 풀기',
+  designDecisions: '설계 선택',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
+}
+
+const arNavigation: NavigationCopy = {
+  docs: 'المستندات',
+  startHere: 'ابدأ من هنا',
+  recipes: 'وصفات',
+  why: 'لماذا',
+  concepts: 'مفاهيم',
+  reference: 'مرجع',
+  integrations: 'تكاملات',
+  overview: 'نظرة عامة',
+  gettingStarted: 'ابدأ الآن',
+  recipeGetDeclared404: 'GET مع 404 معلن',
+  recipePostJson: 'أرسل JSON',
+  recipeCancelHttp: 'ألغِ طلب HTTP',
+  recipeConsumeSse: 'اقرأ بث SSE',
+  recipeWebsocketSession: 'افتح جلسة WebSocket',
+  recipeTestWithHandle: 'اختبر بـ Fetch محلي',
+  recipePublishHttpSdk: 'نشر SDK HTTP',
+  recipeRefreshBearerOnce: 'تجديد Bearer مرة عند 401',
+  recipeEtagRevalidate: 'إعادة التحقق بـ ETag',
+  recipeGraphqlHttpEnvelope: 'فك غلاف GraphQL عبر HTTP',
+  designDecisions: 'قرارات التصميم',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
+}
+
+const esNavigation: NavigationCopy = {
+  docs: 'Docs',
+  startHere: 'Empieza aquí',
+  recipes: 'Recetas',
+  why: 'Por qué',
+  concepts: 'Conceptos',
+  reference: 'Referencia',
+  integrations: 'Integraciones',
+  overview: 'Resumen',
+  gettingStarted: 'Primeros pasos',
+  recipeGetDeclared404: 'GET con 404 declarado',
+  recipePostJson: 'POST JSON',
+  recipeCancelHttp: 'Cancelar una llamada HTTP',
+  recipeConsumeSse: 'Consumir un SSE',
+  recipeWebsocketSession: 'Abrir un WebSocket',
+  recipeTestWithHandle: 'Probar con Fetch local',
+  recipePublishHttpSdk: 'Publicar un SDK HTTP',
+  recipeRefreshBearerOnce: 'Refrescar Bearer una vez en 401',
+  recipeEtagRevalidate: 'Revalidar con ETag',
+  recipeGraphqlHttpEnvelope: 'Desenvolver un sobre GraphQL HTTP',
+  designDecisions: 'Decisiones de diseño',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
+}
+
+const ruNavigation: NavigationCopy = {
+  docs: 'Документация',
+  startHere: 'Начни здесь',
+  recipes: 'Рецепты',
+  why: 'Почему так',
+  concepts: 'Концепции',
+  reference: 'Справка',
+  integrations: 'Интеграции',
+  overview: 'Обзор',
+  gettingStarted: 'Быстрый старт',
+  recipeGetDeclared404: 'GET с объявленным 404',
+  recipePostJson: 'POST JSON',
+  recipeCancelHttp: 'Отменить HTTP',
+  recipeConsumeSse: 'Читать SSE',
+  recipeWebsocketSession: 'Открыть WebSocket',
+  recipeTestWithHandle: 'Тест с локальным Fetch',
+  recipePublishHttpSdk: 'Опубликовать HTTP SDK',
+  recipeRefreshBearerOnce: 'Обновить Bearer один раз при 401',
+  recipeEtagRevalidate: 'Ревалидация с ETag',
+  recipeGraphqlHttpEnvelope: 'Распаковать GraphQL HTTP-конверт',
+  designDecisions: 'Решения по дизайну',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
+}
+
+const frNavigation: NavigationCopy = {
+  docs: 'Docs',
+  startHere: 'Commence ici',
+  recipes: 'Recettes',
+  why: 'Pourquoi',
+  concepts: 'Concepts',
+  reference: 'Référence',
+  integrations: 'Intégrations',
+  overview: "Vue d'ensemble",
+  gettingStarted: 'Démarre vite',
+  recipeGetDeclared404: 'GET avec un 404 déclaré',
+  recipePostJson: 'POST JSON',
+  recipeCancelHttp: 'Annuler un appel HTTP',
+  recipeConsumeSse: 'Lire un flux SSE',
+  recipeWebsocketSession: 'Ouvrir un WebSocket',
+  recipeTestWithHandle: 'Tester avec un Fetch local',
+  recipePublishHttpSdk: 'Publier un SDK HTTP',
+  recipeRefreshBearerOnce: 'Rafraîchir le Bearer une fois sur 401',
+  recipeEtagRevalidate: 'Revalider avec ETag',
+  recipeGraphqlHttpEnvelope: 'Déballer une enveloppe GraphQL HTTP',
+  designDecisions: 'Choix de conception',
+  client: 'Client',
+  commands: 'Commands',
+  struct: 'Struct',
+  errors: 'Errors',
+  http: 'HTTP',
+  sse: 'SSE',
+  webSocket: 'WebSocket',
+  interceptors: 'Interceptors',
+  vue: 'Vue',
+  react: 'React',
+  opentelemetry: 'OpenTelemetry Server',
 }
 
 export default defineConfig({
@@ -577,7 +600,48 @@ export default defineConfig({
   description: 'Typed APIs across HTTP, SSE, and WebSocket',
   cleanUrls: true,
 
+  markdown: {
+    config(md) {
+      md.use(tabsMarkdownPlugin)
+    },
+    codeTransformers: [
+      transformerTwoslash({
+        throws: false,
+        twoslashOptions: {
+          vfsRoot: process.cwd(),
+          handbookOptions: {
+            noErrors: true,
+            noErrorValidation: true,
+            noStaticSemanticInfo: true,
+          },
+        },
+        typesCache: createFileSystemTypesCache({
+          dir: '.vitepress/cache/twoslash',
+        }),
+      }),
+    ],
+    languages: ['js', 'jsx', 'json', 'ts', 'tsx', 'vue'],
+  },
+
   vite: {
+    plugins: [
+      ...llmstxt({
+        workDir: '.',
+        injectLLMHint: false,
+        ignoreFiles: [
+          'ar/**',
+          'de-DE/**',
+          'es-ES/**',
+          'fr-FR/**',
+          'ja-JP/**',
+          'ko-KR/**',
+          'ru-RU/**',
+          'zh-Hans/**',
+          'zh-Hant-HK/**',
+          'zh-Hant-TW/**',
+        ],
+      }),
+    ],
     build: {
       rollupOptions: {
         onwarn(warning, defaultHandler) {
@@ -592,274 +656,179 @@ export default defineConfig({
   },
 
   locales: {
-    root: {
+    root: createLocale('', {
       label: 'English',
       lang: 'en-US',
-      themeConfig: {
-        nav: navEn,
-        sidebar: sidebarEn,
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: 'Edit this page on GitHub',
-        },
-        docFooter: {
-          prev: 'Previous',
-          next: 'Next',
-        },
-        outline: {
-          label: 'On this page',
-        },
+      description: 'Typed APIs across HTTP, SSE, and WebSocket',
+      navigation: enNavigation,
+      searchPlaceholder: 'Search recipes, HTTP, SSE, WebSocket…',
+      footer: {
+        message: 'Released under the MIT License.',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    'zh-Hans': {
+      editLink: 'Edit this page on GitHub',
+      previous: 'Previous',
+      next: 'Next',
+    }),
+    'zh-Hans': createLocale('/zh-Hans', {
       label: '简体中文',
       lang: 'zh-Hans',
-      description: '跨 HTTP、SSE 和 WebSocket 的类型化 API',
-      themeConfig: {
-        nav: navZh,
-        sidebar: sidebarZh,
-        footer: {
-          message: '基于 MIT 许可证发布。',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: '在 GitHub 上编辑此页',
-        },
-        docFooter: {
-          prev: '上一页',
-          next: '下一页',
-        },
-        outline: {
-          label: '本页目录',
-        },
+      description: '跨 HTTP、SSE、WebSocket 的类型化 API',
+      navigation: zhHansNavigation,
+      searchPlaceholder: '搜食谱、HTTP、SSE、WebSocket…',
+      footer: {
+        message: '基于 MIT 许可证发布。',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    'zh-Hant-TW': {
+      editLink: '在 GitHub 上编辑此页',
+      previous: '上一页',
+      next: '下一页',
+    }),
+    'zh-Hant-TW': createLocale('/zh-Hant-TW', {
       label: '繁體中文（台灣）',
       lang: 'zh-Hant-TW',
-      description: '適用於 HTTP、SSE 與 WebSocket 的型別化 API',
-      themeConfig: {
-        nav: navZhTw,
-        sidebar: sidebarZhTw,
-        footer: {
-          message: '依 MIT 授權條款發布。',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: '在 GitHub 上編輯此頁',
-        },
-        docFooter: {
-          prev: '上一頁',
-          next: '下一頁',
-        },
-        outline: {
-          label: '本頁目錄',
-        },
+      description: '給 HTTP、SSE、WebSocket 用的型別化 API',
+      navigation: zhHantTwNavigation,
+      searchPlaceholder: '搜尋食譜、HTTP、SSE、WebSocket…',
+      footer: {
+        message: '以 MIT 授權條款發布。',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    'zh-Hant-HK': {
+      editLink: '在 GitHub 上編輯此頁',
+      previous: '上一頁',
+      next: '下一頁',
+    }),
+    'zh-Hant-HK': createLocale('/zh-Hant-HK', {
       label: '繁體中文（香港）',
       lang: 'zh-Hant-HK',
-      description: '適用於 HTTP、SSE 與 WebSocket 的類型化 API',
-      themeConfig: {
-        nav: navZhHk,
-        sidebar: sidebarZhHk,
-        footer: {
-          message: '按 MIT 授權條款發布。',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: '在 GitHub 上編輯此頁',
-        },
-        docFooter: {
-          prev: '上一頁',
-          next: '下一頁',
-        },
-        outline: {
-          label: '本頁目錄',
-        },
+      description: 'HTTP、SSE、WebSocket 嘅 typed API',
+      navigation: zhHantHkNavigation,
+      searchPlaceholder: '搜 recipes、HTTP、SSE、WebSocket…',
+      footer: {
+        message: '以 MIT 授權發布。',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    'de-DE': {
+      editLink: '喺 GitHub 編輯呢頁',
+      previous: '上一頁',
+      next: '下一頁',
+    }),
+    'de-DE': createLocale('/de-DE', {
       label: 'Deutsch',
       lang: 'de-DE',
       description: 'Typisierte APIs für HTTP, SSE und WebSocket',
-      themeConfig: {
-        nav: navDe,
-        sidebar: sidebarDe,
-        footer: {
-          message: 'Veröffentlicht unter der MIT-Lizenz.',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: 'Diese Seite auf GitHub bearbeiten',
-        },
-        docFooter: {
-          prev: 'Vorherige',
-          next: 'Nächste',
-        },
-        outline: {
-          label: 'Auf dieser Seite',
-        },
+      navigation: deNavigation,
+      searchPlaceholder: 'Rezepte, HTTP, SSE, WebSocket suchen…',
+      footer: {
+        message: 'Veröffentlicht unter der MIT-Lizenz.',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    'ja-JP': {
+      editLink: 'Diese Seite auf GitHub bearbeiten',
+      previous: 'Zurück',
+      next: 'Weiter',
+    }),
+    'ja-JP': createLocale('/ja-JP', {
       label: '日本語',
       lang: 'ja-JP',
-      description: 'HTTP、SSE、WebSocket 向けの型付き API',
-      themeConfig: {
-        nav: navJa,
-        sidebar: sidebarJa,
-        footer: {
-          message: 'MIT ライセンスで公開しています。',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: 'GitHub でこのページを編集',
-        },
-        docFooter: {
-          prev: '前へ',
-          next: '次へ',
-        },
-        outline: {
-          label: '目次',
-        },
+      description: 'HTTP / SSE / WebSocket 向けの型付き API',
+      navigation: jaNavigation,
+      searchPlaceholder: 'レシピ、HTTP、SSE、WebSocket を検索…',
+      footer: {
+        message: 'MIT ライセンスで公開しています。',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    'ko-KR': {
+      editLink: 'GitHub でこのページを編集',
+      previous: '前へ',
+      next: '次へ',
+    }),
+    'ko-KR': createLocale('/ko-KR', {
       label: '한국어',
       lang: 'ko-KR',
-      description: 'HTTP, SSE, WebSocket용 타입 기반 API',
-      themeConfig: {
-        nav: navKo,
-        sidebar: sidebarKo,
-        footer: {
-          message: 'MIT 라이선스로 배포됩니다.',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: 'GitHub에서 이 페이지 편집',
-        },
-        docFooter: {
-          prev: '이전',
-          next: '다음',
-        },
-        outline: {
-          label: '목차',
-        },
+      description: 'HTTP, SSE, WebSocket용 타입 API',
+      navigation: koNavigation,
+      searchPlaceholder: '레시피, HTTP, SSE, WebSocket 검색…',
+      footer: {
+        message: 'MIT 라이선스로 배포됩니다.',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    ar: {
+      editLink: 'GitHub에서 이 페이지 편집',
+      previous: '이전',
+      next: '다음',
+    }),
+    ar: createLocale('/ar', {
       label: 'العربية',
       lang: 'ar',
       dir: 'rtl',
       description: 'واجهات API مضبوطة الأنواع لـ HTTP وSSE وWebSocket',
-      themeConfig: {
-        nav: navAr,
-        sidebar: sidebarAr,
-        footer: {
-          message: 'مُتاح بموجب ترخيص MIT.',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: 'تحرير هذه الصفحة على GitHub',
-        },
-        docFooter: {
-          prev: 'السابق',
-          next: 'التالي',
-        },
-        outline: {
-          label: 'محتويات الصفحة',
-        },
+      navigation: arNavigation,
+      searchPlaceholder: 'ابحث في الوصفات وHTTP وSSE وWebSocket…',
+      footer: {
+        message: 'متاح بموجب ترخيص MIT.',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    'es-ES': {
+      editLink: 'حرّر هذه الصفحة على GitHub',
+      previous: 'السابق',
+      next: 'التالي',
+    }),
+    'es-ES': createLocale('/es-ES', {
       label: 'Español',
       lang: 'es-ES',
       description: 'API tipadas para HTTP, SSE y WebSocket',
-      themeConfig: {
-        nav: navEs,
-        sidebar: sidebarEs,
-        footer: {
-          message: 'Publicado bajo la licencia MIT.',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: 'Editar esta página en GitHub',
-        },
-        docFooter: {
-          prev: 'Anterior',
-          next: 'Siguiente',
-        },
-        outline: {
-          label: 'En esta página',
-        },
+      navigation: esNavigation,
+      searchPlaceholder: 'Busca recetas, HTTP, SSE, WebSocket…',
+      footer: {
+        message: 'Publicado bajo la licencia MIT.',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    'ru-RU': {
+      editLink: 'Editar esta página en GitHub',
+      previous: 'Anterior',
+      next: 'Siguiente',
+    }),
+    'ru-RU': createLocale('/ru-RU', {
       label: 'Русский',
       lang: 'ru-RU',
       description: 'Типизированные API для HTTP, SSE и WebSocket',
-      themeConfig: {
-        nav: navRu,
-        sidebar: sidebarRu,
-        footer: {
-          message: 'Распространяется по лицензии MIT.',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: 'Редактировать эту страницу на GitHub',
-        },
-        docFooter: {
-          prev: 'Предыдущая',
-          next: 'Следующая',
-        },
-        outline: {
-          label: 'Содержание страницы',
-        },
+      navigation: ruNavigation,
+      searchPlaceholder: 'Ищи рецепты, HTTP, SSE, WebSocket…',
+      footer: {
+        message: 'Под лицензией MIT.',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
-    'fr-FR': {
+      editLink: 'Редактировать на GitHub',
+      previous: 'Назад',
+      next: 'Дальше',
+    }),
+    'fr-FR': createLocale('/fr-FR', {
       label: 'Français',
       lang: 'fr-FR',
       description: 'API typées pour HTTP, SSE et WebSocket',
-      themeConfig: {
-        nav: navFr,
-        sidebar: sidebarFr,
-        footer: {
-          message: 'Publié sous licence MIT.',
-          copyright: 'Copyright © 2026 MunMunMiao',
-        },
-        editLink: {
-          pattern: 'https://github.com/defjs/defjs/edit/main/doc/:path',
-          text: 'Modifier cette page sur GitHub',
-        },
-        docFooter: {
-          prev: 'Précédent',
-          next: 'Suivant',
-        },
-        outline: {
-          label: 'Sur cette page',
-        },
+      navigation: frNavigation,
+      searchPlaceholder: 'Cherche recettes, HTTP, SSE, WebSocket…',
+      footer: {
+        message: 'Publié sous licence MIT.',
+        copyright: 'Copyright © 2026 MunMunMiao',
       },
-    },
+      editLink: 'Modifier cette page sur GitHub',
+      previous: 'Précédent',
+      next: 'Suivant',
+    }),
   },
 
   themeConfig: {
     logo: '/logo.jpg',
     siteTitle: 'Defjs',
+    outline: false,
+    aside: false,
     socialLinks: [{ icon: 'github', link: 'https://github.com/defjs/defjs' }],
     search: {
       provider: 'local',
+      options: {
+        translations: {
+          button: {
+            buttonText: 'Search recipes, HTTP, SSE, WebSocket…',
+            buttonAriaLabel: 'Search recipes, HTTP, SSE, WebSocket…',
+          },
+        },
+      },
     },
     footer: {
       message: 'Released under the MIT License.',

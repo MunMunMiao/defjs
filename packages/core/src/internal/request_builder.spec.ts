@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { struct } from '../struct'
-import { buildRequest } from './request_builder'
+import { struct, type AnyStruct } from '../struct'
+import { buildRequest, type RequestBuildHandler } from './request_builder'
+
+function unsupportedSseBuild<TInput extends AnyStruct>(build: RequestBuildHandler<TInput>): RequestBuildHandler<TInput, 'sse'> {
+  return build as unknown as RequestBuildHandler<TInput, 'sse'>
+}
 
 describe('request_builder formUrlEncoded', () => {
   test('formUrlEncoded uses a single URLSearchParams instance(no double allocation)', () => {
@@ -112,6 +116,15 @@ describe('request_builder general', () => {
       { input },
     )
     expect(built.bodyContentType).toBe('application/vnd+json')
+  })
+
+  test('struct.json contentType is applied without a custom build', () => {
+    const input = struct.request({
+      body: struct.json(struct.object({ a: struct.number() }), { contentType: 'application/merge-patch+json' }),
+    })
+    const built = buildRequest({ body: { a: 1 } }, undefined, { input })
+    expect(built.body).toBe('{"a":1}')
+    expect(built.bodyContentType).toBe('application/merge-patch+json')
   })
 
   test('text sets body and content type', () => {
@@ -513,6 +526,23 @@ describe('request_builder general', () => {
 })
 
 describe('request_builder request-shaped input', () => {
+  test('enforces SSE request build constraints', () => {
+    const queryInput = struct.request({ query: struct.object({ id: struct.number() }) })
+    expect(buildRequest({ query: { id: 1 } }, undefined, { input: queryInput, transport: 'sse' }).query).toEqual({ id: 1 })
+
+    const bodyInput = struct.request({ body: struct.json(struct.object({ ok: struct.boolean() })) })
+    expect(() => buildRequest({ body: { ok: true } }, undefined, { input: bodyInput, transport: 'sse' })).toThrow(
+      'SSE request input does not support body section',
+    )
+    expect(() =>
+      buildRequest(
+        { body: { ok: true } },
+        unsupportedSseBuild<typeof bodyInput>((request, view) => request.setJson({ ok: view.body.ok })),
+        { input: bodyInput, transport: 'sse' },
+      ),
+    ).toThrow('SSE build() does not support request body')
+  })
+
   test('builds request locations and json body from struct.request', () => {
     const input = struct.request({
       path: struct.object({
@@ -753,7 +783,7 @@ describe('request_builder request-shaped input', () => {
     const built = buildRequest({ body }, undefined, { input })
 
     expect(built.body).toBe(body)
-    expect(built.bodyContentType).toBe('text/plain')
+    expect(built.bodyContentType).toBe(body.type)
   })
 
   test('leaves blob body content type undefined when the Blob has no type', () => {

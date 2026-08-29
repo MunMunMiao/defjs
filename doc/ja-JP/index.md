@@ -1,71 +1,66 @@
 ---
-layout: home
-
-hero:
-  name: Defjs
-  text: HTTP、SSE、WebSocket を型付きコマンドで扱う
-  tagline: Struct で通信形式を定義し、クライアントを明示的に作成します。トランスポートごとの戻り値とライフサイクルの違いもそのまま扱えます。
-  actions:
-    - theme: brand
-      text: はじめる
-      link: /ja-JP/guide/getting-started
-    - theme: alt
-      text: GitHub で見る
-      link: https://github.com/defjs/defjs
-
-features:
-  - title: エンドポイント契約
-    details: エンドポイント定義、コマンドビルダー、コマンドを区別します。Struct は呼び出し入力とトランスポートデータを実行時にデコードします。
-  - title: トランスポート別の結果
-    details: HTTP、SSE、WebSocket はいずれもエラーを先頭に置く 3 要素タプルを返します。3 番目の要素は、それぞれレスポンスラッパー、起動時オープンスナップショット、起動時接続スナップショットです。
-  - title: インターセプターチェーン
-    details: HTTP、SSE、WebSocket のインターセプターをクライアントへ登録できます。各トランスポートが該当するインターセプターを選び、オニオン順で実行します。
-  - title: 明示的なライフサイクル
-    details: SSE はネットワーク障害と読み取り失敗を再試行できます。WebSocket の再接続は明示的な設定が必要です。反復処理、キャンセル、終端クローズはアプリケーションが管理します。
-  - title: 実行時デコード
-    details: TypeScript の推論に使うものと同じ Struct 契約で、入力、レスポンス、ストリームイベント、WebSocket メッセージをデコードします。
-  - title: アプリケーション統合
-    details: Vue や React でクライアントを共有し、サーバーサービスの送信処理に OpenTelemetry 計装を追加できます。
+title: Defjs
+description: 明示的なクライアントとエラーファーストな結果で、型付きの HTTP・SSE・WebSocket コマンドを扱います。
 ---
 
-## 型付き API クライアントを作る
+# Defjs
 
-アプリケーションが呼び出す HTTP、SSE、WebSocket の契約を定義するところから始めます。Defjs はその定義をコマンドビルダーに変換し、実行時にデータを検証し、トランスポート結果を明示します。
+エンドポイントを定義し、不透明なコマンドを組み立てて実行します。HTTP、SSE、WebSocket で同じ形です。
 
-HTTP の基本フローは短くまとまります。API 用のクライアントを作成し、エンドポイントを定義し、コマンドビルダーを呼び出して、そのコマンドを実行します。
-
-```typescript
+```ts get-health.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-
-const getUser = defineRequest({
+const getHealth = defineRequest({
   method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  path: '/health',
+  output: { 200: struct.object({ ok: struct.boolean() }) },
 })
 
-const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
-
-if (error) {
-  console.error(error.kind, error.code)
-} else {
-  console.log(user.name, response.status)
-}
+const [error, result, response] = await client.execute(getHealth())
+if (!error) console.log(result.ok, response.status)
 ```
 
-クライアントをアプリケーションが使うサービスへ向け、Struct を実際のレスポンス契約に合わせてください。認証情報、UI 状態、再試行、キャンセル、リソースのクリーンアップはアプリケーション側で管理します。
+Defjs は結果をキャッシュしたり、代わりにリトライしたり、忘れられたストリームを閉じたりしません。キャンセルとクリーンアップは呼び出し側の責任です。
 
-## 次に読む
+## トランスポートを選ぶ
 
-- [はじめに](/ja-JP/guide/getting-started) — パッケージのインストールから最初の型付きリクエストまで
-- [Client](/ja-JP/core/client) — オプションの合成と 3 種類の `execute` オーバーロード
-- [Commands](/ja-JP/core/commands) — エンドポイント定義、コマンドビルダー、コマンド、スキーマに束縛されたプロジェクション
-- [HTTP](/ja-JP/core/http)、[SSE](/ja-JP/core/sse)、[WebSocket](/ja-JP/core/web-socket) — 各トランスポートの動作とライフサイクル管理
-- [Vue](/ja-JP/plugins/vue)、[React](/ja-JP/plugins/react)、[OpenTelemetry Server](/ja-JP/plugins/opentelemetry-server) — アプリケーションのフレームワークとテレメトリーへの接続方法
+| やりたいこと                         | ここから                          | 成功時の結果                                              |
+| ------------------------------------ | --------------------------------- | --------------------------------------------------------- |
+| リクエストと status ごとのレスポンス | [HTTP](./core/http.md)            | デコード済みデータ + `HttpResponse`                       |
+| 長寿命のサーバーイベントフィード     | [SSE](./core/sse.md)              | 1 つのストリーム + 起動時の `open` スナップショット       |
+| 双方向セッション                     | [WebSocket](./core/web-socket.md) | 1 つのセッション + 起動時の `connection` スナップショット |
+
+初めてなら [はじめに](./guide/getting-started.md) をやってから、[レシピ](./recipes/get-declared-404.md) を拾ってみてください。「なぜ？」が気になるときは、何か動かしたあとに [設計上の判断](./guide/design-decisions.md) を読むとよいです。
+
+## パッケージを選ぶ
+
+| パッケージ                    | いつ                                                                                                 |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `@defjs/core`                 | `createClient`（HTTP + SSE + WebSocket）または `createClient`（HTTP 専用）                           |
+| `@defjs/react`                | `ClientProvider` / `useClient` — [React](./plugins/react.md) を参照                                  |
+| `@defjs/vue`                  | プラグイン + `injectClient` — [Vue](./plugins/vue.md) を参照                                         |
+| `@defjs/opentelemetry-server` | アウトバウンドのスパン/メトリクス — [OpenTelemetry Server](./plugins/opentelemetry-server.md) を参照 |
+
+## 結果の形
+
+3 つのトランスポートとも、エラーファーストの 3 要素タプルを返します。位置は揃っていますが、意味は違います。
+
+- HTTP → `[error, data, response]`
+- SSE → `[error, stream, open]`
+- WebSocket → `[error, session, connection]`
+
+起動に失敗したとき、2 番目は `undefined` です。3 番目はそのトランスポートが先にレスポンスやスナップショットを出したときだけ存在します。[Errors](./core/errors.md) を見てください。
+
+## 所有権をひと息で
+
+古くなった HTTP は abort します。SSE は close して `await stream.closed`。WebSocket も close して `await session.closed`。サーバーでは、options が cookie・認証・テナントデータを掴むなら、クライアントをリクエスト境界の中で作ります。ログに出す前に URL・ヘッダー・ボディを redact してください。
+
+## 関連レシピ
+
+- [宣言済み 404 付きの GET](./recipes/get-declared-404.md)
+- [POST JSON](./recipes/post-json.md)
+- [HTTP 呼び出しをキャンセルする](./recipes/cancel-http.md)
+- [SSE ストリームを消費する](./recipes/consume-sse.md)
+- [WebSocket セッションを開く](./recipes/websocket-session.md)
+- [ローカル Fetch ハンドルでテストする](./recipes/test-with-handle.md)

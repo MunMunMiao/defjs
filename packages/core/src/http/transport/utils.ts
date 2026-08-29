@@ -43,11 +43,6 @@ export function parseBytesBody(responseType: HttpRequest['responseType'], conten
   }
 }
 
-export function parseBody(params: { request: HttpRequest; contentType: string; content: Uint8Array }): unknown {
-  const { request, content, contentType } = params
-  return parseBytesBody(request.responseType, content, contentType)
-}
-
 export function concatChunks(chunks: Uint8Array[], totalLength: number): Uint8Array {
   const chunksAll = new Uint8Array(totalLength)
   let position = 0

@@ -1,7 +1,6 @@
 import type { QueryParamsSerializer } from '../client/config'
 import { DEFAULT_QUERY_PARAMS_SERIALIZER } from '../client/config'
 import type { AnyStruct } from '../struct'
-import type { HttpContext } from './context'
 import type { HttpRequest } from './http_request'
 import type { RequestBuild, RequestBuildHandler } from './request_builder'
 import { buildRequest } from './request_builder'
@@ -20,7 +19,7 @@ type BaseTransportRequest = HttpRequest & {
 export type BaseTransportRequestOptions<TInput extends AnyStruct | undefined, TTransport extends BaseTransport> = {
   abort: AbortSignal
   baseEndpoint: string
-  context?: HttpContext
+  defaultHeaders?: Headers
   input?: TInput
   operation?: string
   queryParamsSerializer: QueryParamsSerializer
@@ -42,7 +41,7 @@ export function createBaseTransportRequest<TInput extends AnyStruct | undefined,
   })
   const allowComplexQuery = options.queryParamsSerializer !== DEFAULT_QUERY_PARAMS_SERIALIZER
   const queryParams = createSearchParams(built.query, { allowComplex: allowComplexQuery })
-  const headers = new Headers()
+  const headers = options.defaultHeaders ? new Headers(options.defaultHeaders) : new Headers()
 
   appendRecordToHeaders(headers, built.headers)
 
@@ -51,7 +50,6 @@ export function createBaseTransportRequest<TInput extends AnyStruct | undefined,
     request: {
       abort: options.abort,
       baseEndpoint: options.baseEndpoint,
-      context: options.context,
       endpoint: fillUrl(path, built.params),
       headers,
       method,

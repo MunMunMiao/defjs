@@ -1,11 +1,11 @@
 import { defineConfig } from 'vitest/config'
-import { coverageConfig } from './test/shared'
+import { coverageConfig } from './test/shared.ts'
 
 /**
  * Package-level workspace aggregator.
  *
  * Runs all Vitest projects defined for @defjs/core:
- * - Node runtime tests
+ * - Server tests (Bun process, Vitest default environment)
  * - Browser runtime tests (Chromium + Firefox)
  *
  * Coverage configuration is centralized here so it applies across all projects
@@ -16,6 +16,6 @@ export default defineConfig({
     coverage: {
       ...coverageConfig,
     },
-    projects: ['./vitest.config.node.ts', './vitest.config.browser.ts'],
+    projects: ['./vitest.config.server.ts', './vitest.config.browser.ts'],
   },
 })

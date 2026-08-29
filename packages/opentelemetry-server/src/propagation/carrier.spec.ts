@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { headersGetter, headersSetter, queryStringGetter, queryStringSetter } from './carrier'
+import { headersGetter, headersSetter, queryStringSetter } from './carrier'
 
 describe('headersSetter', () => {
   test('sets header when carrier, key, and value are valid', () => {
@@ -87,40 +87,5 @@ describe('queryStringSetter', () => {
     // @ts-expect-error value must be string, but setter defends against undefined
     queryStringSetter.set(carrier, 'traceparent', undefined)
     expect(carrier.params.has('traceparent')).toBe(false)
-  })
-})
-
-describe('queryStringGetter', () => {
-  test('returns keys from URLSearchParams', () => {
-    const carrier = { params: new URLSearchParams({ traceparent: 'abc', baggage: 'xyz' }) }
-    const keys = queryStringGetter.keys(carrier)
-    expect(keys).toContain('traceparent')
-    expect(keys).toContain('baggage')
-  })
-
-  test('returns empty array when carrier is null', () => {
-    // @ts-expect-error carrier must be QueryStringCarrier, but getter defends against null
-    expect(queryStringGetter.keys(null)).toEqual([])
-  })
-
-  test('returns value for existing key', () => {
-    const carrier = { params: new URLSearchParams({ traceparent: 'abc123' }) }
-    expect(queryStringGetter.get(carrier, 'traceparent')).toBe('abc123')
-  })
-
-  test('returns undefined when carrier is null', () => {
-    // @ts-expect-error carrier must be QueryStringCarrier, but getter defends against null
-    expect(queryStringGetter.get(null, 'traceparent')).toBeUndefined()
-  })
-
-  test('returns undefined when key is null', () => {
-    const carrier = { params: new URLSearchParams() }
-    // @ts-expect-error key must be string, but getter defends against null
-    expect(queryStringGetter.get(carrier, null)).toBeUndefined()
-  })
-
-  test('returns undefined for missing key', () => {
-    const carrier = { params: new URLSearchParams() }
-    expect(queryStringGetter.get(carrier, 'missing')).toBeUndefined()
   })
 })

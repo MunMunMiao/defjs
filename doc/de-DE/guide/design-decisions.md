@@ -1,78 +1,112 @@
 ---
 title: Entwurfsentscheidungen
-description: Warum Defjs explizite Clients, transportspezifische Tupel, Lebenszyklusoptionen bei der Ausführung, projektionsbasierten Request-Aufbau und Beobachter verwendet.
+description: Warum Defjs Verträge, Commands, Transport-Ergebnisse, Decoding und Ownership explizit hält.
 ---
 
 # Entwurfsentscheidungen
 
-Diese Seite erklärt die Gründe hinter der aktuellen API. Die Referenzseiten beschreiben Felder und Standardwerte.
+Defjs trifft ein paar bewusste Trade-offs. Convenience-APIs verstecken oft, wer einen Request, Stream oder eine Session besitzt. Defjs hält diese Grenze sichtbar, damit du denselben Endpoint-Vertrag wiederverwenden kannst, ohne stillschweigend Cache, Retry-Scheduler oder Resource-Manager mitzunehmen.
 
 ## Explizite Clients
 
-Defjs hat keinen prozessweiten Standard-Client. `createClient(...)` macht die Zuständigkeit an der Aufrufstelle sichtbar und erlaubt getrennte Clients für verschiedene Endpunkte, Zugangsdaten, Tests oder Request-Scopes.
+Der Preis: kein process-weites Default. Dieser Preis hilft auf einem Server — erzeuge den Client innerhalb der Request-Grenze, wenn Options oder Closures Auth, Cookies, User, Tenants oder Request-Metadata erfassen. Ein expliziter Client isoliert trotzdem keinen State, den ein Interceptor erfasst. Client-Identität ist für sich keine Security-Grenze.
 
-Diese Trennung hat Grenzen. Interceptors und Optionscallbacks können gemeinsamen Anwendungszustand per Closure verwenden. Zwei Client-Objekte sind deshalb nicht automatisch von allem in ihrer Umgebung isoliert. Auch `setErrorMap(...)` gilt prozessweit. Servercode sollte einen Client pro Request erzeugen, sobald Optionen oder Closures Request-, Benutzer-, Mandanten-, Cookie- oder Autorisierungsdaten enthalten.
+Ein Client dispatcht Commands. Er besitzt keine aktive Arbeit. Wer einen HTTP-Request, SSE-Stream oder eine WebSocket-Session startet, muss canceln oder schließen und auf das Terminal-Promise warten.
 
-Ein expliziter Client macht die Zuständigkeit für Ressourcen leichter nachvollziehbar, ist aber kein Ressourcenmanager. Er verfolgt oder beendet keine aktiven HTTP-Requests, SSE-Handles oder WebSocket-Sessions.
+## Definitionen, Builder und Commands
 
-## Transportspezifische Tupel
+Die Definition ist der stabile Vertrag: Method, Path, Input-Struct, Output-Mapping, Transport-Limits. Der Builder ist die aufrufbare Sicht. Der Aufruf erzeugt einen opaken Command für eine einzelne Ausführung.
 
-Alle unterstützten Commands liefern ein fehlerorientiertes Drei-Elemente-Tupel. Das dritte Element behält jedoch seine transportspezifische Bedeutung:
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-```typescript
-const [httpError, data, response] = await client.execute(httpCommand)
-const [sseError, stream, startupOpen] = await client.execute(sseCommand)
-const [socketError, session, startupConnection] = await client.execute(socketCommand)
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: {
+    200: struct.object({ id: struct.number(), name: struct.string() }),
+    404: struct.object({ message: struct.string() }),
+  },
+})
+
+const command = getUser({ path: { id: 7 } })
 ```
 
-Dadurch werden ein HTTP-Response-Wrapper, der SSE-Start-Snapshot und der WebSocket-Start-Snapshot nicht in eine unscharfe Abstraktion gepresst. Dasselbe gilt für das zweite Element: HTTP liefert dekodierte Daten, SSE einen logischen Stream-Handle und WebSocket eine logische Session.
+Ein Background-Job und ein UI-Owner können dieselbe `getUser`-Form mit unterschiedlichen Cancel-/Retry-Policies ausführen. Opake Commands verhindern, dass App-Code von internen Transport-Tags oder Symbolen abhängt.
 
-Das Tupel macht erwartete Startfehler explizit, ohne den Kontrollfluss über Exceptions zu erzwingen. Es verspricht nicht, dass beliebige Interceptors, Callbacks, Listener oder nicht unterstützte Werte niemals eine Promise ablehnen oder synchron werfen.
+## Transport-spezifische Ergebnisse
 
-## Lebenszyklusoptionen gehören zur Ausführung
+Alle drei Transports nutzen ein Error-first-Tupel. Ein einziges generisches „Response“ würde Lifecycle-Fakten auslöschen.
 
-Endpunktdefinitionen beschreiben stabile Wire-Verträge und besitzen die begrenzten Transportwarteschlangen. Abbruch, Timeout, Heartbeat und Reconnect gehören zu der Ausführung, die diese Arbeit besitzt.
+- HTTP → `[error, data, response]` — dekodierter Output + `HttpResponse`
+- SSE → `[error, stream, open]` — ein logischer Stream + Startup-Response-Snapshot
+- WebSocket → `[error, session, connection]` — logische Session + Startup-Connection-Snapshot
 
-HTTP und SSE akzeptieren Abbruchoptionen bei der Ausführung. WebSocket akzeptiert außerdem `beforeConnect`-, Heartbeat-, Reconnect- und Protokolloptionen pro Ausführung. Clientoptionen stellen wiederverwendbare Standardwerte bereit, soweit der Transport sie unterstützt; die eingehende und ausgehende WebSocket-Kapazität bleibt am Endpunkt definiert.
+Der dritte Wert ist ein Snapshot, kein Promise, dass spätere Reconnects dieselbe physische Connection behalten. Startup-Fehler kann trotzdem Response/Snapshot enthalten, wenn der Transport zuerst eines erzeugt hat. Nach dem Startup gehört Lifecycle-Kontrolle zum zurückgegebenen Handle oder zur Session.
 
-Diese Trennung hält einen Command wiederverwendbar. Ein Hintergrundjob und eine interaktive Ansicht können denselben Command mit verschiedenen Lebenszeiten ausführen, ohne Pfad oder Nachrichtenschema neu zu definieren.
+## Runtime-Decoding
 
-## `build` verwendet Projektionen
+TypeScript-Inferenz beschreibt, was du erwartest; sie kann eine Server-Response zur Laufzeit nicht prüfen. Struct-Parsing ist die zweite Hälfte des Vertrags. Defjs validiert Command-Input vor dem Request-Bau, dekodiert die gewählte Representation und parst dann den passenden Struct.
 
-Ein eigenes `build(request, input)` erhält eine deklarative Bindungsansicht, die aus dem Eingabe-Struct abgeleitet wird. Es hat keinen Zugriff auf die Laufzeitwerte des Aufrufers.
+Diese Reihenfolge hält Status und Body als getrennte Fakten. Exakte deklarierte Status-Auswahl passiert **vor** Body-Decode. Deklariertes Non-2xx → typisiertes `error.data`. Malformed deklarierter Body → `RESPONSE_VALIDATION_FAILED`. Undeclared Status → `UNDECLARED_STATUS` (kein untypisierter Success/Failure). Strenger als „was auch immer an JSON ankam“, aber du kannst eine sichere Entscheidung treffen.
 
-Die Ansicht hält fest, wie Quellfelder auf Pfad, Query, Header und Body-Ziele abgebildet werden. Dieses Modell unterstützt Feldprojektion, explizite Wire-Schlüssel und eine Eins-zu-eins-Projektion von Arrays. Wertabhängige Verzweigungen, beliebige Transformationen und eingeschleuste Literalwerte sind absichtlich ausgeschlossen.
+## Die Grenzen von `build`
 
-So bleibt der Request-Aufbau an deklarierte Struct-Felder gebunden. Normalisierung und fachliche Validierung gehören in den Anwendungscode, bevor der Command erzeugt wird. Die unterstützten Projektionsformen stehen unter [Commands](/de-DE/core/commands).
+Automatisches `struct.request(...)`-Mapping ist Default, wenn Input schon Path/Query/Headers/Body hat. Custom `build(request, input)` ist eine eingeschränkte Projektion, wenn Caller-Shape und Wire-Shape auseinanderlaufen:
 
-## Beobachter steuern nicht den Kontrollfluss
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-SSE-`onInvalidEvent` beobachtet verworfene Events. Geworfene Fehler und abgelehnte Promises werden vom Kontrollfluss des Streams isoliert, sodass die Verarbeitung weiterläuft. Ein asynchroner Beobachter wird weiterhin abgewartet und kann spätere Nachrichten verzögern.
+const createBatch = defineRequest({
+  method: 'POST',
+  path: '/accounts/:account_id/users',
+  input: struct.object({
+    accountId: struct.number(),
+    users: struct.array(
+      struct.object({
+        displayName: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  build(request, input) {
+    request.setPathParams({ account_id: input.accountId })
+    request.setJson({
+      users: input.users.map((user) => ({
+        display_name: user.displayName,
+        email: user.email,
+      })),
+    })
+  },
+  output: { 202: struct.object({ accepted: struct.number() }) },
+})
 
-WebSocket-Listener für Status und Laufzeitfehler sind ebenfalls Beobachter. Geworfene Fehler und abgelehnte Promises werden isoliert: Fehler eines Status-Listeners gehen an die Laufzeitfehler-Listener, Fehler eines Laufzeitfehler-Listeners an das globale `reportError`, sofern vorhanden; die übrigen Listener und die Lebenszyklusarbeit laufen weiter.
+const command = createBatch({
+  accountId: 42,
+  users: [{ displayName: 'Ada', email: 'ada@example.com' }],
+})
+```
 
-Nutze den zurückgegebenen Handle oder die Session für Entscheidungen zum Lebenszyklus. Beobachter eignen sich für begrenztes Logging, Metriken oder Zustandsupdates. Entferne sie, sobald ihr Besitzer endet.
+`input` ist eine schema-gebundene Sicht, nicht das Runtime-Objekt des Callers. Die Projektion kann deklarierte Felder wählen, Targets umbenennen und ein Source-Array-Item auf ein Output-Item mappen. Sie kann nicht auf Werte branchen, Literale injizieren oder Kardinalität ändern. Normalisiere Business-Daten und mach wertabhängige Validierung, bevor du den Command erzeugst.
 
-## Sourcemap-Deployment
+## Observer und Policy-Platzierung
 
-Wähle die Sourcemap-Richtlinie für Produktion explizit:
+Interceptor sind für transportweite Policy: Auth, Tracing, Short-Circuit, reviewed Retry. Sie laufen nur für ihren Transport und komponieren in Onion-Order. Execution-Options sind für work-spezifische Lifetime: `signal`, `timeout`, WebSocket-Heartbeat, opt-in Reconnect.
 
-- **public**: Deploye die Map mit dem Bundle. Sie enthält `sourcesContent`; Anwendungs- und Abhängigkeitsquellen sind daher öffentlich abrufbar, auch bei relativen Source-Pfaden.
+Observer melden, was passiert ist, ohne zweiter Owner zu werden. SSE `onInvalidEvent`, WebSocket-State-Listener und Runtime-Error-Listener sind für begrenzte Diagnostics und Metrics. Der zurückgegebene Stream/Session besitzt weiterhin Iteration, Close, Unsubscribe und Terminal-Warten. Caching, Stale-Result-Suppression, Idempotency und Domain-Error-Mapping gehören um `client.execute(...)`, wo deine App ihre eigene Policy und ihren State sieht.
 
-- **hidden**: Entferne den Source-Map-Verweis aus dem Bundle, lade die Map privat zur Fehlerplattform hoch und deploye sie nicht öffentlich. Die Map-Datei enthält weiterhin sensible Pfade und `sourcesContent`; „hidden“ macht sie nicht sicher.
+## OpenAPI, Sourcemaps und Telemetry
 
-- **disabled**: Erzeuge keine Produktions-Map. Das verhindert Map-Offenlegung, verzichtet aber auf Source-Level-Symbolication von Produktions-Stacks und erschwert Debugging.
+Defjs generiert oder sync’t keinen zweiten OpenAPI-Vertrag. Wenn OpenAPI schon autoritativ ist, behalte es und füge Runtime-Validierung an der App-Grenze hinzu. Für einen neuen Service können Endpoint-Definitionen und Structs der direkte Wire-Vertrag sein — keine zweite Source of Truth.
 
-Beschränke Zugriff und Aufbewahrung privater Maps wie bei anderen Debugging-Artefakten. Relative Pfade sind keine Vertraulichkeitsgrenze.
+`withOpenTelemetryServer(...)` fügt **ausgehende** Defjs-Instrumentierung zu einem Client hinzu. Es initialisiert kein OpenTelemetry-SDK. `tracer` ist required, `meter` optional, alle drei Transports sind default enabled, und WebSocket-Query-Propagation ist default disabled. Halte Operation-Namen statisch und low-cardinality. Review Propagation, Hooks, URLs, Headers, Payloads, Causes und Retention als potenziell sensitiv.
 
-## OpenAPI-Grenze
+Sourcemaps sind eine Deployment-Entscheidung, kein Defjs-Verhalten. Eine öffentliche Map mit `sourcesContent` exponiert Source; eine hidden Map enthält trotzdem Source und Paths; Maps abschalten entfernt Source-Level-Symbolication. Behandle private Maps als deploybare Debugging-Artifacts mit expliziten Access- und Retention-Regeln.
 
-Wähle genau eine maßgebliche Vertragsquelle. Eine Organisation mit etabliertem OpenAPI-Workflow sollte ihn beibehalten und einen mature generator plus expliziten runtime validator an der Anwendungsgrenze verwenden; generierte TypeScript-Typen validieren Responses nicht zur Laufzeit. Für einen greenfield Defjs-Service wird der Wire-Vertrag direkt mit Defjs Structs und Endpoint-Definitionen beschrieben.
+## Verwandte Rezepte
 
-Core fügt weder einen OpenAPI generator/exporter hinzu noch hält es OpenAPI und Defjs als zwei synchronisierte Quellen. Dual-source drift ist schlechter als die Komposition bestehender Werkzeuge an einer klaren Grenze.
-
-## Zugehörige Referenz
-
-- [Client](/de-DE/core/client) dokumentiert Optionskomposition und Client-Scope.
-- [Fehler](/de-DE/core/errors) dokumentiert Tupelfehler und die Verfügbarkeit von Responses.
-- [SSE](/de-DE/core/sse) und [WebSocket](/de-DE/core/web-socket) erklären logische Handles, physische Versuche und endgültiges Schließen.
+- [GET mit deklariertem 404](../recipes/get-declared-404.md)
+- [Mit lokalem Fetch-Handle testen](../recipes/test-with-handle.md)

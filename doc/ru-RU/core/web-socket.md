@@ -1,300 +1,208 @@
 ---
 title: WebSocket
-description: Описывайте конверты сообщений, запускайте и наблюдайте актуальные сеансы, читайте входящую работу, настраивайте явное переподключение и heartbeat и закрывайте принадлежащие вам ресурсы.
+description: Запусти типизированную JSON-сессию, получай и шли envelope’ы, потом close и await closed.
 ---
 
 # WebSocket
 
-`defineWebSocket(...)` создаёт фабрику команды для WebSocket-эндпоинта с JSON-сообщениями.
+Start → receive → send → release через `await using`. Unsubscribe и disposal на тебе. Ручные `close()` / `closed` остаются доступны; клиенты, providers и interceptors не auto-close’ят сессии.
 
-```typescript
+## Базовая настройка
+
+```typescript twoslash
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient(withEndpoint('wss://api.example.com'))
-
-const chat = defineWebSocket({
+const client = createClient(withEndpoint('https://chat.example.com'))
+const room = defineWebSocket({
   maxIncomingQueueSize: 100,
-  maxOutgoingQueueSize: 20,
   path: '/chat',
-  incoming: {
-    message: struct.object({ userId: struct.number(), text: struct.string() }),
-    pong: struct.object({}),
-  },
-  outgoing: {
-    send: struct.object({ text: struct.string() }),
-    ping: struct.object({}),
-  },
+  incoming: { message: struct.object({ text: struct.string() }) },
+  outgoing: { send: struct.object({ text: struct.string() }) },
 })
+
+const [error, session, startupConnection] = await client.execute(room())
+if (error) {
+  console.error(error.kind, error.code, startupConnection?.generation)
+} else {
+  await using ownedSession = session
+  const unsubscribe = ownedSession.onRuntimeError((cause) => console.error('runtime', cause))
+  try {
+    ownedSession.send({ type: 'send', text: 'Hello' })
+    for await (const message of ownedSession.receive) {
+      console.log(message.type, message.text)
+      break
+    }
+  } finally {
+    unsubscribe()
+  }
+}
 ```
 
-## Конверт сообщения
+## JSON envelope
 
-Каждое сообщение — JSON-объект с непустой строкой `type`. По этому типу выбирается Struct из `incoming` или `outgoing`.
+`defineWebSocket(...)` описывает JSON-message эндпоинт. Required `incoming` map выбирает Struct по типу сообщения; optional `outgoing` делает то же для `session.send(...)`. Каждое wire-сообщение — объект с непустым строковым `type`.
 
-Поля объектного payload можно разместить рядом с `type`:
+Поля object payload сидят рядом с `type`. Scalar и array payloads используют поле envelope `data`:
 
 ```json
 { "type": "message", "userId": 7, "text": "Hello" }
 ```
 
-Скалярный payload или массив помещайте в `data`:
-
 ```json
 { "type": "count", "data": 3 }
 ```
 
-`type` и `data` — зарезервированные ключи конверта. Если объектный payload сам содержит поле `data`, оберните весь payload, чтобы обработчик не принял это поле за payload конверта:
+Message map контролирует payload, не envelope discriminator. `incoming.default` принимает иначе необъявленные имена типов; без него unknown types дропаются. Incoming text, `ArrayBuffer`, typed-array и `Blob` frames декодируются как UTF-8 JSON. Malformed JSON и Struct failures идут в runtime-error observers — не в `receive`.
 
-```typescript
-const audit = defineWebSocket({
-  maxIncomingQueueSize: 100,
-  path: '/audit',
-  incoming: {
-    entry: struct.object({ data: struct.string(), source: struct.string() }),
-  },
-  outgoing: {
-    write: struct.object({ data: struct.string(), source: struct.string() }),
-  },
-})
+Если у object payload есть поле с именем `data`, оно остаётся рядом с `type` после encoding (не nested envelope). Пример: `write` с `{ data: string, source: string }` уходит как `{ type: 'write', data: string, source: string }`. Caller-side value всё ещё `{ type: 'write', data: { data, source } }`, потому что `data` несёт object payload до serialization. Алиасы применяются к полям payload. Discriminator `type` принадлежит envelope, не Struct.
 
-const [auditError, auditSession] = await client.execute(audit())
-if (!auditError) {
-  auditSession.send({
-    type: 'write',
-    data: { data: 'reviewed-value', source: 'settings' },
-  })
-}
-```
+`session.send(...)` валидирует и сериализует синхронно. Шлёт сразу, когда open, ставит в очередь во время `reconnecting`, когда outgoing queue включена, бросает `InvalidStateError`, когда не writable. Также throw, когда нет outgoing map, необъявленный type, сбой валидации payload, disabled/full outgoing queue или native send failure.
 
-Соответствующая сетевая форма: `{ "type": "write", "data": { "data": "reviewed-value", "source": "settings" } }`.
+`receive` — one-consumer. Второй iterator reject’ится.
 
-Не объявляйте `type` как обычное поле payload. Нормализация конверта управляет им сама.
+## Снимки state
 
-Необязательный Struct `incoming.default` обрабатывает остальные типы сообщений. Без него неизвестные типы отбрасываются.
+| Member                     | Смысл                                                                                              |
+| -------------------------- | -------------------------------------------------------------------------------------------------- |
+| `state`                    | `idle`, `connecting`, `open`, `reconnecting`, `closing`, `closed`, `aborted` или `error`           |
+| `connection`               | Последнее физическое соединение: `generation`, URL, negotiated protocol, extensions когда доступны |
+| `bufferedAmount`           | Native unsent byte count, или `0` без физического сокета                                           |
+| `receive`                  | One-consumer async iterable валидированных incoming messages                                       |
+| `onStateChange(listener)`  | Подписка на логические state transitions; возвращает unsubscribe                                   |
+| `onRuntimeError(listener)` | Подписка на non-startup runtime errors; возвращает unsubscribe                                     |
+| `closed`                   | Promise логического terminal close outcome                                                         |
 
-## Кортеж запуска
+`open` = физический сокет open. `reconnecting` включает preparation + delay до replacement. `connection.generation` растёт с каждым физическим сокетом, дошедшим до `open`. Кортеж `startupConnection` остаётся первым успешным снимком; `session.connection` двигается вперёд.
 
-```typescript
-const [error, session, startupConnection] = await client.execute(chat())
-```
+Ошибка старта → `[error, undefined, connection?]`. Pre-open сбой конструктора может быть без connection; timeout/close во время startup всё ещё может дать снимок. После возврата session runtime errors идут через observers, `receive` и `closed` — не через второй execute кортеж.
 
-Для выполнения HTTP, SSE и WebSocket параметр `timeout` должен быть положительным безопасным целым числом в диапазоне `1..2_147_483_647`; `0`, отрицательные и дробные значения, `NaN`, `Infinity` и значения выше предела возвращают `REQUEST_VALIDATION_FAILED` до создания ресурса request, stream или socket.
+```typescript twoslash
+import type { RequestError, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
 
-WebSocket возвращает:
-
-```typescript
-type SocketAwaitResult<TIncoming, TOutgoing> =
+type SocketResult<TIncoming, TOutgoing> =
   | [error: null, session: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError<unknown>, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+
+const result: SocketResult<unknown, never> | undefined = undefined
+void result
 ```
 
-При успехе третий элемент — снимок запуска с `generation: 1`. Он может содержать `url`, `protocol` и `extensions` первого физического сокета.
+## Reconnect
 
-`session.connection` — актуальный геттер; при каждом успешном открытии физического сокета `generation` увеличивается. Если важен снимок запуска, сохраните третий элемент кортежа.
+Reconnect — opt-in. Нет объекта `reconnect` → физический close заканчивает логическую сессию. Когда настроен, defaults: `attempts: 3`, `delayMs: 1000`, `factor: 2`, `maxDelayMs: 30000`, `jitter: 0`. `attempts` считает ретраи после initial attempt; `attempts: 0` отключает. Default predicate принимает каждый close outcome.
 
-Не записывайте URL подключения в журнал. Он может содержать идентификаторы пути, query-данные приложения и поля распространения телеметрии.
+```ts
+import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketReconnect } from '@defjs/core'
 
-## Диагностика сбоев
-
-В браузерном API WebSocket или внедрённом конструкторе, который предоставляет только стандартные события WebSocket, транспортный сбой handshake обычно даёт лишь стабильный `RequestError` с `kind: 'transport'` и `code` вроде `NETWORK_ERROR`, `ABORTED` или `TIMEOUT`. Нельзя гарантировать HTTP `401`, другой статус handshake, response headers/body или специфичные для Node детали `unexpected-response`. Runtime-специфичный конструктор может предоставить больше через собственный adapter, но это не переносимый контракт Core.
-
-После запуска дождитесь `session.closed` и используйте его `kind`, необязательный close `code` и необязательный `wasClean` как основную терминальную диагностику. Close code — код WebSocket, а не HTTP-статус. Обычные логи должны содержать только проверенный низкокардинальный контекст и эти поля; не записывайте URL соединения, query, ticket, необработанный `cause` или `reason`. Расширяйте запись только при явной политике redaction, доступа и хранения.
-
-## Актуальный сеанс
-
-`WebSocketSession` — один логический сеанс, который может включать несколько попыток физического подключения.
-
-| Член                       | Поведение                                                                                     |
-| -------------------------- | --------------------------------------------------------------------------------------------- |
-| `connection`               | Актуальная информация о последнем подключении.                                                |
-| `bufferedAmount`           | Неотправленные байты нативного сокета или `0`, если сокета нет.                               |
-| `state`                    | Актуальное состояние логического сеанса.                                                      |
-| `receive`                  | Общая асинхронная рабочая очередь проверенных входящих сообщений.                             |
-| `send(message)`            | Проверяет доступность записи, затем валидирует, сериализует, отправляет или ставит в очередь. |
-| `close(code?, reason?)`    | Запрашивает окончательное закрытие.                                                           |
-| `closed`                   | Promise с информацией о наблюдаемом окончательном закрытии.                                   |
-| `onStateChange(listener)`  | Добавляет наблюдателя состояния и возвращает функцию отписки.                                 |
-| `onRuntimeError(listener)` | Добавляет наблюдателя ошибок во время выполнения и возвращает функцию отписки.                |
-
-После возврата клиента сеанс больше не отслеживается клиентом. Вызывающий код отвечает за чтение, наблюдателей, отмену и закрытие.
-
-## Получение сообщений
-
-Текст, ArrayBuffer, типизированные массивы и Blob декодируются в порядке поступления как JSON в UTF-8. Следующие данные молча отбрасываются:
-
-- конверт, который не является объектом;
-- отсутствующий `type` или пустая строка в нём;
-- неизвестный тип без Struct `incoming.default`.
-
-Некорректный JSON и ошибки выбранного Struct передаются в `onRuntimeError`; кадр отбрасывается, а сеанс продолжается.
-
-```typescript
-const unsubscribeError = session.onRuntimeError(() => {
-  recordSocketFailure({ operation: 'chat-receive' })
-})
-
-try {
-  for await (const message of session.receive) {
-    if (message.type === 'message') {
-      renderMessage(message.userId, message.text)
-    }
-  }
-} finally {
-  unsubscribeError()
-  session.close(1000, 'consumer-finished')
-  await session.closed
-}
-```
-
-`receive` допускает ровно один итератор. `maxIncomingQueueSize` — обязательный положительный лимит элементов; переполнение очищает буфер, отклоняет итератор и завершает сеанс как `error`.
-
-## Отправка сообщений
-
-`send(...)` работает синхронно. Он может синхронно выбросить ошибку, когда:
-
-- у эндпоинта нет карты `outgoing`;
-- у сообщения нет корректного `type`;
-- тип не объявлен;
-- структурное декодирование или кодирование payload завершилось ошибкой;
-- исходящая очередь эндпоинта отключена или заполнена в состоянии `reconnecting`;
-- нативный сокет выбрасывает ошибку при немедленной отправке.
-
-```typescript
-try {
-  session.send({ type: 'send', text: 'Hello' })
-} catch (error) {
-  handleSendFailure(error)
-}
-```
-
-Логическая доступность записи проверяется до валидации и сериализации payload. Прямая отправка выполняется, только когда логическое состояние и текущий физический сокет равны `open`. В очередь данные попадают только в `reconnecting`, если `maxOutgoingQueueSize` эндпоинта положителен. FIFO выгружается до публикации `open` для нового сокета.
-
-При ручном закрытии, после терминального состояния и пока предикат переподключения ещё не решил исход remote close, `send` выбрасывает `InvalidStateError`. Транспорт не повторяет кадры, уже отправленные в предыдущий физический сокет.
-
-## Состояние
-
-`session.state` принимает значения:
-
-| Состояние      | Значение                                                     |
-| -------------- | ------------------------------------------------------------ |
-| `idle`         | Начальное внутреннее состояние до запуска выполнения.        |
-| `connecting`   | Начинается первая физическая попытка.                        |
-| `open`         | Текущий физический сокет открыт.                             |
-| `reconnecting` | Следующая физическая попытка готовится или ожидает задержку. |
-| `closing`      | Владелец запросил ручное закрытие.                           |
-| `closed`       | Окончательное закрытие без нормализованной ошибки.           |
-| `aborted`      | Окончательная внешняя отмена нормализована в `ABORTED`.      |
-| `error`        | Другая окончательная ошибка.                                 |
-
-`session.state` описывает логический жизненный цикл и не доказывает наличие нативного сокета. В состоянии `reconnecting` метод `send` использует исходящую ёмкость эндпоинта.
-
-Сбои наблюдателей изолированы: ошибка слушателя состояния передаётся слушателям runtime-ошибок, а их ошибка — в доступный `globalThis.reportError`. Терминальное завершение освобождает наблюдателей; если владелец заканчивает раньше, отпишитесь самостоятельно.
-
-### Перед каждой попыткой
-
-`beforeConnect` можно настроить на клиенте или при отдельном выполнении. Он запускается перед нативным конструктором для первой и каждой повторной попытки:
-
-```typescript
-declare const refreshConnectionState: (signal: AbortSignal) => Promise<void>
-
-const [error, session] = await client.execute(chat(), {
-  beforeConnect: ({ signal }) => refreshConnectionState(signal),
-})
-```
-
-Хук получает `{ attempt, signal }`; `attempt` начинается с `0` и растёт при переподключениях. Передавайте `signal` в свою асинхронную работу. Отмена и timeout соревнуются с хуком, поздний reject потребляется, а поздний результат не создаёт сокет. Исключение или reject становятся терминальной транспортной ошибкой.
-
-## Переподключение включается явно
-
-Без объекта `reconnect` переподключения нет. Настройте его на клиенте или при выполнении:
-
-```typescript
-const [error, session] = await client.execute(chat(), {
-  reconnect: {
-    attempts: 5,
-    delayMs: 1_000,
+const client = createClient(
+  withEndpoint('https://chat.example.com'),
+  withWebSocketReconnect({
+    attempts: 3,
+    delayMs: 500,
     factor: 2,
-    maxDelayMs: 30_000,
+    maxDelayMs: 10_000,
     jitter: 0.2,
     shouldReconnect({ attempt, code, wasClean }) {
-      return !wasClean && code !== 1008 && attempt <= 5
+      return attempt <= 3 && (wasClean !== true || code === 1006)
     },
-  },
+  }),
+)
+const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/chat',
+  incoming: { ready: struct.object({ ok: struct.boolean() }) },
 })
+const [error, session] = await client.execute(room())
+if (!error) {
+  console.log(session.state)
+  session.close(1000, 'done')
+}
 ```
 
-`attempts` — число повторов после первой попытки. Пустой объект включает три повтора со следующими значениями:
+`shouldReconnect` получает next retry attempt, close cause, code, reason и `wasClean`. Manual `session.close(...)` не входит в predicate. Throw preparation/policy заканчивает логическую сессию с error.
 
-| Поле              | По умолчанию                                      |
-| ----------------- | ------------------------------------------------- |
-| `attempts`        | `3`                                               |
-| `delayMs`         | `1000`                                            |
-| `factor`          | `2`                                               |
-| `maxDelayMs`      | `30000`                                           |
-| `jitter`          | `0`                                               |
-| `shouldReconnect` | Возвращает `true` для любого результата закрытия. |
+WebSocket backoff jitter — **multiplicative** (`jitter: 0.2` → delay между `0.8x` и `1.2x`). SSE jitter — 0–1 multiplicative factor, same as WebSocket. Значения delay/factor/jitter/attempt валидируются до конструктора; timer delays не могут превысить `2_147_483_647` ms.
 
-Стандартный предикат повторяет и чистое, и аварийное удалённое закрытие. Если чистое закрытие должно быть окончательным, задайте свой предикат. `attempt` начинается с 1 для первого повтора.
-
-Базовая задержка равна `min(delayMs * factor ** (attempt - 1), maxDelayMs)`. `jitter` у WebSocket мультипликативный: например, `0.2` выбирает случайный множитель от `0.8` до `1.2`. Это отличается от аддитивного `jitter` SSE в миллисекундах.
-
-`shouldReconnect` работает синхронно. Исключение завершает сеанс как `error`, явный `false` — как `closed`. Переподключение только создаёт новый физический сокет и не повторяет прежние отправки. При росте `session.connection.generation` восстанавливайте лишь активные и безопасные для повтора подписки, никогда не мутации.
+`beforeConnect({ attempt, signal })` бежит до initial конструктора и каждого reconnect. Передай его signal в token refresh, чтобы cancel остановил и prep, и connect.
 
 ## Heartbeat
 
-Heartbeat тоже включается явно:
+Opt-in на execute или client scope. Interval шлёт `message()` через outgoing Struct map. Опциональный `isAck(message)` узнаёт ack — это сообщение чистит timeout и **не** доставляется в `receive`.
 
-```typescript
-const [error, session] = await client.execute(chat(), {
+```ts
+import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://chat.example.com'))
+const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/chat',
+  incoming: { pong: struct.object({ ok: struct.boolean() }) },
+  outgoing: { ping: struct.object({}) },
+})
+
+const [error, session] = await client.execute(room(), {
   heartbeat: {
     intervalMs: 30_000,
     timeoutMs: 10_000,
     message: () => ({ type: 'ping' }),
     isAck: (message) => message.type === 'pong',
   },
-  reconnect: { attempts: 3 },
 })
+if (!error) {
+  console.log(session.state)
+  session.close(1000, 'done')
+}
 ```
 
-`message` должен возвращать значение, допустимое картой `outgoing` эндпоинта. Сообщение, которое распознал `isAck`, сбрасывает тайм-аут heartbeat и не добавляется в `receive`.
-
-Ошибки сериализации, отправки, ack-предиката и timeout heartbeat фатальны. Они уведомляют слушателей runtime-ошибок, завершают `receive` ошибкой и переводят сеанс в `error` без обращения к политике переподключения.
-
-`intervalMs` и заданный `timeoutMs` должны быть положительными конечными значениями не больше `2_147_483_647`. Пока действует один ack-deadline, последующие интервалы не отправляют новый ping и не сбрасывают этот deadline; ack или остановка сеанса очищают его.
+`intervalMs` и `timeoutMs` должны быть положительными finite timers ≤ `2_147_483_647`. Heartbeat message должен быть валиден для outgoing map. Сбои serialization, native send, ack classification и timeout fatal для логической сессии — они не становятся ordinary reconnects.
 
 ## Очереди
 
-Ограничения очередей задаются в определении endpoint. `maxIncomingQueueSize` — обязательное положительное безопасное целое; переполнение фатально и удаляет буфер. `maxOutgoingQueueSize` — необязательное неотрицательное безопасное целое со значением `0` по умолчанию; положительное значение хранит кадры FIFO между попытками и отклоняет переполнение, не удаляя старые кадры.
+| Setting                | Required value                                  | Behavior                                                                                              |
+| ---------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `maxIncomingQueueSize` | Positive safe integer                           | Bounds parsed messages, ждущие `receive`, и raw frames, ждущие transform. Overflow → `state: 'error'` |
+| `maxOutgoingQueueSize` | Optional non-negative safe integer; default `0` | FIFO только пока `state === 'reconnecting'`. Full/disabled → `send(...)` throws                       |
 
-Оба ограничения считают элементы, а не байты. `session.bufferedAmount` отдельно показывает байты в нативном сокете, ожидающие отправки. `receive` допускает ровно один итератор.
+Queued outgoing frames flush до того, как replacement socket опубликует `open`. Frames, уже отправленные на более раннем сокете, никогда не auto-replay’ятся. Reconnect queues — для сообщений, которые ты шлёшь во время reconnecting — не для реконструкции app state.
 
-## Владение закрытием
+Incoming overflow чистит pending sequence, fails `receive`, останавливает сессию, resolves `session.closed` с `kind: 'error'`. Держи consumer достаточно быстрым или подними bound по измеренному size/memory.
 
-`session.close(code, reason)` сначала проверяет код `1000` или `3000..4999` и причину длиной не более 123 байт UTF-8. Корректный ввод переводит состояние в `closing`, запрашивает нативное закрытие и ждёт настоящий `CloseEvent`; наблюдаемые код и причина важнее запрошенных.
+## Protocols и authentication
 
-`session.closed` разрешается информацией о закрытии, которую получила реализация:
+Definition `protocols`, client `withWebSocketProtocols(...)` и execute `protocols` задают constructor subprotocol list. Precedence: execution → client → definition. Первый определённый list копируется для логической сессии и переиспользуется на reconnect.
 
-```typescript
-type WebSocketCloseInfo =
-  | { kind: 'closed'; code?: number; reason?: string; wasClean?: boolean }
-  | { kind: 'aborted'; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }
-  | { kind: 'error'; cause: unknown; code?: number; reason?: string; wasClean?: boolean }
+Браузерные WebSocket constructors не принимают произвольные handshake headers. Defjs конвертирует `http:` → `ws:` и `https:` → `wss:`, кодирует path placeholders один раз, использует настроенный query serializer. WebSocket query building также сериализует complex query values как JSON (в отличие от default HTTP scalar-only query).
+
+`withCredentials(true)` — Fetch credentials для HTTP/SSE — не WebSocket auth. Используй проверенную cookie/session policy, subprotocol или short-lived connection ticket. Не клади общие credentials или long-lived secrets в query string.
+
+## Closure и ownership
+
+`session.close(code?, reason?)` запрашивает terminal closure и останавливает heartbeat. Code должен быть `1000` или `3000..4999`; reason ≤ 123 UTF-8 bytes. Invalid close args throw до смены state. Используй его с `await session.closed`, когда нужен manual close reason или логический terminal result.
+
+```typescript twoslash
+import type { WebSocketSession } from '@defjs/core'
+
+async function observeSession(session: WebSocketSession<unknown, never>): Promise<void> {
+  await using ownedSession = session
+  console.log(ownedSession.state)
+}
+
+void observeSession
 ```
 
-Ручное закрытие, remote close без причины и явный отказ от переподключения дают `closed`. Внешняя отмена даёт `aborted`, timeout и runtime-сбои — `error`. Если нативный close выбрасывает исключение, выполняется одна попытка без аргументов; если обе выбрасывают, сеанс завершается как `error` без третьего вызова.
+`session.closed` — логический terminal snapshot: `'closed'`, `'aborted'` или `'error'`, с опциональными native `code` / `reason` / `wasClean` и `cause` для aborted/error. Наблюдаемые native close fields выигрывают у requested fallback владельца.
 
-Удаляйте слушатели и закрывайте сеанс на границе компонента, маршрута, задачи или сервиса, которая его открыла. Одного размонтирования провайдера для этого недостаточно.
+Стандартный async disposer запрашивает best-effort native close, затем ждёт принадлежащий Defjs teardown lifecycle, message pump, timers, listeners, queues и socket references. Если close event не наблюдался за одну секунду, логический cleanup принудительно завершается и `closed` settles с manual `kind: 'closed'`, но disposer rejects с `DOMException` по имени `TimeoutError`. Если сам native close бросает ошибку, disposer rejects ею после cleanup. Повторные вызовы disposer используют один teardown. Ни один из этих результатов не доказывает закрытие физического TCP-соединения.
 
-## Безопасность URL и аутентификации
+Структурные реализации session теперь обязаны предоставлять тот же контракт `[Symbol.asyncDispose](): PromiseLike<void>`. Для implementers это compile-time breaking change; consumers, которые только получают Defjs session, не обязаны делать новый runtime-вызов.
 
-Базовые HTTP-URL преобразуются в схемы WebSocket: `http:` становится `ws:`, а `https:` — `wss:`. Передавайте сырые значения плейсхолдеров пути: Core кодирует каждый сегмент ровно один раз, превращает `%` в `%25` и отклоняет пустое значение, `.` и `..`. Query-значения проходят через настроенный сериализатор.
+## Граница GraphQL
 
-Приоритет протоколов: опция выполнения, затем опция клиента, затем описание эндпоинта. Явный пустой массив протоколов подавляет значения с меньшим приоритетом.
+Defjs даёт типизированный JSON envelope и логический session lifecycle. Он **не** реализует WebSocket application protocol. Фичи GraphQL-over-WebSocket — connection init, operation IDs, `next`/`error`/`complete`, disposal, subscription replay — вне core-контракта.
 
-Браузерный API WebSocket не умеет задавать произвольные заголовки handshake. Не используйте query-параметры как универсальный канал учётных данных: URL могут попасть в инструменты браузера, прокси, журналы доступа и телеметрию. Используйте TLS (`wss:`) и проверенную для конкретного развёртывания схему аутентификации, например подходящий SameSite-cookie flow или короткоживущий билет подключения.
+Используй protocol client вроде `graphql-ws`, когда сервер требует этот протокол, или смоделируй свой envelope через `defineWebSocket(...)`. Один message map сам по себе не договаривается о GraphQL-семантике.
 
-## Что дальше
+## Связанные рецепты
 
-- [SSE](/ru-RU/core/sse) — отличия повторов и очередей потока.
-- [Перехватчики](/ru-RU/core/interceptors) — сохранение актуальных геттеров сеанса.
-- [Ошибки](/ru-RU/core/errors) — ошибки кортежа запуска.
+- [Открыть WebSocket-сессию](../recipes/websocket-session.md)
+- [Читать SSE-стрим](../recipes/consume-sse.md)

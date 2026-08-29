@@ -56,6 +56,9 @@ export function makeStruct(definition: StructDefinition): RuntimeStruct {
     null() {
       return withFlags({ nullable: true })
     },
+    nullable() {
+      return withFlags({ nullable: true })
+    },
     nullish() {
       return withFlags({ nullable: true, optional: true })
     },

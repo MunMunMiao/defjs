@@ -1,16 +1,16 @@
 ---
 title: Struct
-description: Описывайте строгое структурное декодирование, обязательный и необязательный вход, псевдонимы и обработку StructError.
+description: Моделируй формы request и response, парси unknowns и кодируй wire bodies.
 ---
 
 # Struct
 
-Struct описывают строгое структурное декодирование и сетевое кодирование. Отсутствующие обязательные и недопустимые значения приводят к ошибке, а не к созданию значений по умолчанию.
+Моделируй request (и его responses) как Structs. Получаешь TypeScript-типы через `Infer` и runtime-проверки через `struct.parse(...)` — без throw, error-first кортеж.
 
-Используйте фасад `struct` и тип `Infer<T>` из корневой точки входа:
+## Базовая настройка
 
-```typescript
-import { struct, type Infer, type StructInput } from '@defjs/core'
+```typescript twoslash
+import { defineRequest, struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -19,50 +19,43 @@ const User = struct.object({
 })
 
 type User = Infer<typeof User>
-// { id: number; name: string; active: boolean }
+
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({
+    body: struct.json(
+      struct.object({
+        name: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  output: { 201: User },
+})
+
+const [parseError, user] = struct.parse(User, { id: 7, name: 'Ada', active: true })
+if (!parseError) console.log(user.name)
+void createUser
 ```
 
-## Конструкторы
+Parsed output держит только объявленные поля. Missing required fields, wrong primitives, bad nested values, wrong tuple length или запрещённый `null` → `StructError`, без partial value. Structs immutable; `.optional()` и друзья возвращают новый Struct.
 
-Основные конструкторы:
+## Required, optional, null
 
-```typescript
-struct.string()
-struct.number()
-struct.boolean()
-struct.bigint()
-struct.date()
-struct.null()
-struct.literal('ready')
-struct.enum(['pending', 'done'])
-struct.array(struct.string())
-struct.tuple([struct.string(), struct.number()])
-struct.object({ id: struct.number() })
-struct.record(struct.number())
-struct.or(struct.string(), struct.number())
-struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
-struct.discriminatedUnion('kind', [
-  struct.object({ kind: struct.literal('click'), x: struct.number() }),
-  struct.object({ kind: struct.literal('key'), key: struct.string() }),
-])
-```
+Presence и nullability — раздельно:
 
-`struct.any()` и `struct.unknown()` принимают любые значения, кроме `null` и `undefined`; для их явного разрешения используются те же модификаторы. Для бинарных данных предназначены `struct.blob()`, `struct.file()` и `struct.arrayBuffer()`.
+| Declaration                  | Missing / `undefined`            | `null` | Valid value         |
+| ---------------------------- | -------------------------------- | ------ | ------------------- |
+| `struct.string()`            | Reject                           | Reject | Accept string       |
+| `struct.string().optional()` | Accept; omit absent object field | Reject | Accept string       |
+| `struct.string().null()`     | Reject                           | Accept | Accept string       |
+| `struct.string().nullish()`  | Accept; omit absent object field | Accept | Accept string       |
+| `struct.null()`              | Reject                           | Accept | Reject other values |
 
-Каждый Struct поддерживает модификаторы:
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-struct.string().optional()
-struct.string().null()
-struct.string().nullish()
-struct.string().alias('wire_name')
-```
-
-## Строгий разбор
-
-Для декодирования вне команды используйте `struct.parse(schema, input)`. Метод возвращает фиксированный error-first кортеж:
-
-```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
@@ -70,192 +63,191 @@ const Profile = struct.object({
   note: struct.string().nullish(),
 })
 
-const [error, profile] = struct.parse(Profile, input)
-
-if (error) {
-  // profile is undefined
-  return
-}
+const [error, profile] = struct.parse(Profile, {
+  name: 'Ada',
+  biography: null,
+  note: undefined,
+})
+if (error) throw error
+console.log(profile.name, profile.nickname, profile.biography, profile.note)
 ```
 
-```typescript
-type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
-```
+На root optional может быть `undefined`. Внутри object omitted optional/nullish поля остаются absent. В `struct.request(...)` all-optional секцию можно опустить (нормализуется к `{}`); секция с required полем остаётся required. Wrapper тела есть → body required, даже если inner fields optional.
 
-Для всех модификаторов действует один договор: отсутствие и `undefined` допустимы только с `.optional()` или `.nullish()`, явный `null` — только с `.null()` или `.nullish()`. `.null()` не делает значение необязательным.
+## Wrappers тела request
 
-Отсутствующие optional- и nullish-поля объекта не попадают в результат; на верхнем уровне они декодируются в `undefined`. Неизвестные ключи отбрасываются. Декодированные объекты и записи имеют null-прототип.
+`struct.request(...)` делит `path`, `query`, `headers` и `body`. Телам нужен явный codec:
 
-Строгое глубокое сравнение в Node учитывает прототипы, поэтому объект, разобранный Struct, не равен по глубине литералу с теми же полями. Проверяйте эту границу явно либо создавайте поверхностную копию только внутри проверки:
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-```typescript
-import assert from 'node:assert/strict'
-
-const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
-assert.equal(error, null)
-assert.equal(Object.getPrototypeOf(profile), null)
-assert.deepEqual({ ...profile }, { name: 'Ada' })
-```
-
-Spread здесь создаёт только поверхностную копию для проверки. Вложенные Struct-объекты тоже имеют null-прототип. Не добавляйте глобальную нормализацию или клонирование в production-путь только ради тестового matcher.
-
-При включённом `exactOptionalPropertyTypes` выведенные объектные входы используют точные необязательные свойства. Опускайте optional- или nullish-ключ вместо присваивания ему `undefined`:
-
-```typescript
-const OptionalProfile = struct.object({
-  nickname: struct.string().optional(),
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/organizations/:organizationId/users',
+  input: struct.request({
+    path: struct.object({ organizationId: struct.string() }),
+    query: struct.object({ notify: struct.boolean().optional() }),
+    headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
+    body: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  }),
 })
 
-type OptionalProfileInput = StructInput<typeof OptionalProfile>
-
-const omitted: OptionalProfileInput = {}
-// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
-const explicitUndefined: OptionalProfileInput = { nickname: undefined }
-```
-
-Во время выполнения `struct.parse` защитно принимает явный `undefined` из неизвестного входа и опускает ключ. Эта нормализация не расширяет статически выведенный входной тип вызывающего кода.
-
-## Обязательный объектный вход и части запроса
-
-Свойства объекта обязательны в TypeScript и во время выполнения, если их Struct не optional или nullish. Каждая объявленная в `struct.request(...)` часть тоже обязательна; необъявленные части не входят во входной тип.
-
-```typescript
-const Input = struct.request({
-  path: struct.object({ id: struct.string() }),
-  query: struct.object({ page: struct.number().optional() }),
+const command = createUser({
+  path: { organizationId: 'acme' },
+  query: { notify: true },
+  headers: { requestId: 'request-42' },
+  body: { displayName: 'Ada' },
 })
-
-// { path: { id: string }; query: { page?: number } }
+void command
 ```
 
-Отсутствие `query` — ошибка, а `query: {}` допустим. Отсутствующее обязательное поле, явный `undefined`, запрещённый `null` или неверный runtime-тип прерывают весь разбор без частичного результата.
+| Wrapper                    | Parsed value       | Wire boundary                                                        |
+| -------------------------- | ------------------ | -------------------------------------------------------------------- |
+| `struct.json(inner)`       | Value from `inner` | JSON text, `application/json`                                        |
+| `struct.text()`            | `string`           | Text, `text/plain;charset=UTF-8`                                     |
+| `struct.urlencoded(shape)` | Shape’s object     | `URLSearchParams`, `application/x-www-form-urlencoded;charset=UTF-8` |
+| `struct.formData(shape)`   | Shape’s object     | `FormData`; platform ставит multipart boundary                       |
+| `struct.blob()`            | `Blob`             | Blob type или `application/octet-stream`                             |
+| `struct.file()`            | `File`             | Native `File` (name + type)                                          |
+| `struct.arrayBuffer()`     | `ArrayBuffer`      | Buffer, `application/octet-stream`                                   |
 
-Составные Struct останавливаются на первом определённом issue. Длина входного кортежа должна точно совпадать с объявленной. `struct.or(...)` по-прежнему пробует альтернативы по порядку, а `struct.discriminatedUnion(...)` выбирает объявленную ветвь.
+`struct.file()` — value Struct для form fields — не standalone `request.body`. Binary bodies — `struct.blob()` и `struct.arrayBuffer()`. Bare object/array/primitive Structs невалидны как `request.body`. SSE отклоняет `body`. WebSocket request input отклоняет `body` и `headers`.
 
-Если поля discriminator используют alias, `struct.discriminatedUnion(...)` читает первый действительно присутствующий сетевой discriminator в порядке объявления вариантов. После выбора ветви alias последующих вариантов не читаются.
+## Алиасы
 
-Struct проверяют объявленную структуру, но не правила приложения об авторизации, диапазонах, суммах, форматах и переходах состояния. Публичного DSL для refine/range/format нет.
+`.alias(...)` разделяет логические имена и wire-имена. `struct.parse(...)` использует логические ключи. JSON и flat request codecs кодируют алиасы; JSON response decoding мапит wire-ключи обратно в логические поля.
 
-`struct.number()` принимает положительную и отрицательную `Infinity`; среди чисел JavaScript он исключает только `NaN`. До создания команды проверяйте конечность, диапазон и правила предметной области в коде приложения. Не помещайте эти проверки в `build`: туда приходит проекция, привязанная к схеме, а не значения вызывающего кода.
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-## Тела запросов
-
-`struct.request(...)` объединяет части для прямого сетевого отображения:
-
-```typescript
-const input = struct.request({
-  path: struct.object({ organizationId: struct.string() }),
-  query: struct.object({ includeDisabled: struct.boolean().optional() }),
-  headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
-  body: struct.json(
-    struct.object({
-      displayName: struct.string().alias('display_name'),
-    }),
-  ),
-})
-```
-
-Границы тела:
-
-| Struct                     | Кодирование       |
-| -------------------------- | ----------------- |
-| `struct.json(inner)`       | JSON              |
-| `struct.text()`            | Обычный текст     |
-| `struct.urlencoded(shape)` | `URLSearchParams` |
-| `struct.formData(shape)`   | `FormData`        |
-| `struct.blob()`            | `Blob`            |
-| `struct.arrayBuffer()`     | `ArrayBuffer`     |
-
-Автоматическое отображение запроса и ограничения транспортов описаны в разделе [«Команды»](/ru-RU/core/commands).
-
-## Псевдонимы
-
-`.alias(name)` меняет сетевой ключ, не меняя логический ключ TypeScript.
-
-```typescript
-const UserBody = struct.object({
-  id: struct.number().alias('user_id'),
+const User = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
-if (logicalError) throw logicalError
+const [parseError, user] = struct.parse(User, { displayName: 'Ada' })
+if (parseError) throw parseError
+console.log(user.displayName)
 
-const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
-if (!wireKeyError) throw new Error('struct.parse must read logical keys')
+const [wireError] = struct.parse(User, { display_name: 'Ada' })
+console.log(wireError?.issues[0]?.path)
 ```
 
-`logicalUser` использует `{ id, displayName }`; `wireKeyError` указывает на отсутствие логического ключа `id`. Публичный `struct.parse` читает только логические значения и не принимает сетевые ключи как вход отдельного parse.
+| Boundary                                       | Field                        |
+| ---------------------------------------------- | ---------------------------- |
+| `struct.parse(User, ...)`                      | Logical `displayName`        |
+| JSON request encoding                          | Wire `display_name`          |
+| JSON response decoding                         | Wire → logical `displayName` |
+| Query, header, URL-encoded, multipart encoding | Wire alias as key            |
 
-Wire-псевдонимы применяются только при JSON-кодировании и декодировании транспорта:
+Алиасы работают на nested fields, arrays, objects, unions и discriminators. Держи логические имена в app-коде; внешнее именование клади в Struct.
 
-```typescript
-import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+## Сбои parse
 
-let requestWireBody: unknown
-const echoUser = defineRequest({
-  method: 'POST',
-  path: '/users',
-  input: struct.request({ body: struct.json(UserBody) }),
-  output: { 200: UserBody },
-})
-const client = createClient(
-  withEndpoint('https://example.test'),
-  withHTTPHandle(async (input, init) => {
-    requestWireBody = await new Request(input, init).json()
-    return Response.json({ user_id: 1, display_name: 'Ada' })
-  }),
-)
+`struct.parse(...)` возвращает `[null, value]` или `[StructError, undefined]`. `StructError` extends `Error` и даёт `issues`, плюс `format()`, `flatten()` и `prettify()`.
 
-const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
-if (requestError) throw requestError
-```
+```typescript twoslash
+import { struct, StructError } from '@defjs/core'
 
-`requestWireBody` равен `{ user_id, display_name }`, а `responseUser` снова имеет вид `{ id, displayName }`. Автоматическое построение запроса также применяет псевдонимы к исходящим ключам path, query, headers, URL-encoded и multipart; явные целевые ключи пользовательской проекции `build` не меняются.
+const User = struct.object({ id: struct.number(), name: struct.string() })
+const [error, value] = struct.parse(User, { id: 'not-a-number' })
 
-## `StructError`
-
-Ошибка структурного декодирования создаёт `StructError`, часто доступный как `RequestError.cause`.
-
-```typescript
-import { StructError, type RequestError, type StructIssue } from '@defjs/core'
-
-export function structIssues(error: RequestError): readonly StructIssue[] {
-  if (error.kind === 'definition' && error.cause instanceof StructError) {
-    return error.cause.issues
-  }
-  return []
+if (error) {
+  console.log(error instanceof StructError)
+  console.log(error.issues[0]?.code, error.issues[0]?.path)
+  console.log(error.flatten().fieldErrors)
+  console.log(error.format(), error.prettify())
 }
+void value
 ```
 
-`StructError` предоставляет:
+У `StructIssue` есть `code`, `expected`, `message`, `path` и `received`. Issues могут держать untrusted input — redact до лога или возврата. `struct.parse(..., { errorMap })` rewrites issue messages for that call only.
 
-- `issues` — исходный массив `StructIssue[]`;
-- `format()` — вложенное дерево сообщений;
-- `flatten()` — сообщения формы и полей верхнего уровня;
-- `prettify()` — многострочное человекочитаемое представление.
+Struct validation — только structural. Нет публичных range, format, refinement, auth или state-transition правил. Делай эти проверки до сборки команды.
 
-`StructIssue.received` может содержать входные данные или данные ответа. Стандартные сообщения могут включать представление этого значения. Пути и форматированные ключи тоже могут происходить из недоверенных данных, особенно у записей. Перед записью в журнал или возвратом проверяйте и маскируйте `issues`, сообщения, `format()`, `flatten()` и `prettify()`.
+## Справка
 
-## Глобальные сообщения об ошибках
+Публичные constructors на `@defjs/core` (internals — не facade API):
 
-`setErrorMap(...)` заменяет генерацию сообщений во всём процессе:
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-import { setErrorMap } from '@defjs/core'
+const Any = struct.any()
+const ArrayOfStrings = struct.array(struct.string())
+const Bytes = struct.arrayBuffer()
+const BigIntValue = struct.bigint()
+const BlobValue = struct.blob()
+const BooleanValue = struct.boolean()
+const DateValue = struct.date()
+const Discriminated = struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('created'), id: struct.number() }),
+  struct.object({ kind: struct.literal('deleted'), id: struct.number() }),
+])
+const Status = struct.enum(['draft', 'published'])
+const FileValue = struct.file()
+const Form = struct.formData({ file: struct.file() })
+const Combined = struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
+const JsonBody = struct.json(struct.object({ ok: struct.boolean() }))
+const Literal = struct.literal('ready')
+const NullValue = struct.null()
+const NumberValue = struct.number()
+const ObjectValue = struct.object({ id: struct.number() })
+const Union = struct.or(struct.string(), struct.number())
+const RecordValue = struct.record(struct.number())
+const Request = struct.request({ path: struct.object({ id: struct.number() }) })
+const StringValue = struct.string()
+const TextBody = struct.text()
+const Tuple = struct.tuple([struct.string(), struct.number()])
+const Unknown = struct.unknown()
+const FormUrlEncoded = struct.urlencoded({ name: struct.string() })
 
-setErrorMap((issue) => {
-  if (issue.code === 'invalid_type') {
-    return `Invalid value at ${issue.path.join('.')}`
-  }
-  return undefined
-})
+void [Any, ArrayOfStrings, Bytes, BigIntValue, BlobValue, BooleanValue, DateValue, Discriminated, Status, FileValue, Form, Combined]
+void [
+  JsonBody,
+  Literal,
+  NullValue,
+  NumberValue,
+  ObjectValue,
+  Union,
+  RecordValue,
+  Request,
+  StringValue,
+  TextBody,
+  Tuple,
+  Unknown,
+  FormUrlEncoded,
+]
 ```
 
-Карта глобальна, а не привязана к клиенту. Её изменение влияет на последующие ошибки Struct во всех клиентах одной среды JavaScript. Не захватывайте в колбэке состояние отдельного запроса и согласуйте установку в приложениях, которые делят процесс.
+| Constructor                      | Input                                            | Inferred output                 |
+| -------------------------------- | ------------------------------------------------ | ------------------------------- |
+| `struct.number()`                | Number other than `NaN`                          | `number`, including ±`Infinity` |
+| `struct.date()`                  | `Date`, number, or date string                   | Valid `Date`                    |
+| `struct.bigint()`                | `bigint` or string accepted by `BigInt(...)`     | `bigint`                        |
+| `struct.enum(...)`               | Declared string or number member                 | That literal union              |
+| `struct.discriminatedUnion(...)` | Object with required literal discriminator       | Selected object branch          |
+| `struct.or(...)`                 | First matching branch; encoding checks ambiguity | Union of branch outputs         |
+| `struct.intersection(...)`       | Values accepted by every member                  | Intersection of outputs         |
+| `struct.record(value)`           | Plain object whose values match `value`          | Record of parsed values         |
+| `struct.tuple(items)`            | Array of exactly the declared length             | Fixed-length tuple              |
 
-## Что дальше
+Каждый Struct поддерживает `.alias(name)`, `.optional()`, `.null()` и `.nullish()`. `struct.discriminatedUnion` нуждается в object options с required literal discriminator и отклоняет duplicates.
 
-- [Команды](/ru-RU/core/commands) — отображение полей Struct на запросы и сообщения.
-- [Ошибки](/ru-RU/core/errors) — представление ошибок Struct в кортежах выполнения.
-- [HTTP](/ru-RU/core/http) — декодирование ответа и ошибки представления.
+Импортируй `struct`, `Infer`, `Struct`, `StructError` и связанные публичные типы из `@defjs/core`. Используй `struct.parse(...)` как parser. Не импортируй `createObjectStruct`, definition symbols, codec internals или `packages/core/src`.
+
+Facade non-promises:
+
+- Object/record outputs используют null prototype — не предполагай методы `Object.prototype`.
+- Unknown object keys дропаются.
+- `struct.number()` отклоняет `NaN`, принимает infinities.
+- `struct.or(...)` пробует branches по порядку; отклоняет ambiguous encodings, когда branches не согласны.
+- `struct.intersection(...)` парсит members в declaration order.
+- Struct валидирует границу; он не кеширует, не authorize’ит и не владеет transport resource.
+
+## Связанные рецепты
+
+- [POST JSON](../recipes/post-json.md)
+- [GET с объявленным 404](../recipes/get-declared-404.md)

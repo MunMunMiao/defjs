@@ -1,54 +1,64 @@
 ---
-title: البدء
-description: ثبّت Defjs، وعرّف endpoint HTTP مضبوط النوع، وأنشئ client واستعمله داخل تطبيقك.
+title: 'البدء: طلب HTTP واحد'
+description: عرّف GET /users/:id، شغّله ضد Fetch محلي، ثم وجّهه إلى API حقيقي.
 ---
 
-# البدء
+# البدء: طلب HTTP واحد
 
-يتيح Defjs لتطبيقك وصف عقد API مرة واحدة، ثم إعادة استخدامه مع input مضبوط النوع، وفك ترميز وقت التشغيل، ونتائج transport واضحة.
+ستعرّف `GET /users/:id`، وتنفّذه عبر عميل صريح، وتفكك `200` و`404` المعلَن معًا. المعالج المحلي يبقي أول تشغيل دون شبكة؛ الأمر يبقى كما هو عندما تستبدل بخدمة حقيقية.
 
-## التثبيت
+## الخطوة 1 — التثبيت
 
-أضف الحزمة الأساسية إلى تطبيقك:
+`@defjs/core` هو ESM ويحتاج Node.js 22+ أو Bun أو Deno. Node يشغّل ملف `.ts` مباشرة — ضع `"type": "module"` في package.json. في المتصفح ما زلت تحتاج المُجمّع وFetch.
+
+::: tabs
+== bun
+
+```sh
+bun add @defjs/core
+```
+
+== npm
+
+```sh
+npm install @defjs/core
+```
+
+== pnpm
 
 ```sh
 pnpm add @defjs/core
 ```
 
-استخدم أمر npm أو Yarn أو Bun المكافئ إذا كان مشروعك يستعمل مدير حزم آخر. حزمة `@defjs/core` بنمط ESM. وعند تشغيلها على Node.js، تتطلب metadata الحالية Node 22 أو أحدث.
-
-اختُبرت تطبيقات HTTP المستهلكة لحزمة ESM بعد تجميعها على Node.js 22 و24 و26، وBun 1.3.14، وDeno 2.9.5. وبعد تجميع تطبيقك، تكون أشكال الأوامر المقابلة:
+== yarn
 
 ```sh
-node dist/index.js
-bun run dist/index.js
-deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+yarn add @defjs/core
 ```
 
-يستخدم أمر Deno الحزم المثبتة مسبقًا في `node_modules`؛ استبدل إذن الشبكة بأسماء مضيفي API الدقيقة التي يحتاجها تطبيقك. تغطي اختبارات Bun وDeno جزء HTTP الموثق، وليس كل platform API أو transport. تستخدم تطبيقات المتصفح bundler المعتاد وقدرات Fetch وWebSocket المطلوبة من المنصة.
+== deno
 
-ينبغي أن تتحقق الاختبارات عبر بيئات التشغيل من حقول Defjs المستقرة مثل `error.kind` و`error.code`. لا تعتمد على رسائل `Error` الأصلية الخاصة بالمحرك أو نص أخطاء تحليل JSON؛ فقد تنسّق Node.js وBun وDeno هذه التفاصيل بصورة مختلفة.
+```sh
+deno add npm:@defjs/core
+```
 
-أضف adapter فقط عندما يحتاجه تطبيقك:
-
-| إعداد التطبيق            | الحزم                                                                                     |
-| ------------------------ | ----------------------------------------------------------------------------------------- |
-| React 18+                | `@defjs/core`، `@defjs/react`، `react`                                                    |
-| Vue 3+                   | `@defjs/core`، `@defjs/vue`، `vue`                                                        |
-| OpenTelemetry على الخادم | `@defjs/core`، `@defjs/opentelemetry-server`، `@opentelemetry/api`، `@opentelemetry/core` |
-
-::: tip استخدم الوثائق المطابقة للإصدار المثبّت
-تشرح هذه الصفحات الـ API الخاص بإصدار الوثائق الحالي. تحقّق من الإصدار المثبّت في تطبيقك. إذا اختلف export أو option، فاستخدم وثائق ذلك الإصدار وملاحظات إصداره بدل خلط أمثلة من إصدارات مختلفة.
 :::
 
-## عرّف طلبك الأول
+## الخطوة 2 — عرّف الطلب
 
-افترض أن API تطبيقك يوفّر `GET /users/:id`. استبدل base URL وresponse Structs بالعقد الفعلي لخدمتك.
+أنشئ `src/get-user.ts`. `struct.request(...)` يبقي قيم المسار منفصلة عن الاستعلام والرؤوس والجسم.
 
-```typescript
-import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+```ts get-user.ts
+import { defineRequest, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
 
 const getUser = defineRequest({
   method: 'GET',
@@ -57,57 +67,161 @@ const getUser = defineRequest({
     path: struct.object({ id: struct.number() }),
   }),
   output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
   ],
 })
 
-async function loadUser(id: number) {
-  const [error, user, response] = await client.execute(getUser({ path: { id } }))
+const command = getUser({ path: { id: 7 } })
+void command
+```
 
-  if (error) {
-    console.error(error.kind, error.code)
-    return
+`defineRequest(...)` يُرجع المنشئ. استدعاء `getUser(...)` يبني الأمر المعتم الذي تمرّره إلى `client.execute(...)`.
+
+## الخطوة 3 — نفّذه محليًا
+
+اربط معالج Fetch محليًا للعميل لتشغّل بلا شبكة. Defjs ما زالت تتحقق من المدخل، وتبني `Request`، وتوزّع حسب الحالة، وتحلّل الجسم.
+
+```ts get-user.ts
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+  ],
+})
+
+const handle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
   }
 
-  console.log(user.name, response.status)
+  return Response.json({ message: 'User not found' }, { status: 404 })
 }
 
-void loadUser(7)
-```
+const client = createClient(withEndpoint('https://api.example.test'), withHTTPHandle(handle))
 
-تعيد `defineRequest(...)` **منشئ أمر**. وينشئ استدعاء `getUser(...)` **أمرًا** يحمل تعريف نقطة النهاية ومدخلات الاستدعاء. بعد ذلك تعيد `client.execute(...)` tuple خاصًا بـ HTTP من ثلاثة عناصر:
+const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }), {
+  timeout: 5_000,
+})
 
-```typescript
-;[error, result, response]
-```
-
-عند النجاح تكون `error` مساوية لـ `null`، وتكون `result` البيانات بعد فك ترميزها، وتكون `response` غلاف `HttpResponse` من Defjs. عند الفشل تكون `result` مساوية لـ `undefined`؛ ويكون غلاف الاستجابة أيضًا `undefined` إذا لم تصل أي استجابة.
-
-### تُحفظ قيم status الحرفية تلقائيًا
-
-تستخدم `defineRequest(...)` ‏const generic لـ `output`، لذلك تحتفظ عناصر المصفوفة المضمّنة ومصفوفات status المجمّعة بقيمها الحرفية تلقائيًا. لا تحتاج إلى `as const` للفصل في الأنواع المستنتجة بين أجسام نجاح 2xx وأجسام أخطاء non-2xx.
-
-الشكل الكائني لـ output مدعوم أيضًا:
-
-```typescript
-const output = {
-  '200': struct.object({ id: struct.number() }),
-  '404': struct.object({ message: struct.string() }),
+if (error) {
+  if (error.kind === 'http' && error.status === 404) {
+    console.log(error.data.message)
+  } else {
+    console.error(error.kind, error.code)
+  }
+} else {
+  console.log(`Loaded ${user.name} from ${response.status}`)
 }
 ```
 
-## استخدمه داخل تطبيقك
+شغّله:
 
-ضع تعريفات endpoints في modules تصف API خدمتك. أعد استخدام command builders من components أو route handlers أو jobs أو stores. أنشئ client عند الحد الذي يملك endpoint وcredentials وinterceptors ودورة الحياة:
+::: tabs
+== bun
 
-- يمكن لتطبيق المتصفح عادةً مشاركة client واحد؛
-- في server rendering، أنشئ client خاصًا بكل request عندما تختلف headers أو cookies أو المستخدم أو tenant؛
-- الكود الذي يفتح SSE أو WebSocket مسؤول أيضًا عن استهلاك المورد وإغلاقه.
+```sh
+bun src/get-user.ts
+```
 
-## الخطوات التالية
+== npm
 
-- تشرح [الأوامر](/ar/core/commands) الربط التلقائي للطلب والإسقاطات المخصصة المرتبطة بالـ Struct.
-- توثّق [الأخطاء](/ar/core/errors) tuples الخاصة بوسائل النقل الثلاث واتحاد `RequestError`.
-- تغطي [HTTP](/ar/core/http) حل URL وأجسام الطلب وفك ترميز المخرجات والإلغاء وسلوك XSRF.
-- تجمع [الأمثلة](/ar/guide/examples) هذه العقود في وصفات يملك التطبيق دورة حياتها.
+```sh
+node src/get-user.ts
+```
+
+== pnpm
+
+```sh
+node src/get-user.ts
+```
+
+== yarn
+
+```sh
+node src/get-user.ts
+```
+
+== deno
+
+```sh
+deno run src/get-user.ts
+```
+
+:::
+
+```txt
+Loaded Ada from 200
+```
+
+جرّب مستخدمًا مفقودًا — غيّر معرّف المسار إلى `8` وشغّل مجددًا:
+
+```txt
+User not found
+```
+
+عند النجاح: `error` هو `null`، و`user` هو مخرج Struct لـ `200`، و`response` هو `HttpResponse`. عند `404` معلَن: `error.kind` هو `'http'`، و`error.status` هو `404`، و`error.data` مُنوَّع كـ `NotFound`. العنصر الثاني في الـ tuple هو `undefined` عند الفشل.
+
+## الخطوة 4 — وجّه إلى API حقيقي
+
+احذف `withHTTPHandle(...)` وضع عنوان الأساس الحقيقي عندما تنفّذ الخدمة `GET /v1/users/:id` بتلك الأجسام.
+
+```ts
+import { createClient, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const localHandle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
+  }
+
+  return Response.json({ message: 'User not found' }, { status: 404 })
+}
+
+const localClient = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(localHandle))
+const realClient = createClient(withEndpoint('https://api.example.com/v1'))
+void localClient
+void realClient
+```
+
+نفس الأمر. عميل مختلف.
+
+## عندما تختلف النتيجة
+
+- مدخل سيئ / بناء غير صالح / خيارات إلغاء متعارضة → `REQUEST_VALIDATION_FAILED`
+- غير-2xx معلَن → `HTTP_STATUS` مع `error.data` مُنوَّع
+- جسم معلَن لا يُفكّ → `RESPONSE_VALIDATION_FAILED`
+- حالة بلا إعلان → `UNDECLARED_STATUS` (قبل فك الجسم)
+- فشل Fetch / إلغاء / مهلة → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+
+يجب أن يكون `timeout` عددًا صحيحًا آمنًا موجبًا في `1..2_147_483_647`. لا تمرّر `abort` و`timeout` معًا؛ يمكن لـ `signal` أن يجتمع مع أي منهما. الإلغاء يخبرك بما رآه المستدعي — لا ما إذا كانت كتابة الخادم قد اكتملت.
+
+## الوصفات التالية
+
+- [GET مع 404 معلَن](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [إلغاء استدعاء HTTP](../recipes/cancel-http.md)
+- [استهلاك تدفق SSE](../recipes/consume-sse.md)
+- [فتح جلسة WebSocket](../recipes/websocket-session.md)
+- [الاختبار بـ Fetch محلي](../recipes/test-with-handle.md)

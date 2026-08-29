@@ -13,7 +13,7 @@ import type { FetchEventStreamErrorContext } from '../index'
 import type { FetchEventStreamOptions } from '../index'
 
 import { createClient, defineEventStream, struct, type EventStreamData, type EventStreamErrorCode, type EventStructs } from '../index'
-import type { EventStreamOpenInfo } from './transport/event_stream'
+import type { EventStreamHandle, EventStreamOpenInfo } from './transport/event_stream'
 
 // @ts-expect-error SSE definitions require an endpoint-owned queue limit.
 defineEventStream({ maxBufferSize: 1024, path: '/missing-queue-limit', events: { message: struct.string() } })
@@ -98,6 +98,16 @@ async function assertRequiredStartupOpenInfo(): Promise<void> {
 }
 
 void assertRequiredStartupOpenInfo
+
+async function assertAsyncDisposableEventStream(handle: EventStreamHandle<unknown>): Promise<void> {
+  const disposable: AsyncDisposable = handle
+  void disposable
+
+  await using ownedStream = handle
+  void ownedStream
+}
+
+void assertAsyncDisposableEventStream
 
 const closeErrorCode: EventStreamErrorCode = 'QUEUE_OVERFLOW'
 void closeErrorCode

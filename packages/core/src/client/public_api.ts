@@ -5,6 +5,7 @@ export type {
   ClientSSEConfig,
   ClientSSEOptions,
   ClientWebSocketOptions,
+  FetchHandle,
   QueryParamsSerializer,
   WebSocketHandle,
   WebSocketHandleConstructor,
@@ -13,20 +14,20 @@ export type { ClientOption } from './option'
 export {
   withCredentials,
   withEndpoint,
+  withHeaders,
   withHTTPHandle,
   withInterceptors,
   withQueryParamsSerializer,
   withSSEHandle,
   withSSEOnInvalidEvent,
-  withSSEOptions,
   withSSEReconnect,
+  withTimeout,
   withWebSocketBeforeConnect,
   withWebSocketHandle,
   withWebSocketHeartbeat,
-  withWebSocketOptions,
+  withWebSocketOnInvalidEvent,
   withWebSocketProtocols,
   withWebSocketReconnect,
   withXSRF,
 } from './option'
 export type { Client } from './client'
-export { getClientConfig, isClient } from './client'

@@ -362,7 +362,7 @@ if (error?.kind === 'definition' && error.code === 'RESPONSE_VALIDATION_FAILED')
 }
 ```
 
-`StructError` 还提供 `issues`、`format()`、`flatten()` 和 `prettify()`。`setErrorMap(map)` 可以全局替换后续 issue 的 message；清理时调用 `setErrorMap(undefined)`。`received`、message 和完整 cause 可能包含输入或响应 payload，不应在没有脱敏策略时写入日志。
+`StructError` 还提供 `issues`、`format()`、`flatten()` 和 `prettify()`。`struct.parse(s, v, { errorMap })` 只在这一次 parse 里改写 issue message。`received`、message 和完整 cause 可能包含输入或响应 payload，不应在没有脱敏策略时写入日志。
 
 ### Struct 不提供 HTTP tuple
 
@@ -386,12 +386,9 @@ if (error?.kind === 'definition' && error.code === 'RESPONSE_VALIDATION_FAILED')
 
 ## 现有实践与源码索引
 
-以下示例与当前 public API 对齐，可作为实际用法参考：
+以下源码与当前 public API 对齐，可作为实际用法参考：
 
-- [`examples/struct-zero-values`](../../../../examples/struct-zero-values/src/index.ts)：显式 `0`、`false`、空集合/字符串，以及 optional、nullable 和 nullish。
-- [`examples/struct-discriminated-union`](../../../../examples/struct-discriminated-union/src/index.ts)：按事件类型路由并获得 TypeScript 窄化。
-- [`examples/struct-response-validation-error`](../../../../examples/struct-response-validation-error/src/index.ts)：响应 Struct 形状错误和 `StructError` 诊断。
-- [`public_api.ts`](./public_api.ts) 与 [`facade.ts`](./facade.ts)：公共导出和 `struct` 构造器。
+- [`index.ts`](./index.ts) 与 [`facade.ts`](./facade.ts)：公共导出和 `struct` 构造器。
 - [`parse.ts`](./parse.ts) 与 [`introspection.ts`](./introspection.ts)：严格 Struct 解析和内部 adapter 实现。
 - [`errors.ts`](./errors.ts)：`StructError`、issue message 和错误视图。
 - [`doc/core/struct.md`](../../../../doc/core/struct.md)：面向使用者的 Struct 文档。

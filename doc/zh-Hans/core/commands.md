@@ -1,286 +1,79 @@
 ---
 title: Commands
-description: 定义 endpoint，创建 command builder 和 command，把 Struct 输入映射到 wire，并推断 HTTP output 类型。
+description: 定义端点，打出 opaque command，映射输入，推断传输结果。
 ---
 
 # Commands
 
-Defjs 分为三个相关阶段：
+一份 definition → builder → opaque command → `client.execute`。HTTP、SSE、WebSocket 同一条管线。
 
-1. **端点定义（endpoint definition）**描述稳定的 HTTP、SSE 或 WebSocket 契约。
-2. **Command builder** 是 `defineRequest`、`defineEventStream` 或 `defineWebSocket` 返回的函数。
-3. **Command** 是调用 builder 并传入 input 后得到的值。把它传给 `client.execute(...)`。
+## 基本用法
 
-```typescript
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-})
+```typescript twoslash
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
-const command = getUser({ path: { id: 42 } })
-const result = await client.execute(command)
+const client = createClient(withEndpoint('https://api.example.com'))
+const health = defineRequest({ method: 'GET', path: '/health' })
+const [error, data, response] = await client.execute(health())
+if (!error) console.log(data, response.status)
 ```
 
-这里，传给 `defineRequest` 的对象是端点定义，`getUser` 是 command builder，`command` 是 command。
+## 选哪种 definition
 
-## HTTP 端点定义
+| Definition               | 契约                                              | 成功值                               |
+| ------------------------ | ------------------------------------------------- | ------------------------------------ |
+| `defineRequest(...)`     | Method、相对 path、可选 input、可选状态 output    | 解码数据 + `HttpResponse`            |
+| `defineEventStream(...)` | Path、buffer/queue 上限、事件名 → Struct 映射     | `EventStreamHandle` + open 快照      |
+| `defineWebSocket(...)`   | Path、incoming 映射、可选 outgoing 映射、队列上限 | `WebSocketSession` + connection 快照 |
 
-`defineRequest(...)` 接受以下字段：
+没有 `input` → builder 不收参。有 `input` → 就算嵌套字段全可选也要传 Struct 值。可选的 `path` / `query` / `headers` 段可以省略；段里有必填字段就不能省。Body wrapper 一旦出现，body 就是必填。
 
-| 字段           | 含义                                                                                           |
-| -------------- | ---------------------------------------------------------------------------------------------- |
-| `method`       | HTTP method 字符串。                                                                           |
-| `operation`    | 用于 telemetry 和诊断的可选、显式、静态低基数 identity。                                       |
-| `path`         | 相对 endpoint path，可以包含 `:name` placeholder。                                             |
-| `input`        | 对 command input 做结构化解码的 Struct。                                                       |
-| `build`        | 把 input 字段投影到 request part 的 schema-bound projection。必须同时提供 `input`。            |
-| `output`       | 用于 response 解码和结果推断的 status-to-Struct 映射。                                         |
-| `responseType` | 仅在声明 `output` 时可选用 `json`、`text`、`blob` 或 `arraybuffer`；省略 `output` 时禁止声明。 |
+保持 command 不透明。别去扒标签或 symbol。
 
-SSE 和 WebSocket 定义同样支持 `operation?: string`。请从 endpoint 契约显式设置，例如 `users.lookup`；不要从渲染后的 path、URL、用户或 tenant 数据、request ID 等高基数值派生。
+## 自动请求映射
 
-Command 字段直接对应 wire section 时，使用 `struct.request(...)`：
+逻辑输入已经是 path / query / headers / body 时，用 `struct.request(...)`：
 
-```typescript
+```typescript twoslash
 import { defineRequest, struct } from '@defjs/core'
 
 const createUser = defineRequest({
   method: 'POST',
-  path: '/organizations/:organizationId/users',
+  path: '/users',
   input: struct.request({
-    path: struct.object({
-      organizationId: struct.string().alias('organization_id'),
-    }),
-    query: struct.object({
-      notify: struct.boolean().optional(),
-    }),
-    headers: struct.object({
-      requestId: struct.string().alias('x-request-id'),
-    }),
-    body: struct.json(
-      struct.object({
-        displayName: struct.string().alias('display_name'),
-      }),
-    ),
+    body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: [
-    { status: 201, body: struct.object({ id: struct.number() }) },
-    { status: 409, body: struct.object({ message: struct.string() }) },
-  ],
+  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
 })
-
-const command = createUser({
-  path: { organizationId: 'acme' },
-  query: { notify: true },
-  headers: { requestId: 'request-42' },
-  body: { displayName: 'Ada' },
-})
+void createUser
 ```
 
-调用方使用逻辑字段名，alias 决定 wire key。
-
-## Command Builder 参数可选性
-
-没有 `input` 的 builder 不接收参数：
-
-```typescript
-const health = defineRequest({ method: 'GET', path: '/health' })
-health()
-```
-
-声明 `input` 后，command 根参数仍然必填。在 `struct.request(...)` 内，如果 `path`、`query` 或 `headers` section 的 field 全是 optional 或 nullish，则可以整体省略；解析会把每个省略的 section 规范化为 `{}`。只要 section 含有任一必填 field，就仍然必须提供。即使内部 object field 全部 optional，body section 也仍然必填。
-
-```typescript
-const search = defineRequest({
-  method: 'GET',
-  path: '/search',
-  input: struct.request({
-    query: struct.object({ q: struct.string() }),
-  }),
-})
-
-search({ query: { q: 'docs' } })
-// search() // TypeScript error: an argument is required.
-// search({ query: {} }) // TypeScript and runtime error: q is required.
-```
-
-全 optional 的 request section 可以整体省略，但 command argument 本身仍要提供：
-
-```typescript
-const OptionalSections = struct.request({
-  path: struct.object({ locale: struct.string().optional() }),
-  query: struct.object({ page: struct.number().optional() }),
-  headers: struct.object({ traceId: struct.string().optional() }),
-})
-const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
-
-list({})
-list({ query: { page: 2 } })
-
-const [optionalError, normalized] = struct.parse(OptionalSections, {})
-if (optionalError) throw optionalError
-// normalized 是 { path: {}, query: {}, headers: {} }。
-
-const filtered = defineRequest({
-  method: 'GET',
-  path: '/items',
-  input: struct.request({
-    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
-  }),
-})
-
-filtered({ query: { q: 'docs' } })
-// filtered({}) // TypeScript error：query 含有必填 q。
-```
-
-这只校验结构存在性和类型，不负责应用级 authorization、range、amount、format 或 state transition 规则。
-
-## 自动构建请求
-
-当 `input` 是 `struct.request(...)` 且没有提供 `build` 时，Defjs 会自动映射已声明的 section：
-
-- `path` 替换 path placeholder；
-- `query` 变成 query parameter；
-- `headers` 变成 request header；
-- `body` 使用对应的 body wrapper。
-
-Request body 必须声明受支持的 boundary：
-
-```typescript
-struct.json(struct.object({ name: struct.string() }))
-struct.text()
-struct.urlencoded({ name: struct.string() })
-struct.formData({ file: struct.file() })
-struct.blob()
-struct.arrayBuffer()
-```
-
-不要在 `request.body` 中直接放裸 `struct.object(...)`；`struct.request(...)` 会拒绝它。HTTP 支持所有 body 形式。SSE 不接受 body section，WebSocket 不接受 headers 和 body section。
+Alias 只改写出线上的 key。解析值和 command 输入仍用逻辑名。
 
 ## 自定义 `build`
 
-逻辑字段需要映射到不同 wire 位置或 key 时，使用 `build(request, input)`。`input` 参数是 **schema-bound projection（受 schema 约束的投影）**，不是已解析的调用方运行时值。
+调用方形状和线上形状不一致时再上 `build(request, input)`。这是受限投影——别在这儿按鉴权政策分支，也别搞副作用。
 
-```typescript
-const createBatch = defineRequest({
-  method: 'POST',
-  path: '/accounts/:account_id/users',
-  input: struct.object({
-    accountId: struct.number(),
-    users: struct.array(
-      struct.object({
-        displayName: struct.string(),
-        email: struct.string(),
-      }),
-    ),
-  }),
-  build(request, input) {
-    request.setPathParams({ account_id: input.accountId })
-    request.setJson({
-      users: input.users.map((user) => ({
-        display_name: user.displayName,
-        email: user.email,
-      })),
-    })
-  },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
-})
-```
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-投影可以：
-
-- 选择已声明字段；
-- 指定目标 wire key；
-- 用 `.map(...)` 对数组做 item-to-item 投影；
-- 把选中的对象绑定到 JSON 时，按字段 alias 编码。
-
-投影不能检查调用方的值、按值分支、执行任意 transform、改变数组基数或注入字面量。例如，`request.setJson({ version: 'v1' })` 不是有效投影，因为 `'v1'` 不来自 input binding view。
-
-创建 command 之前，在应用层完成数据标准化和校验。`build` 只负责声明式 wire mapping。
-
-### Build 能力
-
-| Target                                                | HTTP | SSE    | WebSocket |
-| ----------------------------------------------------- | ---- | ------ | --------- |
-| `setPathParams`, `setQueryParams`                     | 支持 | 支持   | 支持      |
-| `setHeaders`, `addHeaders`                            | 支持 | 支持   | 不支持    |
-| JSON、text、HTML、form、Blob、ArrayBuffer body method | 支持 | 不支持 | 不支持    |
-
-TypeScript build context 会按 transport 收窄。即使绕过类型检查，runtime 也会拒绝不支持的输出。
-
-## HTTP Output 推断
-
-`output` 支持 object map 或 status/body pair 数组：
-
-```typescript
-const User = struct.object({ id: struct.number() })
-const NotFound = struct.object({ message: struct.string() })
-const Conflict = struct.object({ conflict: struct.string() })
-
-const objectOutput = {
-  '200': User,
-  '404': NotFound,
-}
-
-const getUsers = defineRequest({
+const search = defineRequest({
   method: 'GET',
-  path: '/users',
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-    { status: [409, 422], body: Conflict },
-  ],
+  path: '/search',
+  input: struct.object({ q: struct.string(), page: struct.number().optional() }),
+  build(request, input) {
+    request.withQuery({ q: input.q, page: input.page ?? 1 })
+  },
+  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
 })
+void search
 ```
 
-HTTP 成功类型是已声明 2xx body 的 union。`error.data` 与已声明的非 2xx status 保持关联。`defineRequest(...)` 使用 const generic，因此 inline status entry 和分组 status 数组无需 `as const` 就能保留字面量。执行 `client.execute(getUsers())` 后，检查 `error.status === 404` 会把 data 缩窄为 `NotFound`；其余 `409 | 422` 分支会缩窄为 `Conflict`。
+## 状态 output 形状
 
-声明 `output` 后，每个返回的 status 都必须有匹配的 Struct。无论 2xx 还是非 2xx，未匹配都会产生 `UNDECLARED_STATUS`。省略 `output` 时不会读取或解码 response body，并会尽力取消它；结果是 `undefined`。
+`output` 可以是 status → Struct 映射，也可以是 `{ status, body }[]`。精确状态优先。数组形式：后面的匹配会覆盖前面的分组匹配。没有匹配声明 → body 解码前就是 `UNDECLARED_STATUS`。
 
-## SSE 与 WebSocket 定义
+## 相关配方
 
-`defineEventStream(...)` 用 `events` map 取代 HTTP `output`。Event name 选择 Struct；可选的 `default` entry 在 runtime 处理未声明名称。
-
-```typescript
-const notifications = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/notifications',
-  events: {
-    message: struct.json(struct.object({ text: struct.string() })),
-    default: struct.string(),
-  },
-})
-```
-
-`defineWebSocket(...)` 声明 `incoming` 和可选的 `outgoing` message map。Message envelope 使用 `type` discriminator。
-
-```typescript
-const chat = defineWebSocket({
-  maxIncomingQueueSize: 100,
-  path: '/chat',
-  incoming: {
-    message: struct.object({ text: struct.string() }),
-  },
-  outgoing: {
-    send: struct.object({ text: struct.string() }),
-  },
-})
-```
-
-解码、queue、reconnect 和关闭所有权见 [SSE](/zh-Hans/core/sse) 与 [WebSocket](/zh-Hans/core/web-socket)。
-
-## 把 Command 当作不透明值
-
-应用代码应创建 command，并直接传给 `Client.execute(...)`。不要依赖 transport tag 或结构反射。
-
-Root entry 目前会导出 transport command interface 和低层 executor function。推荐流程不需要这些导出，它们的长期稳定性承诺也尚未在本文档中确定。Runtime dispatch 使用的 command tag symbol 和 guard function 并未从 root 导出。
-
-## 下一步
-
-- [Client](/zh-Hans/core/client)：execution overload 和 option 组合。
-- [HTTP](/zh-Hans/core/http)：URL、编码、response 和取消行为。
-- [Struct](/zh-Hans/core/struct)：严格结构化解码。
+- [声明了 404 的 GET](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)

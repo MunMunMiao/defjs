@@ -1,16 +1,16 @@
 ---
 title: Struct
-description: 厳密な構造デコード、必須・任意入力、エイリアス、StructError の処理を説明します。
+description: リクエストとレスポンスの形をモデルし、未知値をパースし、ワイヤボディをエンコードします。
 ---
 
 # Struct
 
-Struct は厳密な構造デコードと通信時のエンコーディングを記述します。必須値の欠損や不正値は、既定値を生成せず失敗します。
+リクエスト（とそのレスポンス）を Struct としてモデルします。`Infer` で TypeScript 型が、`struct.parse(...)` で実行時チェックが得られます — throw なし、エラーファーストのタプルです。
 
-ルートエントリーの `struct` ファサードと `Infer<T>` を使います。
+## Basic Setup
 
-```typescript
-import { struct, type Infer, type StructInput } from '@defjs/core'
+```typescript twoslash
+import { defineRequest, struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -19,50 +19,43 @@ const User = struct.object({
 })
 
 type User = Infer<typeof User>
-// { id: number; name: string; active: boolean }
+
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({
+    body: struct.json(
+      struct.object({
+        name: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  output: { 201: User },
+})
+
+const [parseError, user] = struct.parse(User, { id: 7, name: 'Ada', active: true })
+if (!parseError) console.log(user.name)
+void createUser
 ```
 
-## コンストラクター
+パース済み出力は宣言フィールドだけを保ちます。必須欠落、間違ったプリミティブ、悪い入れ子、タプル長不一致、許可されない `null` → `StructError`。部分値なし。Struct は不変です。`.optional()` などは新しい Struct を返します。
 
-主なコンストラクターは次のとおりです。
+## 必須、任意、null
 
-```typescript
-struct.string()
-struct.number()
-struct.boolean()
-struct.bigint()
-struct.date()
-struct.null()
-struct.literal('ready')
-struct.enum(['pending', 'done'])
-struct.array(struct.string())
-struct.tuple([struct.string(), struct.number()])
-struct.object({ id: struct.number() })
-struct.record(struct.number())
-struct.or(struct.string(), struct.number())
-struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
-struct.discriminatedUnion('kind', [
-  struct.object({ kind: struct.literal('click'), x: struct.number() }),
-  struct.object({ kind: struct.literal('key'), key: struct.string() }),
-])
-```
+存在と null 許容は別です。
 
-`struct.any()` と `struct.unknown()` は `null` と `undefined` 以外の任意の値を受け取ります。これらを許可する場合も同じ修飾メソッドを使います。バイナリ用のコンストラクターは `struct.blob()`、`struct.file()`、`struct.arrayBuffer()` です。
+| 宣言                         | Missing / `undefined`                  | `null` | 有効な値     |
+| ---------------------------- | -------------------------------------- | ------ | ------------ |
+| `struct.string()`            | 拒否                                   | 拒否   | 文字列を受理 |
+| `struct.string().optional()` | 受理。欠落オブジェクトフィールドは省略 | 拒否   | 文字列を受理 |
+| `struct.string().null()`     | 拒否                                   | 受理   | 文字列を受理 |
+| `struct.string().nullish()`  | 受理。欠落オブジェクトフィールドは省略 | 受理   | 文字列を受理 |
+| `struct.null()`              | 拒否                                   | 受理   | 他の値は拒否 |
 
-すべての Struct で次の修飾メソッドを使えます。
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-struct.string().optional()
-struct.string().null()
-struct.string().nullish()
-struct.string().alias('wire_name')
-```
-
-## 厳密なパース
-
-コマンド外でデコードするには `struct.parse(schema, input)` を使います。固定の error-first タプルを返します。
-
-```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
@@ -70,192 +63,191 @@ const Profile = struct.object({
   note: struct.string().nullish(),
 })
 
-const [error, profile] = struct.parse(Profile, input)
-
-if (error) {
-  // profile is undefined
-  return
-}
+const [error, profile] = struct.parse(Profile, {
+  name: 'Ada',
+  biography: null,
+  note: undefined,
+})
+if (error) throw error
+console.log(profile.name, profile.nickname, profile.biography, profile.note)
 ```
 
-```typescript
-type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
-```
+ルートでは optional は `undefined` になれます。オブジェクト内では、省略された optional/nullish フィールドは欠落のままです。`struct.request(...)` では、全部 optional のセクションは省略できます（`{}` に正規化）。必須フィールドを持つセクションは必須のままです。ボディラッパーがある → 内側が optional でもボディは必須。
 
-修飾子の規則は共通です。欠損値と `undefined` は `.optional()` または `.nullish()` の場合だけ、明示的な `null` は `.null()` または `.nullish()` の場合だけ受理されます。`.null()` は値を optional にはしません。
+## リクエストボディラッパー
 
-欠損した optional と nullish のオブジェクトフィールドは出力から省かれ、トップレベルでは `undefined` になります。未知のキーは破棄され、デコード後のオブジェクトと record は null prototype を使います。
+`struct.request(...)` は `path`、`query`、`headers`、`body` を分けます。ボディには明示コーデックが要ります。
 
-Node の strict deep equality は prototype も比較するため、Struct で解析したオブジェクトは同じフィールドを持つオブジェクトリテラルと深く等価にはなりません。この境界を明示的に検証するか、アサーション内だけで shallow copy を作成してください。
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-```typescript
-import assert from 'node:assert/strict'
-
-const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
-assert.equal(error, null)
-assert.equal(Object.getPrototypeOf(profile), null)
-assert.deepEqual({ ...profile }, { name: 'Ada' })
-```
-
-この spread はアサーション専用の浅いコピーです。ネストした Struct オブジェクトも null prototype のままです。テスト matcher に合わせるためだけに、本番経路へ全体的な normalize や clone を追加しないでください。
-
-`exactOptionalPropertyTypes` を有効にすると、推論されたオブジェクト入力は正確な optional property を使います。optional または nullish のキーに `undefined` を代入せず、そのキー自体を省略してください。
-
-```typescript
-const OptionalProfile = struct.object({
-  nickname: struct.string().optional(),
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/organizations/:organizationId/users',
+  input: struct.request({
+    path: struct.object({ organizationId: struct.string() }),
+    query: struct.object({ notify: struct.boolean().optional() }),
+    headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
+    body: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  }),
 })
 
-type OptionalProfileInput = StructInput<typeof OptionalProfile>
-
-const omitted: OptionalProfileInput = {}
-// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
-const explicitUndefined: OptionalProfileInput = { nickname: undefined }
-```
-
-実行時の `struct.parse` は unknown 入力に含まれる明示的な `undefined` を防御的に受け入れ、そのキーを省略します。この正規化によって、静的に推論された呼び出し側の入力型が広がることはありません。
-
-## 必須のオブジェクト・リクエスト入力
-
-Struct が optional または nullish でない限り、オブジェクトプロパティは TypeScript と実行時の両方で必須です。`struct.request(...)` で宣言した各セクションも必須です。宣言しないセクションは入力型に現れません。
-
-```typescript
-const Input = struct.request({
-  path: struct.object({ id: struct.string() }),
-  query: struct.object({ page: struct.number().optional() }),
+const command = createUser({
+  path: { organizationId: 'acme' },
+  query: { notify: true },
+  headers: { requestId: 'request-42' },
+  body: { displayName: 'Ada' },
 })
-
-// { path: { id: string }; query: { page?: number } }
+void command
 ```
 
-`query` の省略はエラーですが、`query: {}` は有効です。必須フィールドの欠損、明示的な `undefined`、禁止された `null`、不正な実行時型のどれでも、部分値を返さずパース全体が失敗します。
+| ラッパー                   | パース済み値         | ワイヤ境界                                                           |
+| -------------------------- | -------------------- | -------------------------------------------------------------------- |
+| `struct.json(inner)`       | `inner` からの値     | JSON テキスト、`application/json`                                    |
+| `struct.text()`            | `string`             | テキスト、`text/plain;charset=UTF-8`                                 |
+| `struct.urlencoded(shape)` | shape のオブジェクト | `URLSearchParams`、`application/x-www-form-urlencoded;charset=UTF-8` |
+| `struct.formData(shape)`   | shape のオブジェクト | `FormData`。プラットフォームが multipart boundary を設定             |
+| `struct.blob()`            | `Blob`               | Blob の type、または `application/octet-stream`                      |
+| `struct.file()`            | `File`               | ネイティブ `File`（name + type）                                     |
+| `struct.arrayBuffer()`     | `ArrayBuffer`        | バッファ、`application/octet-stream`                                 |
 
-複合 Struct は最初に確定した issue で停止します。タプル入力の長さは宣言と完全に一致する必要があります。`struct.or(...)` は順番に代替候補を試し、`struct.discriminatedUnion(...)` は宣言済みの分岐を選びます。
-
-discriminator フィールドに alias がある場合、`struct.discriminatedUnion(...)` は option の宣言順に、実際に存在する最初の wire discriminator を読み取ります。分岐を選択した後は、後続 option の alias を読み取りません。
-
-Struct が保証するのは宣言した構造であり、アプリケーションの認可、範囲、金額、形式、状態遷移ではありません。公開 refine/range/format DSL はありません。
-
-`struct.number()` は正負の `Infinity` を受け付け、JavaScript の数値のうち除外するのは `NaN` だけです。有限性、範囲、ドメインのチェックは、コマンド作成前にアプリケーションコードで行ってください。`build` の中には置けません。`build` が受け取るのは呼び出し元の実値ではなく、スキーマに束縛されたプロジェクションだからです。
-
-## リクエストボディ
-
-`struct.request(...)` は、通信形式へ直接割り当てるセクションをまとめます。
-
-```typescript
-const input = struct.request({
-  path: struct.object({ organizationId: struct.string() }),
-  query: struct.object({ includeDisabled: struct.boolean().optional() }),
-  headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
-  body: struct.json(
-    struct.object({
-      displayName: struct.string().alias('display_name'),
-    }),
-  ),
-})
-```
-
-ボディ境界は次のとおりです。
-
-| Struct                     | エンコーディング  |
-| -------------------------- | ----------------- |
-| `struct.json(inner)`       | JSON              |
-| `struct.text()`            | プレーンテキスト  |
-| `struct.urlencoded(shape)` | `URLSearchParams` |
-| `struct.formData(shape)`   | `FormData`        |
-| `struct.blob()`            | `Blob`            |
-| `struct.arrayBuffer()`     | `ArrayBuffer`     |
-
-リクエストの自動マッピングとトランスポートごとの制約は [Commands](/ja-JP/core/commands) を参照してください。
+`struct.file()` はフォームフィールド用の値 Struct であり、単独の `request.body` ではありません。バイナリボディは `struct.blob()` と `struct.arrayBuffer()` です。むき出しのオブジェクト/配列/プリミティブ Struct は `request.body` として無効です。SSE は `body` を拒否します。WebSocket のリクエスト入力は `body` と `headers` を拒否します。
 
 ## エイリアス
 
-`.alias(name)` は論理的な TypeScript キーを変えずに通信上のキーを変更します。
+`.alias(...)` は論理名とワイヤ名を分けます。`struct.parse(...)` は論理キーを使います。JSON とフラットなリクエストコーデックはエイリアスをエンコードし、JSON レスポンスデコードはワイヤキーを論理フィールドに戻します。
 
-```typescript
-const UserBody = struct.object({
-  id: struct.number().alias('user_id'),
+```typescript twoslash
+import { struct } from '@defjs/core'
+
+const User = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
-if (logicalError) throw logicalError
+const [parseError, user] = struct.parse(User, { displayName: 'Ada' })
+if (parseError) throw parseError
+console.log(user.displayName)
 
-const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
-if (!wireKeyError) throw new Error('struct.parse must read logical keys')
+const [wireError] = struct.parse(User, { display_name: 'Ada' })
+console.log(wireError?.issues[0]?.path)
 ```
 
-`logicalUser` は `{ id, displayName }` を使い、`wireKeyError` は論理キー `id` の欠落を示します。公開 `struct.parse` は論理値だけを読み、wire key を単独 parse の入力として扱いません。
+| 境界                                             | フィールド                  |
+| ------------------------------------------------ | --------------------------- |
+| `struct.parse(User, ...)`                        | 論理 `displayName`          |
+| JSON リクエストエンコード                        | ワイヤ `display_name`       |
+| JSON レスポンスデコード                          | ワイヤ → 論理 `displayName` |
+| query、header、URL-encoded、multipart エンコード | キーとしてワイヤエイリアス  |
 
-transport の JSON エンコードとデコードでのみ wire alias が適用されます。
+エイリアスは入れ子フィールド、配列、オブジェクト、ユニオン、ディスクリミネータで動きます。アプリコードでは論理名を保ち、外部命名は Struct に載せてください。
 
-```typescript
-import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+## パース失敗
 
-let requestWireBody: unknown
-const echoUser = defineRequest({
-  method: 'POST',
-  path: '/users',
-  input: struct.request({ body: struct.json(UserBody) }),
-  output: { 200: UserBody },
-})
-const client = createClient(
-  withEndpoint('https://example.test'),
-  withHTTPHandle(async (input, init) => {
-    requestWireBody = await new Request(input, init).json()
-    return Response.json({ user_id: 1, display_name: 'Ada' })
-  }),
-)
+`struct.parse(...)` は `[null, value]` または `[StructError, undefined]` を返します。`StructError` は `Error` を拡張し、`issues` に加え `format()`、`flatten()`、`prettify()` を公開します。
 
-const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
-if (requestError) throw requestError
-```
+```typescript twoslash
+import { struct, StructError } from '@defjs/core'
 
-`requestWireBody` は `{ user_id, display_name }`、`responseUser` は再び `{ id, displayName }` になります。リクエストの自動構築でも送信時の path、query、header、URL-encoded、multipart のキーに alias を使います。カスタム `build` プロジェクションで明示した出力先キーは変わりません。
+const User = struct.object({ id: struct.number(), name: struct.string() })
+const [error, value] = struct.parse(User, { id: 'not-a-number' })
 
-## `StructError`
-
-構造デコードに失敗すると `StructError` になります。多くの場合は `RequestError.cause` から参照できます。
-
-```typescript
-import { StructError, type RequestError, type StructIssue } from '@defjs/core'
-
-export function structIssues(error: RequestError): readonly StructIssue[] {
-  if (error.kind === 'definition' && error.cause instanceof StructError) {
-    return error.cause.issues
-  }
-  return []
+if (error) {
+  console.log(error instanceof StructError)
+  console.log(error.issues[0]?.code, error.issues[0]?.path)
+  console.log(error.flatten().fieldErrors)
+  console.log(error.format(), error.prettify())
 }
+void value
 ```
 
-`StructError` は次を公開します。
+`StructIssue` は `code`、`expected`、`message`、`path`、`received` を持ちます。issue は信頼できない入力を持ち得ます — ログや返却の前に redact してください。`struct.parse(..., { errorMap })` rewrites issue messages for that call only.決定的にし、リクエスト固有状態を入れないでください。
 
-- `issues`: 元の `StructIssue[]`
-- `format()`: 入れ子になったメッセージツリー
-- `flatten()`: 最上位のフォームメッセージとフィールドメッセージ
-- `prettify()`: 人が読める複数行の文字列
+Struct の検証は構造だけです。公開の range、format、refinement、認可、状態遷移ルールはありません。そうした検査はコマンドを組み立てる前に行ってください。
 
-`StructIssue.received` には入力データまたはレスポンスデータが入ることがあります。デフォルトメッセージにその値の表現が含まれる場合もあります。特に record では、パスと整形済みのキーも信頼できないデータに由来します。`issues`、メッセージ、`format()`、`flatten()`、`prettify()` をログ出力または返却する前に、内容を確認してマスキングしてください。
+## Reference
 
-## グローバルなエラーメッセージ
+`@defjs/core` 上の公開コンストラクタです（内部は facade API ではありません）。
 
-`setErrorMap(...)` は、メッセージ生成処理をプロセス全体で置き換えます。
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-import { setErrorMap } from '@defjs/core'
+const Any = struct.any()
+const ArrayOfStrings = struct.array(struct.string())
+const Bytes = struct.arrayBuffer()
+const BigIntValue = struct.bigint()
+const BlobValue = struct.blob()
+const BooleanValue = struct.boolean()
+const DateValue = struct.date()
+const Discriminated = struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('created'), id: struct.number() }),
+  struct.object({ kind: struct.literal('deleted'), id: struct.number() }),
+])
+const Status = struct.enum(['draft', 'published'])
+const FileValue = struct.file()
+const Form = struct.formData({ file: struct.file() })
+const Combined = struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
+const JsonBody = struct.json(struct.object({ ok: struct.boolean() }))
+const Literal = struct.literal('ready')
+const NullValue = struct.null()
+const NumberValue = struct.number()
+const ObjectValue = struct.object({ id: struct.number() })
+const Union = struct.or(struct.string(), struct.number())
+const RecordValue = struct.record(struct.number())
+const Request = struct.request({ path: struct.object({ id: struct.number() }) })
+const StringValue = struct.string()
+const TextBody = struct.text()
+const Tuple = struct.tuple([struct.string(), struct.number()])
+const Unknown = struct.unknown()
+const FormUrlEncoded = struct.urlencoded({ name: struct.string() })
 
-setErrorMap((issue) => {
-  if (issue.code === 'invalid_type') {
-    return `Invalid value at ${issue.path.join('.')}`
-  }
-  return undefined
-})
+void [Any, ArrayOfStrings, Bytes, BigIntValue, BlobValue, BooleanValue, DateValue, Discriminated, Status, FileValue, Form, Combined]
+void [
+  JsonBody,
+  Literal,
+  NullValue,
+  NumberValue,
+  ObjectValue,
+  Union,
+  RecordValue,
+  Request,
+  StringValue,
+  TextBody,
+  Tuple,
+  Unknown,
+  FormUrlEncoded,
+]
 ```
 
-このマップはグローバルで、クライアントスコープではありません。変更すると、同じ JavaScript realm にある全クライアントの後続 Struct issue に影響します。コールバックにリクエスト固有の状態を持ち込まないでください。同一プロセスを共有するアプリケーションでは、設定箇所を調整してください。
+| コンストラクタ                   | 入力                                            | 推論される出力           |
+| -------------------------------- | ----------------------------------------------- | ------------------------ |
+| `struct.number()`                | `NaN` 以外の数値                                | ±Infinity`を含む`number` |
+| `struct.date()`                  | `Date`、数値、または日付文字列                  | 有効な `Date`            |
+| `struct.bigint()`                | `bigint`、または `BigInt(...)` が受理する文字列 | `bigint`                 |
+| `struct.enum(...)`               | 宣言された文字列または数値メンバー              | そのリテラルユニオン     |
+| `struct.discriminatedUnion(...)` | 必須リテラルディスクリミネータ付きオブジェクト  | 選ばれたオブジェクト分岐 |
+| `struct.or(...)`                 | 最初に一致する分岐。エンコードは曖昧さを検査    | 分岐出力のユニオン       |
+| `struct.intersection(...)`       | 全メンバーが受理する値                          | 出力の交差               |
+| `struct.record(value)`           | 値が `value` に一致するプレーンオブジェクト     | パース済み値の Record    |
+| `struct.tuple(items)`            | 宣言長ちょうどである配列                        | 固定長タプル             |
 
-## 次に読む
+すべての Struct は `.alias(name)`、`.optional()`、`.null()`、`.nullish()` をサポートします。`struct.discriminatedUnion` は必須リテラルディスクリミネータ付きオブジェクトオプションが要り、重複を拒否します。
 
-- [Commands](/ja-JP/core/commands) — Struct フィールドとリクエスト/メッセージのマッピング
-- [Errors](/ja-JP/core/errors) — Struct 失敗が実行タプルに現れる形
-- [HTTP](/ja-JP/core/http) — レスポンスデコードと表現エラー
+`struct`、`Infer`、`Struct`、`StructError`、関連する公開型は `@defjs/core` から import してください。パーサは `struct.parse(...)` を使います。`createObjectStruct`、定義 symbol、コーデック内部、`packages/core/src` は import しないでください。
+
+facade の非約束事項:
+
+- オブジェクト/record 出力は null プロトタイプを使います — `Object.prototype` メソッドを前提にしないでください。
+- 未知のオブジェクトキーは落とされます。
+- `struct.number()` は `NaN` を拒否し、無限大は受理します。
+- `struct.or(...)` は分岐を順に試し、分岐が食い違う曖昧なエンコードは拒否します。
+- `struct.intersection(...)` はメンバーを宣言順にパースします。
+- Struct は境界を検証します。キャッシュも認可も、トランスポートリソースの所有もしません。
+
+## 関連レシピ
+
+- [POST JSON](../recipes/post-json.md)
+- [宣言済み 404 付きの GET](../recipes/get-declared-404.md)

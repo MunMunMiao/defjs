@@ -1,78 +1,114 @@
 ---
-title: 設計方針
-description: 明示的なクライアント、トランスポート別のタプル、実行時のライフサイクル設定、プロジェクションベースの build、オブザーバーを採用する理由を説明します。
+title: 設計上の判断
+description: Defjs が契約・コマンド・トランスポート結果・デコード・所有権を明示的に保つ理由です。
 ---
 
-# 設計方針
+# 設計上の判断
 
-このページでは、現在の API がこの設計を採用している理由を説明します。各フィールドとデフォルト値はリファレンスページを参照してください。
+Defjs はいくつかの意図的なトレードオフを取っています。便利 API は、誰がリクエスト・ストリーム・セッションを所有しているかを隠しがちです。Defjs はその境界を見えるままにして、同じエンドポイント契約を再利用しても、キャッシュやリトライスケジューラやリソースマネージャを黙って抱え込まないようにしています。
 
 ## 明示的なクライアント
 
-Defjs には、プロセス全体で共有されるデフォルトクライアントがありません。`createClient(...)` を使うと所有者が呼び出し元から明確になり、接続先、認証情報、テスト、リクエストスコープごとに別のクライアントを作れます。
+`createClient(...)` はエンドポイント設定を明示的な値にします。環境やリクエストスコープが違えば、エンドポイント・資格情報・インターセプター・シリアライザ・トランスポートハンドルも違います。`@defjs/core` の `createClient(...)` も、HTTP 専用の利用者向けに同じ考え方です。
 
-ただし、分離には限界があります。インターセプターやオプションコールバックはアプリケーションの共有状態をクロージャで参照できるため、2 つのクライアントオブジェクトが周囲のすべてから自動的に分離されるわけではありません。`setErrorMap(...)` もプロセス全体に作用します。サーバーでは、オプションやクロージャにリクエスト、ユーザー、テナント、Cookie、認可情報が含まれる場合、リクエストスコープでクライアントを作成してください。
+代償は、プロセス全体のデフォルトがないことです。その代償はサーバーで効きます — options やクロージャが認証・cookie・ユーザー・テナント・リクエストメタデータを掴むなら、クライアントをリクエスト境界の中で作ります。明示的なクライアントでも、インターセプターが掴んだ状態は隔離されませんクライアントの同一性そのものがセキュリティ境界ではありません。
 
-明示的なクライアントにするとリソースの所有者も説明しやすくなりますが、クライアント自体はリソースマネージャーではありません。実行中の HTTP リクエスト、SSE ハンドル、WebSocket セッションを追跡したり破棄したりしません。
+クライアントはコマンドをディスパッチします。進行中の作業は所有しません。HTTP リクエスト・SSE ストリーム・WebSocket セッションを始めた側が、キャンセルまたは close し、終端の promise を await する必要があります。
 
-## トランスポート別のタプル
+## 定義、ビルダー、コマンド
 
-対応するすべてのコマンドは、エラーを先頭に置く 3 要素タプルを返します。ただし、3 番目の要素はトランスポート固有の意味を保ちます。
+定義は安定した契約です。method、path、入力 Struct、出力マッピング、トランスポートの上限。ビルダーは呼び出し可能なビューです。呼ぶと、1 回の実行用の不透明なコマンドが 1 つできます。
 
-```typescript
-const [httpError, data, response] = await client.execute(httpCommand)
-const [sseError, stream, startupOpen] = await client.execute(sseCommand)
-const [socketError, session, startupConnection] = await client.execute(socketCommand)
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: {
+    200: struct.object({ id: struct.number(), name: struct.string() }),
+    404: struct.object({ message: struct.string() }),
+  },
+})
+
+const command = getUser({ path: { id: 7 } })
 ```
 
-HTTP レスポンスラッパー、SSE の起動時オープンスナップショット、WebSocket の起動時接続スナップショットを、意味の曖昧な 1 つの抽象にまとめないためです。2 番目の要素も同様で、HTTP はデコード済みデータ、SSE は論理ストリームハンドル、WebSocket は論理セッションを返します。
+バックグラウンドジョブと UI の所有者は、同じ `getUser` の形を、違うキャンセル/リトライ方針で実行できます。コマンドを不透明にしておくと、アプリコードが内部のトランスポートタグや symbol に依存しにくくなります。
 
-このタプルにより、起動時に想定される失敗を例外に頼らず明示できます。ただし、任意のインターセプター、コールバック、リスナー、未対応の値によって Promise が reject されたり、例外が送出されたりしないことまで保証するものではありません。
+## トランスポート固有の結果
 
-## ライフサイクル設定は実行側に置く
+3 つのトランスポートともエラーファーストのタプルを使います。汎用の単一「レスポンス」だと、ライフサイクルの事実が消えてしまいます。
 
-エンドポイント定義は、安定した通信契約とトランスポートキューの上限を記述します。キャンセル、タイムアウト、ハートビート、再接続は、その処理を所有する実行側の責務です。
+- HTTP → `[error, data, response]` — デコード済み出力 + `HttpResponse`
+- SSE → `[error, stream, open]` — 1 つの論理ストリーム + 起動時のレスポンススナップショット
+- WebSocket → `[error, session, connection]` — 論理セッション + 起動時の接続スナップショット
 
-HTTP と SSE は実行時にキャンセル設定を受け取ります。WebSocket も実行ごとの `beforeConnect`、ハートビート、再接続、プロトコル設定を受け取ります。対応する項目はクライアントオプションで再利用可能なデフォルト値を設定できますが、WebSocket の受信・送信容量はエンドポイントに属します。
+3 番目の値はスナップショットであり、将来の再接続が同じ物理接続を保つという promise ではありません。起動失敗でも、トランスポートが先にレスポンス/スナップショットを出していれば、それが含まれることがあります。起動後のライフサイクル制御は、返されたハンドルまたはセッションに属します。
 
-この分離により、コマンドを再利用できます。バックグラウンドジョブと対話画面は、パスやメッセージスキーマを定義し直さず、同じコマンドを異なるライフサイクルで実行できます。
+## 実行時デコード
 
-## `build` はプロジェクションを使う
+TypeScript の推論は「期待するもの」を記述しますが、サーバーレスポンスを実行時に検査はできません。Struct のパースが契約のもう半分です。Defjs はリクエスト組み立て前にコマンド入力を検証し、選ばれた表現をデコードし、対応する Struct をパースします。
 
-カスタム `build(request, input)` が受け取るのは、入力 Struct から作られた宣言的なバインディングビューです。呼び出し元が渡した実値にはアクセスできません。
+この順序で、status と body を別の事実として保てます。宣言済み status の厳密な選択は、ボディデコードの**前**に行われます。宣言済み non-2xx → 型付き `error.data`。壊れた宣言済みボディ → `RESPONSE_VALIDATION_FAILED`。未宣言の status → `UNDECLARED_STATUS`（型なしの成功/失敗ではない）。「届いた JSON なんでも」より厳しいですが、安全な判断ができます。
 
-このビューは、入力フィールドをパス、クエリ、ヘッダー、ボディの各ターゲットへどう対応させるかを記録します。フィールドの選択、明示的な通信上のキー、配列要素の 1 対 1 プロジェクションに対応します。一方、値に応じた分岐、任意の変換、リテラル値の注入は意図的に許可していません。
+## `build` の限界
 
-この制約により、リクエスト構築と宣言済み Struct フィールドの対応を維持できます。アプリケーション固有の正規化とビジネスルールの検証は、コマンドを作成する前に行ってください。対応するプロジェクション形式は [Commands](/ja-JP/core/commands) を参照してください。
+入力がすでに path/query/headers/body を持つとき、自動の `struct.request(...)` マッピングがデフォルトです。カスタム `build(request, input)` は、呼び出し側の形とワイヤの形が違うときの、制約付きプロジェクションです。
 
-## オブザーバーは制御フローを所有しない
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-SSE の `onInvalidEvent` は、破棄されたイベントを観測します。送出された例外と reject された Promise はストリームの制御フローから分離され、処理は継続します。ただし、非同期オブザーバーは完了まで待機されるため、後続メッセージを遅らせることがあります。
+const createBatch = defineRequest({
+  method: 'POST',
+  path: '/accounts/:account_id/users',
+  input: struct.object({
+    accountId: struct.number(),
+    users: struct.array(
+      struct.object({
+        displayName: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  build(request, input) {
+    request.setPathParams({ account_id: input.accountId })
+    request.setJson({
+      users: input.users.map((user) => ({
+        display_name: user.displayName,
+        email: user.email,
+      })),
+    })
+  },
+  output: { 202: struct.object({ accepted: struct.number() }) },
+})
 
-WebSocket の状態リスナーとランタイムエラーリスナーもオブザーバーです。送出された例外と reject された Promise は分離されます。状態リスナーの失敗はランタイムエラーリスナーへ転送され、後者の失敗は存在すればグローバルな `reportError` へ送られます。残りのリスナーとライフサイクル処理は継続します。
+const command = createBatch({
+  accountId: 42,
+  users: [{ displayName: 'Ada', email: 'ada@example.com' }],
+})
+```
 
-ライフサイクルの判断には、返されたハンドルまたはセッションを使ってください。オブザーバーは範囲を限定したログ、メトリクス、状態更新に使い、所有者を破棄するときに解除します。
+`input` はスキーマに束縛されたビューであり、呼び出し側の実行時オブジェクトそのものではありません。プロジェクションは宣言フィールドの選択、リネーム、ソース配列 1 要素から出力 1 要素への写像はできます。値で分岐したり、リテラルを差し込んだり、濃度を変えたりはできません。ビジネスデータの正規化と値依存の検証は、コマンドを作る前に行ってください。
 
-## Sourcemap のデプロイ
+## オブザーバーと方針の置き場所
 
-production sourcemap policy は明示的に選択します。
+インターセプターはトランスポート全体の方針向けです。認証、トレーシング、ショートサーキット、レビュー済みリトライ。自分のトランスポートだけ動き、オニオン順で合成されます。実行 options は作業固有の寿命向けです。`signal`、`timeout`、WebSocket ハートビート、オプトイン再接続。
 
-- **public**: map を bundle と一緒に deploy します。map には `sourcesContent` が含まれるため、source path が相対でも application と dependency の source を公開することになります。
+オブザーバーは、起きたことを報告するだけで、第二の所有者にはなりません。SSE の `onInvalidEvent`、WebSocket の状態リスナー、ランタイムエラーリスナーは、境界付きの診断とメトリクス向けです。返されたストリーム/セッションが、反復・close・購読解除・終端待ちを所有したままです。キャッシュ、古い結果の抑制、冪等性、ドメインエラーの写像は、`client.execute(...)` の周りに置き、アプリ自身の方針と状態が見える場所にしてください。
 
-- **hidden**: bundle から source-map reference を削除し、map を error platform へ private upload して、public deploy しません。map file 自体には sensitive path と `sourcesContent` が残り、「hidden」でも安全にはなりません。
+## OpenAPI、ソースマップ、テレメトリ
 
-- **disabled**: production map を生成しません。map disclosure は避けられますが、production stack の source-level symbolication を失い、debugging が難しくなります。
+Defjs は第二の OpenAPI 契約を生成したり同期したりしません。OpenAPI がすでに権威なら、それを保ち、アプリ境界で実行時検証を足します。新しいサービスなら、エンドポイント定義と Struct を直接のワイヤ契約にしてよいです — 第二の単一情報源は不要です。
 
-private map の access と retention は他の debugging artifact と同様に制限してください。relative path だけでは confidentiality boundary になりません。
+`withOpenTelemetryServer(...)` はクライアントに **アウトバウンド** の Defjs 計測を足します。OpenTelemetry SDK の初期化はしません。`tracer` は必須、`meter` は任意、3 トランスポートはデフォルト有効、WebSocket の query 伝播はデフォルト無効です。operation 名は静的で低カーディナリティに保ってください。伝播・フック・URL・ヘッダー・ペイロード・cause・保持期間は、機微になり得るものとして見直してください。
 
-## OpenAPI の境界
+ソースマップはデプロイの判断であり、Defjs の振る舞いではありません。`sourcesContent` 付きの公開マップはソースを晒します。隠したマップでもソースとパスは入ります。マップを無効にするとソースレベルでのシンボル化は失われます。非公開マップは、明示的なアクセスと保持ルール付きの、デプロイ可能なデバッグ成果物として扱ってください。
 
-authoritative contract source を 1 つ選びます。既存の OpenAPI workflow がある組織は、それを維持して mature generator と明示的な runtime validator を application boundary で使ってください。生成された TypeScript type だけでは runtime response を検証できません。greenfield Defjs service では Defjs Struct と endpoint definition で wire contract を直接定義します。
+## 関連レシピ
 
-Core に OpenAPI generator/exporter を追加したり、OpenAPI と Defjs を同期対象の 2 source として維持したりしません。dual-source drift より、明確な boundary で既存 tool を組み合わせる方が安全です。
-
-## 関連リファレンス
-
-- [Client](/ja-JP/core/client) — オプションの合成とクライアントスコープ
-- [Errors](/ja-JP/core/errors) — タプルで返る失敗とレスポンスの有無
-- [SSE](/ja-JP/core/sse) と [WebSocket](/ja-JP/core/web-socket) — 論理ハンドル、物理接続試行、終端クローズ
+- [宣言済み 404 付きの GET](../recipes/get-declared-404.md)
+- [ローカル Fetch ハンドルでテストする](../recipes/test-with-handle.md)

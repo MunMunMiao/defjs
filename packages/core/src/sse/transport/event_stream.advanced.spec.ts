@@ -105,8 +105,9 @@ describe('fetchEventStream advanced', () => {
       .mockResolvedValueOnce(new Response('id: 1\nevent: message\ndata: ok\n\n', { headers: { 'content-type': 'text/event-stream' } }))
 
     const stream = await fetchEventStream(createRequest('/events'), {
-      fetch: fetch as typeof globalThis.fetch,
+      fetch,
       onerror,
+      reconnect: { attempts: 3, delayMs: 0 },
       retryInterval: 1,
     })
 
@@ -595,10 +596,11 @@ describe('fetchEventStream advanced', () => {
 
     await expect(
       fetchEventStream(request, {
-        fetch: fetch as typeof globalThis.fetch,
+        fetch,
         onerror() {
           return 1000
         },
+        reconnect: { attempts: 3, delayMs: 1000 },
       }),
     ).rejects.toBe(ERR_ABORTED)
   })
@@ -641,6 +643,107 @@ describe('fetchEventStream advanced', () => {
       expect(cancel).toHaveBeenCalledWith('stop')
     })
     await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+  })
+
+  test.each([
+    ['an Error', new Error('close failed')],
+    ['undefined', undefined],
+  ])('should finish teardown before rejecting a synchronous close throw of %s', async (_label, closeError) => {
+    const cancel = vi.fn()
+    const body = new ReadableStream<Uint8Array>({
+      pull() {
+        return new Promise<void>(() => undefined)
+      },
+      cancel,
+    })
+    const stream = await fetchEventStream(createRequest('/events'), {
+      fetch: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+    })
+    const close = vi.fn(() => {
+      throw closeError
+    })
+    stream.close = close
+
+    let first: PromiseLike<void> | undefined
+    expect(() => {
+      first = stream[Symbol.asyncDispose]()
+    }).not.toThrow()
+    expect(close).not.toHaveBeenCalled()
+    if (!first) {
+      throw new Error('Expected disposal promise')
+    }
+
+    const second = stream[Symbol.asyncDispose]()
+    expect(second).toBe(first)
+    await expect(Promise.resolve(first)).rejects.toBe(closeError)
+    expect(close).toHaveBeenCalledOnce()
+    await expect(settleWithin(stream.closed)).resolves.toMatchObject({ code: 'aborted' })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+  })
+
+  test('should dispose an active stream once without waiting for a stuck provider cancel', async () => {
+    const pull = vi.fn(() => new Promise<void>(() => undefined))
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const body = new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 })
+    const fetch = vi.fn(async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }))
+    const stream = await fetchEventStream(createRequest('/events'), {
+      fetch,
+      reconnect: { attempts: 3, delayMs: 0 },
+    })
+    const close = vi.fn(stream.close.bind(stream))
+    stream.close = close
+    await vi.waitFor(() => expect(pull).toHaveBeenCalledOnce())
+
+    let first: PromiseLike<void> | undefined
+    expect(() => {
+      first = stream[Symbol.asyncDispose]()
+    }).not.toThrow()
+    expect(close).not.toHaveBeenCalled()
+    if (!first) {
+      throw new Error('Expected disposal promise')
+    }
+
+    const second = stream[Symbol.asyncDispose]()
+    expect(second).toBe(first)
+    await expect(settleWithin(Promise.resolve(first))).resolves.toBeUndefined()
+
+    expect(close).toHaveBeenCalledOnce()
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+
+    const pullCount = pull.mock.calls.length
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(pull).toHaveBeenCalledTimes(pullCount)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  test('should preserve an error terminal state when disposed', async () => {
+    const failure = new Error('provider failed')
+    let sourceController: ReadableStreamDefaultController<Uint8Array> | undefined
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        sourceController = controller
+      },
+    })
+    const stream = await fetchEventStream(createRequest('/events'), {
+      fetch: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+    })
+
+    sourceController?.error(failure)
+    const terminal = await settleWithin(stream.closed)
+    expect(terminal).toEqual({
+      code: 'error',
+      errorCode: 'TRANSPORT_ERROR',
+      cause: failure,
+      reason: failure.message,
+    })
+
+    await expect(settleWithin(Promise.resolve(stream[Symbol.asyncDispose]()))).resolves.toBeUndefined()
+    await expect(stream.closed).resolves.toBe(terminal)
+    await expect(stream[Symbol.asyncIterator]().next()).rejects.toBe(failure)
   })
 
   test('should close and cancel the active response when iteration returns early', async () => {
@@ -907,7 +1010,11 @@ describe('fetchEventStream advanced', () => {
         ),
       ) as unknown as typeof globalThis.fetch
 
-    const stream = await fetchEventStream(createRequest('/sse/basic'), { fetch: mockFetch, retryInterval: 1 })
+    const stream = await fetchEventStream(createRequest('/sse/basic'), {
+      fetch: mockFetch,
+      reconnect: { attempts: 3, delayMs: 0 },
+      retryInterval: 1,
+    })
 
     const events: EventStreamMessage[] = []
     for await (const event of stream) {
@@ -935,6 +1042,19 @@ describe('fetchEventStream advanced', () => {
       events.push(event as EventStreamMessage)
     }
     expect(events.length).toBeGreaterThan(0)
+  })
+
+  test('should not retry when reconnect is omitted', async () => {
+    let fetchCount = 0
+    const mockFetch = vi.fn(async () => {
+      fetchCount += 1
+      throw new Error('network error')
+    }) as unknown as typeof fetch
+
+    const request = { baseEndpoint: 'https://example.com', endpoint: '/fail', method: 'GET' }
+
+    await expect(fetchEventStream(request, { fetch: mockFetch })).rejects.toThrow('network error')
+    expect(fetchCount).toBe(1)
   })
 
   test('should not retry when reconnect.attempts = 0', async () => {
@@ -1099,7 +1219,7 @@ describe('fetchEventStream advanced', () => {
           reconnect: { attempts: 1, delayMs: Infinity },
         },
       ),
-    ).rejects.toThrow('SSE retry delay must be finite')
+    ).rejects.toThrow('Reconnect delay must be finite')
 
     expect(mockFetch).toHaveBeenCalledTimes(1)
   })
@@ -1182,11 +1302,27 @@ describe('fetchEventStream advanced', () => {
     await expect(
       fetchEventStream(request, {
         fetch: mockFetch,
-        reconnect: { attempts: 1, delayMs: 1, jitter: 10 },
+        reconnect: { attempts: 1, delayMs: 1, jitter: 0.5 },
       }),
     ).rejects.toThrow()
 
     expect(fetchCount).toBe(2)
+  })
+
+  test('should reject out-of-range SSE reconnect jitter', async () => {
+    const mockFetch = vi.fn(async () => {
+      throw new Error('network error')
+    }) as unknown as typeof fetch
+
+    await expect(
+      fetchEventStream(
+        { baseEndpoint: 'https://example.com', endpoint: '/fail', method: 'GET' },
+        {
+          fetch: mockFetch,
+          reconnect: { attempts: 1, delayMs: 1, jitter: 1.1 },
+        },
+      ),
+    ).rejects.toThrow('SSE reconnect jitter is out of range')
   })
 
   test('should enforce maxBufferSize in parser', async () => {

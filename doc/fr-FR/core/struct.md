@@ -1,16 +1,16 @@
 ---
 title: Struct
-description: Décodez strictement les données structurées et gérez les entrées obligatoires, facultatives, les alias et StructError.
+description: Modélise les formes de requête et de réponse, parse les unknowns, et encode les corps wire.
 ---
 
 # Struct
 
-Les Structs décrivent le décodage structurel strict et l'encodage du format d'échange. Une valeur obligatoire absente ou invalide échoue au lieu de produire une valeur par défaut.
+Modélise une requête (et ses réponses) en Structs. Tu obtiens des types TypeScript via `Infer`, et des checks runtime via `struct.parse(...)` — pas de throw, tuple erreur en premier.
 
-Utilisez la façade `struct` et `Infer<T>` depuis l'entrée racine :
+## Basic Setup
 
-```typescript
-import { struct, type Infer, type StructInput } from '@defjs/core'
+```typescript twoslash
+import { defineRequest, struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -19,50 +19,43 @@ const User = struct.object({
 })
 
 type User = Infer<typeof User>
-// { id: number; name: string; active: boolean }
+
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({
+    body: struct.json(
+      struct.object({
+        name: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  output: { 201: User },
+})
+
+const [parseError, user] = struct.parse(User, { id: 7, name: 'Ada', active: true })
+if (!parseError) console.log(user.name)
+void createUser
 ```
 
-## Constructeurs
+La sortie parsée ne garde que les champs déclarés. Champs requis manquants, primitives fausses, mauvaises valeurs nested, mauvaise longueur de tuple, ou `null` interdit → `StructError`, pas de valeur partielle. Les Structs sont immutables ; `.optional()` et amis renvoient un nouveau Struct.
 
-Parmi les constructeurs courants :
+## Requis, optionnel, null
 
-```typescript
-struct.string()
-struct.number()
-struct.boolean()
-struct.bigint()
-struct.date()
-struct.null()
-struct.literal('ready')
-struct.enum(['pending', 'done'])
-struct.array(struct.string())
-struct.tuple([struct.string(), struct.number()])
-struct.object({ id: struct.number() })
-struct.record(struct.number())
-struct.or(struct.string(), struct.number())
-struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
-struct.discriminatedUnion('kind', [
-  struct.object({ kind: struct.literal('click'), x: struct.number() }),
-  struct.object({ kind: struct.literal('key'), key: struct.string() }),
-])
-```
+Présence et nullabilité sont séparées :
 
-`struct.any()` et `struct.unknown()` acceptent toute valeur sauf `null` et `undefined` ; les mêmes modificateurs permettent de les autoriser explicitement. Les constructeurs binaires sont `struct.blob()`, `struct.file()` et `struct.arrayBuffer()`.
+| Déclaration                  | Manquant / `undefined`                 | `null`  | Valeur valide              |
+| ---------------------------- | -------------------------------------- | ------- | -------------------------- |
+| `struct.string()`            | Rejette                                | Rejette | Accepte string             |
+| `struct.string().optional()` | Accepte ; omet le champ d’objet absent | Rejette | Accepte string             |
+| `struct.string().null()`     | Rejette                                | Accepte | Accepte string             |
+| `struct.string().nullish()`  | Accepte ; omet le champ d’objet absent | Accepte | Accepte string             |
+| `struct.null()`              | Rejette                                | Accepte | Rejette les autres valeurs |
 
-Chaque Struct accepte ces modificateurs :
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-struct.string().optional()
-struct.string().null()
-struct.string().nullish()
-struct.string().alias('wire_name')
-```
-
-## Décodage strict
-
-Utilisez `struct.parse(schema, input)` pour décoder hors d'une commande. Il renvoie un tuple error-first fixe :
-
-```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
@@ -70,192 +63,191 @@ const Profile = struct.object({
   note: struct.string().nullish(),
 })
 
-const [error, profile] = struct.parse(Profile, input)
-
-if (error) {
-  // profile is undefined
-  return
-}
+const [error, profile] = struct.parse(Profile, {
+  name: 'Ada',
+  biography: null,
+  note: undefined,
+})
+if (error) throw error
+console.log(profile.name, profile.nickname, profile.biography, profile.note)
 ```
 
-```typescript
-type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
-```
+À la racine, optionnel peut être `undefined`. Dans un objet, les champs optional/nullish omis restent absents. Dans `struct.request(...)`, une section entièrement optionnelle peut être omise (normalisée en `{}`) ; une section avec un champ requis reste requise. Un wrapper body présent → body requis, même si les champs internes sont optionnels.
 
-Un seul contrat s'applique aux modificateurs : une valeur absente ou `undefined` n'est acceptée qu'avec `.optional()` ou `.nullish()` ; un `null` explicite qu'avec `.null()` ou `.nullish()`. `.null()` ne rend pas la valeur facultative.
+## Wrappers de body de requête
 
-Les champs optional et nullish absents sont omis de l'objet de sortie ; au niveau racine, ils deviennent `undefined`. Les clés inconnues sont supprimées. Les objets et records décodés ont un prototype nul.
+`struct.request(...)` sépare `path`, `query`, `headers` et `body`. Les bodies ont besoin d’un codec explicite :
 
-L'égalité profonde stricte de Node compare les prototypes. Un objet analysé par Struct n'est donc pas profondément égal à un littéral possédant les mêmes champs. Vérifiez explicitement cette limite ou créez une copie superficielle uniquement dans l'assertion :
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-```typescript
-import assert from 'node:assert/strict'
-
-const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
-assert.equal(error, null)
-assert.equal(Object.getPrototypeOf(profile), null)
-assert.deepEqual({ ...profile }, { name: 'Ada' })
-```
-
-Le spread est une copie superficielle réservée à cette assertion. Les objets Struct imbriqués ont eux aussi un prototype nul. N'ajoutez pas une normalisation ou un clonage global au chemin de production uniquement pour satisfaire un matcher de test.
-
-Avec `exactOptionalPropertyTypes`, les entrées d'objet inférées utilisent des propriétés facultatives exactes. Omettez une clé optional ou nullish au lieu de lui affecter `undefined` :
-
-```typescript
-const OptionalProfile = struct.object({
-  nickname: struct.string().optional(),
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/organizations/:organizationId/users',
+  input: struct.request({
+    path: struct.object({ organizationId: struct.string() }),
+    query: struct.object({ notify: struct.boolean().optional() }),
+    headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
+    body: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  }),
 })
 
-type OptionalProfileInput = StructInput<typeof OptionalProfile>
-
-const omitted: OptionalProfileInput = {}
-// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
-const explicitUndefined: OptionalProfileInput = { nickname: undefined }
-```
-
-À l'exécution, `struct.parse` accepte par précaution un `undefined` explicite provenant d'une entrée inconnue et omet la clé. Cette normalisation n'élargit pas le type d'entrée inféré statiquement pour l'appelant.
-
-## Entrées d'objet et de requête obligatoires
-
-Les propriétés d'objet sont obligatoires en TypeScript et à l'exécution, sauf si leur Struct est optional ou nullish. Chaque section déclarée dans `struct.request(...)` est elle aussi obligatoire ; une section non déclarée n'appartient pas au type d'entrée.
-
-```typescript
-const Input = struct.request({
-  path: struct.object({ id: struct.string() }),
-  query: struct.object({ page: struct.number().optional() }),
+const command = createUser({
+  path: { organizationId: 'acme' },
+  query: { notify: true },
+  headers: { requestId: 'request-42' },
+  body: { displayName: 'Ada' },
 })
-
-// { path: { id: string }; query: { page?: number } }
+void command
 ```
 
-Omettre `query` est une erreur ; `query: {}` est valide. Un champ obligatoire absent, un `undefined` explicite, un `null` interdit ou un mauvais type d'exécution fait échouer tout le décodage sans valeur partielle.
+| Wrapper                    | Valeur parsée     | Frontière wire                                                       |
+| -------------------------- | ----------------- | -------------------------------------------------------------------- |
+| `struct.json(inner)`       | Valeur de `inner` | Texte JSON, `application/json`                                       |
+| `struct.text()`            | `string`          | Texte, `text/plain;charset=UTF-8`                                    |
+| `struct.urlencoded(shape)` | Objet de la shape | `URLSearchParams`, `application/x-www-form-urlencoded;charset=UTF-8` |
+| `struct.formData(shape)`   | Objet de la shape | `FormData` ; la plateforme pose le boundary multipart                |
+| `struct.blob()`            | `Blob`            | Type du Blob ou `application/octet-stream`                           |
+| `struct.file()`            | `File`            | `File` natif (name + type)                                           |
+| `struct.arrayBuffer()`     | `ArrayBuffer`     | Buffer, `application/octet-stream`                                   |
 
-Les Structs composées s'arrêtent au premier issue déterminé. La longueur d'un tuple doit correspondre exactement à sa déclaration. `struct.or(...)` continue d'essayer les alternatives dans l'ordre et `struct.discriminatedUnion(...)` de sélectionner une branche déclarée.
-
-Lorsque les champs discriminateurs utilisent des alias, `struct.discriminatedUnion(...)` lit le premier discriminateur wire réellement présent, dans l'ordre de déclaration des options. Une fois une branche sélectionnée, il ne lit aucun alias d'une option ultérieure.
-
-Les Structs imposent la structure déclarée, pas les règles applicatives d'autorisation, de plage, de montant, de format ou de transition d'état. Aucun DSL public de raffinement, de plage ou de format n'existe.
-
-`struct.number()` accepte `Infinity` et `-Infinity` ; parmi les nombres JavaScript, seul `NaN` est exclu. Contrôlez la finitude, la plage et le domaine dans le code applicatif avant de créer une commande. Ne placez pas ces contrôles dans `build`, car celui-ci reçoit une projection liée au schéma et non les valeurs de l'appelant à l'exécution.
-
-## Corps de requête
-
-`struct.request(...)` regroupe les sections qui correspondent directement au format d'échange :
-
-```typescript
-const input = struct.request({
-  path: struct.object({ organizationId: struct.string() }),
-  query: struct.object({ includeDisabled: struct.boolean().optional() }),
-  headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
-  body: struct.json(
-    struct.object({
-      displayName: struct.string().alias('display_name'),
-    }),
-  ),
-})
-```
-
-Les formats de `body` disponibles sont :
-
-| Struct                     | Encodage          |
-| -------------------------- | ----------------- |
-| `struct.json(inner)`       | JSON              |
-| `struct.text()`            | Texte brut        |
-| `struct.urlencoded(shape)` | `URLSearchParams` |
-| `struct.formData(shape)`   | `FormData`        |
-| `struct.blob()`            | `Blob`            |
-| `struct.arrayBuffer()`     | `ArrayBuffer`     |
-
-Consultez [Commandes](/fr-FR/core/commands) pour la construction automatique et les restrictions propres aux transports.
+`struct.file()` est un Struct de valeur pour les champs de formulaire — pas un `request.body` autonome. Les bodies binaires sont `struct.blob()` et `struct.arrayBuffer()`. Les Structs object/array/primitive nus ne sont pas valides comme `request.body`. SSE rejette `body`. L’entrée de requête WebSocket rejette `body` et `headers`.
 
 ## Alias
 
-`.alias(name)` modifie la clé du format d'échange sans changer la clé TypeScript logique.
+`.alias(...)` sépare les noms logiques des noms wire. `struct.parse(...)` utilise les clés logiques. Les codecs JSON et de requête plats encodent les alias ; le décodage de réponse JSON mappe les clés wire vers les champs logiques.
 
-```typescript
-const UserBody = struct.object({
-  id: struct.number().alias('user_id'),
+```typescript twoslash
+import { struct } from '@defjs/core'
+
+const User = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
-if (logicalError) throw logicalError
+const [parseError, user] = struct.parse(User, { displayName: 'Ada' })
+if (parseError) throw parseError
+console.log(user.displayName)
 
-const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
-if (!wireKeyError) throw new Error('struct.parse must read logical keys')
+const [wireError] = struct.parse(User, { display_name: 'Ada' })
+console.log(wireError?.issues[0]?.path)
 ```
 
-`logicalUser` utilise `{ id, displayName }` ; `wireKeyError` signale l'absence de la clé logique `id`. Le `struct.parse` public lit uniquement les valeurs logiques et ne traite pas les clés d'échange comme entrée d'un parse autonome.
+| Frontière                                      | Champ                        |
+| ---------------------------------------------- | ---------------------------- |
+| `struct.parse(User, ...)`                      | Logique `displayName`        |
+| Encodage de requête JSON                       | Wire `display_name`          |
+| Décodage de réponse JSON                       | Wire → logique `displayName` |
+| Encodage query, header, URL-encoded, multipart | Alias wire comme clé         |
 
-Seuls l'encodage et le décodage JSON du transport appliquent les alias d'échange :
+Les alias marchent sur les champs nested, arrays, objects, unions et discriminators. Garde les noms logiques dans le code app ; mets le naming externe dans le Struct.
 
-```typescript
-import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+## Échecs de parse
 
-let requestWireBody: unknown
-const echoUser = defineRequest({
-  method: 'POST',
-  path: '/users',
-  input: struct.request({ body: struct.json(UserBody) }),
-  output: { 200: UserBody },
-})
-const client = createClient(
-  withEndpoint('https://example.test'),
-  withHTTPHandle(async (input, init) => {
-    requestWireBody = await new Request(input, init).json()
-    return Response.json({ user_id: 1, display_name: 'Ada' })
-  }),
-)
+`struct.parse(...)` renvoie `[null, value]` ou `[StructError, undefined]`. `StructError` étend `Error` et expose `issues`, plus `format()`, `flatten()` et `prettify()`.
 
-const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
-if (requestError) throw requestError
-```
+```typescript twoslash
+import { struct, StructError } from '@defjs/core'
 
-`requestWireBody` vaut `{ user_id, display_name }`, tandis que `responseUser` redevient `{ id, displayName }`. La construction automatique applique aussi les alias aux clés sortantes de path, query, headers, URL-encoded et multipart ; les clés cibles explicites d'une projection `build` personnalisée restent inchangées.
+const User = struct.object({ id: struct.number(), name: struct.string() })
+const [error, value] = struct.parse(User, { id: 'not-a-number' })
 
-## `StructError`
-
-Un échec de décodage structurel produit une `StructError`, souvent disponible dans `RequestError.cause`.
-
-```typescript
-import { StructError, type RequestError, type StructIssue } from '@defjs/core'
-
-export function structIssues(error: RequestError): readonly StructIssue[] {
-  if (error.kind === 'definition' && error.cause instanceof StructError) {
-    return error.cause.issues
-  }
-  return []
+if (error) {
+  console.log(error instanceof StructError)
+  console.log(error.issues[0]?.code, error.issues[0]?.path)
+  console.log(error.flatten().fieldErrors)
+  console.log(error.format(), error.prettify())
 }
+void value
 ```
 
-Une `StructError` expose :
+Un `StructIssue` a `code`, `expected`, `message`, `path` et `received`. Les issues peuvent contenir de l’entrée non fiable — masque avant de journaliser ou renvoyer. `struct.parse(..., { errorMap })` rewrites issue messages for that call only.
 
-- `issues`, le tableau `StructIssue[]` d'origine ;
-- `format()`, une arborescence de messages ;
-- `flatten()`, les messages de formulaire et de champs au premier niveau ;
-- `prettify()`, une chaîne multiligne lisible.
+La validation Struct est structurelle seulement. Pas de règles publiques de range, format, refinement, auth ou transition d’état. Fais ces checks avant de construire une commande.
 
-`StructIssue.received` peut contenir des données d'entrée ou de réponse. Les messages par défaut peuvent en inclure une représentation. Les chemins et les clés formatées peuvent aussi provenir de données non fiables, notamment pour les records. Masquez ou contrôlez `issues`, les messages, `format()`, `flatten()` et `prettify()` avant de les journaliser ou de les renvoyer.
+## Référence
 
-## Messages d'erreur globaux
+Constructeurs publics sur `@defjs/core` (les internals ne sont pas des API facade) :
 
-`setErrorMap(...)` remplace la génération des messages dans tout le processus :
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-import { setErrorMap } from '@defjs/core'
+const Any = struct.any()
+const ArrayOfStrings = struct.array(struct.string())
+const Bytes = struct.arrayBuffer()
+const BigIntValue = struct.bigint()
+const BlobValue = struct.blob()
+const BooleanValue = struct.boolean()
+const DateValue = struct.date()
+const Discriminated = struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('created'), id: struct.number() }),
+  struct.object({ kind: struct.literal('deleted'), id: struct.number() }),
+])
+const Status = struct.enum(['draft', 'published'])
+const FileValue = struct.file()
+const Form = struct.formData({ file: struct.file() })
+const Combined = struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
+const JsonBody = struct.json(struct.object({ ok: struct.boolean() }))
+const Literal = struct.literal('ready')
+const NullValue = struct.null()
+const NumberValue = struct.number()
+const ObjectValue = struct.object({ id: struct.number() })
+const Union = struct.or(struct.string(), struct.number())
+const RecordValue = struct.record(struct.number())
+const Request = struct.request({ path: struct.object({ id: struct.number() }) })
+const StringValue = struct.string()
+const TextBody = struct.text()
+const Tuple = struct.tuple([struct.string(), struct.number()])
+const Unknown = struct.unknown()
+const FormUrlEncoded = struct.urlencoded({ name: struct.string() })
 
-setErrorMap((issue) => {
-  if (issue.code === 'invalid_type') {
-    return `Invalid value at ${issue.path.join('.')}`
-  }
-  return undefined
-})
+void [Any, ArrayOfStrings, Bytes, BigIntValue, BlobValue, BooleanValue, DateValue, Discriminated, Status, FileValue, Form, Combined]
+void [
+  JsonBody,
+  Literal,
+  NullValue,
+  NumberValue,
+  ObjectValue,
+  Union,
+  RecordValue,
+  Request,
+  StringValue,
+  TextBody,
+  Tuple,
+  Unknown,
+  FormUrlEncoded,
+]
 ```
 
-Cette fonction agit globalement, pas au niveau d'un client. La modifier affecte les futurs `StructIssue` de tous les clients dans le même environnement JavaScript. Ne capturez aucun état propre à une requête dans ce callback et coordonnez son installation dans les applications qui partagent un processus.
+| Constructeur                     | Entrée                                                          | Sortie inférée                  |
+| -------------------------------- | --------------------------------------------------------------- | ------------------------------- |
+| `struct.number()`                | Nombre autre que `NaN`                                          | `number`, y compris ±`Infinity` |
+| `struct.date()`                  | `Date`, number, ou chaîne de date                               | `Date` valide                   |
+| `struct.bigint()`                | `bigint` ou string acceptée par `BigInt(...)`                   | `bigint`                        |
+| `struct.enum(...)`               | Membre string ou number déclaré                                 | Cette union de littéraux        |
+| `struct.discriminatedUnion(...)` | Objet avec discriminateur littéral requis                       | Branche d’objet sélectionnée    |
+| `struct.or(...)`                 | Première branche correspondante ; l’encodage checke l’ambiguïté | Union des sorties de branches   |
+| `struct.intersection(...)`       | Valeurs acceptées par chaque membre                             | Intersection des sorties        |
+| `struct.record(value)`           | Objet plain dont les valeurs matchent `value`                   | Record des valeurs parsées      |
+| `struct.tuple(items)`            | Tableau de exactement la longueur déclarée                      | Tuple de longueur fixe          |
 
-## Étapes suivantes
+Chaque Struct supporte `.alias(name)`, `.optional()`, `.null()` et `.nullish()`. `struct.discriminatedUnion` a besoin d’options objet avec un discriminateur littéral requis et rejette les doublons.
 
-- [Commandes](/fr-FR/core/commands) projette les champs Struct vers les requêtes et les messages.
-- [Erreurs](/fr-FR/core/errors) explique comment les échecs Struct apparaissent dans les tuples d'exécution.
-- [HTTP](/fr-FR/core/http) couvre le décodage des réponses et les erreurs de représentation.
+Importe `struct`, `Infer`, `Struct`, `StructError` et les types publics liés depuis `@defjs/core`. Utilise `struct.parse(...)` comme parser. N’importe pas `createObjectStruct`, les symboles de définition, les internals de codec, ou `packages/core/src`.
+
+Non-promesses de la facade :
+
+- Les sorties object/record utilisent un prototype null — n’assume pas les méthodes `Object.prototype`.
+- Les clés d’objet inconnues sont droppées.
+- `struct.number()` rejette `NaN`, accepte les infinis.
+- `struct.or(...)` essaie les branches dans l’ordre ; rejette les encodages ambigus quand les branches divergent.
+- `struct.intersection(...)` parse les membres dans l’ordre de déclaration.
+- Un Struct valide une frontière ; il ne met pas en cache, n’autorise pas, et ne possède pas une ressource de transport.
+
+## Recettes liées
+
+- [POST JSON](../recipes/post-json.md)
+- [GET avec un 404 déclaré](../recipes/get-declared-404.md)

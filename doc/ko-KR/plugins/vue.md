@@ -1,18 +1,21 @@
 ---
 title: Vue
-description: Vue injection으로 Defjs 클라이언트를 공유하고 API에 맞게 설정하며 SSR 요청 범위와 트랜스포트 정리를 관리합니다.
+description: 플러그인을 설치하고, 클라이언트를 제공하고, 사용자를 fetch하며, 반응형 변경 시 abort 해요.
 ---
 
-# `@defjs/vue`
+# Vue
 
-이 패키지는 `@defjs/core`용 얇은 injection adapter입니다. `createClientPlugin(client)`는 애플리케이션이 만든 client를 제공하고, `injectClient()`는 가장 가까운 instance를 반환하며, `HTTP_CLIENT`는 native subtree override에 사용합니다. client factory, cache, retry, resource lifecycle은 추가하지 않습니다.
+기존 `@defjs/core` 클라이언트를 Vue에 연결해요. 플러그인, injection key, `injectClient()`를 받아요. 패키지는 클라이언트를 **만들지 않고**, 결과를 캐시하지 않으며, 명령을 재시도하지 않고, unmount 때 전송 리소스를 닫지도 않아요.
 
-## Plugin 설치
+## Basic Setup
 
-`@defjs/core`에서 client를 생성하고 구성한 뒤 그 동일한 instance용 plugin을 설치합니다.
+`@defjs/core`, `@defjs/vue`, Vue 3+를 설치하세요. ESM이고, Node에서 돌릴 때는 Node.js 22+예요.
 
-```typescript
-// main.ts
+`bun add @defjs/core @defjs/vue vue`
+
+클라이언트를 만들고 플러그인을 설치한 뒤, 변경 시 abort로 fetch 해요.
+
+```typescript twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
@@ -25,155 +28,176 @@ app.use(createClientPlugin(client))
 app.mount('#app')
 ```
 
-plugin은 전달된 instance만 제공합니다. client를 생성, 복제, 교체 또는 dispose하지 않습니다.
-
-## 가장 가까운 클라이언트 inject
-
-`injectClient()`는 `setup`, `<script setup>` 또는 활성 injection context 안에서 호출합니다. `HTTP_CLIENT`가 없으면 오류를 던지며 Vue의 일반적인 가장 가까운 provider 규칙을 따릅니다.
-
-subtree override에는 공개 key와 Vue native `provide`를 사용합니다.
-
-```vue
+```vue twoslash
 <script setup lang="ts">
-import { createClient, withEndpoint } from '@defjs/core'
-import { HTTP_CLIENT } from '@defjs/vue'
-import { provide } from 'vue'
-
-const scopedClient = createClient(withEndpoint('https://preview.example.com'))
-provide(HTTP_CLIENT, scopedClient)
-</script>
-
-<template>
-  <slot />
-</template>
-```
-
-## Interceptor factory
-
-interceptor value를 만들고 core의 `withInterceptors(...)`로 조합한 뒤 plugin을 설치합니다.
-
-```typescript
-import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
-import { createClientPlugin } from '@defjs/vue'
-
-const auth = createHttpInterceptor((request, next) => {
-  const headers = new Headers(request.headers)
-  headers.set('Authorization', `Bearer ${readAccessToken()}`)
-  return next({ ...request, headers })
-})
-
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
-app.use(createClientPlugin(client))
-```
-
-factory가 request별 credential을 캡처한다면 해당 client를 만드는 request boundary 안에서 호출하세요.
-
-## 입력 변화에 반응하기
-
-HTTP 작업을 그 작업을 시작한 reactive 값에 연결하세요. `onMounted`만 사용하면 최초 prop만 읽습니다. `watch`와 cleanup을 함께 사용하면 대체된 작업을 취소할 수 있습니다.
-
-```vue
-<script setup lang="ts">
-import { ref, watch } from 'vue'
+import { defineRequest, struct } from '@defjs/core'
 import { injectClient } from '@defjs/vue'
-import { getUser } from './api'
+import { ref, watch } from 'vue'
 
 const props = defineProps<{ id: number }>()
 const client = injectClient()
-const name = ref('')
-const errorMessage = ref('')
+const name = ref('Loading...')
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
 
 watch(
   () => props.id,
   (id, _previousId, onCleanup) => {
-    const abort = new AbortController()
-    let current = true
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
 
-    onCleanup(() => {
-      current = false
-      abort.abort()
+    void client.execute(getUser({ path: { id } }), { signal: controller.signal }).then(([error, user]) => {
+      if (controller.signal.aborted) return
+      name.value = error ? 'Unable to load user.' : user.name
     })
-
-    void client
-      .execute(getUser({ path: { id } }), { signal: abort.signal })
-      .then(([error, user]) => {
-        if (!current) {
-          return
-        }
-
-        if (error) {
-          errorMessage.value = 'Unable to load user.'
-          return
-        }
-
-        errorMessage.value = ''
-        name.value = user.name
-      })
-      .catch(() => {
-        if (current) {
-          errorMessage.value = 'Unable to load user.'
-        }
-      })
   },
   { immediate: true },
 )
 </script>
 
 <template>
-  <p v-if="errorMessage">{{ errorMessage }}</p>
-  <p v-else>{{ name }}</p>
+  <span>{{ name }}</span>
 </template>
 ```
 
-import한 `getUser` 커맨드 빌더가 엔드포인트 계약을 소유합니다. 이 컴포넌트는 `id`가 바뀌거나 unmount될 때 취소하는 책임을 집니다.
+`createClientPlugin(client)`는 넘긴 객체를 그대로 제공해요. 복제나 dispose 훅은 없어요. core 옵션과 인터셉터는 클라이언트를 만들 때 설정하세요.
 
-## SSR 경계
+`onCleanup`은 watcher가 다시 돌거나 멈출 때 전에 실행돼요. 비동기 작업을 시작하기 전에 등록하세요. error-first 튜플은 애플리케이션 data로 남아요.
 
-browser app에는 browser-safe client를 설치할 수 있습니다. SSR에서는 server request boundary마다 별도 core client를 만들고 해당 app에 그 instance만 제공하세요. header, cookie, tenant state, credential을 request 사이에 공유하면 안 됩니다.
+## inject와 덮어쓰기
 
-```typescript
-// plugins/defjs.client.ts
+`injectClient()`는 가장 가까운 `HTTP_CLIENT` provider를 읽고, 없으면 throw해요. 하위 트리는 Vue의 `provide(HTTP_CLIENT, childClient)`로 덮어써요.
+
+```vue twoslash
+<script setup lang="ts">
 import { createClient, withEndpoint } from '@defjs/core'
-import { createClientPlugin } from '@defjs/vue'
+import { HTTP_CLIENT, injectClient } from '@defjs/vue'
+import { defineComponent, h, provide } from 'vue'
 
-export default defineNuxtPlugin((nuxtApp) => {
-  const client = createClient(withEndpoint(useRuntimeConfig().public.apiBase))
-  nuxtApp.vueApp.use(createClientPlugin(client))
+const childClient = createClient(withEndpoint('https://tenant.example.com'))
+const Child = defineComponent({
+  setup() {
+    const client = injectClient()
+    return () => h('span', client === childClient ? 'Child client is provided' : 'Unexpected client')
+  },
 })
+
+provide(HTTP_CLIENT, childClient)
+</script>
+
+<template>
+  <Child />
+</template>
 ```
 
-## 리소스 소유권
+가장 가까운 provider가 이겨요. 자손은 `childClient`를 받고, 하위 트리 밖 형제들은 앱 수준 클라이언트를 유지해요.
 
-plugin 설치나 unmount는 HTTP를 abort하거나 SSE 및 WebSocket resource를 닫지 않습니다. client를 만든 호출자가 이를 통해 시작한 모든 작업을 소유합니다.
+## watcher 밖에서 HTTP 작업 소유하기
 
-- 비동기 시작 전이나 동시에 cleanup을 등록합니다.
-- scope가 끝나면 시작 작업을 abort합니다.
-- dispose 후 뒤늦게 도착한 handle 또는 session을 닫습니다.
-- `stream` 또는 `session.receive`를 계속 소비합니다.
-- 활성 리소스에 `stream.close(...)` 또는 `session.close(...)`를 호출합니다.
-- WebSocket observer를 구독 해제합니다.
+watcher 밖에서 composable이나 컴포넌트가 시작한 작업은 `AbortController` + `onScopeDispose`를 쓰세요. 시작과 활성 작업을 abort하고, 반응형 상태를 할당하기 전에 signal을 확인하세요. 플러그인이나 injection 범위는 명령 소유자를 추론하지 않아요.
 
-유한 incoming queue를 읽지 않은 채 state listener만 붙이려고 WebSocket을 열지 마세요. overflow는 세션을 fatal 종료합니다. 전체 생명주기 규칙은 [SSE](/ko-KR/core/sse)와 [WebSocket](/ko-KR/core/web-socket)을 참고하세요.
+범위가 클라이언트를 소유하면 브라우저 전역 재사용을 위해 요청에 독립적으로 두세요. 헤더, 쿠키, 사용자, 테넌트, 자격 증명을 담으면 관련 앱/SSR 요청 경계에서 만들고 그 인스턴스를 거기서 제공하세요.
 
-## API
+## 실시간 범위 정리하기
 
-```typescript
-import type { Client } from '@defjs/core'
-import type { InjectionKey, Plugin } from 'vue'
+범위가 연결 중간에 사라져도 스트림이나 세션을 닫으세요. 시작을 abort하고, 늦게 도착한 핸들을 닫고, 단일 iterator를 소비하고, 종료 프로미스를 await 하세요.
 
-declare const HTTP_CLIENT: InjectionKey<Client>
-declare function createClientPlugin(client: Client): Plugin
-declare function injectClient(): Client
+```vue twoslash
+<script setup lang="ts">
+import { defineEventStream, struct, type EventStreamHandle } from '@defjs/core'
+import { injectClient } from '@defjs/vue'
+import { onScopeDispose, ref } from 'vue'
+
+const client = injectClient()
+const messages = ref<string[]>([])
+const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.string() },
+})
+
+const controller = new AbortController()
+let disposed = false
+let stream: EventStreamHandle<string> | undefined
+
+const stop = () => {
+  disposed = true
+  controller.abort()
+  stream?.close('scope-disposed')
+}
+onScopeDispose(stop)
+
+void (async () => {
+  const [error, nextStream] = await client.execute(notifications(), { signal: controller.signal })
+  if (error) return
+
+  stream = nextStream
+  if (disposed) {
+    nextStream.close('scope-disposed')
+    await nextStream.closed
+    return
+  }
+
+  try {
+    for await (const event of nextStream) {
+      messages.value.push(event.data)
+    }
+  } finally {
+    nextStream.close('scope-finished')
+    await nextStream.closed
+  }
+})()
+</script>
+
+<template>
+  <ul>
+    <li v-for="message in messages" :key="message">{{ message }}</li>
+  </ul>
+</template>
 ```
 
-전달된 client instance를 제공하는 Vue plugin을 만듭니다.
+WebSocket도 같은 순서예요 — 준비를 abort하고, 늦은 세션을 닫고, `session.receive`를 소비하고, `onStateChange` / `onRuntimeError`를 구독 해제하고, 닫고, `session.closed`를 await 하세요. 정리는 멱등하게 두세요. dispose와 iterator 완료가 만날 수 있어요.
 
-가장 가까운 client를 반환하며 없으면 오류를 던집니다.
+## SSR 범위
 
-native subtree provider용 공개 injection key입니다.
+`createClientPlugin(client)`는 Vue 앱 하나에 인스턴스 하나를 제공해요. 브라우저에서는 엔드포인트, 인터셉터, 담은 상태를 공유해도 안전할 때 공유하세요. SSR에서는 헤더, 쿠키, 사용자, 테넌트, 자격 증명이 다르면 요청마다 별도 클라이언트를 만들고 설치하세요.
 
-## 다음 단계
+앱 unmount, 플러그인 제거, 컴포넌트 범위 dispose는 HTTP를 abort하거나, SSE/WebSocket을 닫거나, 리스너를 구독 해제하거나, core 클라이언트를 dispose하지 **않아요**. 작업을 시작한 소유자가 끝내야 해요.
 
-- [클라이언트](/ko-KR/core/client)에서는 core 옵션 조합과 클라이언트 범위를 설명합니다.
-- [커맨드](/ko-KR/core/commands)에서는 엔드포인트 정의와 커맨드 입력을 설명합니다.
-- [인터셉터](/ko-KR/core/interceptors)에서는 core interceptor 계약을 설명합니다.
+## Reference
+
+`@defjs/vue`의 공개 export:
+
+```typescript twoslash
+import { HTTP_CLIENT, createClientPlugin, injectClient } from '@defjs/vue'
+
+type VueApi = {
+  HTTP_CLIENT: typeof HTTP_CLIENT
+  createClientPlugin: typeof createClientPlugin
+  injectClient: typeof injectClient
+}
+
+const api: VueApi = { HTTP_CLIENT, createClientPlugin, injectClient }
+void api
+```
+
+- `HTTP_CLIENT` — 네이티브 `provide` / `inject`용 `InjectionKey<Client>`
+- `createClientPlugin(client)` — 그 클라이언트를 제공하는 Vue `Plugin`
+- `injectClient()` — 가장 가까운 `Client`, 없으면 throw
+
+클라이언트와 옵션은 `@defjs/core`에서 만들어요. [클라이언트](../core/client.md), [명령](../core/commands.md), [인터셉터](../core/interceptors.md), [SSE](../core/sse.md), [WebSocket](../core/web-socket.md)을 보세요.
+
+## 관련 레시피
+
+- [선언된 404가 있는 GET](../recipes/get-declared-404.md)
+- [HTTP 호출 취소하기](../recipes/cancel-http.md)
+- [SSE 스트림 소비하기](../recipes/consume-sse.md)
+- [WebSocket 세션 열기](../recipes/websocket-session.md)

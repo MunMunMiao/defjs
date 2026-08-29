@@ -1,12 +1,9 @@
 import { describe, expect, test } from 'vitest'
-import { makeHttpContext, makeHttpContextToken } from '../internal/context'
 import { struct } from '../struct'
 import { createHttpRequest, resolveDefaultResponseType, resolveOutputStruct } from './request'
 
 describe('http request helpers', () => {
   test('should create http request with builder helpers params query headers and custom serializer', () => {
-    const traceToken = makeHttpContextToken(() => 'default-trace')
-    const configContext = makeHttpContext().set(traceToken, 'trace-from-config')
     const abort = new AbortController()
 
     const input = struct.request({
@@ -54,7 +51,6 @@ describe('http request helpers', () => {
       {
         abort: abort.signal,
         baseEndpoint: 'https://api.example.com/v1',
-        context: configContext,
         input,
         operation: 'users.update',
         queryParamsSerializer: (params) => `custom=${params.toString()}`,
@@ -73,7 +69,6 @@ describe('http request helpers', () => {
     expect(request.headers?.get('content-type')).toBe('application/json')
     expect(request.responseType).toBe('json')
     expect(request.withCredentials).toBe(true)
-    expect(request.context?.get(traceToken)).toBe('trace-from-config')
     expect(request.body).toBe('{"nickname":"Miao"}')
   })
 

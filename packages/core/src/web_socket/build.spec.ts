@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'vitest'
 import type { QueryParamsSerializer } from '../client/config'
 import type { RequestBuildHandler } from '../internal/request_builder'
+import { buildRequest } from '../internal/request_builder'
 import type { RequestBuildValue } from '../internal/request_values'
 import type { AnyStruct } from '../struct'
 import { struct } from '../struct'
-import { createWebSocketBuild, createWebSocketRequest, createWebSocketUrlFromRequest } from './build'
+import { createWebSocketRequest, createWebSocketUrlFromRequest } from './build'
 
 function unsupportedWebSocketBuild<TInput extends AnyStruct>(build: RequestBuildHandler<TInput>): RequestBuildHandler<TInput, 'webSocket'> {
   // Type boundary: this spec intentionally builds unsupported WebSocket output so the runtime guard rejects it.
@@ -108,7 +109,7 @@ describe('web socket build helpers', () => {
     )
   })
 
-  test('createWebSocketBuild should return built request', () => {
+  test('buildRequest should return a WebSocket request build', () => {
     const input = struct.request({
       path: struct.object({
         id: struct.number(),
@@ -117,22 +118,25 @@ describe('web socket build helpers', () => {
         search: struct.string(),
       }),
     })
-    const built = createWebSocketBuild({ path: { id: 1 }, query: { search: 'test' } }, undefined, input)
+    const built = buildRequest({ path: { id: 1 }, query: { search: 'test' } }, undefined, {
+      input,
+      transport: 'webSocket',
+    })
     expect(built.params).toEqual({ id: 1 })
     expect(built.query).toEqual({ search: 'test' })
   })
 
-  test('createWebSocketBuild should throw for unsupported build options', () => {
+  test('buildRequest should reject unsupported WebSocket build options', () => {
     const bodyInput = struct.request({
       body: struct.json(struct.object({ body: struct.boolean() })),
     })
     expect(() =>
-      createWebSocketBuild(
+      buildRequest(
         { body: { body: true } },
         unsupportedWebSocketBuild<typeof bodyInput>((request, view) => {
           request.setJson({ body: view.body.body })
         }),
-        bodyInput,
+        { input: bodyInput, transport: 'webSocket' },
       ),
     ).toThrow('WebSocket build() only supports path params and query params')
 
@@ -140,23 +144,23 @@ describe('web socket build helpers', () => {
       headers: struct.object({ 'x-auth': struct.string() }),
     })
     expect(() =>
-      createWebSocketBuild(
+      buildRequest(
         { headers: { 'x-auth': 'token' } },
         unsupportedWebSocketBuild<typeof headerInput>((request, view) => {
           request.setHeaders({ 'x-auth': view.headers['x-auth'] })
         }),
-        headerInput,
+        { input: headerInput, transport: 'webSocket' },
       ),
     ).toThrow('WebSocket build() only supports path params and query params')
   })
 
-  test('createWebSocketBuild rejects headers and body request sections', () => {
+  test('buildRequest rejects headers and body WebSocket request sections', () => {
     const withHeaders = struct.request({
       headers: struct.object({
         token: struct.string(),
       }),
     })
-    expect(() => createWebSocketBuild({ headers: { token: 'secret' } }, undefined, withHeaders)).toThrow(
+    expect(() => buildRequest({ headers: { token: 'secret' } }, undefined, { input: withHeaders, transport: 'webSocket' })).toThrow(
       'WebSocket request input does not support headers section',
     )
 
@@ -167,7 +171,7 @@ describe('web socket build helpers', () => {
         }),
       ),
     })
-    expect(() => createWebSocketBuild({ body: { id: '1' } }, undefined, withBody)).toThrow(
+    expect(() => buildRequest({ body: { id: '1' } }, undefined, { input: withBody, transport: 'webSocket' })).toThrow(
       'WebSocket request input does not support body section',
     )
   })

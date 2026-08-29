@@ -1,10 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { decodeObjectByAlias, encodeObjectByAlias, mapAliasedObjectFields } from './codec/common'
 import { decodeJson, encodeJson } from './codec/json'
-import { appendFormData, encodeMultipart } from './codec/multipart'
-import { encodeHeaders, encodePathParams, encodeQueryParams } from './codec/query'
-import { forEachEncodedWireField, writeRepeated } from './codec/flat'
-import { appendSearchParam, encodeUrlencoded, stringifySearchParamScalar } from './codec/urlencoded'
 import { encodeValue, matchesDefinition } from './encode'
 import { StructError } from './errors'
 import { struct as directStruct } from './facade'
@@ -35,6 +31,8 @@ describe('struct coverage boundary cases', () => {
     expect(isStruct(testStruct)).toBe(true)
     expect(typeof DEFINITION).toBe('symbol')
     expect(typeof OMIT).toBe('symbol')
+    expect(DEFINITION).toBe(Symbol.for('defjs.struct.definition'))
+    expect(OMIT).toBe(Symbol.for('defjs.struct.omit'))
 
     expect(parseValue(runtime(directStruct.string()), 'x', [], 'value')).toEqual({
       ok: true,
@@ -331,66 +329,6 @@ describe('struct coverage boundary cases', () => {
     expect(() => decodeObjectByAlias(discriminated, { kind: 'unknown' })).toThrow(StructError)
   })
 
-  test('multipart codec rejects invalid shapes and supports explicit append branches', () => {
-    expect(() => encodeMultipart(struct.string(), {})).toThrow('multipart encode expects object struct')
-
-    const form = new FormData()
-    appendFormData(form, 'skip', undefined)
-    expect(form.get('skip')).toBeNull()
-
-    appendFormData(form, 'item', ['a', 'b'])
-    expect(form.getAll('item')).toEqual(['a', 'b'])
-    expect(() => appendFormData(form, 'bad', { nested: true })).toThrow('multipart value for "bad" requires a scalar, Blob, or File')
-  })
-
-  test('query, header, path, and urlencoded codecs cover scalar and complex branches', () => {
-    const query = struct.object({
-      filter: struct.object({ page: struct.number() }).alias('filter'),
-      include: struct.boolean().alias('include'),
-      missing: struct.string(),
-      optional: struct.string().optional().alias('optional'),
-      tags: struct.array(struct.string()).alias('tag'),
-    })
-
-    expect(() => encodeQueryParams(struct.string(), {})).toThrow('query encode expects object struct')
-    expect(encodeQueryParams(query, { filter: { page: 1 }, include: true, tags: ['a', 'b'] }, { allowComplex: true })).toEqual({
-      filter: { page: 1 },
-      include: true,
-      tag: ['a', 'b'],
-    })
-    expect(encodeQueryParams(query, { filter: undefined, include: true, optional: undefined, tags: ['a'] })).toEqual({
-      include: true,
-      tag: ['a'],
-    })
-    expect(() => encodeQueryParams(query, { filter: { page: 1 }, include: true, tags: ['a'] })).toThrow(
-      'query value for "filter" requires queryParamsSerializer or a scalar value',
-    )
-
-    const pathParams = struct.object({
-      id: struct.string().alias('id'),
-    })
-    expect(encodePathParams(pathParams, { id: 'u_1' })).toEqual({ id: 'u_1' })
-
-    const headers = struct.object({
-      meta: struct.object({ page: struct.number() }).alias('x-meta'),
-    })
-    expect(() => encodeHeaders(headers, { meta: { page: 1 } })).toThrow('header value for "x-meta" requires a scalar value')
-
-    expect(() => encodeUrlencoded(struct.string(), {})).toThrow('urlencoded encode expects object struct')
-    const form = struct.object({
-      internal: struct.string(),
-      name: struct.string().alias('name'),
-      optional: struct.string().optional().alias('optional'),
-    })
-    expect(encodeUrlencoded(form, { name: 'Miao', optional: undefined }).toString()).toBe('name=Miao')
-
-    const params = new URLSearchParams()
-    appendSearchParam(params, 'skip', undefined)
-    expect(params.has('skip')).toBe(false)
-    expect(() => appendSearchParam(params, 'bad', { nested: true })).toThrow('urlencoded value for "bad" requires an explicit serializer')
-    expect(stringifySearchParamScalar(null)).toBe('null')
-  })
-
   test('guard helpers reject malformed struct metadata', () => {
     expect(isStruct({ [DEFINITION]: null })).toBe(false)
     expect(isStruct({ [DEFINITION]: { flags: { nullable: false, optional: false }, kind: 'not-real' } })).toBe(false)
@@ -420,22 +358,6 @@ describe('struct coverage boundary cases', () => {
     const duplicateShape = resolveObjectShape(duplicate, duplicateDefinition)
     expect(resolveObjectShape(duplicate, duplicateDefinition)).toBe(duplicateShape)
     expect(() => getStructFields(duplicate)).toThrow('duplicate wire key "same" for object fields "first" and "second"')
-
-    const pathFields: Array<{ key: string; value: unknown }> = []
-    forEachEncodedWireField(
-      struct.object({
-        keep: struct.string().alias('keep'),
-        skip: struct.string().optional().alias('skip'),
-      }),
-      { keep: 'yes' },
-      'path',
-      (field) => pathFields.push(field),
-    )
-    expect(pathFields).toEqual([{ key: 'keep', value: 'yes' }])
-
-    const repeated: unknown[] = []
-    writeRepeated('item', ['a', undefined, ['b']], (_key, value) => repeated.push(value))
-    expect(repeated).toEqual(['a', 'b'])
 
     const ambiguous = struct.discriminatedUnion('type', [
       struct.object({ type: struct.literal('a').alias('kind_a') }),
@@ -511,18 +433,5 @@ describe('struct coverage boundary cases', () => {
       },
     }
     expect(() => decodeObjectByAlias(unstableObjectStruct as never, {})).toThrow()
-
-    const undefinedEncodingString = makeStruct({
-      encode: () => undefined,
-      expected: 'string',
-      flags: DEFAULT_FLAGS,
-      is: (value): value is string => typeof value === 'string',
-      kind: 'string',
-    })
-    const encodedUndefinedFields: Array<{ key: string; value: unknown }> = []
-    forEachEncodedWireField(struct.object({ value: undefinedEncodingString }), { value: 'drops after child encode' }, 'query', (field) =>
-      encodedUndefinedFields.push(field),
-    )
-    expect(encodedUndefinedFields).toEqual([])
   })
 })

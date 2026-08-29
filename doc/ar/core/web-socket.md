@@ -1,300 +1,195 @@
 ---
 title: WebSocket
-description: عرّف message envelopes، وابدأ جلسات حية وراقبها، واستهلك العمل الوارد، واضبط reconnect وheartbeat الاختياريين، وأغلق الموارد التي تملكها.
+description: ابدأ جلسة JSON مُنوَّعة، استقبل وأرسل أغلفة، ثم أغلق وانتظر closed.
 ---
 
 # WebSocket
 
-تنشئ `defineWebSocket(...)` منشئ أمر لنقطة نهاية WebSocket تتبادل رسائل JSON.
+ابدأ → استقبل → أرسل → أغلق + `await session.closed`. أنت تملك إلغاء الاشتراك والتخلص. العملاء والمزوّدون والمعترضات لا تغلق الجلسات تلقائيًا.
 
-```typescript
+## الإعداد الأساسي
+
+```typescript twoslash
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient(withEndpoint('wss://api.example.com'))
-
-const chat = defineWebSocket({
+const client = createClient(withEndpoint('https://chat.example.com'))
+const room = defineWebSocket({
   maxIncomingQueueSize: 100,
-  maxOutgoingQueueSize: 20,
   path: '/chat',
-  incoming: {
-    message: struct.object({ userId: struct.number(), text: struct.string() }),
-    pong: struct.object({}),
-  },
-  outgoing: {
-    send: struct.object({ text: struct.string() }),
-    ping: struct.object({}),
-  },
+  incoming: { message: struct.object({ text: struct.string() }) },
+  outgoing: { send: struct.object({ text: struct.string() }) },
 })
+
+const [error, openedSession, startupConnection] = await client.execute(room())
+if (error) {
+  console.error(error.kind, error.code, startupConnection?.generation)
+} else {
+  await using session = openedSession
+  const unsubscribe = session.onRuntimeError((cause) => console.error('runtime', cause))
+  try {
+    session.send({ type: 'send', text: 'Hello' })
+    for await (const message of session.receive) {
+      console.log(message.type, message.text)
+      break
+    }
+  } finally {
+    unsubscribe()
+  }
+}
 ```
 
-## Message Envelope
+## غلاف JSON
 
-تستخدم كل رسالة كائن JSON يحتوي `type` غير فارغ من نوع string. يختار هذا النوع Struct من `incoming` أو `outgoing`.
+`defineWebSocket(...)` يصف نقطة نهاية رسائل JSON. خريطة `incoming` المطلوبة تختار Struct حسب نوع الرسالة؛ `outgoing` الاختياري يفعل الشيء نفسه لـ `session.send(...)`. كل رسالة على السلك كائن بـ `type` سلسلة غير فارغة.
 
-في payload كائني، يمكن أن تأتي الحقول بجانب `type`:
+حقول حمولة الكائن تجلس بجانب `type`. حمولات القيم القياسية والمصفوفات تستخدم حقل الغلاف `data`:
 
 ```json
 { "type": "message", "userId": 7, "text": "Hello" }
 ```
 
-إذا كانت الحمولة قيمة مفردة أو مصفوفة، فضعها داخل `data`:
-
 ```json
 { "type": "count", "data": 3 }
 ```
 
-المفتاحان `type` و`data` محجوزان للـ envelope. إذا احتوى object payload نفسه على حقل `data`، فغلّف payload كاملًا كي لا يخلط وقت التشغيل بين ذلك الحقل وpayload الخاص بالـ envelope:
+خريطة الرسالة تتحكم بالحمولة، لا بمميّز الغلاف. `incoming.default` يقبل أسماء أنواع غير معلَنة بخلاف ذلك؛ بدونه، الأنواع المجهولة تُسقط. إطارات النص الواردة و`ArrayBuffer` والمصفوفة المُنوَّعة و`Blob` تُفك كـ UTF-8 JSON. JSON التالف وأعطال Struct تذهب إلى مراقبي أخطاء وقت التشغيل — لا إلى `receive`.
 
-```typescript
-const audit = defineWebSocket({
-  maxIncomingQueueSize: 100,
-  path: '/audit',
-  incoming: {
-    entry: struct.object({ data: struct.string(), source: struct.string() }),
-  },
-  outgoing: {
-    write: struct.object({ data: struct.string(), source: struct.string() }),
-  },
-})
+إذا كان لحمولة كائن حقل باسم `data`، يبقى بجانب `type` بعد الترميز (وليس غلافًا متداخلًا). مثال: `write` مع `{ data: string, source: string }` يُسلك كـ `{ type: 'write', data: string, source: string }`. قيمة جانب المستدعي ما زالت `{ type: 'write', data: { data, source } }` لأن `data` يحمل حمولة الكائن قبل التسلسل. الأسماء المستعارة تُطبَّق على حقول الحمولة. مميّز `type` يخص الغلاف، لا الـ Struct.
 
-const [auditError, auditSession] = await client.execute(audit())
-if (!auditError) {
-  auditSession.send({
-    type: 'write',
-    data: { data: 'reviewed-value', source: 'settings' },
-  })
-}
-```
+`session.send(...)` يتحقق ويُسلسل بشكل متزامن. يرسل فورًا عندما يكون مفتوحًا، ويصف أثناء `reconnecting` عندما يُفعَّل طابور صادر، ويرمي `InvalidStateError` عندما لا يكون قابلاً للكتابة. يرمي أيضًا عندما لا توجد خريطة صادرة، أو نوع غير معلَن، أو فشل تحقق الحمولة، أو طابور صادر معطّل/ممتلئ، أو فشل إرسال أصلي.
 
-شكل wire المقابل هو `{ "type": "write", "data": { "data": "reviewed-value", "source": "settings" } }`.
+`receive` لمستهلك واحد. مكرّر ثانٍ يُرفض.
 
-لا تعلن `type` كحقل payload عادي، إذ تملكه عملية تطبيع الـ envelope.
+## لقطات الحالة
 
-يتعامل `incoming.default` الاختياري مع أنواع الرسائل الأخرى غير المعلنة. ومن دونه تُسقط الأنواع غير المعروفة.
+| العضو                      | المعنى                                                                                              |
+| -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `state`                    | `idle` أو `connecting` أو `open` أو `reconnecting` أو `closing` أو `closed` أو `aborted` أو `error` |
+| `connection`               | أحدث اتصال مادي: `generation`، URL، بروتوكول متفاوض، امتدادات عند التوفر                            |
+| `bufferedAmount`           | عدد البايتات الأصلية غير المرسلة، أو `0` بلا مقبس مادي                                              |
+| `receive`                  | قابل للتكرار غير متزامن لمستهلك واحد من الرسائل الواردة المتحقق منها                                |
+| `onStateChange(listener)`  | اشترك في انتقالات الحالة المنطقية؛ يُرجع إلغاء الاشتراك                                             |
+| `onRuntimeError(listener)` | اشترك في أخطاء وقت التشغيل غير بدء التشغيل؛ يُرجع إلغاء الاشتراك                                    |
+| `closed`                   | وعد لنتيجة الإغلاق النهائي المنطقي                                                                  |
 
-## Tuple البدء
+`open` = المقبس المادي مفتوح. `reconnecting` يشمل التحضير + التأخير قبل البديل. `connection.generation` يزيد لكل مقبس مادي يصل إلى `open`. `startupConnection` في الـ tuple تبقى أول لقطة ناجحة؛ `session.connection` يتحرك للأمام.
 
-```typescript
-const [error, session, startupConnection] = await client.execute(chat())
-```
+فشل البدء → `[error, undefined, connection?]`. فشل المُنشئ قبل الفتح قد بلا اتصال؛ المهلة/الإغلاق أثناء البدء قد ما زالت تقدّم لقطة. بعد إرجاع الجلسة، أخطاء وقت التشغيل تسير عبر المراقبين و`receive` و`closed` — لا tuple تنفيذ ثانٍ.
 
-يجب أن تكون قيمة `timeout` لتنفيذ HTTP وSSE وWebSocket عددًا صحيحًا موجبًا وآمنًا ضمن `1..2_147_483_647`؛ وتؤدي القيم `0` أو السالبة أو الكسرية أو `NaN` أو `Infinity` أو التي تتجاوز الحد إلى `REQUEST_VALIDATION_FAILED` قبل إنشاء أي مورد request أو stream أو socket.
+```typescript twoslash
+import type { RequestError, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
 
-تعيد WebSocket:
-
-```typescript
-type SocketAwaitResult<TIncoming, TOutgoing> =
+type SocketResult<TIncoming, TOutgoing> =
   | [error: null, session: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError<unknown>, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+
+const result: SocketResult<unknown, never> | undefined = undefined
+void result
 ```
 
-العنصر الثالث عند النجاح هو لقطة اتصال البدء ذات `generation: 1`. قد يحتوي `url` و`protocol` و`extensions` الملتقطة عند فتح أول socket فعلي.
+## أعد الاتصال
 
-أما `session.connection` فهو getter حي؛ يزيد `generation` عند كل فتح فعلي ناجح. احتفظ بالعنصر الثالث من الـ tuple عندما تكون لقطة البدء مهمة.
+إعادة الاتصال اختيارية. بلا كائن `reconnect` → الإغلاق المادي ينهي الجلسة المنطقية. عند الضبط، الافتراضات هي `attempts: 3` و`delayMs: 1000` و`factor: 2` و`maxDelayMs: 30000` و`jitter: 0`. `attempts` يعدّ المحاولات بعد المحاولة الأولية؛ `attempts: 0` يعطّل. المسند الافتراضي يقبل كل نتيجة إغلاق.
 
-لا تسجّل connection URLs. فقد تحتوي على path identifiers وapplication query data وحقول نشر telemetry.
+```ts
+import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketReconnect } from '@defjs/core'
 
-## تشخيص الفشل
-
-مع browser WebSocket API أو constructor محقون لا يعرض إلا standard WebSocket events، لا يكشف transport-level handshake failure عادةً إلا `RequestError` ثابتًا من `kind: 'transport'` و`code` مثل `NETWORK_ERROR` أو `ABORTED` أو `TIMEOUT`. لا يمكن ضمان HTTP `401` أو handshake status آخر أو response headers/body أو تفاصيل Node الخاصة بـ `unexpected-response`. قد يكشف constructor خاص بالـ runtime معلومات إضافية عبر adapter خاص به، لكن ذلك ليس Core contract قابلًا للنقل.
-
-بعد startup انتظر `session.closed` واستخدم `kind` وclose `code` الاختياري و`wasClean` الاختياري كتشخيص نهائي أساسي. Close code هو WebSocket close code وليس HTTP status. يجب أن تقتصر routine logs على context منخفض cardinality خضع للمراجعة وهذه الحقول؛ لا تسجّل connection URL أو query أو ticket أو raw `cause` أو `reason`. لا توسعها إلا مع policy صريحة للـ redaction والوصول والاحتفاظ.
-
-## الجلسة الحية
-
-تمثل `WebSocketSession` جلسة منطقية واحدة قد تمتد عبر عدة محاولات اتصال فعلية.
-
-| العضو                      | السلوك                                                                       |
-| -------------------------- | ---------------------------------------------------------------------------- |
-| `connection`               | أحدث معلومات connection الحية.                                               |
-| `bufferedAmount`           | عدد بايتات native socket غير المرسلة، أو `0` عند غيابه.                      |
-| `state`                    | حالة الجلسة المنطقية الحية.                                                  |
-| `receive`                  | طابور عمل async مشترك للرسائل الواردة بعد التحقق.                            |
-| `send(message)`            | يفحص قابلية الكتابة ثم يتحقق من الرسالة ويرمزها ويرسلها أو يضيفها إلى queue. |
-| `close(code?, reason?)`    | يطلب إغلاقًا نهائيًا.                                                        |
-| `closed`                   | Promise بمعلومات الإغلاق النهائي المرصودة.                                   |
-| `onStateChange(listener)`  | يضيف state observer ويعيد دالة إلغاء الاشتراك.                               |
-| `onRuntimeError(listener)` | يضيف runtime-error observer ويعيد دالة إلغاء الاشتراك.                       |
-
-لا يتتبع العميل الجلسة بعد إعادتها. يملك المستدعي الاستهلاك والمراقبين والإلغاء والإغلاق.
-
-## استقبال الرسائل
-
-تُفك رسائل النص وArrayBuffer وtyped-array وBlob بالترتيب الذي وصلت به على أنها JSON بترميز UTF-8. تُسقط المدخلات التالية بصمت:
-
-- envelope ليس كائنًا؛
-- `type` مفقود أو string فارغ؛
-- نوع غير معروف من دون Struct باسم `incoming.default`.
-
-يُرسل JSON غير الصالح وفشل التحقق من Struct المحدد إلى `onRuntimeError`، وتُسقط الرسالة وتستمر الجلسة.
-
-```typescript
-const unsubscribeError = session.onRuntimeError(() => {
-  recordSocketFailure({ operation: 'chat-receive' })
-})
-
-try {
-  for await (const message of session.receive) {
-    if (message.type === 'message') {
-      renderMessage(message.userId, message.text)
-    }
-  }
-} finally {
-  unsubscribeError()
-  session.close(1000, 'consumer-finished')
-  await session.closed
-}
-```
-
-يسمح `receive` بـ iterator واحد فقط. `maxIncomingQueueSize` حد عناصر موجب وإلزامي؛ overflow يمسح القيم المخزنة ويفشل iterator وينهي الجلسة كـ `error`.
-
-## إرسال الرسائل
-
-`send(...)` متزامنة. وقد ترمي تزامنيًا عندما:
-
-- لا تملك نقطة النهاية خريطة `outgoing`؛
-- لا تملك الرسالة `type` صالحًا؛
-- يكون النوع غير معلن؛
-- يفشل فك payload البنيوي أو ترميزه؛
-- تكون outgoing queue المملوكة للـ endpoint معطلة أو ممتلئة أثناء `reconnecting`؛
-- يرمي native socket أثناء إرسال فوري.
-
-```typescript
-try {
-  session.send({ type: 'send', text: 'Hello' })
-} catch (error) {
-  handleSendFailure(error)
-}
-```
-
-تُفحص قابلية الكتابة المنطقية قبل validation أو serialization للـ payload. لا يحدث الإرسال المباشر إلا عندما تكون الحالة المنطقية والـ socket الفعلي الحالي `open`. ولا يحدث enqueue إلا أثناء `reconnecting` عندما تكون `maxOutgoingQueueSize` في endpoint موجبة. تُصرّف FIFO قبل أن يعلن socket البديل حالة `open`.
-
-أثناء الإغلاق اليدوي أو بعد الحالة النهائية أو بينما لم يحسم reconnect predicate إغلاقًا بعيدًا بعد، ترمي `send` خطأ `InvalidStateError`. لا يعيد transport تشغيل frames سبق إرسالها إلى socket فعلي سابق.
-
-## الحالة
-
-يمكن أن تكون `session.state`:
-
-| الحالة         | المعنى                                    |
-| -------------- | ----------------------------------------- |
-| `idle`         | الحالة الداخلية الأولى قبل بدء التنفيذ.   |
-| `connecting`   | بدء أول محاولة فعلية.                     |
-| `open`         | الـ socket الفعلي الحالي مفتوح.           |
-| `reconnecting` | يجري تحضير محاولة فعلية لاحقة أو تأخيرها. |
-| `closing`      | طلب المالك إغلاقًا يدويًا.                |
-| `closed`       | إغلاق نهائي بلا خطأ مطبّع.                |
-| `aborted`      | إلغاء خارجي نهائي طُبّع إلى `ABORTED`.    |
-| `error`        | فشل نهائي آخر.                            |
-
-تصف `session.state` دورة الحياة المنطقية، ولا تثبت وجود native socket حالي. أثناء `reconnecting` تستخدم `send` السعة الصادرة المملوكة للـ endpoint.
-
-تُعزل أخطاء observers: يُرسل خطأ state listener إلى runtime-error listeners، ويُمرر خطأ هؤلاء إلى `globalThis.reportError` عند توفرها. تحرر التسوية النهائية كل observers؛ وألغِ الاشتراك إذا انتهى المالك قبل ذلك.
-
-### قبل كل محاولة
-
-يمكن ضبط `beforeConnect` على العميل أو على تنفيذ واحد. تعمل قبل native constructor في المحاولة الأولى وكل محاولة reconnect:
-
-```typescript
-declare const refreshConnectionState: (signal: AbortSignal) => Promise<void>
-
-const [error, session] = await client.execute(chat(), {
-  beforeConnect: ({ signal }) => refreshConnectionState(signal),
-})
-```
-
-تستقبل hook الكائن `{ attempt, signal }`؛ تبدأ `attempt` من `0` وتزداد عند reconnect. مرّر `signal` إلى async work الذي تملكه. يتسابق abort وtimeout مع hook، ويُستهلك late rejection، ولا يمكن لنتيجة متأخرة إنشاء socket. الرمي أو الرفض فشل transport نهائي.
-
-## Reconnect اختياري
-
-عدم وجود كائن reconnect يعني عدم إعادة الاتصال. اضبطه على العميل أو لكل تنفيذ:
-
-```typescript
-const [error, session] = await client.execute(chat(), {
-  reconnect: {
-    attempts: 5,
-    delayMs: 1_000,
+const client = createClient(
+  withEndpoint('https://chat.example.com'),
+  withWebSocketReconnect({
+    attempts: 3,
+    delayMs: 500,
     factor: 2,
-    maxDelayMs: 30_000,
+    maxDelayMs: 10_000,
     jitter: 0.2,
     shouldReconnect({ attempt, code, wasClean }) {
-      return !wasClean && code !== 1008 && attempt <= 5
+      return attempt <= 3 && (wasClean !== true || code === 1006)
     },
-  },
+  }),
+)
+const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/chat',
+  incoming: { ready: struct.object({ ok: struct.boolean() }) },
 })
+const [error, session] = await client.execute(room())
+if (!error) {
+  console.log(session.state)
+  session.close(1000, 'done')
+}
 ```
 
-تعني `attempts` عدد retries بعد المحاولة الأولى. يؤدي تمرير كائن فارغ إلى تفعيل ثلاث retries بهذه القيم الافتراضية:
+`shouldReconnect` يحصل على محاولة إعادة المحاولة التالية وسبب الإغلاق والرمز والسبب و`wasClean`. `session.close(...)` اليدوي لا يدخل المسند. رمي التحضير/السياسة ينهي الجلسة المنطقية بخطأ.
 
-| الحقل             | الافتراضي                    |
-| ----------------- | ---------------------------- |
-| `attempts`        | `3`                          |
-| `delayMs`         | `1000`                       |
-| `factor`          | `2`                          |
-| `maxDelayMs`      | `30000`                      |
-| `jitter`          | `0`                          |
-| `shouldReconnect` | يعيد `true` لكل نتيجة إغلاق. |
+تذبذب تراجع WebSocket **ضربي** (`jitter: 0.2` → تأخير بين `0.8x` و`1.2x`). تذبذب SSE عامل ضربي 0–1، مثل WebSocket. قيم التأخير/المعامل/التذبذب/المحاولة تُتحقق قبل المُنشئ؛ تأخيرات المؤقت لا يمكن أن تتجاوز `2_147_483_647` مللي ثانية.
 
-يعيد predicate الافتراضي المحاولة بعد remote close سواء كان clean أو unclean. اضبط predicate عندما يجب أن يكون clean close نهائيًا. يبدأ `attempt` من 1 لأول retry.
+`beforeConnect({ attempt, signal })` يعمل قبل المُنشئ الأولي وكل إعادة اتصال. مرّر إشارته إلى تحديث الرمز حتى يوقف الإلغاء التحضير والاتصال معًا.
 
-قيمة التأخير الأساسية هي `min(delayMs * factor ** (attempt - 1), maxDelayMs)`. jitter في WebSocket مضاعِفة: تختار قيمة مثل `0.2` عاملًا عشوائيًا بين `0.8` و`1.2`. وهذا يختلف عن jitter في SSE التي تُضاف بوحدة المللي ثانية.
+## نبض القلب
 
-تكون `shouldReconnect` متزامنة. الرمي ينهي session كـ `error`، وإرجاع `false` صراحة ينهيها كـ `closed`. ينشئ reconnect socket فعليًا جديدًا فقط ولا يعيد أي send سابق. عند زيادة `session.connection.generation` أعد فقط subscriptions النشطة والآمنة لإعادة التشغيل، ولا تعد mutations.
+اختياري عند التنفيذ أو نطاق العميل. الفاصل يرسل `message()` عبر خريطة Struct الصادرة. `isAck(message)` الاختياري يتعرّف على إقرار — تلك الرسالة تمسح المهلة و**لا** تُسلَّم إلى `receive`.
 
-## Heartbeat
+```ts
+import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-heartbeat اختيارية أيضًا:
+const client = createClient(withEndpoint('https://chat.example.com'))
+const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/chat',
+  incoming: { pong: struct.object({ ok: struct.boolean() }) },
+  outgoing: { ping: struct.object({}) },
+})
 
-```typescript
-const [error, session] = await client.execute(chat(), {
+const [error, session] = await client.execute(room(), {
   heartbeat: {
     intervalMs: 30_000,
     timeoutMs: 10_000,
     message: () => ({ type: 'ping' }),
     isAck: (message) => message.type === 'pong',
   },
-  reconnect: { attempts: 3 },
 })
+if (!error) {
+  console.log(session.state)
+  session.close(1000, 'done')
+}
 ```
 
-يجب أن تنتج `message` قيمة صالحة لخريطة `outgoing` الخاصة بنقطة النهاية. تمسح الرسالة التي تتعرف عليها `isAck` heartbeat timeout ولا تدخل `receive`.
+`intervalMs` و`timeoutMs` يجب أن يكونا مؤقتين محدودين موجبين ≤ `2_147_483_647`. رسالة نبض القلب يجب أن تكون صالحة لخريطة الصادرة. التسلسل والإرسال الأصلي وتصنيف الإقرار وأعطال المهلة قاتلة للجلسة المنطقية — لا تصبح إعادة اتصال عادية.
 
-أخطاء serialization أو send أو ack predicate أو timeout في heartbeat كلها fatal. تُخطر runtime-error listeners، وتفشل `receive`، وتنهي session كـ `error` من دون استشارة reconnect policy.
+## الطوابير
 
-يجب أن تكون `intervalMs` و`timeoutMs` عند تعريفها موجبتين ومحدودتين ولا تتجاوزان `2_147_483_647`. ما دام ack deadline قائمًا، لا ترسل interval ticks التالية ping جديدًا ولا تعيد ضبط deadline؛ ويمسحه ack أو توقف session.
+| الإعداد                | القيمة المطلوبة                              | السلوك                                                                                                   |
+| ---------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `maxIncomingQueueSize` | عدد صحيح آمن موجب                            | يحد الرسائل المحلَّلة المنتظرة لـ `receive` والإطارات الخام المنتظرة للتحويل. الفيضان → `state: 'error'` |
+| `maxOutgoingQueueSize` | عدد صحيح آمن غير سالب اختياري؛ الافتراضي `0` | FIFO فقط بينما `state === 'reconnecting'`. ممتلئ/معطّل → `send(...)` يرمي                                |
 
-## Queues
+الإطارات الصادرة المصطفّة تُفرَّغ قبل أن ينشر المقبس البديل `open`. الإطارات المرسلة بالفعل على مقبس سابق لا تُعاد تلقائيًا أبدًا. طوابير إعادة الاتصال للرسائل التي ترسلها أثناء إعادة الاتصال — لا لإعادة بناء حالة التطبيق.
 
-توجد حدود الـ queue في تعريف endpoint. يجب أن تكون `maxIncomingQueueSize` عددًا صحيحًا آمنًا موجبًا؛ والـ overflow خطأ نهائي يمسح القيم المخزنة. أما `maxOutgoingQueueSize` فهو عدد صحيح آمن غير سالب، وقيمته الافتراضية `0`؛ والقيمة الموجبة تحفظ الإطارات بترتيب FIFO بين المحاولات وترفض overflow دون حذف الإطارات الأقدم.
+فيضان الوارد يمسح التسلسل المعلق، ويفشل `receive`، ويوقف الجلسة، ويحل `session.closed` بـ `kind: 'error'`. أبقِ المستهلك سريعًا بما يكفي أو ارفع الحد من الحجم/الذاكرة المقاسة.
 
-كلا الحدين يحسب العناصر لا البايتات. يعرض `session.bufferedAmount` تراكم البايتات في native socket بشكل منفصل. ويجب أن يكون لـ `receive` iterator واحد فقط.
+## البروتوكولات والمصادقة
 
-## ملكية الإغلاق
+`protocols` في التعريف، و`withWebSocketProtocols(...)` في العميل، و`protocols` في التنفيذ تضبط قائمة البروتوكول الفرعي للمُنشئ. الأسبقية: التنفيذ → العميل → التعريف. أول قائمة معرّفة تُنسخ للجلسة المنطقية وتُعاد استخدامها عند إعادة الاتصال.
 
-تتحقق `session.close(code, reason)` أولًا من أن code هو `1000` أو ضمن `3000..4999` وأن reason لا يتجاوز 123 بايت UTF-8. تنتقل القيم الصالحة إلى `closing` وتطلب native close وتنتظر `CloseEvent` الفعلي؛ code وreason المرصودان يسبقان القيم المطلوبة.
+مُنشئات WebSocket في المتصفح لا تقبل رؤوس مصافحة عشوائية. Defjs تحوّل `http:` → `ws:` و`https:` → `wss:`، ترمّز عناصر المسار النائبة مرة، تستخدم مُسلسل الاستعلام المضبوط. بناء استعلام WebSocket أيضًا يُسلسل قيم الاستعلام المعقدة كـ JSON (بخلاف استعلام HTTP الافتراضي للقيم القياسية فقط).
 
-تُحل `session.closed` من معلومات الإغلاق التي يرصدها وقت التشغيل:
+`withCredentials(true)` هو بيانات اعتماد Fetch لـ HTTP/SSE — وليست مصادقة WebSocket. استخدم سياسة ملف تعريف ارتباط/جلسة مراجعة، أو بروتوكولًا فرعيًا، أو تذكرة اتصال قصيرة العمر. لا تضع بيانات اعتماد عامة أو أسرارًا طويلة العمر في سلسلة الاستعلام.
 
-```typescript
-type WebSocketCloseInfo =
-  | { kind: 'closed'; code?: number; reason?: string; wasClean?: boolean }
-  | { kind: 'aborted'; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }
-  | { kind: 'error'; cause: unknown; code?: number; reason?: string; wasClean?: boolean }
-```
+## الإغلاق والملكية
 
-ينتج عن manual close وremote close بلا cause ورفض reconnect صراحةً `closed`. ينتج عن external abort حالة `aborted`، وعن timeout وruntime failure حالة `error`. إذا رمى native close تُجرّب مرة واحدة بلا arguments؛ وإذا رمى الاستدعاءان تتم التسوية كـ `error` بلا استدعاء ثالث.
+`session.close(code?, reason?)` يطلب إغلاقًا نهائيًا ويوقف نبض القلب. الرمز يجب أن يكون `1000` أو `3000..4999`؛ السبب ≤ 123 بايت UTF-8. وسائط الإغلاق غير الصالحة ترمي قبل تغيير الحالة.
 
-ألغِ اشتراك listeners وأغلق عند حد component أو route أو job أو service الذي فتح الجلسة. لا يؤدي provider unmount وحده هذا العمل.
+`await using` يطلب الإغلاق ثم ينتظر teardown المملوك لـ Defjs. `close()` و`closed` يظلان صالحين عندما تحتاج سببًا يدويًا أو نتيجة النهاية المنطقية.
 
-## أمان URL والمصادقة
+`kind` النهائي: `'closed'` أو `'aborted'` أو `'error'`، مع `code` / `reason` / `wasClean` أصلي اختياري و`cause` للإلغاء/الخطأ. `closed` يصف النهاية المنطقية ولا يثبت إغلاق TCP المادي. disposer ذو teardown محدود بثانية واحدة؛ إذا لم يُرصد حدث close، يكمل تنظيف Defjs وقد يرفض بـ `DOMException` اسمه `TimeoutError`، بينما يبقى `closed` نتيجة الإغلاق اليدوي المنطقية. حقول الإغلاق الأصلية المرصودة تفوز على احتياطي المالك المطلوب.
 
-تتحول HTTP base URLs إلى WebSocket schemes: يتحول `http:` إلى `ws:` و`https:` إلى `wss:`. مرّر قيم path-placeholder الخام؛ يرمّز Core كل segment مرة واحدة بالضبط، ويحوّل `%` إلى `%25`، ويرفض القيمة الفارغة و`.` و`..`. تستخدم قيم query الـ serializer المضبوط.
+## حد GraphQL
 
-أولوية protocols هي خيار التنفيذ ثم خيار العميل ثم تعريف نقطة النهاية. تمنع مصفوفة protocols فارغة صراحة القيم الأقل أولوية.
+Defjs توفّر غلاف JSON مُنوَّعًا ودورة حياة جلسة منطقية. **لا** تنفّذ بروتوكول تطبيق WebSocket. ميزات GraphQL-over-WebSocket — تهيئة الاتصال، معرّفات العملية، `next`/`error`/`complete`، التخلص، إعادة تشغيل الاشتراك — خارج العقد الأساسي.
 
-لا تستطيع browser WebSocket APIs ضبط handshake headers اعتباطية. لا تعامل query parameters على أنها قناة credentials عامة؛ فقد تسجّل URLs في أدوات المتصفح وproxies وaccess logs وtelemetry. استخدم TLS (`wss:`) وتصميم مصادقة خضع للمراجعة في بيئة النشر، مثل تدفق same-site cookie مناسب أو connection ticket قصير العمر.
+استخدم عميل بروتوكول مثل `graphql-ws` عندما يتطلب الخادم ذلك البروتوكول، أو نمذج غلافك بـ `defineWebSocket(...)`. خريطة رسائل وحدها لا تتفاوض دلالات GraphQL.
 
-## التالي
+## وصفات ذات صلة
 
-- تقارن [SSE](/ar/core/sse) سلوك stream retry والـ queue.
-- توضّح [المعترضات](/ar/core/interceptors) كيفية الحفاظ على live session getters.
-- تغطي [الأخطاء](/ar/core/errors) فشل startup tuple.
+- [فتح جلسة WebSocket](../recipes/websocket-session.md)
+- [استهلاك تدفق SSE](../recipes/consume-sse.md)

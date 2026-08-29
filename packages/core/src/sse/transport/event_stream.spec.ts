@@ -83,6 +83,7 @@ describe('fetchEventStream', () => {
       onerror() {
         return 0
       },
+      reconnect: { attempts: 3, delayMs: 0 },
     })
 
     const messages: EventStreamMessage[] = []

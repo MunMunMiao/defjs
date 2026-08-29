@@ -1,54 +1,64 @@
 ---
-title: Primeros pasos
-description: Instala Defjs, define un endpoint HTTP tipado, crea un cliente y úsalo desde tu aplicación.
+title: 'Primeros pasos: una solicitud HTTP'
+description: Define GET /users/:id, ejecútalo contra un handle Fetch local y luego apúntalo a una API real.
 ---
 
-# Primeros pasos
+# Primeros pasos: una solicitud HTTP
 
-Defjs permite que tu aplicación describa una vez el contrato de una API y lo reutilice con entradas tipadas, decodificación en tiempo de ejecución y resultados de transporte explícitos.
+Vas a definir `GET /users/:id`, ejecutarlo con un cliente explícito y decodificar tanto el `200` como el `404` declarado. El handler local mantiene la primera ejecución offline; el comando no cambia cuando cambias a un servicio real.
 
-## Instalación
+## Step 1 — Instalar
 
-Añade el paquete Core a tu aplicación:
+`@defjs/core` es ESM y quiere Node.js 22+, Bun o Deno. Node ejecuta el `.ts` tal cual — pon `"type": "module"` en package.json. En el navegador sigues necesitando tu bundler y Fetch.
+
+::: tabs
+== bun
+
+```sh
+bun add @defjs/core
+```
+
+== npm
+
+```sh
+npm install @defjs/core
+```
+
+== pnpm
 
 ```sh
 pnpm add @defjs/core
 ```
 
-Utiliza el comando equivalente de npm, Yarn o Bun si tu proyecto usa otro gestor de paquetes. `@defjs/core` es ESM. Al ejecutarlo en Node.js, los metadatos actuales del paquete requieren Node 22 o posterior.
-
-Se han ejecutado consumidores HTTP ESM empaquetados con Node.js 22, 24 y 26, Bun 1.3.14 y Deno 2.9.5. Después de compilar tu aplicación, las formas de los comandos correspondientes son:
+== yarn
 
 ```sh
-node dist/index.js
-bun run dist/index.js
-deno run --node-modules-dir=manual --allow-net=api.example.com dist/index.js
+yarn add @defjs/core
 ```
 
-El comando de Deno usa los paquetes ya instalados en `node_modules`; sustituye el permiso de red por los hosts exactos de la API que necesite tu aplicación. Las comprobaciones de Bun y Deno cubren la parte HTTP documentada, no todas las API de plataforma ni todos los transportes. Las compilaciones de navegador usan su bundler habitual y las capacidades Fetch y WebSocket necesarias de la plataforma.
+== deno
 
-Las pruebas entre runtimes deben comprobar campos estables de Defjs como `error.kind` y `error.code`. No dependas de mensajes nativos de `Error` específicos del motor ni del texto del análisis JSON; Node.js, Bun y Deno pueden dar formatos diferentes a esos detalles.
+```sh
+deno add npm:@defjs/core
+```
 
-Añade un adaptador solo cuando tu aplicación lo necesite:
-
-| Configuración             | Paquetes                                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------- |
-| React 18+                 | `@defjs/core`, `@defjs/react`, `react`                                                    |
-| Vue 3+                    | `@defjs/core`, `@defjs/vue`, `vue`                                                        |
-| OpenTelemetry en servidor | `@defjs/core`, `@defjs/opentelemetry-server`, `@opentelemetry/api`, `@opentelemetry/core` |
-
-::: tip Usa la documentación de la versión instalada
-Estas páginas describen la API de esta versión de la documentación. Comprueba qué versión tiene instalada tu aplicación. Si cambia un export o una opción, consulta la documentación y las notas de esa versión en lugar de mezclar ejemplos de versiones distintas.
 :::
 
-## Define tu primera petición
+## Step 2 — Definir la solicitud
 
-Supón que tu API expone `GET /users/:id`. Sustituye la URL base y los Structs de respuesta por el contrato real de tu servicio.
+Crea `src/get-user.ts`. `struct.request(...)` mantiene los valores de path separados de query, cabeceras y cuerpo.
 
-```typescript
-import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
+```ts get-user.ts
+import { defineRequest, struct } from '@defjs/core'
 
-const client = createClient(withEndpoint('https://api.example.com'))
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
 
 const getUser = defineRequest({
   method: 'GET',
@@ -57,57 +67,161 @@ const getUser = defineRequest({
     path: struct.object({ id: struct.number() }),
   }),
   output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
   ],
 })
 
-async function loadUser(id: number) {
-  const [error, user, response] = await client.execute(getUser({ path: { id } }))
+const command = getUser({ path: { id: 7 } })
+void command
+```
 
-  if (error) {
-    console.error(error.kind, error.code)
-    return
+`defineRequest(...)` devuelve el builder. Llamar a `getUser(...)` construye el comando opaco que pasarás a `client.execute(...)`.
+
+## Step 3 — Ejecutarlo en local
+
+Conecta un handle Fetch local al cliente para poder ejecutar sin red. Defjs sigue validando la entrada, construyendo el `Request`, despachando por estado y parseando el cuerpo.
+
+```ts get-user.ts
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const User = struct.object({
+  id: struct.number(),
+  name: struct.string(),
+})
+
+const NotFound = struct.object({
+  message: struct.string(),
+})
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: [
+    { status: 200, body: User },
+    { status: 404, body: NotFound },
+  ],
+})
+
+const handle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
   }
 
-  console.log(user.name, response.status)
+  return Response.json({ message: 'User not found' }, { status: 404 })
 }
 
-void loadUser(7)
-```
+const client = createClient(withEndpoint('https://api.example.test'), withHTTPHandle(handle))
 
-`defineRequest(...)` devuelve un **constructor de comandos**. Al llamar a `getUser(...)`, creas un **comando** que conserva la definición del endpoint y la entrada de esa llamada. Después, `client.execute(...)` devuelve una tupla HTTP de tres elementos:
+const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }), {
+  timeout: 5_000,
+})
 
-```typescript
-;[error, result, response]
-```
-
-Si todo va bien, `error` es `null`, `result` contiene los datos de salida decodificados y `response` es un wrapper `HttpResponse` de Defjs. Si hay un error, `result` es `undefined`; el wrapper de respuesta también será `undefined` si no se recibió ninguna respuesta.
-
-### Los literales de estado se conservan automáticamente
-
-`defineRequest(...)` usa un const generic para `output`, por lo que las entradas inline y los arrays agrupados de estados conservan automáticamente sus valores literales. No necesitas `as const` para separar los cuerpos 2xx correctos de los cuerpos de error no 2xx en los tipos inferidos.
-
-También puedes declarar la salida como un objeto:
-
-```typescript
-const output = {
-  '200': struct.object({ id: struct.number() }),
-  '404': struct.object({ message: struct.string() }),
+if (error) {
+  if (error.kind === 'http' && error.status === 404) {
+    console.log(error.data.message)
+  } else {
+    console.error(error.kind, error.code)
+  }
+} else {
+  console.log(`Loaded ${user.name} from ${response.status}`)
 }
 ```
 
-## Llévalo a tu aplicación
+Ejecútalo:
 
-Guarda las definiciones de endpoints en módulos que describan la API de tu servicio. Reutiliza sus constructores de comandos desde componentes, route handlers, jobs o stores. Crea el cliente en el límite que controla endpoint, credenciales, interceptores y ciclo de vida:
+::: tabs
+== bun
 
-- Una aplicación de navegador normalmente puede compartir un cliente.
-- En renderizado de servidor, crea un cliente por petición cuando cambien cabeceras, cookies, usuarios o tenants.
-- El código que abre recursos SSE o WebSocket también debe consumirlos y cerrarlos.
+```sh
+bun src/get-user.ts
+```
 
-## Siguientes pasos
+== npm
 
-- [Comandos](/es-ES/core/commands) explica el mapeo automático de peticiones y las proyecciones personalizadas vinculadas al esquema.
-- [Errores](/es-ES/core/errors) documenta las tuplas de los tres transportes y la unión `RequestError`.
-- [HTTP](/es-ES/core/http) cubre la resolución de URLs, los cuerpos de petición, la decodificación de la salida, la cancelación y el comportamiento XSRF.
-- [Ejemplos](/es-ES/guide/examples) combina estos contratos en recetas cuyos recursos controla la aplicación.
+```sh
+node src/get-user.ts
+```
+
+== pnpm
+
+```sh
+node src/get-user.ts
+```
+
+== yarn
+
+```sh
+node src/get-user.ts
+```
+
+== deno
+
+```sh
+deno run src/get-user.ts
+```
+
+:::
+
+```txt
+Loaded Ada from 200
+```
+
+Prueba un usuario que falta — cambia el id del path a `8` y vuelve a ejecutar:
+
+```txt
+User not found
+```
+
+En éxito: `error` es `null`, `user` es la salida Struct del `200`, `response` es un `HttpResponse`. En un `404` declarado: `error.kind` es `'http'`, `error.status` es `404` y `error.data` está tipado como `NotFound`. El segundo elemento de la tupla es `undefined` en fallo.
+
+## Step 4 — Apuntar a una API real
+
+Quita `withHTTPHandle(...)` y pon la URL base real cuando el servicio implemente `GET /v1/users/:id` con esos cuerpos.
+
+```ts
+import { createClient, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const localHandle: typeof fetch = async (input, init) => {
+  const request = new Request(input, init)
+  const id = new URL(request.url).pathname.split('/').at(-1)
+
+  if (id === '7') {
+    return Response.json({ id: 7, name: 'Ada' }, { status: 200 })
+  }
+
+  return Response.json({ message: 'User not found' }, { status: 404 })
+}
+
+const localClient = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(localHandle))
+const realClient = createClient(withEndpoint('https://api.example.com/v1'))
+void localClient
+void realClient
+```
+
+Mismo comando. Cliente distinto.
+
+## Cuando el resultado cambia
+
+- Entrada mala / build inválido / opciones de cancel conflictivas → `REQUEST_VALIDATION_FAILED`
+- No-2xx declarado → `HTTP_STATUS` con `error.data` tipado
+- Cuerpo declarado que no decodifica → `RESPONSE_VALIDATION_FAILED`
+- Estado sin declaración → `UNDECLARED_STATUS` (antes de decodificar el cuerpo)
+- Fallo de Fetch / cancel / timeout → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+
+`timeout` debe ser un entero seguro positivo en `1..2_147_483_647`. No pases `abort` y `timeout` juntos; `signal` puede combinarse con cualquiera de los dos. La cancelación te dice lo que vio el llamador — no si una escritura en el servidor se confirmó.
+
+## Siguientes recetas
+
+- [GET con un 404 declarado](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)
+- [Cancelar una llamada HTTP](../recipes/cancel-http.md)
+- [Consumir un stream SSE](../recipes/consume-sse.md)
+- [Abrir una sesión WebSocket](../recipes/websocket-session.md)
+- [Probar con un handle Fetch local](../recipes/test-with-handle.md)

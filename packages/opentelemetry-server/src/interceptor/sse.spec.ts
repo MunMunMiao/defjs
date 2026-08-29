@@ -14,6 +14,22 @@ import { createOpenTelemetrySSEInterceptor } from './sse'
 
 let mockPropagator: ReturnType<typeof createMockPropagator>
 
+function settleWithin<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('operation did not settle')), 100)
+    promise.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
+}
+
 describe('createOpenTelemetrySSEInterceptor', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -53,6 +69,55 @@ describe('createOpenTelemetrySSEInterceptor', () => {
     expect(activeSpans[0]?.attributes['url.full']).toBe('https://api.example.com/events')
   })
 
+  test('should merge startSpanHook attributes last into initial SSE span options', async () => {
+    const { tracer } = createMockTracer()
+    const req = makeSSERequest()
+    const startSpanHook = vi.fn(() => ({ 'app.tenant': 'acme', 'url.full': 'https://tenant.example.com/events' }))
+    const interceptor = createOpenTelemetrySSEInterceptor({ tracer, propagator: mockPropagator, startSpanHook })
+
+    await interceptor.fn(req, async () => makeSSEStream())
+
+    expect(startSpanHook).toHaveBeenCalledWith(req)
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes).toEqual({
+      'app.tenant': 'acme',
+      'url.full': 'https://tenant.example.com/events',
+    })
+  })
+
+  test('should keep the resolved SSE URL in initial span options when startSpanHook is absent', async () => {
+    const { tracer } = createMockTracer()
+    const interceptor = createOpenTelemetrySSEInterceptor({ tracer, propagator: mockPropagator })
+
+    await interceptor.fn(makeSSERequest(), async () => makeSSEStream())
+
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes).toEqual({
+      'url.full': 'https://api.example.com/events',
+    })
+  })
+
+  test('should continue SSE and record a hook error when startSpanHook throws', async () => {
+    const { tracer } = createMockTracer()
+    const next = vi.fn(async () => makeSSEStream())
+    const interceptor = createOpenTelemetrySSEInterceptor({
+      tracer,
+      propagator: mockPropagator,
+      startSpanHook: () => {
+        throw new Error('start hook failed')
+      },
+    })
+
+    await interceptor.fn(makeSSERequest(), next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes).toEqual({
+      'url.full': 'https://api.example.com/events',
+    })
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', {
+      'error.type': 'Error',
+      'hook.name': 'startSpanHook',
+    })
+  })
+
   test('should add sse.connected event on success', async () => {
     const { tracer } = createMockTracer()
     const interceptor = createOpenTelemetrySSEInterceptor({ tracer, propagator: mockPropagator })
@@ -75,6 +140,30 @@ describe('createOpenTelemetrySSEInterceptor', () => {
     await waitForSettledPromises()
 
     expect(activeSpans[0]?.ended).toBe(true)
+  })
+
+  test('should dispose a deferred SSE fake through its own close lifecycle once', async () => {
+    const deferred = makeDeferredSSEStream()
+    const close = vi.spyOn(deferred.stream, 'close')
+
+    const first = deferred.stream[Symbol.asyncDispose]()
+    const second = deferred.stream[Symbol.asyncDispose]()
+
+    expect(second).toBe(first)
+    await expect(settleWithin(Promise.resolve(first))).resolves.toBeUndefined()
+    expect(close).toHaveBeenCalledOnce()
+    await expect(deferred.stream.closed).resolves.toMatchObject({ code: 'aborted' })
+  })
+
+  test('should propagate the original rejection when disposing a rejected SSE fake', async () => {
+    const failure = new Error('stream failed')
+    const deferred = makeDeferredSSEStream()
+    const close = vi.spyOn(deferred.stream, 'close')
+    deferred.reject(failure)
+
+    await expect(settleWithin(Promise.resolve(deferred.stream[Symbol.asyncDispose]()))).rejects.toBe(failure)
+    expect(close).toHaveBeenCalledOnce()
+    await expect(deferred.stream.closed).rejects.toBe(failure)
   })
 
   test('should record sse.closed and end span when stream closes normally', async () => {

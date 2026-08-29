@@ -1,23 +1,12 @@
-import type { FnReturn } from '../internal/utility_types'
 import { describe, expect, test, vi } from 'vitest'
 import { encodeValue } from './encode'
 import { struct } from './index'
 import { encodeStructValue, parseStructTuple as parse } from './introspection'
-import { matchesRuntimeValue, selectUnionOption } from './match'
-import { DEFINITION } from './symbols'
+import { matchesRuntimeValue } from './match'
 import type { RuntimeStruct } from './types'
 
 function encode(struct: unknown, value: unknown): unknown {
   return encodeValue(struct as RuntimeStruct, value)
-}
-
-function unionOptions(struct: RuntimeStruct): readonly RuntimeStruct[] {
-  const definition = struct[DEFINITION]
-  if (definition.kind !== 'or') {
-    throw new TypeError('union struct is required')
-  }
-
-  return definition.options as unknown as readonly RuntimeStruct[]
 }
 
 describe('encode.ts', () => {
@@ -30,7 +19,7 @@ describe('encode.ts', () => {
   test('encode follows getter-recursive object structs', () => {
     const tree = struct.object({
       id: struct.string(),
-      get children(): FnReturn<typeof struct.array> {
+      get children(): ReturnType<typeof struct.array> {
         return struct.array(tree)
       },
     })
@@ -203,21 +192,6 @@ describe('encode.ts', () => {
     expect(matchesRuntimeValue(dateStruct, '2026-05-12T10:00:00Z')).toBe(false)
     expect(matchesRuntimeValue(bigintStruct, 42n)).toBe(true)
     expect(matchesRuntimeValue(bigintStruct, '42')).toBe(false)
-  })
-
-  test('selectUnionOption chooses neutral runtime branch for date and bigint values', () => {
-    const dateStruct = struct.date()
-    const stringStruct = struct.string()
-    const dateUnion = struct.or(dateStruct, stringStruct)
-
-    const bigintStruct = struct.bigint()
-    const numberStruct = struct.number()
-    const bigintUnion = struct.or(bigintStruct, numberStruct)
-
-    expect(selectUnionOption(unionOptions(dateUnion as unknown as RuntimeStruct), new Date('2026-05-12T10:00:00Z'))).toBe(
-      dateStruct as unknown as RuntimeStruct,
-    )
-    expect(selectUnionOption(unionOptions(bigintUnion as unknown as RuntimeStruct), 42n)).toBe(bigintStruct as unknown as RuntimeStruct)
   })
 
   test('encode uses injected selectUnionOptions as the union branch source', () => {

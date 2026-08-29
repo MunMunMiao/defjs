@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config'
-import { coverageConfig } from './test/shared'
+import { coverageConfig } from './test/shared.ts'
 
 /**
  * Package-level workspace aggregator.

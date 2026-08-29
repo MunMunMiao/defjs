@@ -1,11 +1,31 @@
 ---
-title: 攔截器
-description: 依傳輸篩選攔截器、以洋蔥順序組合、安全複製請求、short-circuit 工作，並實作有界的認證與重試政策。
+title: Interceptors
+description: 在傳輸邊界以洋蔥順序疊加 HTTP、SSE、WebSocket 政策。
 ---
 
-# 攔截器
+# Interceptors
 
-攔截器會包住傳輸邊界。HTTP、SSE 與 WebSocket 各自有不同的 interceptor kind 與 result type。
+加 auth headers、短接維護時段，或重試安全的讀取 — 不必動到 command 驗證。每種傳輸有自己的 chain。你拿到 `HttpRequest`；回傳該傳輸的結果（`HttpResponse`、event-stream handle，或 WebSocket session）。Input 驗證在 chain 前；status 分派與解碼結果在之後。
+
+## Basic Setup
+
+```typescript twoslash
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+
+const audit = createHttpInterceptor(async (request, next) => {
+  const started = performance.now()
+  const response = await next(request)
+  console.info(request.operation ?? request.method, response.status, Math.round(performance.now() - started))
+  return response
+})
+
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(audit))
+void client
+```
+
+## 洋蔥順序
+
+`withInterceptors(...items)` 接受混合 interceptors。Client 依選定傳輸的 `kind` 篩選，並保留相對註冊順序。每個 interceptor 可以在 `next` 前後各跑一次：
 
 | Factory                      | Request       | `next` 的結果                         |
 | ---------------------------- | ------------- | ------------------------------------- |
@@ -13,17 +33,10 @@ description: 依傳輸篩選攔截器、以洋蔥順序組合、安全複製請�
 | `createSSEInterceptor`       | `HttpRequest` | `Promise<EventStreamHandle<unknown>>` |
 | `createWebSocketInterceptor` | `HttpRequest` | `Promise<WebSocketSessionLike>`       |
 
-用 `withInterceptors(...)` 註冊混合各傳輸的攔截器。Client 會依 `kind` 篩選，並保留同一傳輸內的註冊順序。
+```typescript twoslash
+import { createHttpInterceptor } from '@defjs/core'
 
-```typescript
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(httpLogger, sseAuth, socketObserver))
-```
-
-## 洋蔥順序
-
-Request flow 依註冊順序往內執行，return flow 則反向展開：
-
-```typescript
+const order: string[] = []
 const first = createHttpInterceptor(async (request, next) => {
   order.push('first:before')
   const response = await next(request)
@@ -38,28 +51,27 @@ const second = createHttpInterceptor(async (request, next) => {
   return response
 })
 
-// first:before -> second:before -> transport
-//               <- second:after <- first:after
+// Request: first:before → second:before → transport
+// Return: second:after → first:after
+void [first, second, order]
 ```
 
-多次呼叫 `withInterceptors(...)` 會附加項目：
+多次 `withInterceptors(...)` 會追加。當外層必須看到最終結果時，把廣的 observation 放在較窄的 mutation／retry 外面。
 
-```typescript
-createClient(withInterceptors(first), withInterceptors(second, third))
-```
+## Clone 並加 request headers
 
-WebSocket 攔截器最多只能呼叫一次 `next`。如果 chain 在建立 session 後失敗，Core 會先 settle 未交付的 session，再回傳原始攔截器錯誤。如果 chain 成功回傳另一個 short-circuit session，Core 會關閉已建立的 session；wrapper 必須沿用原始 `closed` Promise 以維持關聯。
+把進來的 `HttpRequest` 當 chain 擁有的。改之前先 clone `Headers`；把新的 request 傳給 `next`：
 
-## 安全複製 Request
+```typescript twoslash
+import { createHttpInterceptor } from '@defjs/core'
 
-把傳入的 request 視為 chain 所擁有。修改 header 前，先建立新的 `Headers` 物件：
+function readAccessToken(): string | undefined {
+  return undefined
+}
 
-```typescript
-const auth = createHttpInterceptor((request, next) => {
-  const token = getAccessToken()
-  if (!token) {
-    return next(request)
-  }
+const bearer = createHttpInterceptor((request, next) => {
+  const token = readAccessToken()
+  if (!token) return next(request)
 
   const headers = new Headers(request.headers)
   headers.set('Authorization', `Bearer ${token}`)
@@ -67,20 +79,22 @@ const auth = createHttpInterceptor((request, next) => {
 })
 ```
 
-SSE header 也使用相同模式。瀏覽器的 WebSocket constructor 無法傳送任意 handshake header，因此在 WebSocket 攔截器改 `request.headers`，不能用來驗證瀏覽器連線。
+SSE 同套路。瀏覽器 WebSocket 不能加任意 handshake headers — 改 `request.headers` 不會幫瀏覽器 socket 做認證。改用 protocol、URL／query 政策，或伺服器支援的 handshake。
 
-取代 HTTP body 時，spread request 再取代 `body`。Fetch 邊界會偵測舊 body 的 content-type metadata 已不適用於新 body。不要重用已消耗的 `ReadableStream` body。
+替換 HTTP body 時，在複製後的 request 上換 `body`。Body 值變了時，Fetch 會忽略過期的 content-type metadata。別重用已消耗的 `ReadableStream` body。
 
-## Short-Circuit
+## Short-circuit 請求
 
-攔截器可以不呼叫 `next`，但必須回傳該傳輸預期的 result type。HTTP 可以用 `makeResponse(...)` 建立 Defjs wrapper：
+你可以跳過 `next`，但必須回傳預期的結果型別。HTTP 用 `makeResponse(...)` 建相容 wrapper：
 
-```typescript
+```typescript twoslash
 import { createHttpInterceptor, makeResponse } from '@defjs/core'
 
-declare const isMaintenanceWindow: () => boolean
+function isMaintenanceWindow(): boolean {
+  return false
+}
 
-const maintenanceGate = createHttpInterceptor(async (request, next) => {
+const maintenanceGate = createHttpInterceptor(async (_request, next) => {
   if (isMaintenanceWindow()) {
     return makeResponse({
       status: 503,
@@ -89,22 +103,85 @@ const maintenanceGate = createHttpInterceptor(async (request, next) => {
     })
   }
 
-  return next(request)
+  return next(_request)
 })
 ```
 
-正常指令層仍會依 status 與 output Struct 分派這個回應。若該 status 是端點契約的一部分，就要明確宣告。
+Command 層仍會依 status 分派。呼叫端需要型別化 `error.data` 時，在 `output` 宣告 `503`。Short-circuit SSE 或 WebSocket 需要完整相容的 handle／session（closure promises、live state、ownership 與 `[Symbol.asyncDispose]`）。部分物件不算有效政策。結構化 `EventStreamHandle` 與 `WebSocketSessionLike` 實作現在編譯時必須提供標準 disposer；只接收 Defjs handle 的 consumer 不必新增執行期呼叫。
 
-Short-circuit SSE 或 WebSocket 需要提供完整相容的 handle 或 session，連關閉語意也不能少。這通常比回傳合成 HTTP response 麻煩得多。
+## 重試安全讀取
 
-## 保留即時 Session Getter
+重試會改行為。政策收窄 — 這個例子對可重放的 `GET`／`HEAD`／`OPTIONS`，在 status `0`、`502`、`503`、`504` 時重試，把 `Retry-After` 上限設 30s，兩次重試後或 abort 時停止：
 
-不要用 `{ ...session }` 包裝 WebSocket session。Spread 會立刻讀取 `state` 與 `connection`，把即時 getter 變成過期值。每個 member 都要明確 delegate：
+```typescript twoslash
+import { createHttpInterceptor, type HttpRequest, type HttpResponse } from '@defjs/core'
 
-```typescript
+const retryableMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
+const retryableStatuses = new Set([0, 502, 503, 504])
+
+function isReplayable(request: HttpRequest): boolean {
+  return typeof ReadableStream === 'undefined' || !(request.body instanceof ReadableStream)
+}
+
+function retryAfterMs(response: HttpResponse<unknown>): number {
+  const value = response.headers.get('retry-after')
+  if (!value) return 250
+
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 30_000)
+
+  const date = Date.parse(value)
+  return Number.isNaN(date) ? 250 : Math.min(Math.max(0, date - Date.now()), 30_000)
+}
+
+function waitForRetryAfter(response: HttpResponse<unknown>, signal?: AbortSignal): Promise<void> {
+  const delay = retryAfterMs(response)
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason)
+      return
+    }
+
+    const timer = setTimeout(done, delay)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(signal?.reason)
+    }
+
+    function done() {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
+  })
+}
+
+const retrySafeReads = createHttpInterceptor(async (request, next) => {
+  if (!retryableMethods.has(request.method.toUpperCase()) || !isReplayable(request)) return next(request)
+
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await next(request)
+    if (!retryableStatuses.has(response.status) || attempt >= 2) return response
+    await waitForRetryAfter(response, request.abort)
+  }
+})
+```
+
+這個迴圈不會重試被丟出的 interceptor／Fetch 錯誤。Status `0` 是 Fetch 邊界的傳輸失敗回應。重試 `POST`／`PUT`／`PATCH`／`DELETE` 需要可重放的 bytes、伺服器支援、idempotency 契約，以及審過的 status 政策。
+
+Interceptor 在這個範例之外丟錯或 reject 時，會以 `kind: 'definition'` / `INTERCEPTOR_FAILED` 回傳給呼叫端——參閱 [錯誤](./errors.md)。
+
+## 包裝 WebSocket sessions
+
+WebSocket interceptor 最多呼叫一次 `next`。若你包裝 session，請明確委派 live getters 與生命週期成員：
+
+```typescript twoslash
 import { createWebSocketInterceptor } from '@defjs/core'
 
-const wrappedSession = createWebSocketInterceptor(async (request, next) => {
+const preserveSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
@@ -119,8 +196,11 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
     },
     closed: session.closed,
     receive: session.receive,
-    close(code, reason) {
+    close(code?: number, reason?: string) {
       session.close(code, reason)
+    },
+    [Symbol.asyncDispose]() {
+      return session[Symbol.asyncDispose]()
     },
     onRuntimeError(listener) {
       return session.onRuntimeError(listener)
@@ -128,144 +208,36 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
     onStateChange(listener) {
       return session.onStateChange(listener)
     },
-    send(message) {
+    send(message: unknown) {
       session.send(message)
     },
   }
 })
 ```
 
-Wrapper 也必須保留資源歸屬。除非應用程式刻意這樣設計並清楚記錄，否則不能取代 `closed`、隱藏 `close`，或切斷 incoming iterable。
+Spread session 會把 `state`／`connection`／`bufferedAmount` 快照一次。除非你刻意改 ownership，否則保留 `closed`、`receive`、`close`、精確的 `[Symbol.asyncDispose]()` 轉發與 listener cleanup。Wrapper 必須回傳內部 session 的 teardown promise，不能回傳無關的 resolved promise。若 chain 建立了 session 卻沒交付，Core 會 settle 並關閉它；若成功的 interceptor 回傳不同的 session，Core 會丟掉建立出來的那個。
 
-## 有界的 Logging
+## Reference
 
-優先使用固定 operation name 與少量、經審查的欄位：
+Factories 回傳帶 tag 的傳輸值：
 
-```typescript
-function timingInterceptor(operation: string) {
-  return createHttpInterceptor(async (request, next) => {
-    const startedAt = performance.now()
-    const response = await next(request)
+- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
+- `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
+- `basicAuthHttpInterceptor(provider, options?)` — HTTP 上的 Basic credentials
+- `basicAuthSSEInterceptor(provider, options?)` — SSE 上的 Basic credentials
 
-    console.info('outbound request completed', {
-      durationMs: Math.round(performance.now() - startedAt),
-      operation,
-      status: response.status,
-    })
+`HttpRequest` 可能包含 `endpoint`、`baseEndpoint`、`method`、`headers`、`body`、`queryParams`、`queryString`、`abort`、`timeout`、static `operation`。它是傳輸整合值 — 不是呼叫端已剖析的 input。Command 驗證、output 驗證、網域錯誤對應留在各自的層。
 
-    return response
-  })
-}
-```
+SSE／WebSocket observers 是生命週期 hooks，不是控制流程。擁有者結束時要 unsubscribe WebSocket listeners。Observer 失敗跟傳輸契約走；interceptor 本身可以 throw 或 reject。
 
-預設不要記錄 endpoint URL、query string、headers、body、raw cause、SSE event ID 或 WebSocket payload。
+記審過的 allowlist：static `operation`、method、status、duration、穩定錯誤碼。預設別記解析後的 URLs、query strings、auth headers、bodies、raw causes、SSE event IDs、WebSocket payloads。
 
-## 保守地重試 HTTP
+Basic credentials 是 base64，不是加密。用 TLS，伺服器上的 credential providers 保持請求範圍，永遠別記產生出的 header。預設 encoder 是 `globalThis.btoa`；runtime 沒有 `btoa` 或需要審過的 encoder 時，傳 `BasicAuthInterceptorOptions.encode`。
 
-重試會改變應用程式行為。以下範例只允許 `GET`、`HEAD` 與 `OPTIONS`；只重試 status `0`、`502`、`503` 與 `504`；遵守 `Retry-After`；abort 後會盡快停止；也拒絕 stream body。
+Interceptor 可以強制傳輸政策。它不是 input 驗證、授權或資源擁有權。啟動長期工作的程式碼仍要用 `await using`，或手動關閉並 await 終端 promise。一般 HTTP 是 request-scoped，透過 timeout / `AbortSignal` 管理，因此 `Client` 不是 `AsyncDisposable`。
 
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpResponse } from '@defjs/core'
+## 相關 recipes
 
-const RETRYABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
-const RETRYABLE_STATUSES = new Set([0, 502, 503, 504])
-
-function isReplayable(request: HttpRequest): boolean {
-  return !(typeof ReadableStream !== 'undefined' && request.body instanceof ReadableStream)
-}
-
-function retryAfterMs(response: HttpResponse<unknown>): number | undefined {
-  const value = response.headers.get('retry-after')
-  if (!value) {
-    return undefined
-  }
-
-  const seconds = Number(value)
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return seconds * 1_000
-  }
-
-  const at = Date.parse(value)
-  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
-}
-
-async function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    throw signal.reason
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(finish, ms)
-
-    function finish() {
-      signal?.removeEventListener('abort', abort)
-      resolve()
-    }
-
-    function abort() {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', abort)
-      reject(signal?.reason)
-    }
-
-    signal?.addEventListener('abort', abort, { once: true })
-    if (signal?.aborted) {
-      abort()
-    }
-  })
-}
-
-function retrySafeHttp(maxRetries = 2) {
-  return createHttpInterceptor(async (request, next) => {
-    if (!RETRYABLE_METHODS.has(request.method.toUpperCase()) || !isReplayable(request)) {
-      return next(request)
-    }
-
-    for (let retry = 0; ; retry += 1) {
-      const response = await next(request)
-      if (!RETRYABLE_STATUSES.has(response.status) || retry >= maxRetries) {
-        return response
-      }
-
-      const fallback = Math.min(250 * 2 ** retry, 5_000)
-      const delay = Math.min(retryAfterMs(response) ?? fallback, 30_000)
-      await abortableWait(delay, request.abort)
-    }
-  })
-}
-```
-
-這個攔截器不重試其他攔截器 throw 的錯誤，因為無法安全分類。Status `0` 是 Defjs Fetch 邊界的 transport-failure wrapper。
-
-不要習慣性把 write method 加進集合。重試 `POST`、`PUT`、`PATCH` 或 `DELETE`，需要應用程式層級的 idempotency 契約、可 replay 的 body、伺服器支援，以及審查過的 status 政策。
-
-## Basic Authentication
-
-Root entry 有匯出 `basicAuthHttpInterceptor(...)` 與 `basicAuthSSEInterceptor(...)`。
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(
-    basicAuthHttpInterceptor(() => credentials),
-    basicAuthSSEInterceptor(() => credentials),
-  ),
-)
-```
-
-Basic credential 只做 base64 編碼，沒有加密，請務必使用 TLS。預設 encoder 使用 `globalThis.btoa`；它可能不存在，而且只接受有限字元範圍。執行環境沒有 `btoa`，或 credential 需要經審查的 UTF-8/base64 實作時，請傳入 `options.encode`。
-
-Credential provider 會在 request 經過攔截器時執行。伺服器端 credential 必須維持 request-scoped，也不要記錄產生的 header。
-
-## 觀察器與 Callback 安全性
-
-SSE 與 WebSocket 攔截器可以在回傳 handle 上註冊生命週期觀察器。擁有者結束時要取消訂閱 WebSocket listener。WebSocket 會把 state listener failure 交給 runtime-error observer，把後者的 failure 轉送到 `reportError`，並把 reconnect predicate throw 視為 terminal session error。
-
-攔截器本身可以 throw 或 reject。High-level transport 可能會把部分失敗正規化成 `RequestError`，但攔截器程式碼不應依賴「永遠不 reject」的概括保證。
-
-## 下一步
-
-- [Client](/zh-Hant-TW/core/client)說明註冊與選項組合。
-- [HTTP](/zh-Hant-TW/core/http)說明 Fetch wrapper 與 status 0 行為。
-- [SSE](/zh-Hant-TW/core/sse)與 [WebSocket](/zh-Hant-TW/core/web-socket)各自說明傳輸生命週期。
+- [用本機 Fetch handle 測試](../recipes/test-with-handle.md)
+- [取消 HTTP 呼叫](../recipes/cancel-http.md)

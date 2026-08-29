@@ -452,6 +452,25 @@ describe('Fetch handler responses', () => {
     const res = await fetchHandler(requestConfig)
     expect(res.body).toBeNull()
   })
+
+  test('should fill an empty native Response url from the resolved request URL', async () => {
+    const response = await fetchHandler(
+      {
+        baseEndpoint: 'https://example.com',
+        endpoint: '/filled',
+        method: 'GET',
+        responseType: 'json',
+      },
+      async () =>
+        new Response(JSON.stringify({ id: 1 }), {
+          headers: { 'content-type': 'application/json' },
+          status: 200,
+        }),
+    )
+
+    expect(response.url).toBe('https://example.com/filled')
+    expect(response.body).toEqual({ id: 1 })
+  })
 })
 
 function settleWithin<T>(promise: Promise<T>): Promise<T> {

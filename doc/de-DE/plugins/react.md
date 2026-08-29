@@ -1,219 +1,196 @@
 ---
 title: React
-description: Teile einen Defjs-Client über React Context, konfiguriere ihn für deine API und räume Requests sowie Echtzeitressourcen aus Effects auf.
+description: Provider installieren, Client lesen, User fetchen und aborten, wenn der Effect neu läuft.
 ---
 
-# `@defjs/react`
+# React
 
-Dieses Paket ist ein dünner Context-Adapter für `@defjs/core`. `ClientProvider` stellt einen von der Anwendung erzeugten Client bereit, und `useClient()` liefert die nächstgelegene Instanz. Es fügt weder Client-Factory noch Cache, Retry-Policy oder Ressourcen-Lifecycle hinzu.
+Verdrahte einen bestehenden `@defjs/core`-Client in einen React-Tree. Du bekommst Context und `useClient()`. Das Paket erzeugt **keinen** Client, fügt keinen Cache hinzu, retried keine Commands und disposet keine Transport-Resources. Die Komponente, der Effect oder die Data-Library, die Arbeit startet, besitzt sie.
 
-## Client bereitstellen
+## Basic Setup
 
-Erzeuge und konfiguriere den Client mit `@defjs/core` und übergib die Instanz explizit:
+Installiere `@defjs/core`, `@defjs/react` und React 18+. ESM; Node.js 22+, wenn du in Node läufst:
 
-```tsx
-import { createClient, withEndpoint } from '@defjs/core'
-import { ClientProvider } from '@defjs/react'
-import { UserProfile } from './UserProfile'
+`bun add @defjs/core @defjs/react react`
 
-const client = createClient(withEndpoint('https://api.example.com'))
+Provide den Client, dann fetche einen User und abort on Change:
 
-export function App() {
-  return (
-    <ClientProvider client={client}>
-      <UserProfile id={7} />
-    </ClientProvider>
-  )
-}
-```
-
-`ClientProvider` stellt exakt diese Instanz bereit. Der Aufrufer entscheidet über Erzeugung und Austausch und besitzt weiterhin Requests und Echtzeitressourcen.
-
-## Nächstgelegenen Client lesen
-
-Rufe `useClient()` in einer React-Komponente oder einem eigenen Hook auf. Ohne Provider wird ein Fehler ausgelöst; verschachtelte Provider folgen der normalen Nearest-Provider-Regel von React Context.
-
-```tsx
-import { useClient } from '@defjs/react'
-
-export function UserProfile() {
-  const client = useClient()
-  return null
-}
-```
-
-Alle Konfigurationsoptionen kommen aus `@defjs/core`:
-
-```tsx
-import { createClient, withCredentials, withEndpoint } from '@defjs/core'
-
-const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
-```
-
-## Interceptor-Factorys
-
-Erzeuge Interceptor-Werte und kombiniere sie mit dem Core-`withInterceptors(...)`, bevor du den Client an React übergibst:
-
-```tsx
-import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
-import { ClientProvider } from '@defjs/react'
-
-const auth = createHttpInterceptor((request, next) => {
-  const headers = new Headers(request.headers)
-  headers.set('Authorization', `Bearer ${readAccessToken()}`)
-  return next({ ...request, headers })
-})
-
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
-
-export function ApiBoundary({ children }: { children: React.ReactNode }) {
-  return <ClientProvider client={client}>{children}</ClientProvider>
-}
-```
-
-Wenn eine Factory request-spezifische Zugangsdaten erfasst, rufe sie innerhalb der Request-Grenze auf, die den Client erzeugt.
-
-## HTTP-Effects verwalten
-
-Erzeuge den Abbruch im Effect und ignoriere Ergebnisse nach dem Cleanup:
-
-```tsx
-import { useEffect, useState } from 'react'
-import { useClient } from '@defjs/react'
-import { getUser } from './api'
-
-export function UserProfile({ id }: { id: number }) {
-  const client = useClient()
-  const [name, setName] = useState('')
-  const [errorMessage, setErrorMessage] = useState('')
-
-  useEffect(() => {
-    const abort = new AbortController()
-
-    void client
-      .execute(getUser({ path: { id } }), { signal: abort.signal })
-      .then(([error, user]) => {
-        if (abort.signal.aborted) {
-          return
-        }
-
-        if (error) {
-          setErrorMessage('Unable to load user.')
-          return
-        }
-
-        setErrorMessage('')
-        setName(user.name)
-      })
-      .catch(() => {
-        if (!abort.signal.aborted) {
-          setErrorMessage('Unable to load user.')
-        }
-      })
-
-    return () => abort.abort()
-  }, [client, id])
-
-  return errorMessage ? <p>{errorMessage}</p> : <p>{name}</p>
-}
-```
-
-Defjs gibt erwartete Request-Fehler in Tupeln zurück. Wandle einen Fehler nur an einer Integrationsgrenze in eine geworfene Exception um, die Exceptions erwartet, etwa in der `queryFn` einer Query-Bibliothek.
-
-## Client-Component-Grenze
-
-Der Paketeinstieg ist eine Client-Component-Grenze. Ein anwendungseigener Wrapper kann einen Browser-Client erzeugen und explizit bereitstellen:
-
-```tsx
-// app/ApiProvider.tsx
-'use client'
-
+```tsx twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
 
-const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
   return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-Servercode mit Headern, Cookies, Tenant-Zustand oder Zugangsdaten sollte pro Request-Grenze einen eigenen Client erzeugen. Der Adapter isoliert keine parallelen SSR-Requests und räumt Client-Arbeit nicht auf.
-
-## Echtzeit-Effects verwalten
-
-Das Unmounten eines Providers schließt keine Ressourcen, die Nachkommen gestartet haben. Ein Effect, der einen WebSocket öffnet, muss den Start abbrechen, eine spät eintreffende Session schließen, die eingehende Warteschlange konsumieren, Beobachter entfernen und die aktive Session schließen.
-
-```tsx
-import { useEffect } from 'react'
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
 import { useClient } from '@defjs/react'
-import { openNotificationsSocket } from './api'
-import { handleNotification } from './notifications'
-import { recordRealtimeFailure } from './telemetry'
+import { useEffect, useState } from 'react'
 
-export function LiveNotifications() {
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
+
+export function UserName({ id }: { id: number }) {
+  const client = useClient()
+  const [name, setName] = useState<string>()
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    void client.execute(getUser({ path: { id } }), { signal: controller.signal }).then(([error, user]) => {
+      if (controller.signal.aborted) return
+      setName(error ? undefined : user.name)
+    })
+
+    return () => controller.abort()
+  }, [client, id])
+
+  return <span>{name ?? 'Loading...'}</span>
+}
+```
+
+`ClientProvider` ist ein normaler Context-Provider. Ein anderer `client`-Prop ändert, was Descendants sehen — kein Clone, Replace oder Dispose. Nested Provider erzeugen explizite Boundaries.
+
+React kann einen Effect in Development mehr als einmal setuppen und cleanupen. Der Signal-Check stoppt ein stale Promise daran, in den aktuellen Render zu schreiben. Der Tupel-Error bleibt Data.
+
+## Mit `useClient` lesen
+
+`useClient()` gibt den nächsten `Client` zurück. Ruf ihn während Render auf (Komponente oder Custom Hook). Throwt, wenn kein Provider existiert:
+
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
+import { useClient } from '@defjs/react'
+
+const health = defineRequest({
+  method: 'GET',
+  path: '/health',
+  output: { 200: struct.object({ ok: struct.boolean() }) },
+})
+
+export function HealthCheck() {
+  const client = useClient()
+
+  const check = async () => {
+    const [error, result] = await client.execute(health())
+    if (error) {
+      console.error(error.kind, error.code)
+      return
+    }
+    console.log(result.ok)
+  }
+
+  return (
+    <button type="button" onClick={() => void check()}>
+      Check service
+    </button>
+  )
+}
+```
+
+Der Hook liefert nur den Client. Er startet keine Arbeit, subscribed keinen Transport und macht aus dem Error-first-Tupel keine Exception.
+
+## Query-Arbeit besitzen
+
+Eine Query-Library kann Caching, Retries, Stale-Result-Suppression und Cancellation besitzen. Gib ihr das Signal, das sie liefert:
+
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
+import { useCallback } from 'react'
+import { useClient } from '@defjs/react'
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
+
+export function useUserQueryFn(id: number) {
+  const client = useClient()
+
+  return useCallback(
+    async ({ signal }: { signal: AbortSignal }) => {
+      const [error, user] = await client.execute(getUser({ path: { id } }), { signal })
+      if (error) throw error
+      return user
+    },
+    [client, id],
+  )
+}
+```
+
+Wrappe denselben Command nicht in einen zweiten Effect — zwei Owner machen Cancel und Stale-Result-Handling ambiguous.
+
+## Realtime-Arbeit besitzen
+
+SSE- und WebSocket-Handles überleben `client.execute(...)`. Registriere Cleanup vor dem Await von Startup, schließe ein Handle, das nach Disposal ankommt, konsumiere seinen einzelnen Iterator, await sein Terminal-Promise:
+
+```tsx twoslash
+import { defineWebSocket, struct } from '@defjs/core'
+import { useClient } from '@defjs/react'
+import { useEffect } from 'react'
+
+const notifications = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/notifications',
+  incoming: {
+    message: struct.object({ text: struct.string() }),
+  },
+})
+
+export function Notifications() {
   const client = useClient()
 
   useEffect(() => {
-    const abort = new AbortController()
+    const controller = new AbortController()
     let disposed = false
-    let closeActiveSession: ((reason: string) => void) | undefined
+    let closeActive: (() => void) | undefined
 
     void (async () => {
-      const [error, session] = await client.execute(openNotificationsSocket(), {
-        signal: abort.signal,
-      })
+      const [error, session] = await client.execute(notifications(), { signal: controller.signal })
+      if (error) return
 
-      if (error) {
-        if (!abort.signal.aborted) {
-          recordRealtimeFailure({ operation: 'notifications-startup' })
-        }
-        return
+      let closed = false
+      const close = () => {
+        if (closed) return
+        closed = true
+        session.close(1000, 'effect-disposed')
       }
-
-      const unsubscribeError = session.onRuntimeError(() => {
-        recordRealtimeFailure({ operation: 'notifications' })
-      })
-      let closeRequested = false
-
-      const closeSession = (reason: string) => {
-        if (closeRequested) {
-          return
-        }
-        closeRequested = true
-        unsubscribeError()
-        session.close(1000, reason)
-      }
-      closeActiveSession = closeSession
+      closeActive = close
 
       if (disposed) {
-        closeSession('effect-disposed')
+        close()
         await session.closed
         return
       }
 
       try {
         for await (const message of session.receive) {
-          if (disposed) {
-            break
-          }
-          handleNotification(message)
+          console.info(message.text)
         }
       } finally {
-        closeSession('consumer-finished')
+        close()
         await session.closed
       }
-    })().catch(() => {
-      if (!abort.signal.aborted) {
-        recordRealtimeFailure({ operation: 'notifications-consumer' })
-      }
-    })
+    })()
 
     return () => {
       disposed = true
-      abort.abort()
-      closeActiveSession?.('effect-disposed')
+      controller.abort()
+      closeActive?.()
     }
   }, [client])
 
@@ -221,31 +198,27 @@ export function LiveNotifications() {
 }
 ```
 
-Dieses Fragment nimmt an, dass `recordRealtimeFailure` eine Telemetriefunktion der Anwendung ist. Es konsumiert `session.receive` absichtlich; bleibt die begrenzte eingehende Warteschlange ungelesen, beendet ein Overflow die Session fatal. Wende dieselbe Disziplin für Start und Cleanup auf SSE-Handles an.
+Dieselbe Regel für `EventStreamHandle`: in `finally` schließen, `stream.closed` awaiten. WebSocket-Consumer müssen auch State-/Runtime-Error-Listener unsubscriben und `session.receive` weiterlesen — eine ungelesene bounded Queue kann overflowen.
 
-Unmount und erneuter Mount des Providers ändern den Client-Scope. Sie rufen weder `dispose` auf noch brechen sie Requests ab oder schließen Handles und Sessions, denn der Core-`Client` hat keine solche Lebenszyklus-API.
+## SSR und Client-Scope
 
-## API
+Der Package-Entry ist eine Client-Component-Boundary. Eine Browser-App kann einen Module-scoped Client teilen, wenn Endpoint, Interceptors und captured State browser-safe und request-independent sind. Für SSR erzeuge einen separaten Client innerhalb jeder Request-Grenze, wenn Headers, Cookies, User, Tenants oder Credentials differieren.
 
-```typescript
-import type { Client } from '@defjs/core'
-import type { JSX, ReactNode } from 'react'
+Provider-Unmount abortet HTTP **nicht**, schließt SSE/WebSocket nicht, unsubscribed keine Listener und ruft kein `dispose`. `@defjs/react` hat keine solche Lifecycle-API. Der Code, der jede Operation startet, muss sie finishen oder canceln.
 
-interface ClientProviderProps {
-  client: Client
-  children?: ReactNode
-}
+## Reference
 
-declare function ClientProvider(props: ClientProviderProps): JSX.Element
-declare function useClient(): Client
-```
+Öffentliche Exports aus `@defjs/react`:
 
-Stellt den übergebenen Client für Nachfahren bereit. `children` ist optional.
+- `ClientProvider` — akzeptiert `ClientProviderProps`, provides den gelieferten Client
+- `useClient` — nächster Client, oder throwt
+- `ClientProviderProps` — `{ client: Client; children?: ReactNode }`
 
-Liefert den nächstgelegenen Client und wirft ohne Provider einen Fehler.
+Erzeuge Clients und Options in `@defjs/core`. Siehe [Client](../core/client.md), [Fehler](../core/errors.md), [SSE](../core/sse.md) und [WebSocket](../core/web-socket.md).
 
-## Weiter
+## Verwandte Rezepte
 
-- [Client](/de-DE/core/client) behandelt Core-Optionskomposition und Scope.
-- [Fehler](/de-DE/core/errors) behandelt Integrationsgrenzen zwischen Tupeln und Exceptions.
-- [SSE](/de-DE/core/sse) und [WebSocket](/de-DE/core/web-socket) erklären die Zuständigkeit für Echtzeitressourcen.
+- [GET mit deklariertem 404](../recipes/get-declared-404.md)
+- [HTTP-Aufruf abbrechen](../recipes/cancel-http.md)
+- [SSE-Stream konsumieren](../recipes/consume-sse.md)
+- [WebSocket-Session öffnen](../recipes/websocket-session.md)

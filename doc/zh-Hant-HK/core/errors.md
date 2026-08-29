@@ -1,211 +1,166 @@
 ---
 title: Errors
-description: 處理 transport-specific result tuple，並按 plain RequestError discriminated union 分支。
+description: 按 kind 同 code 分支處理 404s、timeouts、undeclared statuses 同 transport failures。
 ---
 
 # Errors
 
-每種受支援的 transport 都回傳 error-first 三項 tuple，但第三項保留該 transport 的特定意思。
+處理 declared 404、timeout 或者 undeclared status，靠讀 error-first tuple — 唔係 catch throws。`RequestError` 仍然係按 `kind` / `code` 區分嘅 union，同時亦係 native `Error`（`instanceof Error` 係 true）。先睇 `kind`，再睇 `code`。
 
-```typescript
-const [httpError, data, response] = await client.execute(httpCommand)
-const [sseError, stream, startupOpen] = await client.execute(sseCommand)
-const [socketError, session, startupConnection] = await client.execute(socketCommand)
-```
+## Basic Setup
 
-- HTTP 回傳解碼後的 data 與 Defjs `HttpResponse` wrapper。
-- SSE 回傳 logical stream handle 與 startup-open snapshot。
-- WebSocket 回傳 logical session 與 startup-connection snapshot。
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
-失敗時，第二項是 `undefined`。如果 transport 在產生對應 snapshot 前已 startup failure，第三項亦可能是 `undefined`。
+const client = createClient(withEndpoint('https://api.example.com'))
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({ path: struct.object({ id: struct.number() }) }),
+  output: {
+    200: struct.object({ id: struct.number(), name: struct.string() }),
+    404: struct.object({ message: struct.string() }),
+  },
+})
 
-## `RequestError`
-
-`RequestError` 是在 tuple 回傳的 plain discriminated object，並不繼承原生 `Error` class。
-
-```typescript
-import type { DefinitionError, HttpStatusError, TransportError } from '@defjs/core'
-
-type RequestErrorShape<TErrorData = unknown> = HttpStatusError<TErrorData, number> | TransportError | DefinitionError
-```
-
-Root export 的 union 名稱是 `RequestError<TErrorData>`。
-
-先按 `kind` 分支，有需要再按 `code` 分支。
-
-### HTTP Status Error
-
-已宣告的非 2xx HTTP response 會產生以下 error：
-
-```typescript
-interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> {
-  kind: 'http'
-  code: 'HTTP_STATUS'
-  status: TStatus
-  message: string
-  data: TErrorData
-  response: HttpResponse<unknown>
+const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }))
+if (error?.kind === 'http' && error.status === 404) {
+  console.log(error.data.message)
+} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+  console.log('timed out')
+} else if (error?.kind === 'definition' && error.code === 'UNDECLARED_STATUS') {
+  console.log('status not in output map', error.response?.status)
+} else if (!error) {
+  console.log(user.name, response.status)
 }
 ```
 
-兩個 generic 的次序是 data 在前、status 在後。較廣的 `RequestError<TErrorData>` export 仍適合 application boundary，而 endpoint execute 會回傳按 status 區分的 `HttpStatusError<Data, Status>` union。因此，檢查 `error.status` 會把 `error.data` narrow 到該 status 宣告的 body：
+```typescript twoslash
+import { createTransportError, ERR_ABORTED, type RequestError } from '@defjs/core'
 
-```typescript
-const [error] = await client.execute(getUser())
+function classify(error: RequestError): string {
+  if (error.kind === 'http') return `status:${error.status}`
+  if (error.kind === 'transport') return `transport:${error.code}`
+  return `definition:${error.code}`
+}
 
-if (error?.kind === 'http') {
-  if (error.status === 404) {
-    console.error(error.data.missing)
-  } else {
-    // 對此 endpoint，其餘 409 | 422 status 共用同一個 conflict body。
-    console.error(error.data.conflict)
+const example: RequestError = createTransportError(ERR_ABORTED)
+console.log(classify(example))
+```
+
+## Stable codes
+
+| `kind`       | Codes                                                                                                | Meaning                                                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `http`       | `HTTP_STATUS`                                                                                        | Non-2xx 到達 HTTP boundary。保留 `status`、`response`，同任何 decoded status-specific `data`。                                  |
+| `transport`  | `ABORTED`, `TIMEOUT`, `NETWORK_ERROR`                                                                | Cancel、timeout，或者 Fetch/transport failure 擋住咗正常 result。                                                               |
+| `definition` | `REQUEST_VALIDATION_FAILED`, `RESPONSE_VALIDATION_FAILED`, `UNDECLARED_STATUS`, `INTERCEPTOR_FAILED` | Input、request construction、response representation、Struct decode、status-contract failure，或者 interceptor 入面嘅 `throw`。 |
+
+`cause` 喺 transport 同 definition errors 上面係 optional。`response` 永遠喺 HTTP status errors 上面；當已經有 response 時，definition errors 都可能出現。
+
+## 按 transport 嘅 tuple 形狀
+
+```typescript twoslash
+import type {
+  EventStreamHandle,
+  EventStreamOpenInfo,
+  HttpResponse,
+  RequestError,
+  WebSocketConnectionInfo,
+  WebSocketSession,
+} from '@defjs/core'
+
+type HttpResult =
+  | [error: null, data: unknown, response: HttpResponse<unknown>]
+  | [error: RequestError, data: undefined, response: HttpResponse<unknown> | undefined]
+type SseResult =
+  | [error: null, stream: EventStreamHandle<unknown>, open: EventStreamOpenInfo]
+  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+type SocketResult =
+  | [error: null, session: WebSocketSession<unknown>, connection: WebSocketConnectionInfo]
+  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+
+const results: [HttpResult, SseResult, SocketResult] | undefined = undefined
+void results
+```
+
+Startup failure → 第二項 `undefined`。第三項只會喺嗰個 transport 已經產出 response/snapshot 時出現。SSE handle 或者 WebSocket session return 之後，之後嘅 failures 住喺嗰個 handle 嘅 lifecycle — 唔會改寫已經 settle 嘅 startup tuple。
+
+## HTTP status 同 data
+
+Exact-status 優先。有 `output` 時，Defjs 會喺 decode body 之前揀 matching Struct，等 `error.status` 同 `error.data` 保持 correlated。
+
+| Situation                                 | Tuple outcome                         | Body behavior                                                |
+| ----------------------------------------- | ------------------------------------- | ------------------------------------------------------------ |
+| 2xx 配 matching declared status           | Success                               | Selected Struct → `data`                                     |
+| Non-2xx 配 matching declared status       | `HTTP_STATUS`                         | Selected Struct → typed `error.data`                         |
+| 任何 status 冇 matching declaration       | `UNDECLARED_STATUS`                   | Status 喺 body decode **之前**贏                             |
+| Matching status，body representation fail | `RESPONSE_VALIDATION_FAILED`          | 冇 partial typed value                                       |
+| 省略 `output`                             | 2xx succeeds；non-2xx → `HTTP_STATUS` | Body 唔 decode；`data` 係 `undefined`                        |
+| Response status `0`                       | Transport error                       | `response.error` → `NETWORK_ERROR`、`ABORTED` 或者 `TIMEOUT` |
+
+`HttpResponse.ok` 淨係指 `200 <= status < 300`。正常 non-2xx 唔會 set `HttpResponse.error` — 嗰個 property 用嚟表示 Fetch-boundary transport 或者 body-representation failure。
+
+## Startup vs post-open
+
+SSE 會喺 resolve handle 之前 validate status、`text/event-stream` 同 body。Failed status → `HTTP_STATUS`。Bad content type 或者 missing body → `RESPONSE_VALIDATION_FAILED`。Opening snapshot 仍然可以落喺 tuple 第三格。
+
+WebSocket startup 覆蓋 handshake + 第一次 physical open。Constructor failure、pre-open close、timeout 或者 cancel → startup tuple。即使 socket 從未到 `open`，connection snapshot 都可能存在。
+
+| Transport | After startup                                                                                                                                                |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| SSE       | Fatal error 時 iterator reject；`stream.closed` resolve 時帶 `code: 'error'` 同 `EventStreamErrorCode`                                                       |
+| WebSocket | Message/queue/heartbeat/runtime failures 用 `onRuntimeError`；terminal errors 令 `receive` fail；`session.closed` → `kind: 'error' \| 'aborted' \| 'closed'` |
+| HTTP      | Execute promise settle 一次。Interceptor/callback code 仍然可以喺 tuple normalization 之外 throw                                                             |
+
+`ABORTED` / `TIMEOUT` 描述嘅係 caller-facing startup result。你仍然要 close return 出嚟嘅 stream/session，再 await 佢嘅 terminal promise。
+
+## Native Error logging 同 cause
+
+所有 `RequestError` variants 都係 native `Error` instances，所以唔再需要 diagnostic adapter。`String(error)` 會用穩定嘅 native form `<name>: <message>`。`kind`、`code`，以及 `status`、`response`、`data` 呢類 variant fields 會保持 enumerable，方便 structured logging；`name` 同 native `cause` chain 就係 non-enumerable。
+
+```typescript twoslash
+import { StructError, type RequestError } from '@defjs/core'
+
+export function logRequestError(error: RequestError): void {
+  console.error(String(error), { code: error.code, kind: error.kind })
+  if (error.cause instanceof StructError) {
+    console.error(error.cause.prettify())
   }
 }
 ```
 
-只有 `HttpStatusError` 有 `data`。請在 endpoint boundary 保留這個與 status 關聯的 union，不要把它 widen 成互不關聯的 data union。
+Call `format()`、`flatten()` 或 `prettify()` 之前，要先用 `error.cause instanceof StructError` 收窄 type。呢啲 helpers 留喺 Struct cause，唔會 copy 去外層 `DefinitionError`。唔好叫 control flow parse `message` 或 `String(error)` — `kind`、`code` 同 reviewed status 仍然係 contract。
 
-### Transport Error
+## Reference
 
-網絡操作失敗、cancellation 或 timeout 會產生：
+| Branch                 | Control-flow check                           | Useful stable fields                        | Usually absent / sensitive        |
+| ---------------------- | -------------------------------------------- | ------------------------------------------- | --------------------------------- |
+| HTTP status policy     | `error.kind === 'http'`                      | `error.status`、reviewed `error.data`       | Body、headers、URL、`cause`       |
+| Caller cancellation    | `kind === 'transport' && code === 'ABORTED'` | `kind`、`code`                              | Abort reason 同 stack             |
+| Timeout                | `kind === 'transport' && code === 'TIMEOUT'` | `kind`、`code`                              | Request URL 同 underlying cause   |
+| Contract failure       | `error.kind === 'definition'`                | `kind`、`code`、reviewed `response?.status` | Struct issues、body、input values |
+| Stream/session runtime | `stream.closed` / `session.closed`           | Terminal code/kind、reviewed close status   | Event payloads、frames、causes    |
 
-```typescript
-interface TransportError {
-  kind: 'transport'
-  code: 'ABORTED' | 'NETWORK_ERROR' | 'TIMEOUT'
-  message: string
-  cause?: unknown
-}
-```
+唔好由 status `0` 推 CORS — 用 `kind` 同 `code` 分支。
 
-Transport error 沒有 `data` 或 `response` 欄位。
+將 `cause`、`data`、response headers/bodies、URLs、Struct issues、input values 同 stacks 當 sensitive。一個保守 summary：
 
-### Definition Error
-
-Input 解碼、request building、response decoding 或未宣告 HTTP status，可能產生：
-
-```typescript
-interface DefinitionError {
-  kind: 'definition'
-  code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'UNDECLARED_STATUS'
-  message: string
-  cause?: unknown
-  response?: HttpResponse<unknown>
-}
-```
-
-| Code                         | 目前觸發條件                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------------ |
-| `REQUEST_VALIDATION_FAILED`  | Input 結構式解碼失敗、request construction 失敗，或 `build` 產生無效 binding。 |
-| `RESPONSE_VALIDATION_FAILED` | 已宣告 response 或 SSE startup response 未通過 structural/content validation。 |
-| `UNDECLARED_STATUS`          | 已宣告 `output`，但 HTTP 回傳的 status 沒有對應 Struct。                       |
-
-`UNDECLARED_STATUS` 同時適用於未匹配的 2xx 與 non-2xx status。
-
-## 分支處理
-
-```typescript
-declare const useUser: (user: unknown) => void
-
-const [error, user, response] = await client.execute(getUser())
-
-if (!error) {
-  useUser(user)
-} else {
-  switch (error.kind) {
-    case 'http':
-      console.error('HTTP request failed', {
-        operation: 'get-user',
-        status: error.status,
-      })
-      break
-
-    case 'transport':
-      switch (error.code) {
-        case 'ABORTED':
-          console.info('get-user cancelled')
-          break
-        case 'TIMEOUT':
-          console.warn('get-user timed out')
-          break
-        case 'NETWORK_ERROR':
-          console.error('get-user transport failed')
-          break
-      }
-      break
-
-    case 'definition':
-      console.error('get-user contract failed', {
-        code: error.code,
-        status: error.response?.status,
-      })
-      break
-  }
-}
-```
-
-未有明確的敏感資料遮罩與 retention policy 時，不要記錄 `cause`、`data`、response headers、body 或 URL。
-
-### 原生 `Error` Bridge
-
-部分 integration 要求 throw 原生 `Error`。請在這個 boundary 建立新的 diagnostic error，預設只公開穩定的 `kind`、`code` 及可用的 HTTP `status` 分類：
-
-```typescript
+```typescript twoslash
 import type { RequestError } from '@defjs/core'
 
-type DiagnosticRequestError = Error & {
-  readonly code: RequestError<unknown>['code']
-  readonly kind: RequestError<unknown>['kind']
-  readonly status: number | undefined
-}
-
-export function toDiagnosticError(error: RequestError<unknown>): DiagnosticRequestError {
-  const status = error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined
-  const diagnostic = Object.assign(new Error(`Defjs request failed: ${error.kind}/${error.code}`), {
-    code: error.code,
+export function summarize(error: RequestError): { kind: RequestError['kind']; code: RequestError['code']; status?: number } {
+  return {
     kind: error.kind,
-    status,
-  })
-  diagnostic.name = 'DefjsRequestError'
-  return diagnostic
+    code: error.code,
+    status: error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined,
+  }
 }
 ```
 
-新建 error 會保留它在 boundary 產生的自身 stack。這個 bridge 絕不會附加或複製原始 `cause`、cause message、cause stack frame、`data`、response header/body 或 request/response URL。stack frame text 本身亦可能包含 URL 及 secret，因此選取並複製部分 cause frame 並不是安全預設。可執行的 `examples/observability-redacted-logging` 專案會斷言保留的 404 status，同時檢查 response data 及刻意帶有 secret 的 cause stack 沒有洩漏。
+`createTransportError`、`createDefinitionError` 同 `createHttpStatusError` 會 build 呢啲 native Error values。普通 request failures 仍然由 tuple return；inherit native Error 唔代表會自動 throw。`ERR_ABORTED` 同 `ERR_TIMEOUT` 係 transport normalizer 認得嘅 shared causes。
 
-## Response Availability
+## Related recipes
 
-`HttpResponse` 是 Defjs wrapper，不是 native `Response`。它提供 status、status text、headers、URL、body、`error` 與 `ok`。`ok` 只代表 status 落在 2xx 範圍。`error` 只用於 transport 或 body representation failure；普通 non-2xx response 會留空。
-
-有效而且已宣告的 non-2xx body 會經 Struct 解碼，並以 typed `HttpStatusError.data` 保留。Malformed representation 則產生 `RESPONSE_VALIDATION_FAILED`，原始 codec exception 保存在 `cause`，已收到的 response 仍保留，但沒有 `data`。
-
-對 HTTP 而言：
-
-- 已宣告 HTTP status error 有 `error.response`；
-- response-output validation error 與 undeclared status 可能有 `error.response`；
-- request validation、收到 response 前取消、interceptor throw，以及 status-0 transport failure，可能沒有 tuple response。
-
-SSE startup failure 時，如果 response 已到達，之後才出現 content 或 status validation failure，第三項仍可能有 open snapshot。WebSocket startup failure 時，只有已擷取 connection snapshot 才可能回傳第三項。
-
-## Error Factory 與 Constant
-
-Root entry 為 integration code 匯出以下 factory helper：
-
-```typescript
-import { ERR_ABORTED, ERR_TIMEOUT, createDefinitionError, createHttpStatusError, createTransportError } from '@defjs/core'
-```
-
-- `createTransportError(cause)`：normalize abort、timeout 與其他 cause。
-- `createDefinitionError(code, cause, response?)`：建立 definition error。
-- `createHttpStatusError(status, message, response, data?)`：建立 HTTP status error。
-- `ERR_ABORTED` 與 `ERR_TIMEOUT`：normalizer 可識別的共用 `Error` 值。
-
-這些 helper 建立 plain `RequestError` object，不會 throw。
-
-內置 command path 會把預期內的 startup failure 轉成 tuple。Tuple handling 不涵蓋任意 extension code：custom interceptor 與應用程式 callback 仍可能 throw；把不受支援的 command 傳給 broad runtime implementation 亦會 reject。
-
-## 下一步
-
-- [HTTP](/zh-Hant-HK/core/http)：status dispatch 與 response decoding。
-- [SSE](/zh-Hant-HK/core/sse)：startup failure 與 open 後 error 的分別。
-- [WebSocket](/zh-Hant-HK/core/web-socket)：runtime error 與 terminal close。
+- [GET with a declared 404](../recipes/get-declared-404.md)
+- [Cancel an HTTP call](../recipes/cancel-http.md)

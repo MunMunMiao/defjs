@@ -1,300 +1,208 @@
 ---
 title: WebSocket
-description: 定義 message envelope、啟動並觀察 live session、讀取 incoming work、設定 opt-in reconnect 與 heartbeat，並關閉自己擁有的 resource。
+description: 開 typed JSON session，receive 同 send envelopes，之後 close 同 await closed。
 ---
 
 # WebSocket
 
-`defineWebSocket(...)` 為 JSON-message WebSocket endpoint 建立 command builder。
+Start → receive → send → 用 `await using` release。Unsubscribe 同 disposal 係你 own。Manual `close()` / `closed` 仍然用得；clients、providers 同 interceptors 唔會 auto-close sessions。
 
-```typescript
+## Basic Setup
+
+```typescript twoslash
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
-const client = createClient(withEndpoint('wss://api.example.com'))
-
-const chat = defineWebSocket({
+const client = createClient(withEndpoint('https://chat.example.com'))
+const room = defineWebSocket({
   maxIncomingQueueSize: 100,
-  maxOutgoingQueueSize: 20,
   path: '/chat',
-  incoming: {
-    message: struct.object({ userId: struct.number(), text: struct.string() }),
-    pong: struct.object({}),
-  },
-  outgoing: {
-    send: struct.object({ text: struct.string() }),
-    ping: struct.object({}),
-  },
+  incoming: { message: struct.object({ text: struct.string() }) },
+  outgoing: { send: struct.object({ text: struct.string() }) },
 })
+
+const [error, session, startupConnection] = await client.execute(room())
+if (error) {
+  console.error(error.kind, error.code, startupConnection?.generation)
+} else {
+  await using ownedSession = session
+  const unsubscribe = ownedSession.onRuntimeError((cause) => console.error('runtime', cause))
+  try {
+    ownedSession.send({ type: 'send', text: 'Hello' })
+    for await (const message of ownedSession.receive) {
+      console.log(message.type, message.text)
+      break
+    }
+  } finally {
+    unsubscribe()
+  }
+}
 ```
 
-## Message Envelope
+## JSON envelope
 
-每條 message 都是 JSON object，並有一個非空 string `type`。Runtime 會按 type 從 `incoming` 或 `outgoing` 選取 Struct。
+`defineWebSocket(...)` 描述 JSON-message endpoint。Required `incoming` map 按 message type 揀 Struct；optional `outgoing` 對 `session.send(...)` 做同一樣。每條 wire message 係帶非空 string `type` 嘅 object。
 
-Object payload 的欄位可以與 `type` 同級：
+Object payload fields 坐喺 `type` 旁邊。Scalar 同 array payloads 用 envelope 嘅 `data` field：
 
 ```json
 { "type": "message", "userId": 7, "text": "Hello" }
 ```
 
-Scalar 或 array payload 要放進 `data`：
-
 ```json
 { "type": "count", "data": 3 }
 ```
 
-`type` 與 `data` 是 reserved envelope key。如果 object payload 自己有 `data` 欄位，請把整個 payload 包入 `data`，否則 runtime 會把該欄位誤認成 envelope payload：
+Message map 控制 payload，唔係 envelope discriminator。`incoming.default` 接受否則 undeclared 嘅 type names；冇佢嘅話，unknown types 會被 drop。Incoming text、`ArrayBuffer`、typed-array 同 `Blob` frames 會 decode 做 UTF-8 JSON。Malformed JSON 同 Struct failures 去 runtime-error observers — 唔去 `receive`。
 
-```typescript
-const audit = defineWebSocket({
-  maxIncomingQueueSize: 100,
-  path: '/audit',
-  incoming: {
-    entry: struct.object({ data: struct.string(), source: struct.string() }),
-  },
-  outgoing: {
-    write: struct.object({ data: struct.string(), source: struct.string() }),
-  },
-})
+如果 object payload 有個 field 叫 `data`，encode 之後佢仍然坐喺 `type` 旁邊（唔係 nested envelope）。例子：`write` 配 `{ data: string, source: string }` wire 做 `{ type: 'write', data: string, source: string }`。Caller-side value 仍然係 `{ type: 'write', data: { data, source } }`，因為 serialization 之前 `data` 帶住 object payload。Aliases 套用喺 payload fields。`type` discriminator 屬於 envelope，唔屬於 Struct。
 
-const [auditError, auditSession] = await client.execute(audit())
-if (!auditError) {
-  auditSession.send({
-    type: 'write',
-    data: { data: 'reviewed-value', source: 'settings' },
-  })
-}
-```
+`session.send(...)` 會 synchronous validate 同 serialize。Open 時即刻 send；`reconnecting` 期間如果有 outgoing queue 就 queue；唔 writable 就 throw `InvalidStateError`。冇 outgoing map、undeclared type、payload validation failure、disabled/full outgoing queue，或者 native send failure 都會 throw。
 
-對應的 wire shape 是 `{ "type": "write", "data": { "data": "reviewed-value", "source": "settings" } }`。
+`receive` 係 one-consumer。第二個 iterator 會被 reject。
 
-不要把 `type` 宣告成一般 payload 欄位；envelope normalization 會管理這個 key。
+## State snapshots
 
-可選的 `incoming.default` Struct 會處理其他未宣告 message type。沒有它時，unknown type 會被丟棄。
+| Member                     | Meaning                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------- |
+| `state`                    | `idle`、`connecting`、`open`、`reconnecting`、`closing`、`closed`、`aborted` 或者 `error` |
+| `connection`               | 最新 physical connection：`generation`、URL、negotiated protocol、有就有 extensions       |
+| `bufferedAmount`           | Native unsent byte count；冇 physical socket 就係 `0`                                     |
+| `receive`                  | Validated incoming messages 嘅 one-consumer async iterable                                |
+| `onStateChange(listener)`  | Subscribe logical state transitions；return unsubscribe                                   |
+| `onRuntimeError(listener)` | Subscribe non-startup runtime errors；return unsubscribe                                  |
+| `closed`                   | Logical terminal close outcome 嘅 promise                                                 |
 
-## Startup Tuple
+`open` = physical socket open。`reconnecting` 包括 replacement 之前嘅 preparation + delay。`connection.generation` 每逢一個 physical socket 到達 `open` 就 +1。Tuple `startupConnection` 保持第一個成功 snapshot；`session.connection` 會向前走。
 
-```typescript
-const [error, session, startupConnection] = await client.execute(chat())
-```
+Startup failure → `[error, undefined, connection?]`。Pre-open constructor failure 可能冇 connection；startup 期間嘅 timeout/close 仍然可能提供 snapshot。Session return 之後，runtime errors 經 observers、`receive` 同 `closed` 行 — 唔係第二次 execute tuple。
 
-HTTP、SSE 與 WebSocket execution 的 `timeout` 必須是 `1..2_147_483_647` 範圍內的正安全整數；`0`、負數、小數、`NaN`、`Infinity` 或超出上限的值會在建立 request、stream 或 socket 資源前回傳 `REQUEST_VALIDATION_FAILED`。
+```typescript twoslash
+import type { RequestError, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
 
-WebSocket 回傳：
-
-```typescript
-type SocketAwaitResult<TIncoming, TOutgoing> =
+type SocketResult<TIncoming, TOutgoing> =
   | [error: null, session: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError<unknown>, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+
+const result: SocketResult<unknown, never> | undefined = undefined
+void result
 ```
 
-成功時，第三項是 `generation: 1` 的 startup-connection snapshot，可以包含第一個實體 socket 的 `url`、`protocol` 與 `extensions`。
+## Reconnect
 
-`session.connection` 是 live getter；每次實體 socket 成功 open 都會遞增 `generation`。需要 startup snapshot 時，請保留 tuple 第三項。
+Reconnect 係 opt-in。冇 `reconnect` object → physical close 完結 logical session。Configure 咗之後，defaults 係 `attempts: 3`、`delayMs: 1000`、`factor: 2`、`maxDelayMs: 30000`、`jitter: 0`。`attempts` 數嘅係 initial attempt 之後嘅 retries；`attempts: 0` 關閉。Default predicate 接受每個 close outcome。
 
-不要記錄 connection URL，因為可能包含 path identifier、應用程式 query data 與 telemetry propagation 欄位。
+```ts
+import { createClient, defineWebSocket, struct, withEndpoint, withWebSocketReconnect } from '@defjs/core'
 
-## 失敗診斷
-
-使用 browser WebSocket API，或只暴露 standard WebSocket event surface 的 injected constructor 時，transport-level handshake failure 通常只可提供穩定的 `RequestError` `kind: 'transport'`，以及 `NETWORK_ERROR`、`ABORTED` 或 `TIMEOUT` 等 `code`。不能保證取得 HTTP `401`、其他 handshake status、response header/body，或 Node 特有的 `unexpected-response` detail。runtime-specific constructor 可在自己的 adapter boundary 暴露更多資料，但那不是 portable Core contract。
-
-成功啟動後，應等待 `session.closed`，優先使用當中的 `kind`、可選 close `code` 與可選 `wasClean` 作為 terminal diagnostic。Close code 是 WebSocket close code，不是 HTTP status。Routine log 只保留經審查的 low-cardinality context 與這些欄位；不要記錄 connection URL、query、ticket、raw `cause` 或 `reason`。只有具備明確 redaction、access 與 retention policy 時才擴展記錄。
-
-## Live Session
-
-一個 `WebSocketSession` 是 logical session，可以橫跨多次實體 connection attempt。
-
-| Member                     | 行為                                                       |
-| -------------------------- | ---------------------------------------------------------- |
-| `connection`               | 最新 connection information 的 live getter。               |
-| `bufferedAmount`           | Native socket 尚未送出的 byte 數；沒有 socket 時為 `0`。   |
-| `state`                    | Logical session state 的 live getter。                     |
-| `receive`                  | 已驗證 incoming message 的共用 async work queue。          |
-| `send(message)`            | 先檢查可寫性，再驗證、serialize、send 或 enqueue。         |
-| `close(code?, reason?)`    | 請求 terminal close。                                      |
-| `closed`                   | 回傳 observed terminal-close information 的 promise。      |
-| `onStateChange(listener)`  | 加入 state observer，並回傳 unsubscribe function。         |
-| `onRuntimeError(listener)` | 加入 runtime-error observer，並回傳 unsubscribe function。 |
-
-Client 回傳 session 後不會再追蹤。呼叫方要負責讀取 incoming message、管理 observer、cancellation 與 close。
-
-## 接收 Message
-
-Text、ArrayBuffer、typed-array 與 Blob message 會按到達次序 decode 成 UTF-8 JSON。以下 input 會直接丟棄而不報錯：
-
-- non-object envelope；
-- 缺少 `type`，或 `type` 並非非空 string；
-- 沒有 `incoming.default` Struct 可處理的 unknown type。
-
-Invalid JSON 與已選 Struct 的 validation failure 會傳給 `onRuntimeError`；frame 會被丟棄，session 繼續運作。
-
-```typescript
-const unsubscribeError = session.onRuntimeError(() => {
-  recordSocketFailure({ operation: 'chat-receive' })
-})
-
-try {
-  for await (const message of session.receive) {
-    if (message.type === 'message') {
-      renderMessage(message.userId, message.text)
-    }
-  }
-} finally {
-  unsubscribeError()
-  session.close(1000, 'consumer-finished')
-  await session.closed
-}
-```
-
-`receive` 只容許一個 iterator。`maxIncomingQueueSize` 是必填的正 item 上限；overflow 會清空 buffer、令 iterator 失敗，並以 `error` 終止 session。
-
-## 傳送 Message
-
-`send(...)` 是同步 method。以下情況會同步拋錯：
-
-- endpoint 沒有 `outgoing` map；
-- message 沒有 valid `type`；
-- type 未宣告；
-- payload 結構式解碼或 encoding 失敗；
-- reconnecting 時 endpoint-owned outgoing queue 被停用或已滿；
-- immediate send 時 native socket throw。
-
-```typescript
-try {
-  session.send({ type: 'send', text: 'Hello' })
-} catch (error) {
-  handleSendFailure(error)
-}
-```
-
-邏輯可寫性會在 payload validation 與 serialization 前檢查。只有邏輯 state 與目前實體 socket 都是 `open` 才會直接傳送；只有 `reconnecting` 且 endpoint 的 `maxOutgoingQueueSize` 是正數時才會 enqueue。保留的 FIFO 會在 replacement socket 發出 `open` 前 flush。
-
-Manual closing、terminal state，以及 remote close 後 reconnect predicate 尚未決定的窗口都會令 `send` 拋出 `InvalidStateError`。Transport 不會 replay 已傳送到先前實體 socket 的 frame。
-
-## State
-
-`session.state` 可以是：
-
-| State          | 含義                                                               |
-| -------------- | ------------------------------------------------------------------ |
-| `idle`         | Execution 開始前的初始內部 state。                                 |
-| `connecting`   | 第一個實體 connection attempt 正在開始。                           |
-| `open`         | 目前實體 socket 已打開。                                           |
-| `reconnecting` | 下一個實體 connection attempt 正在準備或 delay。                   |
-| `closing`      | 擁有者要求 manual close。                                          |
-| `closed`       | 沒有 normalized error 的 terminal close。                          |
-| `aborted`      | External cancellation normalize 成 `ABORTED` 後的 terminal state。 |
-| `error`        | 其他 terminal failure。                                            |
-
-`session.state` 是 logical lifecycle，不能證明目前一定有 native socket。`reconnecting` 期間，`send` 使用 endpoint-owned outgoing capacity。
-
-Observer failure 會被隔離：state-listener failure 會通知 runtime-error listener；runtime-error listener failure 會轉送至可用的 `globalThis.reportError`。Terminal settlement 會釋放 observer；擁有者更早結束時仍應 unsubscribe。
-
-### 每次嘗試前
-
-`beforeConnect` 可設定在 client 或單次 execution。首次 attempt 與每次 reconnect 時，都會在 native constructor 前執行：
-
-```typescript
-declare const refreshConnectionState: (signal: AbortSignal) => Promise<void>
-
-const [error, session] = await client.execute(chat(), {
-  beforeConnect: ({ signal }) => refreshConnectionState(signal),
-})
-```
-
-Hook 接收 `{ attempt, signal }`；首次 `attempt` 是 `0`，reconnect 時遞增。把 `signal` 傳給 owned async work。Abort 與 timeout 會同 hook race、消費 late rejection，並阻止 late result 建立 socket。Throw 或 rejection 是 terminal transport failure。
-
-## Reconnect 要明確啟用
-
-沒有 reconnect object 就不會 reconnect。可在 client 或單次 execution 設定：
-
-```typescript
-const [error, session] = await client.execute(chat(), {
-  reconnect: {
-    attempts: 5,
-    delayMs: 1_000,
+const client = createClient(
+  withEndpoint('https://chat.example.com'),
+  withWebSocketReconnect({
+    attempts: 3,
+    delayMs: 500,
     factor: 2,
-    maxDelayMs: 30_000,
+    maxDelayMs: 10_000,
     jitter: 0.2,
     shouldReconnect({ attempt, code, wasClean }) {
-      return !wasClean && code !== 1008 && attempt <= 5
+      return attempt <= 3 && (wasClean !== true || code === 1006)
     },
-  },
+  }),
+)
+const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/chat',
+  incoming: { ready: struct.object({ ok: struct.boolean() }) },
 })
+const [error, session] = await client.execute(room())
+if (!error) {
+  console.log(session.state)
+  session.close(1000, 'done')
+}
 ```
 
-`attempts` 是首次 attempt 之後的 retry 次數。傳入 empty object 會啟用三次 retry，預設值如下：
+`shouldReconnect` 拎 next retry attempt、close cause、code、reason 同 `wasClean`。Manual `session.close(...)` 唔入 predicate。Throwing preparation/policy 會以 error 完結 logical session。
 
-| 欄位              | 預設值                             |
-| ----------------- | ---------------------------------- |
-| `attempts`        | `3`                                |
-| `delayMs`         | `1000`                             |
-| `factor`          | `2`                                |
-| `maxDelayMs`      | `30000`                            |
-| `jitter`          | `0`                                |
-| `shouldReconnect` | 對所有 close outcome 回傳 `true`。 |
+WebSocket backoff jitter 係 **multiplicative**（`jitter: 0.2` → delay 喺 `0.8x` 到 `1.2x`）。SSE jitter 同 WebSocket 一樣，係 0–1 multiplicative factor。Delay/factor/jitter/attempt values 會喺 constructor 之前 validate；timer delays 唔可以超過 `2_147_483_647` ms。
 
-預設 predicate 會 retry clean 與 unclean remote close。如果 clean close 應直接 terminal，請設定 predicate。第一次 retry 的 `attempt` 是 1。
-
-Base delay 為 `min(delayMs * factor ** (attempt - 1), maxDelayMs)`。WebSocket jitter 是 multiplicative：例如 `0.2` 會在 `0.8` 至 `1.2` 隨機選 factor。這與 SSE 額外加上毫秒數的 additive jitter 不同。
-
-`shouldReconnect` 必須同步；throw 令 session 以 `error` 終止，明確回傳 `false` 則以 `closed` 終止。Reconnect 只建立同一 logical session 的新實體 socket，不會 replay 先前 send。應用程式可在 `session.connection.generation` 增加時只恢復仍 active、可安全 replay 的 subscription，絕不可 replay mutation。
+`beforeConnect({ attempt, signal })` 喺 initial constructor 同每次 reconnect 之前 run。將佢嘅 signal 傳入 token refresh，等 cancel 同時停 prep 同 connect。
 
 ## Heartbeat
 
-Heartbeat 亦要明確啟用：
+喺 execute 或者 client scope opt-in。Interval 會經 outgoing Struct map send `message()`。Optional `isAck(message)` 認 ack — 嗰條 message 會清 timeout，而且 **唔會** deliver 去 `receive`。
 
-```typescript
-const [error, session] = await client.execute(chat(), {
+```ts
+import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://chat.example.com'))
+const room = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/chat',
+  incoming: { pong: struct.object({ ok: struct.boolean() }) },
+  outgoing: { ping: struct.object({}) },
+})
+
+const [error, session] = await client.execute(room(), {
   heartbeat: {
     intervalMs: 30_000,
     timeoutMs: 10_000,
     message: () => ({ type: 'ping' }),
     isAck: (message) => message.type === 'pong',
   },
-  reconnect: { attempts: 3 },
 })
+if (!error) {
+  console.log(session.state)
+  session.close(1000, 'done')
+}
 ```
 
-`message` 必須產生 endpoint `outgoing` map 接受的值。`isAck` 認出的 message 會清除 heartbeat timeout，不會加入 `receive`。
+`intervalMs` 同 `timeoutMs` 一定要係 ≤ `2_147_483_647` 嘅 positive finite timers。Heartbeat message 一定要符合 outgoing map。Serialization、native send、ack classification 同 timeout failures 對 logical session 係 fatal — 唔會變做 ordinary reconnects。
 
-Heartbeat serialization、send、ack predicate 與 timeout failure 都是 fatal：會通知 runtime-error listener、令 `receive` 失敗，並讓 session 以 `error` 終止，不會諮詢 reconnect policy。
+## Queues
 
-`intervalMs` 與已定義的 `timeoutMs` 都必須是正有限值，且不超過 `2_147_483_647`。一個 ack deadline 生效期間，後續 interval 不會傳送新 ping 或重設 deadline；ack 或 session stop 會清除它。
+| Setting                | Required value                                  | Behavior                                                                                         |
+| ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `maxIncomingQueueSize` | Positive safe integer                           | Bound 等 `receive` 嘅 parsed messages，同等 transform 嘅 raw frames。Overflow → `state: 'error'` |
+| `maxOutgoingQueueSize` | Optional non-negative safe integer；default `0` | 淨係喺 `state === 'reconnecting'` 時 FIFO。Full/disabled → `send(...)` throw                     |
 
-## Queue
+Queued outgoing frames 會喺 replacement socket publish `open` 之前 flush。已經喺舊 socket send 過嘅 frames 永遠唔會 auto-replay。Reconnect queues 用嚟裝你 reconnecting 期間 send 嘅 messages — 唔係 reconstruct app state。
 
-Queue limit 屬於 endpoint definition。`maxIncomingQueueSize` 是必填的正 safe integer；overflow 會清空 buffer 並以 fatal error 終止。`maxOutgoingQueueSize` 是可選的非負 safe integer，預設 `0`；正數容量會在連線嘗試之間按 FIFO 保留 frame，overflow 會拒絕新 frame，不會刪除舊 frame。
+Incoming overflow 會清 pending sequence、fail `receive`、停 session，再用 `kind: 'error'` resolve `session.closed`。Keep consumer 夠快，或者按 measured size/memory 提高 bound。
 
-兩個 limit 都按 item 而非 byte 計算。`session.bufferedAmount` 另行顯示 native socket 尚未送出的 byte。`receive` 只容許一個 iterator。
+## Protocols 同 authentication
 
-## Close Ownership
+Definition `protocols`、client `withWebSocketProtocols(...)`，同 execute `protocols` 設定 constructor subprotocol list。Precedence：execution → client → definition。第一個 defined list 會 copy 畀 logical session，reconnect 時 reuse。
 
-`session.close(code, reason)` 先驗證 code 必須是 `1000` 或 `3000..4999`，reason 最多 123 個 UTF-8 byte。有效輸入進入 `closing`、要求 native close，並等待實際 `CloseEvent`；觀察到的 code/reason 優先於 request value。
+Browser WebSocket constructors 唔接受 arbitrary handshake headers。Defjs 會將 `http:` → `ws:` 同 `https:` → `wss:`，path placeholders encode 一次，用 configured query serializer。WebSocket query building 亦會將 complex query values serialize 做 JSON（同 default HTTP scalar-only query 唔同）。
 
-`session.closed` resolve 成 runtime 實際 observed 的 close information：
+`withCredentials(true)` 係 HTTP/SSE 嘅 Fetch credentials — 唔係 WebSocket auth。用 reviewed cookie/session policy、subprotocol，或者 short-lived connection ticket。唔好將一般 credentials 或者 long-lived secrets 放 query string。
 
-```typescript
-type WebSocketCloseInfo =
-  | { kind: 'closed'; code?: number; reason?: string; wasClean?: boolean }
-  | { kind: 'aborted'; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }
-  | { kind: 'error'; cause: unknown; code?: number; reason?: string; wasClean?: boolean }
+## Closure 同 ownership
+
+`session.close(code?, reason?)` 要求 terminal closure 同停 heartbeat。Code 一定要係 `1000` 或者 `3000..4999`；reason ≤ 123 UTF-8 bytes。Invalid close args 會喺改 state 之前 throw。要 manual close reason 或 logical terminal result 時，同 `await session.closed` 一齊用。
+
+```typescript twoslash
+import type { WebSocketSession } from '@defjs/core'
+
+async function observeSession(session: WebSocketSession<unknown, never>): Promise<void> {
+  await using ownedSession = session
+  console.log(ownedSession.state)
+}
+
+void observeSession
 ```
 
-Manual close、無 cause 的 remote close 與明確拒絕 reconnect 都產生 `closed`。External abort 產生 `aborted`；timeout 與 runtime failure 產生 `error`。Native close throw 時只做一次無參數 fallback；兩次都 throw 就直接以 `error` settle，不會第三次呼叫 close。
+`session.closed` 係 logical terminal snapshot：`'closed'`、`'aborted'` 或者 `'error'`，可選帶 native `code` / `reason` / `wasClean`，aborted/error 時仲有 `cause`。Observed native close fields 贏過 owner 要求嘅 fallback。
 
-請在開啟 session 的 component、route、job 或 service boundary unsubscribe listener 並關閉 session。單靠 provider unmount 不會完成這些工作。
+Standard async disposer 會 request best-effort native close，再等 Defjs-owned lifecycle、message pump、timers、listeners、queues 同 socket references teardown。假如 1 秒內都 observe 唔到 close event，logical cleanup 會 forced complete，`closed` 會用 manual `kind: 'closed'` settle，但 disposer 會用名為 `TimeoutError` 嘅 `DOMException` reject。假如 native close call 自己 throw，cleanup 完成後 disposer 會用嗰個 error reject。重複 call disposer 會 share 同一個 teardown。以上結果全部都證明唔到 physical TCP connection 已經 close。
 
-## URL 與 Authentication 安全
+自己 structural implement session 嘅 code，而家必須 provide 同一份 `[Symbol.asyncDispose](): PromiseLike<void>` contract。對 implementer 嚟講係 compile-time breaking change；淨係接收 Defjs session 嘅 consumer 唔使加新 runtime call。
 
-HTTP base URL 會轉成 WebSocket scheme：`http:` 變成 `ws:`，`https:` 變成 `wss:`。請提供 raw path-placeholder value；Core 會逐 segment 精確 encode 一次，`%` 會變成 `%25`，並拒絕空值、`.` 與 `..`。Query 值使用 configured serializer。
+## GraphQL boundary
 
-Protocol precedence 依序是 execution option、client option、endpoint definition。明確傳入 empty protocol array 會 suppress 較低 precedence 的值。
+Defjs 提供 typed JSON envelope 同 logical session lifecycle。佢 **唔會** implement WebSocket application protocol。GraphQL-over-WebSocket features — connection init、operation IDs、`next`/`error`/`complete`、disposal、subscription replay — 都喺 core contract 之外。
 
-Browser WebSocket API 不能設定任意 handshake header。不要把 query parameter 當成通用 credential channel；browser tool、proxy、access log 與 telemetry 都可能記錄 URL。請使用 TLS（`wss:`），並按部署環境審查 authentication design，例如合適的 same-site cookie flow 或 short-lived connection ticket。
+Server 要求嗰個 protocol 時，用好似 `graphql-ws` 噉嘅 protocol client，或者用 `defineWebSocket(...)` model 自己嘅 envelope。淨係一個 message map 唔會 negotiate GraphQL semantics。
 
-## 下一步
+## Related recipes
 
-- [SSE](/zh-Hant-HK/core/sse)：stream retry 與 queue behavior 的分別。
-- [Interceptors](/zh-Hant-HK/core/interceptors)：如何保留 live session getter。
-- [Errors](/zh-Hant-HK/core/errors)：startup tuple failure。
+- [Open a WebSocket session](../recipes/websocket-session.md)
+- [Consume an SSE stream](../recipes/consume-sse.md)

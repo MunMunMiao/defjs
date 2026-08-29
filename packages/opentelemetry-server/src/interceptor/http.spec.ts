@@ -46,6 +46,111 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     expect(activeSpans[0]?.attributes['url.full']).toBe('https://api.example.com/test')
   })
 
+  test('should merge startSpanHook attributes last into initial HTTP span options', async () => {
+    const { tracer } = createMockTracer()
+    const req = { ...makeHttpRequest(), baseEndpoint: 'https://api.example.com:8443' }
+    const startSpanHook = vi.fn(() => ({
+      'app.tenant': 'acme',
+      'server.address': 'tenant.example.com',
+      'server.port': 9443,
+      'url.full': 'https://tenant.example.com/custom',
+    }))
+    const interceptor = createOpenTelemetryHttpInterceptor({ tracer, propagator: mockPropagator, startSpanHook })
+
+    await interceptor.fn(req, async () => makeHttpResponse())
+
+    expect(startSpanHook).toHaveBeenCalledWith(req)
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes).toEqual({
+      'app.tenant': 'acme',
+      'http.request.method': 'GET',
+      'server.address': 'tenant.example.com',
+      'server.port': 9443,
+      'url.full': 'https://tenant.example.com/custom',
+    })
+  })
+
+  test('should keep the resolved HTTP URL initial and omit req.queryString when startSpanHook is absent', async () => {
+    const { tracer } = createMockTracer()
+    const interceptor = createOpenTelemetryHttpInterceptor({ tracer, propagator: mockPropagator })
+    const req = { ...makeHttpRequest(), queryString: 'tenant=acme' }
+
+    await interceptor.fn(req, async () => makeHttpResponse())
+
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes).toEqual({
+      'http.request.method': 'GET',
+      'server.address': 'api.example.com',
+      'url.full': 'https://api.example.com/test',
+    })
+  })
+
+  test('should preserve a literal query already present in the endpoint URL', async () => {
+    const { tracer } = createMockTracer()
+    const interceptor = createOpenTelemetryHttpInterceptor({ tracer, propagator: mockPropagator })
+
+    await interceptor.fn({ ...makeHttpRequest(), endpoint: '/test?literal=kept' }, async () => makeHttpResponse())
+
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes?.['url.full']).toBe('/test?literal=kept')
+  })
+
+  test('should let startSpanHook explicitly include req.queryString in url.full', async () => {
+    const { tracer } = createMockTracer()
+    const req = { ...makeHttpRequest(), queryString: 'tenant=acme' }
+    const interceptor = createOpenTelemetryHttpInterceptor({
+      tracer,
+      propagator: mockPropagator,
+      startSpanHook: (request) => ({ 'url.full': `${request.baseEndpoint}${request.endpoint}?${request.queryString}` }),
+    })
+
+    await interceptor.fn(req, async () => makeHttpResponse())
+
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes?.['url.full']).toBe('https://api.example.com/test?tenant=acme')
+  })
+
+  test('should continue HTTP and record a hook error when startSpanHook throws', async () => {
+    const { tracer } = createMockTracer()
+    const next = vi.fn(async () => makeHttpResponse())
+    const interceptor = createOpenTelemetryHttpInterceptor({
+      tracer,
+      propagator: mockPropagator,
+      startSpanHook: () => {
+        throw new Error('start hook failed')
+      },
+    })
+
+    await interceptor.fn(makeHttpRequest(), next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(tracer.startSpan).mock.calls[0]?.[1]?.attributes).toEqual({
+      'http.request.method': 'GET',
+      'server.address': 'api.example.com',
+      'url.full': 'https://api.example.com/test',
+    })
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', {
+      'error.type': 'Error',
+      'hook.name': 'startSpanHook',
+    })
+  })
+
+  test('should continue HTTP when startSpanHook throws undefined', async () => {
+    const { tracer } = createMockTracer()
+    const next = vi.fn(async () => makeHttpResponse())
+    const interceptor = createOpenTelemetryHttpInterceptor({
+      tracer,
+      propagator: mockPropagator,
+      startSpanHook: () => {
+        throw undefined
+      },
+    })
+
+    await interceptor.fn(makeHttpRequest(), next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('defjs.otel.hook.error', {
+      'error.type': '_OTHER',
+      'hook.name': 'startSpanHook',
+    })
+  })
+
   test('should leave span status unset on success', async () => {
     const { tracer } = createMockTracer()
     const interceptor = createOpenTelemetryHttpInterceptor({ tracer, propagator: mockPropagator })

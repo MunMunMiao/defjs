@@ -7,15 +7,35 @@ import type { WebSocketCloseInfo, WebSocketState } from '../web_socket/web_socke
 // HTTP Interceptor
 // ---------------------------------------------------------------------------
 
+/**
+ * Continuation that runs the rest of the HTTP interceptor chain (or the handler).
+ *
+ * `next(req)` only goes **inward** — remaining interceptors registered after this one,
+ * then the Fetch handler. It is not a re-dispatch of `client.execute` / `axios(config)`
+ * from the outside of the onion. Call `next` again for a safe replay (for example one
+ * 401 refresh) from the same interceptor; outer layers do not run a second time.
+ */
 export type HttpInterceptorNext = (req: HttpRequest) => Promise<HttpResponse<unknown>>
 
+/**
+ * HTTP interceptor function: may inspect/modify the request, then call `next`.
+ */
 export type InterceptorFn = (req: HttpRequest, next: HttpInterceptorNext) => Promise<HttpResponse<unknown>>
 
+/**
+ * Tagged HTTP interceptor for client option lists.
+ */
 export interface HttpInterceptor {
   kind: 'http'
   fn: InterceptorFn
 }
 
+/**
+ * Wrap an `InterceptorFn` as a tagged `HttpInterceptor`.
+ *
+ * @param fn - HTTP interceptor function.
+ * @returns An `HttpInterceptor` with `kind: 'http'`.
+ */
 export function createHttpInterceptor(fn: InterceptorFn): HttpInterceptor {
   return { kind: 'http', fn }
 }
@@ -24,15 +44,30 @@ export function createHttpInterceptor(fn: InterceptorFn): HttpInterceptor {
 // SSE Interceptor
 // ---------------------------------------------------------------------------
 
+/**
+ * Terminal SSE handler that opens an event stream for the given request.
+ */
 export type SSEHandler = (req: HttpRequest) => Promise<EventStreamHandle<unknown>>
 
+/**
+ * SSE interceptor function: may inspect/modify the request, then call `next`.
+ */
 export type SSEInterceptorFn = (req: HttpRequest, next: SSEHandler) => Promise<EventStreamHandle<unknown>>
 
+/**
+ * Tagged SSE interceptor for client option lists.
+ */
 export interface SSEInterceptor {
   kind: 'sse'
   fn: SSEInterceptorFn
 }
 
+/**
+ * Wrap an `SSEInterceptorFn` as a tagged `SSEInterceptor`.
+ *
+ * @param fn - SSE interceptor function.
+ * @returns An `SSEInterceptor` with `kind: 'sse'`.
+ */
 export function createSSEInterceptor(fn: SSEInterceptorFn): SSEInterceptor {
   return { kind: 'sse', fn }
 }
@@ -41,29 +76,49 @@ export function createSSEInterceptor(fn: SSEInterceptorFn): SSEInterceptor {
 // WebSocket Interceptor
 // ---------------------------------------------------------------------------
 
-// Minimal session interface — structurally compatible with WebSocketSession
-// to avoid circular dependency (interceptor.ts ←→ web_socket.ts).
-export interface WebSocketSessionLike {
+/**
+ * Minimal WebSocket session surface used by interceptors.
+ *
+ * Structurally compatible with `WebSocketSession` without importing that type
+ * (avoids a circular dependency between interceptors and WebSocket).
+ */
+export interface WebSocketSessionLike extends AsyncDisposable {
   readonly bufferedAmount: number
   readonly connection: { extensions?: string; generation: number; protocol?: string; url?: string }
   readonly closed: Promise<WebSocketCloseInfo>
   readonly receive: AsyncIterable<unknown>
   readonly state: WebSocketState
   close(code?: number, reason?: string): void
+  [Symbol.asyncDispose](): PromiseLike<void>
   onRuntimeError(listener: (error: unknown) => void): () => void
   onStateChange(listener: (state: WebSocketState) => void): () => void
   send(message: unknown): void
 }
 
+/**
+ * Terminal WebSocket handler that opens a session for the given request.
+ */
 export type WebSocketHandler = (req: HttpRequest) => Promise<WebSocketSessionLike>
 
+/**
+ * WebSocket interceptor function: may inspect/modify the request, then call `next`.
+ */
 export type WebSocketInterceptorFn = (req: HttpRequest, next: WebSocketHandler) => Promise<WebSocketSessionLike>
 
+/**
+ * Tagged WebSocket interceptor for client option lists.
+ */
 export interface WebSocketInterceptor {
   kind: 'web-socket'
   fn: WebSocketInterceptorFn
 }
 
+/**
+ * Wrap a `WebSocketInterceptorFn` as a tagged `WebSocketInterceptor`.
+ *
+ * @param fn - WebSocket interceptor function.
+ * @returns A `WebSocketInterceptor` with `kind: 'web-socket'`.
+ */
 export function createWebSocketInterceptor(fn: WebSocketInterceptorFn): WebSocketInterceptor {
   return { kind: 'web-socket', fn }
 }
@@ -72,6 +127,9 @@ export function createWebSocketInterceptor(fn: WebSocketInterceptorFn): WebSocke
 // Unified type
 // ---------------------------------------------------------------------------
 
+/**
+ * Any tagged interceptor accepted by client interceptor options.
+ */
 export type Interceptor = HttpInterceptor | SSEInterceptor | WebSocketInterceptor
 
 // ---------------------------------------------------------------------------
@@ -86,23 +144,11 @@ function dispatch<TReq, TResult>(req: TReq, next: Handler<TReq, TResult>): TResu
   return next(req)
 }
 
-function makeChain<TReq, TResult>(interceptors: InterceptorChainFn<TReq, TResult>[]): InterceptorChainFn<TReq, TResult> {
+export function makeChain<TReq, TResult>(interceptors: InterceptorChainFn<TReq, TResult>[]): InterceptorChainFn<TReq, TResult> {
   return interceptors.reduceRight<InterceptorChainFn<TReq, TResult>>(
     (fn, interceptor) => (req, next) => interceptor(req, (nextReq) => fn(nextReq, next)),
     dispatch,
   )
-}
-
-export function makeInterceptorChain(interceptors: InterceptorFn[]): InterceptorFn {
-  return makeChain(interceptors)
-}
-
-export function makeSSEInterceptorChain(interceptors: SSEInterceptorFn[]): SSEInterceptorFn {
-  return makeChain(interceptors)
-}
-
-export function makeWebSocketInterceptorChain(interceptors: WebSocketInterceptorFn[]): WebSocketInterceptorFn {
-  return makeChain(interceptors)
 }
 
 // ---------------------------------------------------------------------------

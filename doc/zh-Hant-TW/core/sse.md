@@ -1,185 +1,131 @@
 ---
-title: SSE
-description: 定義並解碼有界 Server-Sent Events、設定重連，並關閉自己擁有的 stream。
+title: Server-Sent Events
+description: 消費型別化的 SSE 串流，關閉它，並 await 終端的 closed promise。
 ---
 
-# SSE
+# Server-Sent Events
 
-`defineEventStream(...)` 會建立 SSE 指令建構器。端點會宣告 path，以及每個 event name 要使用的 Struct。
+開啟串流、迭代它，再用 `await using` 釋放自有 handle。手動 `close()` 與 `closed` 仍可使用；clients 與 plugins 不會替你 dispose 回傳的串流。
 
-```typescript
-import { defineEventStream, struct } from '@defjs/core'
+## Basic Setup
 
+```typescript twoslash
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
 const notifications = defineEventStream({
   maxBufferSize: 64 * 1024,
   maxQueueSize: 100,
   path: '/notifications',
   events: {
-    message: struct.json(
-      struct.object({
-        id: struct.number(),
-        text: struct.string(),
-      }),
-    ),
-    heartbeat: struct.string(),
-  },
-})
-```
-
-Method 預設是 `GET`。端點可以指定其他 method，但 high-level SSE build context 不支援 request body。
-
-## 事件解碼
-
-SSE parser 會先選 `events[eventName]`，沒有時再選 `events.default`。兩者都找不到就丟棄事件，並向選用的 invalid-event observer 回報 `missing-struct`。
-
-SSE `data:` 以文字抵達：
-
-- `struct.string()`、`struct.text()`、`struct.any()` 與 `struct.unknown()` 會收到文字；
-- `struct.number()` 會 trim 文字並接受 finite number；
-- `struct.boolean()` 會 trim 文字，而且只接受 `true` 或 `false`；
-- `struct.json(inner)` 先解析 JSON 文字，再用 `inner` 做結構解碼。
-
-單獨的 `struct.object(...)` 不會解析看起來像 JSON 的 event text，必須用 `struct.json(...)` 包起來。
-
-`default` Struct 會處理其他未宣告名稱：
-
-```typescript
-const events = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/events',
-  events: {
-    update: struct.json(struct.object({ version: struct.number() })),
-    default: struct.string(),
-  },
-})
-```
-
-沒有 `default` Struct 時，`EventStreamData<TEvents>` 是由已宣告事件名稱組成的判別聯集。對 `event.event` 使用 switch 會將 `event.data` narrow 為對應的 Struct 輸出。當 `default` 存在時，其分支會以 `event: string` 保留 wire 上的實際事件名稱；因此，混合已知事件與 `default` 的 stream 仍會保留這個寬廣的 fallback 分支。
-
-## 輸入與 Request Mapping
-
-Path、query 與 header section 請使用 `struct.request(...)`：
-
-```typescript
-const roomEvents = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/rooms/:roomId/events',
-  input: struct.request({
-    path: struct.object({ roomId: struct.string() }),
-    query: struct.object({ after: struct.string().optional() }),
-  }),
-  events: {
     message: struct.json(struct.object({ text: struct.string() })),
   },
 })
-```
 
-自訂 SSE `build` 可以設定 path parameter、query parameter 與 header。它收到結構描述綁定投影，不能設定 body 或 credentials。Credentials 請在 client 上用 `withCredentials(...)` 設定。
-
-## 啟動 Tuple
-
-```typescript
-const [error, stream, startupOpen] = await client.execute(
-  roomEvents({
-    path: { roomId: 'general' },
-  }),
-)
-```
-
-HTTP、SSE 與 WebSocket 執行的 `timeout` 必須是 `1..2_147_483_647` 範圍內的正安全整數；`0`、負數、小數、`NaN`、`Infinity` 或超過上限的值會在建立 request、stream 或 socket 資源前回傳 `REQUEST_VALIDATION_FAILED`。
-
-SSE 回傳：
-
-```typescript
-type StreamAwaitResult<TEvent> =
-  | [error: null, stream: EventStreamHandle<TEvent>, open: StreamOpenInfo]
-  | [error: RequestError<unknown>, stream: undefined, open: StreamOpenInfo | undefined]
-```
-
-成功時，第三個元素是驗證過的啟動開啟快照。它的 response 已通過 HTTP status 與 `text/event-stream` content-type 檢查。
-
-`stream.open` 是即時 getter，保存邏輯 stream 最新看到的 response。即使後續重連 response 沒通過 status 或 content-type 驗證，也會出現在這裡。初始快照很重要時，請另外保留 `startupOpen`。
-
-預設不要記錄 `startupOpen.url`、`stream.open.url` 或 response URL，其中可能含有敏感的 path 或 query data。
-
-## 消費事件
-
-擁有者應在同一個生命週期內開始迭代，並安排關閉：
-
-```typescript
-import type { Client } from '@defjs/core'
-
-declare const client: Client
-declare const showNotification: (message: { id: number; text: string }) => void
-
-async function consumeNotifications(signal: AbortSignal) {
-  const [error, stream, startupOpen] = await client.execute(notifications(), { signal })
-
-  if (error) {
-    console.error('notification stream startup failed', { kind: error.kind, code: error.code })
-    return
-  }
-
-  console.info('notification stream connected', {
-    status: startupOpen.response?.status,
-  })
-
-  try {
-    for await (const event of stream) {
-      switch (event.event) {
-        case 'message':
-          showNotification(event.data)
-          break
-        case 'heartbeat':
-          break
-        default: {
-          const exhaustive: never = event
-          void exhaustive
-        }
-      }
-    }
-  } finally {
-    await stream.closed
+const [error, stream] = await client.execute(notifications())
+if (error) {
+  console.error(error.code)
+} else {
+  await using ownedStream = stream
+  for await (const event of ownedStream) {
+    if (event.event === 'message') console.log(event.data.text)
   }
 }
 ```
 
-`execute` 成功代表啟動完成。啟動後發生的錯誤會透過 iterator rejection 與 `stream.closed` 出現，不會回頭改變原始 tuple 的 `error` 項目。
+## 定義串流
 
-透過 `break`、`return` 或 throw 提早離開 `for await` 迴圈時，會呼叫 iterator 的 `return()`。Stream 會自動以 `{ code: 'aborted', reason: 'iterator-return' }` 關閉；await `stream.closed` 即可觀察這個終止狀態。只有 owner 需要從活動 iteration 外部關閉時，才明確呼叫 `stream.close(...)`。
+`defineEventStream(...)` 需要 `events`、正的 safe-integer `maxBufferSize`、正的 safe-integer `maxQueueSize`，以及相對 `path`。Method 預設是 `GET`。
 
-## 無效事件
+Request input 可以有 `path`、`query`、`headers` — 沒有 `body`。自訂 `build` 只拿到 path／query／header setters。你沒設 `Accept` 時，Defjs 會送 `Accept: text/event-stream`。
 
-透過 `withSSEOnInvalidEvent(...)` 或 `withSSEOptions(...)` 設定 `onInvalidEvent`：
+一個邏輯串流可以跨多次實體 Fetch attempts。即使沒設 reconnect options，SSE 預設仍會重試暫時性的網路與串流讀取失敗；沒有 `attempts` 上限時，那些重試是無界的。你仍只拿到一個 handle 與一個 async iterator。
 
-```typescript
+## 開啟與檢查
+
+`client.execute(...)` 只有在 status、content-type、body 檢查通過後才會 resolve：
+
+```typescript twoslash
+import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
+
+const client = createClient(withEndpoint('https://api.example.com'))
+const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.string() },
+})
+
+const [error, stream, startupOpen] = await client.execute(notifications())
+if (error) {
+  console.error(error.kind, error.code, startupOpen?.response.status)
+} else {
+  console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
+  stream.close('example-finished')
+  await stream.closed
+}
+```
+
+回應必須成功、media type essence 是 `text/event-stream`，且有 body。非 2xx 啟動 → `HTTP_STATUS`。壞 content type 或缺少 body → `RESPONSE_VALIDATION_FAILED`。回應抵達後驗證失敗時，第三格 tuple 仍可能放著回應快照。
+
+`startupOpen` 是初始快照。`stream.open` 是 live 的，之後的實體 opens 會變。第一個回應重要時，留住 tuple 那個值。
+
+```typescript twoslash
+import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+
+type StreamResult<T> =
+  | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
+  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+
+const result: StreamResult<string> | undefined = undefined
+void result
+```
+
+## 解碼事件
+
+Wire event name → `events[eventName]`；否則 `events.default`。沒有相符 Struct → 事件不會交付。缺少 SSE `event` 欄位 → 邏輯名稱 `message`。
+
+SSE `data` 一開始是文字。選定的 Struct 決定轉換：
+
+| Struct                                                                 | 轉換                                                 |
+| ---------------------------------------------------------------------- | ---------------------------------------------------- |
+| `struct.string()`、`struct.text()`、`struct.any()`、`struct.unknown()` | 維持文字                                             |
+| `struct.number()`                                                      | Trimmed 文字必須是 finite number；空的無效           |
+| `struct.boolean()`                                                     | Trimmed 文字正好是 `true` 或 `false`                 |
+| `struct.json(inner)`                                                   | Parse JSON，再用 `inner` 解碼                        |
+| Object、array、union、其他一般 Structs                                 | 直接解碼文字；看起來像 JSON 的文字**不會**自動 parse |
+
+發出的值：`event`、解碼後的 `data`、選填的非空 `id`。有 `default` 時，未知 event names 在推導的 union 裡是 `string`。
+
+## 觀察無效事件
+
+無效／未宣告事件會被丟掉，不會進 queue。`withSSEOnInvalidEvent(...)` 可觀察 raw ID、名稱、文字 data，以及 `missing-struct` 或 `validation-failed` 與選填 cause。
+
+```ts
+import { createClient, withEndpoint, withSSEOnInvalidEvent } from '@defjs/core'
+
 const client = createClient(
   withEndpoint('https://api.example.com'),
-  withSSEOnInvalidEvent(({ reason, message, signal }) => {
+  withSSEOnInvalidEvent(({ reason, message, cause, signal }) => {
     if (signal.aborted) return
-    recordInvalidEvent({ eventName: message.event, reason })
+    console.info('Dropped SSE event', {
+      reason,
+      event: message.event,
+      hasCause: cause !== undefined,
+    })
   }),
 )
 ```
 
-Observer 會收到：
-
-- `reason: 'missing-struct' | 'validation-failed'`；
-- 原始事件的 `id`、name 與 data text；
-- validation failure 的 `cause`。
-- 目前 attempt 的 `signal`。
-
-這個事件會被丟棄，後續有效事件仍可正常送出。Observer throw 與 rejected promise 會被隔離；abort 會透過 `signal` 立即中斷 pending observer。請保持快速，並在記錄 `id`、`data` 與 `cause` 前遮罩。
+Observer 跑在 transform 邊界。除非 active attempt signal 已 aborted，否則它的失敗是隔離的。保持短小；別把 raw event data 當可信資料。
 
 ## 重連
 
-SSE 對網路與 stream read failure 內建重試行為。正常 EOF 會以 `code: 'eof'` 關閉 stream，不會重連。
+Reconnect 設定是自訂預設重試路徑 — 不是開啟重試的必要條件。正常 EOF 不會重試。網路與串流讀取失敗可以重試。Status／content-type 驗證、parser 限制、message transform 失敗、queue overflow、正常 EOF，對邏輯串流都是終端。
 
-預設從 1 秒開始重試，而且沒有次數上限。用 `attempts` 設定上限：
+```ts
+import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
 
-```typescript
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withSSEReconnect({
@@ -187,79 +133,61 @@ const client = createClient(
     delayMs: 1_000,
     factor: 2,
     maxDelayMs: 30_000,
-    jitter: 250,
+    jitter: 0.5,
+    shouldReconnect({ attempt, open }) {
+      return attempt <= 5 && (open?.response.status ?? 0) !== 401
+    },
   }),
 )
 ```
 
-`attempts` 指初次嘗試之後的重試次數。`attempts: 0` 會停用重試。傳給 `shouldReconnect` 的 `attempt` 在第一次重試時從 1 開始，並在同一個邏輯 stream 內持續累加；實體連線成功不會把它重設。
+`attempts` 計算初始 attempt 之後的重試；`attempts: 0` 關掉重試。沒有 attempt 上限 → 內建重試無界。`delayMs` 是起始間隔；`factor` 放大它；`maxDelayMs` 限制基數。SSE 的 `jitter` 是與 WebSocket 相同的 **0–1 乘性因子**。串流的 `retry:` 欄位會更新目前間隔。政策 callback 回傳 false／throw／reject 會結束邏輯串流。
 
-Delay 從目前的 retry interval 開始。伺服器可以用 SSE `retry:` 欄位更新 interval。`factor` 套用指數成長，`maxDelayMs` 則限制 base 上限。`jitter` 會再加上從零到設定值的隨機毫秒數。由於 jitter 在 cap 之後才加入，最終 delay 可能超出 `maxDelayMs`，但差值會小於 `jitter`。
+最新剖析到的 event ID 會在之後的 attempt 變成 `Last-Event-ID`。無界重連前，先搞清楚伺服器的 replay 語意。
 
-```typescript
-withSSEReconnect({
-  attempts: 5,
-  shouldReconnect({ attempt, lastEventId, cause, open }) {
-    return shouldRetryStream({ attempt, lastEventId, cause, status: open?.response.status })
-  },
-})
+## Buffer 與 queue 限制
+
+兩者都必須是正的 safe integers。Overflow 是致命的 — 不會默默丟掉較舊事件。
+
+| 限制            | 保護什麼                             | 終端 code               |
+| --------------- | ------------------------------------ | ----------------------- |
+| `maxBufferSize` | 剖析時不完整／過大的 SSE line／event | `PARSER_LIMIT_EXCEEDED` |
+| `maxQueueSize`  | 事件產出快過單一消費者讀取           | `QUEUE_OVERFLOW`        |
+
+致命串流也會清掉 buffered events、取消 active body、reject iterator，並以 `code: 'error'` resolve `stream.closed`。
+
+## Close 與 dispose
+
+`EventStreamHandle`：一個 live opening 快照、一個終端 promise、一個 `close`、一個 async iterator，以及一個標準 async disposer。
+
+```typescript twoslash
+import type { EventStreamCloseInfo, EventStreamHandle, EventStreamOpenInfo } from '@defjs/core'
+
+interface StreamApi<T> extends AsyncIterable<T>, AsyncDisposable {
+  readonly open: EventStreamOpenInfo
+  readonly closed: Promise<EventStreamCloseInfo>
+  close(reason?: unknown): void
+  [Symbol.asyncDispose](): PromiseLike<void>
+}
+
+const handle = null as unknown as EventStreamHandle<string>
+const api: StreamApi<string> = handle
+void api
 ```
 
-後續 attempt 會把最新 event ID 放在 `Last-Event-ID`。`shouldReconnect` throw 或 reject 時會停止 retry，並讓 pending startup 或 stream 以該 policy error settle。Abort 會透過目前 attempt signal 中斷 pending predicate。
+終端 codes：`eof`、`aborted` 或 `error`。`error` 結果還帶 `EventStreamErrorCode`：`INVALID_RESPONSE`、`MESSAGE_PROCESSING_FAILED`、`PARSER_LIMIT_EXCEEDED`、`QUEUE_OVERFLOW`、`TIMEOUT` 或 `TRANSPORT_ERROR`。
 
-HTTP/open validation failure、message-processing fatal error 與正常 EOF，和可重試的 network/read failure 並不相同。不要假設每個終止路徑都會重連。
+`close(reason)` 會 abort active attempt、關閉 queue、以 `aborted` settle。迴圈 `break`／`return`／throw 會觸發 iterator return，並以 `iterator-return` 關閉。執行 command 的程式碼擁有關閉責任。
 
-## 端點自有資源上限
+`await using` 會呼叫同一條自有 close 路徑，並等待 Defjs 讀取／重連工作停止，以及 active reader lock 釋放。如果 provider-controlled `ReadableStream.cancel()` promise 永久卡住，它不保證該 promise 完成。需要 reason 或終端結果時，仍可明確呼叫 `stream.close(reason)`，再 `await stream.closed`。
 
-一個 stream 只允許一個 async iterator consumer；建立第二個 iterator 會拋錯。Iterator return（包括提早 `break` 離開 `for await`）會自動以 reason `iterator-return` 關閉 stream。
+結構化實作 `EventStreamHandle` 的程式碼現在必須提供 `[Symbol.asyncDispose](): PromiseLike<void>`，並接到同一個 lifecycle。對實作者而言，這是編譯期 breaking change；只接收 Defjs handle 的 consumer 不必新增執行期呼叫。
 
-每個定義都必須提供正安全整數 `maxBufferSize` 與 `maxQueueSize`。前者限制每條 SSE line 與目前 event 的累計 data，後者限制等待 consumer 的已解析 event。Queue overflow 是 fatal error，不會靜默丟棄 event。
+儲存庫已驗證並支援的最低 lib 契約，是固定 TypeScript 7 加上 `ES2022`、`ESNext.Disposable`、`DOM`、`DOM.Iterable`。這四項組合是一個 baseline；不表示每份 declaration 都各自強制全部四項，也不承諾未經測試的舊 compiler。一般 HTTP Client 不是 `AsyncDisposable`，其請求應使用 timeout 或 `AbortSignal` 管理。
 
-```typescript
-const notifications = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/notifications',
-  events: { message: struct.json(notificationStruct) },
-})
-```
+Credentials、event data、event IDs、causes、stream URLs 別進日常 logs。`withCredentials(true)` 影響 SSE 的 Fetch cookies；它不會設定 WebSocket auth。
 
-正常 EOF 允許 consumer 排空已 buffered event。Fatal parser、transform 或 overflow error 會清空 buffer、cancel active body、reject iteration，並讓 `stream.closed` 以 `code: 'error'` settle。
+## 相關 recipes
 
-## 終止關閉
-
-`stream.closed` 會 resolve 為 discriminated union：
-
-```typescript
-type EventStreamCloseInfo =
-  | { code: 'eof'; reason?: string; cause?: unknown }
-  | { code: 'aborted'; reason?: string; cause?: unknown }
-  | { code: 'error'; errorCode: EventStreamErrorCode; reason?: string; cause?: unknown }
-```
-
-- `eof` 代表 response body 正常結束。
-- `aborted` 包含明確呼叫 `stream.close(...)` 或取消路徑。
-- `error` 代表停止重試或發生終止 stream error；該分支一定包含公開的 `errorCode`。
-
-`EventStreamErrorCode` 有六個穩定值：
-
-| Error code                  | 含義                                                         |
-| --------------------------- | ------------------------------------------------------------ |
-| `INVALID_RESPONSE`          | Status、content type、response error 或 response body 無效。 |
-| `MESSAGE_PROCESSING_FAILED` | Event transform 或 lifecycle callback 失敗。                 |
-| `PARSER_LIMIT_EXCEEDED`     | 超出端點自有的 parser buffer limit。                         |
-| `QUEUE_OVERFLOW`            | 已解析 event 超出端點自有的 queue bound。                    |
-| `TIMEOUT`                   | Transport attempt 達到設定的 timeout。                       |
-| `TRANSPORT_ERROR`           | 發生其他終止 network、stream read 或 retry policy failure。  |
-
-`stream.close(reason)` 是 idempotent。它會中止進行中的傳輸工作、停止讓新值進入 queue，並 settle `stream.closed`。Iterator `return()` 會以 reason `iterator-return` 使用相同 close path。
-
-一般日誌只應記錄 `close.code`，以及 `error` 分支中的 `close.errorCode`。沒有明確的遮罩與保存政策時，不要記錄 `reason`、`cause`、raw event 或 stream URL。
-
-開啟 stream 的應用程式邊界負責關閉它。Client 或 framework provider 不會自動關閉。
-
-## 下一步
-
-- [WebSocket](/zh-Hant-TW/core/web-socket)說明雙向 session 與 opt-in 重連。
-- [攔截器](/zh-Hant-TW/core/interceptors)說明 SSE header 修改與生命週期觀察。
-- [錯誤](/zh-Hant-TW/core/errors)說明啟動 response 是否可用。
+- [消費 SSE 串流](../recipes/consume-sse.md)
+- [取消 HTTP 呼叫](../recipes/cancel-http.md)

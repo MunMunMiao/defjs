@@ -1,29 +1,42 @@
 ---
 title: المعترضات
-description: رشّح المعترضات حسب وسيلة النقل، وركّبها بترتيب البصلة، وانسخ الطلبات بأمان، واقطع السلسلة، ونفّذ سياسات auth وretry محدودة.
+description: طبّق سياسة HTTP وSSE وWebSocket عند حد النقل بترتيب البصلة.
 ---
 
 # المعترضات
 
-تغلّف المعترضات حد النقل. لكل من HTTP وSSE وWebSocket نوع interceptor ونوع result مستقل.
+أضف رؤوس مصادقة، أو اقطع نوافذ الصيانة، أو أعد محاولة القراءات الآمنة — دون لمس تحقق الأمر. لكل وسيلة نقل سلسلتها. تحصل على `HttpRequest`؛ تُرجع نتيجة تلك الوسيلة (`HttpResponse` أو معالج تدفق أحداث أو جلسة WebSocket). تحقق المدخل يعمل قبل السلسلة؛ توزيع الحالة والنتائج المفكوكة بعدها.
 
-| Factory                      | الطلب         | Result من `next`                      |
+## الإعداد الأساسي
+
+```typescript twoslash
+import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
+
+const audit = createHttpInterceptor(async (request, next) => {
+  const started = performance.now()
+  const response = await next(request)
+  console.info(request.operation ?? request.method, response.status, Math.round(performance.now() - started))
+  return response
+})
+
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(audit))
+void client
+```
+
+## ترتيب البصلة
+
+`withInterceptors(...items)` يقبل معترضات مختلطة. العميل يصفّي حسب `kind` لوسيلة النقل المختارة ويحافظ على ترتيب التسجيل النسبي. كل معترض قد يعمل قبل `next` وبعده:
+
+| المصنع                       | الطلب         | النتيجة من `next`                     |
 | ---------------------------- | ------------- | ------------------------------------- |
 | `createHttpInterceptor`      | `HttpRequest` | `Promise<HttpResponse<unknown>>`      |
 | `createSSEInterceptor`       | `HttpRequest` | `Promise<EventStreamHandle<unknown>>` |
 | `createWebSocketInterceptor` | `HttpRequest` | `Promise<WebSocketSessionLike>`       |
 
-سجّل معترضات مختلطة باستخدام `withInterceptors(...)`. يرشّح العميل حسب `kind` ويحافظ على ترتيب التسجيل داخل كل وسيلة نقل.
+```typescript twoslash
+import { createHttpInterceptor } from '@defjs/core'
 
-```typescript
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(httpLogger, sseAuth, socketObserver))
-```
-
-## ترتيب البصلة
-
-يتبع مسار الطلب ترتيب التسجيل. ثم يعود مسار النتيجة بالترتيب المعاكس:
-
-```typescript
+const order: string[] = []
 const first = createHttpInterceptor(async (request, next) => {
   order.push('first:before')
   const response = await next(request)
@@ -38,28 +51,27 @@ const second = createHttpInterceptor(async (request, next) => {
   return response
 })
 
-// first:before -> second:before -> transport
-//               <- second:after <- first:after
+// Request: first:before → second:before → transport
+// Return: second:after → first:after
+void [first, second, order]
 ```
 
-تُلحق استدعاءات `withInterceptors(...)` المتعددة العناصر:
+استدعاءات `withInterceptors(...)` المتعددة تُلحق. ضع المراقبة الواسعة خارج الطفرة/إعادة المحاولة الأضيق عندما يجب أن ترى الطبقة الخارجية النتيجة النهائية.
 
-```typescript
-createClient(withInterceptors(first), withInterceptors(second, third))
-```
+## استنسخ وأضف رؤوس الطلب
 
-لا يجوز لـ WebSocket interceptor استدعاء `next` أكثر من مرة. إذا فشلت chain بعد إنشاء session، يسوي Core تلك session غير المسلّمة قبل إعادة خطأ interceptor الأصلي. وإذا نجحت chain مع short-circuit session أخرى، يغلق Core الـ session المنشأة؛ ويحافظ wrapper على الارتباط بتمرير Promise `closed` الأصلية.
+عامل `HttpRequest` الوارد كمملوك للسلسلة. استنسخ `Headers` قبل تغييرها؛ مرّر طلبًا جديدًا إلى `next`:
 
-## انسخ الطلبات بأمان
+```typescript twoslash
+import { createHttpInterceptor } from '@defjs/core'
 
-تعامل مع الطلب الوارد على أنه مملوك للسلسلة. أنشئ كائن `Headers` جديدًا قبل تعديل headers:
+function readAccessToken(): string | undefined {
+  return undefined
+}
 
-```typescript
-const auth = createHttpInterceptor((request, next) => {
-  const token = getAccessToken()
-  if (!token) {
-    return next(request)
-  }
+const bearer = createHttpInterceptor((request, next) => {
+  const token = readAccessToken()
+  if (!token) return next(request)
 
   const headers = new Headers(request.headers)
   headers.set('Authorization', `Bearer ${token}`)
@@ -67,20 +79,22 @@ const auth = createHttpInterceptor((request, next) => {
 })
 ```
 
-ينطبق النمط نفسه على headers في SSE. لا يستطيع منشئ WebSocket في المتصفح إرسال handshake headers اعتباطية، لذلك لا تؤدي تعديلات `request.headers` داخل WebSocket interceptor إلى مصادقة اتصال المتصفح.
+نفس النمط لـ SSE. WebSocket في المتصفح لا يمكنه إضافة رؤوس مصافحة عشوائية — تغيير `request.headers` لن يصادق مقبس متصفح. استخدم بروتوكولًا أو سياسة URL/استعلام أو مصافحة يدعمها الخادم بدلًا من ذلك.
 
-عند استبدال HTTP body، انشر request واستبدل `body`. يكتشف حد Fetch أن metadata الخاصة بـ content type القديم لم تعد تخص body الجديد. لا تعِد استخدام body من نوع `ReadableStream` جرى استهلاكه.
+عند استبدال جسم HTTP، استبدل `body` على الطلب المنسوخ. Fetch يتجاهل بيانات تعريف نوع المحتوى القديمة عندما تغيّرت قيمة الجسم. لا تعِد استخدام جسم `ReadableStream` مستهلك.
 
-## قطع السلسلة
+## اقطع طلبًا قطعًا قصيرًا
 
-يستطيع المعترض تجاوز `next`، لكنه يجب أن يعيد نوع النتيجة المتوقع لوسيلة النقل. في HTTP، تستطيع `makeResponse(...)` إنشاء غلاف من Defjs:
+يمكنك تخطي `next`، لكن يجب أن تُرجع نوع النتيجة المتوقع. لـ HTTP، `makeResponse(...)` يبني غلافًا متوافقًا:
 
-```typescript
+```typescript twoslash
 import { createHttpInterceptor, makeResponse } from '@defjs/core'
 
-declare const isMaintenanceWindow: () => boolean
+function isMaintenanceWindow(): boolean {
+  return false
+}
 
-const maintenanceGate = createHttpInterceptor(async (request, next) => {
+const maintenanceGate = createHttpInterceptor(async (_request, next) => {
   if (isMaintenanceWindow()) {
     return makeResponse({
       status: 503,
@@ -89,22 +103,83 @@ const maintenanceGate = createHttpInterceptor(async (request, next) => {
     })
   }
 
-  return next(request)
+  return next(_request)
 })
 ```
 
-تستمر طبقة الأوامر المعتادة في توزيع هذه response حسب status وoutput Struct. أعلن status إذا كان جزءًا من عقد نقطة النهاية.
+طبقة الأمر ما زالت توزّع حسب الحالة. أعلن `503` في `output` عندما يحتاج المستدعون `error.data` مُنوَّعًا. القطع القصير لـ SSE أو WebSocket يحتاج معالجًا/جلسة متوافقين كاملين (وعود الإغلاق، حالة حية، ملكية). الكائنات الجزئية ليست سياسة صالحة.
 
-يتطلب قطع SSE أو WebSocket مقبضًا أو جلسة كاملة ومتوافقة، بما في ذلك دلالات الإغلاق. وغالبًا ما يكون هذا أصعب من إعادة response اصطناعية في HTTP.
+## أعد محاولة القراءات الآمنة
 
-## حافظ على Live Getters للجلسة
+إعادة المحاولة تغيّر السلوك. أبقِ السياسة ضيقة — هذا المثال يعيد محاولة `GET` / `HEAD` / `OPTIONS` القابلة لإعادة التشغيل للحالات `0` و`502` و`503` و`504`، يحد `Retry-After` عند 30 ثانية، ويتوقف بعد محاولتين أو عند الإلغاء:
 
-لا تغلّف جلسة WebSocket باستخدام `{ ...session }`. يقرأ spread قيمتي `state` و`connection` مرة واحدة، ويحوّل getter الحي إلى قيمة قديمة. فوّض كل عضو صراحة:
+```typescript twoslash
+import { createHttpInterceptor, type HttpRequest, type HttpResponse } from '@defjs/core'
 
-```typescript
+const retryableMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
+const retryableStatuses = new Set([0, 502, 503, 504])
+
+function isReplayable(request: HttpRequest): boolean {
+  return typeof ReadableStream === 'undefined' || !(request.body instanceof ReadableStream)
+}
+
+function retryAfterMs(response: HttpResponse<unknown>): number {
+  const value = response.headers.get('retry-after')
+  if (!value) return 250
+
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 30_000)
+
+  const date = Date.parse(value)
+  return Number.isNaN(date) ? 250 : Math.min(Math.max(0, date - Date.now()), 30_000)
+}
+
+function waitForRetryAfter(response: HttpResponse<unknown>, signal?: AbortSignal): Promise<void> {
+  const delay = retryAfterMs(response)
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason)
+      return
+    }
+
+    const timer = setTimeout(done, delay)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(signal?.reason)
+    }
+
+    function done() {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
+  })
+}
+
+const retrySafeReads = createHttpInterceptor(async (request, next) => {
+  if (!retryableMethods.has(request.method.toUpperCase()) || !isReplayable(request)) return next(request)
+
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await next(request)
+    if (!retryableStatuses.has(response.status) || attempt >= 2) return response
+    await waitForRetryAfter(response, request.abort)
+  }
+})
+```
+
+أخطاء المعترض/Fetch المرمية لا تُعاد بهذا الحلقة. الحالة `0` هي استجابة فشل النقل عند حد Fetch. إعادة محاولة `POST` / `PUT` / `PATCH` / `DELETE` تحتاج بايتات قابلة لإعادة التشغيل، ودعم الخادم، وعقد تكرار آمن، وسياسة حالة مراجعة.
+
+## غلّف جلسات WebSocket
+
+معترض WebSocket قد يستدعي `next` مرة واحدة على الأكثر. إذا غلّفت الجلسة، فوّض getters الحية وأعضاء دورة الحياة صراحة:
+
+```typescript twoslash
 import { createWebSocketInterceptor } from '@defjs/core'
 
-const wrappedSession = createWebSocketInterceptor(async (request, next) => {
+const preserveSession = createWebSocketInterceptor(async (request, next) => {
   const session = await next(request)
 
   return {
@@ -119,8 +194,11 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
     },
     closed: session.closed,
     receive: session.receive,
-    close(code, reason) {
+    close(code?: number, reason?: string) {
       session.close(code, reason)
+    },
+    [Symbol.asyncDispose]() {
+      return session[Symbol.asyncDispose]()
     },
     onRuntimeError(listener) {
       return session.onRuntimeError(listener)
@@ -128,144 +206,36 @@ const wrappedSession = createWebSocketInterceptor(async (request, next) => {
     onStateChange(listener) {
       return session.onStateChange(listener)
     },
-    send(message) {
+    send(message: unknown) {
       session.send(message)
     },
   }
 })
 ```
 
-يجب أن يحافظ الغلاف أيضًا على ملكية المورد. لا تستبدل `closed` أو تحجب `close` أو تفصل incoming iterable إلا إذا كان ذلك مقصودًا وموثقًا في التطبيق.
+نشر جلسة يلتقط `state` / `connection` / `bufferedAmount` مرة. احفظ `closed` و`receive` و`close` و`[Symbol.asyncDispose]()` وتنظيف المستمعين ما لم تغيّر الملكية عمدًا. يجب أن يعيد wrapper نفس disposer الداخلي كما في المثال، لا Promise منفصلًا. هذا كسر compile-time للتطبيقات الهيكلية المخصصة لـ `WebSocketSessionLike`؛ الكود الذي يستقبل جلسات Defjs فقط لا يحتاج نداء runtime إضافيًا.
 
-## تسجيل محدود
+## المرجع
 
-فضّل أسماء عمليات ثابتة ومجموعة صغيرة من الحقول التي خضعت للمراجعة:
+المصانع تُرجع قيم نقل موسومة:
 
-```typescript
-function timingInterceptor(operation: string) {
-  return createHttpInterceptor(async (request, next) => {
-    const startedAt = performance.now()
-    const response = await next(request)
+- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
+- `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
+- `basicAuthHttpInterceptor(provider, options?)` — بيانات اعتماد Basic على HTTP
+- `basicAuthSSEInterceptor(provider, options?)` — بيانات اعتماد Basic على SSE
 
-    console.info('outbound request completed', {
-      durationMs: Math.round(performance.now() - startedAt),
-      operation,
-      status: response.status,
-    })
+`HttpRequest` قد يتضمن `endpoint` و`baseEndpoint` و`method` و`headers` و`body` و`queryParams` و`queryString` و`abort` و`timeout` و`operation` ثابتًا. قيمة تكامل نقل — وليست مدخل المستدعي المحلَّل. أبقِ تحقق الأمر وتحقق المخرج وتعيين أخطاء المجال في طبقاتها.
 
-    return response
-  })
-}
-```
+مراقبو SSE/WebSocket خطافات دورة حياة، وليست تدفق تحكم. ألغِ اشتراك مستمعي WebSocket عندما ينتهي المالك. أعطال المراقب تتبع عقد النقل؛ المعترض نفسه يمكن أن يرمي أو يرفض.
 
-لا تسجّل endpoint URLs أو query strings أو headers أو bodies أو raw causes أو SSE event IDs أو WebSocket payloads افتراضيًا.
+سجّل قائمة مسموح مراجعة: `operation` ثابت، الطريقة، الحالة، المدة، رمز خطأ مستقر. لا تسجّل عناوين URL المحلولة أو سلاسل الاستعلام أو رؤوس المصادقة أو الأجسام أو الأسباب الخام أو معرّفات أحداث SSE أو حمولات WebSocket افتراضيًا.
 
-## أعد محاولة HTTP بتحفظ
+بيانات اعتماد Basic هي base64، وليست مشفّرة. استخدم TLS، أبقِ مزوّدي بيانات الاعتماد محدودين بالطلب على الخادم، لا تسجّل الرأس المُولَّد أبدًا. المرمّز الافتراضي هو `globalThis.btoa`؛ مرّر `BasicAuthInterceptorOptions.encode` عندما تفتقر وقت التشغيل إلى `btoa` أو تحتاج مرمّزًا مراجعًا.
 
-تغيّر retries سلوك التطبيق. المثال التالي مقصور على `GET` و`HEAD` و`OPTIONS`؛ ويعيد فقط status يساوي `0` أو `502` أو `503` أو `504`؛ ويحترم `Retry-After`؛ ويتوقف سريعًا عند abort؛ ويرفض stream body.
+المعترض يمكنه فرض سياسة النقل. ليس تحقق مدخل، ولا تفويضًا، ولا ملكية مورد. الكود الذي يبدأ العمل طويل العمر لـ SSE/WebSocket ما زال يستخدم `await using` أو يلغي ويغلق وينتظر الوعد النهائي يدويًا. HTTP العادي محدود بالطلب ويُدار بمهلته / `AbortSignal`؛ `Client` ليس `AsyncDisposable`.
 
-```typescript
-import { createHttpInterceptor } from '@defjs/core'
-import type { HttpRequest, HttpResponse } from '@defjs/core'
+## وصفات ذات صلة
 
-const RETRYABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
-const RETRYABLE_STATUSES = new Set([0, 502, 503, 504])
-
-function isReplayable(request: HttpRequest): boolean {
-  return !(typeof ReadableStream !== 'undefined' && request.body instanceof ReadableStream)
-}
-
-function retryAfterMs(response: HttpResponse<unknown>): number | undefined {
-  const value = response.headers.get('retry-after')
-  if (!value) {
-    return undefined
-  }
-
-  const seconds = Number(value)
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return seconds * 1_000
-  }
-
-  const at = Date.parse(value)
-  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
-}
-
-async function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    throw signal.reason
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(finish, ms)
-
-    function finish() {
-      signal?.removeEventListener('abort', abort)
-      resolve()
-    }
-
-    function abort() {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', abort)
-      reject(signal?.reason)
-    }
-
-    signal?.addEventListener('abort', abort, { once: true })
-    if (signal?.aborted) {
-      abort()
-    }
-  })
-}
-
-function retrySafeHttp(maxRetries = 2) {
-  return createHttpInterceptor(async (request, next) => {
-    if (!RETRYABLE_METHODS.has(request.method.toUpperCase()) || !isReplayable(request)) {
-      return next(request)
-    }
-
-    for (let retry = 0; ; retry += 1) {
-      const response = await next(request)
-      if (!RETRYABLE_STATUSES.has(response.status) || retry >= maxRetries) {
-        return response
-      }
-
-      const fallback = Math.min(250 * 2 ** retry, 5_000)
-      const delay = Math.min(retryAfterMs(response) ?? fallback, 30_000)
-      await abortableWait(delay, request.abort)
-    }
-  })
-}
-```
-
-لا يعيد هذا المعترض محاولة أخطاء المعترضات المرمية لأنه لا يستطيع تصنيفها بأمان. status الذي يساوي `0` هو غلاف فشل النقل من حد Fetch في Defjs.
-
-لا توسّع مجموعة methods إلى عمليات كتابة بشكل اعتيادي. تتطلب إعادة محاولة `POST` أو `PUT` أو `PATCH` أو `DELETE` عقد idempotency على مستوى التطبيق، وbodies قابلة لإعادة التشغيل، ودعمًا من الخادم، وسياسة status خضعت للمراجعة.
-
-## Basic Authentication
-
-يصدّر root entry الدالتين `basicAuthHttpInterceptor(...)` و`basicAuthSSEInterceptor(...)`.
-
-```typescript
-const client = createClient(
-  withEndpoint('https://api.example.com'),
-  withInterceptors(
-    basicAuthHttpInterceptor(() => credentials),
-    basicAuthSSEInterceptor(() => credentials),
-  ),
-)
-```
-
-بيانات Basic credentials مرمّزة بـ base64 فقط، وهذا الترميز قابل للعكس ولا يوفّر تشفيرًا. استخدم TLS. يعتمد encoder الافتراضي على `globalThis.btoa`، وقد لا تكون متاحة، كما أنها لا تقبل إلا نطاقًا محدودًا من المحارف. مرّر `options.encode` عندما تفتقر بيئة التشغيل إلى `btoa` أو تحتاج credentials إلى تنفيذ UTF-8/base64 خضع للمراجعة.
-
-تعمل credential providers عند مرور الطلب عبر المعترض. أبقِ server credentials ضمن نطاق الطلب، ولا تسجّل header الناتج.
-
-## سلامة المراقبين وCallbacks
-
-تستطيع معترضات SSE وWebSocket ربط lifecycle observers بالمقابض المعادة. ألغِ اشتراك WebSocket listeners عند انتهاء مالكها. يعزل WebSocket فشل state listener عبر runtime-error observers، ويمرر فشل runtime-error observer إلى `reportError`، ويعامل رمي reconnect predicate كخطأ نهائي للجلسة.
-
-قد يرمي المعترض أو يرفض Promise. قد تطبّع وسيلة النقل عالية المستوى بعض الإخفاقات إلى `RequestError`، لكن لا ينبغي لكود المعترض الاعتماد على ضمان شامل بأن Promise لن تُرفض أبدًا.
-
-## التالي
-
-- تشرح [العميل](/ar/core/client) التسجيل وتركيب الخيارات.
-- توثّق [HTTP](/ar/core/http) غلاف Fetch وسلوك status الذي يساوي 0.
-- تملك [SSE](/ar/core/sse) و[WebSocket](/ar/core/web-socket) تفاصيل دورة حياة وسائل النقل.
+- [الاختبار بـ Fetch محلي](../recipes/test-with-handle.md)
+- [إلغاء استدعاء HTTP](../recipes/cancel-http.md)

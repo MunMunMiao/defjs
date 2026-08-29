@@ -203,7 +203,7 @@ setErrorMap(map) // 全局拦截 issue.message，i18n 友好
 1. `input` 同时作为调用方输入解析合同和 request build 元数据源，避免 struct、tag、build 三套规则漂移。
 2. 简单 endpoint 不需要写 `build`：`struct.request(...)` 直接描述 `path/query/headers/body`，runtime 自动 materialize request。
 3. 复杂 endpoint 必须显式写 `build(ctx, input)`：只编排当前 endpoint input tree 的字段引用，不接收 raw runtime value。
-4. `build` 只负责 request shape 编排；鉴权、trace、事务、request-scoped metadata 通过 `context` 和 interceptor 处理。
+4. `build` 只负责 request shape 编排；鉴权、trace、事务、request-scoped metadata 通过 interceptor 与 command `headers` / `operation` 处理。
 5. HTTP、SSE、WebSocket 共用同一套 request plan 心智，但按 transport 能力裁剪可用 section 和 ctx 方法。
 
 ### 非目标
@@ -559,7 +559,6 @@ const [error, data, response] = await getUserInfo({
   timeout: 10_000,
   onUploadProgress(event) {},
   onDownloadProgress(event) {},
-  context,
 })
 ```
 
@@ -570,7 +569,6 @@ const [error, data, response] = await getUserInfo({
 3. `abort?: AbortSignal`
 4. `onUploadProgress?: HttpProgressFn`
 5. `onDownloadProgress?: HttpProgressFn`
-6. `context?: HttpContext`
 
 `timeout` 与 `abort` 互斥。`timeout` 是便捷超时入口；`abort` 接收外部 `AbortSignal`。如果需要组合外部取消和超时，请自行构造组合后的 `AbortSignal` 并只传 `abort`。
 
@@ -697,7 +695,6 @@ const [error, stream, open] = await watchUserInfo({
 }).with({
   client,
   timeout: 10_000,
-  context,
 })
 ```
 
@@ -706,7 +703,6 @@ const [error, stream, open] = await watchUserInfo({
 1. `client?: Client`
 2. `timeout?: number`
 3. `abort?: AbortSignal`
-4. `context?: HttpContext`
 
 `timeout` 与 `abort` 互斥。SSE 的 `fetch` 只在 client 的 `sse` 配置中设置；需要动态切换 fetch 时，创建或 clone 对应 client，然后通过 `.with({ client })` 切换。
 
@@ -847,19 +843,9 @@ WebSocket 固定返回：
 8. queue limit 属于 endpoint：`maxIncomingQueueSize` 必填且 overflow fatal；`maxOutgoingQueueSize` 默认 `0`，只在 reconnecting 时保留 FIFO frame
 9. state/runtime observer failure 被隔离；reconnect predicate throw 是 terminal `error`，明确返回 `false` 是 terminal `closed`
 
-## `context + interceptor`
+## interceptor
 
-事务、trace、request-scoped metadata 当前统一走 build 之外的：
-
-1. `context`
-2. `interceptor`
-
-建议边界：
-
-1. 事务状态、trace、request-scoped metadata 放进 `context`
-2. 需要基于这些上下文改写 headers/query/body 的逻辑放进 interceptor
-3. `build(ctx, input)` 不读写 context，只编排 input struct field reference
-4. 不在 `client` 或 endpoint 定义层新增事务字段
+需要改写 headers/query/body 的跨请求策略放进 interceptor。`build(ctx, input)` 只编排 input struct field reference。低基数端点身份用 `defineRequest` 的 `operation`；需要上网的关联值用 command `headers`。
 
 ## 当前不提供
 

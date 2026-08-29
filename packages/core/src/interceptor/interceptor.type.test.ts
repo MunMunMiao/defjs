@@ -1,4 +1,3 @@
-import type { FnReturn } from '../internal/utility_types'
 import type { HttpRequest } from '../internal/http_request'
 import type { HttpResponse } from '../internal/http_response'
 import type { EventStreamHandle } from '../sse/transport/event_stream'
@@ -11,11 +10,8 @@ import type {
   WebSocketHandler,
   WebSocketInterceptorFn,
   WebSocketSessionLike,
-  makeInterceptorChain,
-  makeSSEInterceptorChain,
-  makeWebSocketInterceptorChain,
 } from './interceptor'
-import { createHttpInterceptor } from './interceptor'
+import { createHttpInterceptor, type makeChain } from './interceptor'
 import type { HttpInterceptor, SSEInterceptor } from './index'
 import { basicAuthHttpInterceptor, basicAuthSSEInterceptor } from './index'
 
@@ -64,28 +60,32 @@ const sseInterceptor = basicAuthSSEInterceptor(() => ({
 type HttpInterceptorCase = Expect<StrictEqual<typeof httpInterceptor, HttpInterceptor>>
 type SSEInterceptorCase = Expect<StrictEqual<typeof sseInterceptor, SSEInterceptor>>
 
-type MakeHttpChainCase = Expect<StrictEqual<FnReturn<typeof makeInterceptorChain>, InterceptorFn>>
-type MakeSSEChainCase = Expect<StrictEqual<FnReturn<typeof makeSSEInterceptorChain>, SSEInterceptorFn>>
-type MakeWebSocketChainCase = Expect<StrictEqual<FnReturn<typeof makeWebSocketInterceptorChain>, WebSocketInterceptorFn>>
+type HttpChain = typeof makeChain<HttpRequest, Promise<HttpResponse<unknown>>>
+type SSEChain = typeof makeChain<HttpRequest, Promise<EventStreamHandle<unknown>>>
+type WebSocketChain = typeof makeChain<HttpRequest, Promise<WebSocketSessionLike>>
 
-type HttpChainParametersCase = Expect<StrictEqual<ParametersOf<FnReturn<typeof makeInterceptorChain>>, [HttpRequest, HttpInterceptorNext]>>
-type SSEChainParametersCase = Expect<StrictEqual<ParametersOf<FnReturn<typeof makeSSEInterceptorChain>>, [HttpRequest, SSEHandler]>>
-type WebSocketChainParametersCase = Expect<
-  StrictEqual<ParametersOf<FnReturn<typeof makeWebSocketInterceptorChain>>, [HttpRequest, WebSocketHandler]>
->
+type MakeHttpChainCase = Expect<StrictEqual<ReturnType<HttpChain>, InterceptorFn>>
+type MakeSSEChainCase = Expect<StrictEqual<ReturnType<SSEChain>, SSEInterceptorFn>>
+type MakeWebSocketChainCase = Expect<StrictEqual<ReturnType<WebSocketChain>, WebSocketInterceptorFn>>
 
-type HttpChainNextCase = Expect<StrictEqual<SecondParameter<FnReturn<typeof makeInterceptorChain>>, HttpInterceptorNext>>
-type SSEChainNextCase = Expect<StrictEqual<SecondParameter<FnReturn<typeof makeSSEInterceptorChain>>, SSEHandler>>
-type WebSocketChainNextCase = Expect<StrictEqual<SecondParameter<FnReturn<typeof makeWebSocketInterceptorChain>>, WebSocketHandler>>
+type HttpChainParametersCase = Expect<StrictEqual<ParametersOf<ReturnType<HttpChain>>, [HttpRequest, HttpInterceptorNext]>>
+type SSEChainParametersCase = Expect<StrictEqual<ParametersOf<ReturnType<SSEChain>>, [HttpRequest, SSEHandler]>>
+type WebSocketChainParametersCase = Expect<StrictEqual<ParametersOf<ReturnType<WebSocketChain>>, [HttpRequest, WebSocketHandler]>>
 
-type HttpChainResultCase = Expect<StrictEqual<FnReturn<FnReturn<typeof makeInterceptorChain>>, Promise<HttpResponse<unknown>>>>
-type SSEChainResultCase = Expect<StrictEqual<FnReturn<FnReturn<typeof makeSSEInterceptorChain>>, Promise<EventStreamHandle<unknown>>>>
-type WebSocketChainResultCase = Expect<StrictEqual<FnReturn<FnReturn<typeof makeWebSocketInterceptorChain>>, Promise<WebSocketSessionLike>>>
+type HttpChainNextCase = Expect<StrictEqual<SecondParameter<ReturnType<HttpChain>>, HttpInterceptorNext>>
+type SSEChainNextCase = Expect<StrictEqual<SecondParameter<ReturnType<SSEChain>>, SSEHandler>>
+type WebSocketChainNextCase = Expect<StrictEqual<SecondParameter<ReturnType<WebSocketChain>>, WebSocketHandler>>
+
+type HttpChainResultCase = Expect<StrictEqual<ReturnType<ReturnType<HttpChain>>, Promise<HttpResponse<unknown>>>>
+type SSEChainResultCase = Expect<StrictEqual<ReturnType<ReturnType<SSEChain>>, Promise<EventStreamHandle<unknown>>>>
+type WebSocketChainResultCase = Expect<StrictEqual<ReturnType<ReturnType<WebSocketChain>>, Promise<WebSocketSessionLike>>>
 type WebSocketBufferedAmountCase = Expect<StrictEqual<WebSocketSessionLike['bufferedAmount'], number>>
 type WebSocketConnectionCase = Expect<
   StrictEqual<WebSocketSessionLike['connection'], { extensions?: string; generation: number; protocol?: string; url?: string }>
 >
 type WebSocketClosedCase = Expect<StrictEqual<WebSocketSessionLike['closed'], Promise<WebSocketCloseInfo>>>
+type WebSocketDisposableCase = Expect<WebSocketSessionLike extends AsyncDisposable ? true : false>
+type WebSocketDisposeResultCase = Expect<StrictEqual<ReturnType<WebSocketSessionLike[typeof Symbol.asyncDispose]>, PromiseLike<void>>>
 type WebSocketStateCase = Expect<StrictEqual<WebSocketSessionLike['state'], WebSocketState>>
 type WebSocketStateListenerCase = Expect<StrictEqual<Parameters<WebSocketSessionLike['onStateChange']>[0], (state: WebSocketState) => void>>
 
@@ -133,5 +133,7 @@ export type Cases =
   | WebSocketBufferedAmountCase
   | WebSocketClosedCase
   | WebSocketConnectionCase
+  | WebSocketDisposableCase
+  | WebSocketDisposeResultCase
   | WebSocketStateCase
   | WebSocketStateListenerCase

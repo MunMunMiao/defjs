@@ -1,18 +1,21 @@
 ---
 title: Vue
-description: Partagez un client Defjs par injection Vue, configurez-le pour votre API, conservez le scope de requête SSR et nettoyez les transports.
+description: Installe le plugin, fournis un client, fetch un user, et abort au changement réactif.
 ---
 
-# `@defjs/vue`
+# Vue
 
-Ce paquet est un adaptateur d’injection minimal pour `@defjs/core`. `createClientPlugin(client)` fournit un client créé par l’application, `injectClient()` renvoie l’instance la plus proche et `HTTP_CLIENT` permet les overrides natifs d’un sous-arbre. Il n’ajoute ni fabrique, ni cache, ni retry, ni cycle de vie des ressources.
+Branche un client `@defjs/core` existant dans Vue. Tu obtiens un plugin, une clé d’injection et `injectClient()`. Le package ne crée **pas** de clients, ne met pas les résultats en cache, ne relance pas les commandes et ne ferme pas les ressources de transport au unmount.
 
-## Installer le plugin
+## Basic Setup
 
-Créez et configurez le client avec `@defjs/core`, puis installez un plugin pour cette instance exacte :
+Installe `@defjs/core`, `@defjs/vue` et Vue 3+. ESM ; Node.js 22+ quand tu tournes dans Node :
 
-```typescript
-// main.ts
+`bun add @defjs/core @defjs/vue vue`
+
+Crée le client, installe le plugin, puis fetch avec abort-au-changement :
+
+```typescript twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
@@ -25,155 +28,176 @@ app.use(createClientPlugin(client))
 app.mount('#app')
 ```
 
-Le plugin ne fait que fournir l’instance reçue ; il ne crée, clone, remplace ou libère pas le client.
-
-## Injecter le client le plus proche
-
-Appelez `injectClient()` dans `setup`, `<script setup>` ou un contexte d’injection actif. Un appel sans `HTTP_CLIENT` lève une erreur et la règle Vue du provider le plus proche s’applique.
-
-Utilisez la clé publique avec le `provide` natif de Vue pour remplacer le client d’un sous-arbre :
-
-```vue
+```vue twoslash
 <script setup lang="ts">
-import { createClient, withEndpoint } from '@defjs/core'
-import { HTTP_CLIENT } from '@defjs/vue'
-import { provide } from 'vue'
-
-const scopedClient = createClient(withEndpoint('https://preview.example.com'))
-provide(HTTP_CLIENT, scopedClient)
-</script>
-
-<template>
-  <slot />
-</template>
-```
-
-## Fabriques d'intercepteurs
-
-Créez les valeurs interceptor et composez-les avec le `withInterceptors(...)` du core avant d’installer le plugin :
-
-```typescript
-import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
-import { createClientPlugin } from '@defjs/vue'
-
-const auth = createHttpInterceptor((request, next) => {
-  const headers = new Headers(request.headers)
-  headers.set('Authorization', `Bearer ${readAccessToken()}`)
-  return next({ ...request, headers })
-})
-
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
-app.use(createClientPlugin(client))
-```
-
-Si une fabrique capture des identifiants propres à une requête, appelez-la dans la frontière de requête qui crée ce client.
-
-## Réagir aux changements d'entrée
-
-Liez la requête HTTP à la valeur réactive qui la déclenche. `onMounted` seul ne lit que la prop initiale. Un `watch` avec nettoyage annule la requête devenue obsolète :
-
-```vue
-<script setup lang="ts">
-import { ref, watch } from 'vue'
+import { defineRequest, struct } from '@defjs/core'
 import { injectClient } from '@defjs/vue'
-import { getUser } from './api'
+import { ref, watch } from 'vue'
 
 const props = defineProps<{ id: number }>()
 const client = injectClient()
-const name = ref('')
-const errorMessage = ref('')
+const name = ref('Loading...')
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
 
 watch(
   () => props.id,
   (id, _previousId, onCleanup) => {
-    const abort = new AbortController()
-    let current = true
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
 
-    onCleanup(() => {
-      current = false
-      abort.abort()
+    void client.execute(getUser({ path: { id } }), { signal: controller.signal }).then(([error, user]) => {
+      if (controller.signal.aborted) return
+      name.value = error ? 'Unable to load user.' : user.name
     })
-
-    void client
-      .execute(getUser({ path: { id } }), { signal: abort.signal })
-      .then(([error, user]) => {
-        if (!current) {
-          return
-        }
-
-        if (error) {
-          errorMessage.value = 'Unable to load user.'
-          return
-        }
-
-        errorMessage.value = ''
-        name.value = user.name
-      })
-      .catch(() => {
-        if (current) {
-          errorMessage.value = 'Unable to load user.'
-        }
-      })
   },
   { immediate: true },
 )
 </script>
 
 <template>
-  <p v-if="errorMessage">{{ errorMessage }}</p>
-  <p v-else>{{ name }}</p>
+  <span>{{ name }}</span>
 </template>
 ```
 
-Le constructeur de commande `getUser` importé possède le contrat de l'endpoint. Ce composant est responsable de l'annulation lorsque `id` change ou que le composant est démonté.
+`createClientPlugin(client)` fournit l’objet exact que tu passes. Pas de clone, pas de hook de disposal. Configure les options core et les intercepteurs quand tu crées le client.
 
-## Frontières SSR
+`onCleanup` tourne avant que le watcher re-run et quand il s’arrête. Enregistre-le avant de démarrer le travail async. Le tuple erreur en premier reste de la data applicative.
 
-Une application navigateur peut installer un client sûr pour le navigateur. En SSR, créez un core client distinct dans chaque frontière de requête et ne fournissez que cette instance à l’application correspondante ; ne partagez ni headers, ni cookies, ni état de tenant, ni identifiants.
+## Injecter et overrider
 
-```typescript
-// plugins/defjs.client.ts
+`injectClient()` lit le provider `HTTP_CLIENT` le plus proche et throw quand aucun n’existe. Override un sous-arbre avec le `provide(HTTP_CLIENT, childClient)` de Vue :
+
+```vue twoslash
+<script setup lang="ts">
 import { createClient, withEndpoint } from '@defjs/core'
-import { createClientPlugin } from '@defjs/vue'
+import { HTTP_CLIENT, injectClient } from '@defjs/vue'
+import { defineComponent, h, provide } from 'vue'
 
-export default defineNuxtPlugin((nuxtApp) => {
-  const client = createClient(withEndpoint(useRuntimeConfig().public.apiBase))
-  nuxtApp.vueApp.use(createClientPlugin(client))
+const childClient = createClient(withEndpoint('https://tenant.example.com'))
+const Child = defineComponent({
+  setup() {
+    const client = injectClient()
+    return () => h('span', client === childClient ? 'Child client is provided' : 'Unexpected client')
+  },
 })
+
+provide(HTTP_CLIENT, childClient)
+</script>
+
+<template>
+  <Child />
+</template>
 ```
 
-## Responsabilité des ressources
+Le provider le plus proche gagne. Les descendants obtiennent `childClient` ; les siblings hors du sous-arbre gardent le client app-level.
 
-Installer ou démonter le plugin n’annule pas les travaux HTTP et ne ferme pas les ressources SSE ou WebSocket. L’appelant qui crée le client possède tout le travail démarré avec lui.
+## Posséder le travail HTTP hors d’un watcher
 
-- enregistrer le nettoyage avant ou en même temps que le démarrage asynchrone ;
-- annuler le démarrage lorsque sa portée prend fin ;
-- fermer un handle ou une session qui arrive après la destruction ;
-- consommer en continu `stream` ou `session.receive` ;
-- appeler `stream.close(...)` ou `session.close(...)` pour une ressource active ;
-- désinscrire les observateurs WebSocket.
+Pour le travail démarré par un composable ou un composant hors d’un watcher, utilise `AbortController` + `onScopeDispose`. Abort le démarrage et le travail actif ; check le signal avant d’assigner l’état réactif. Un plugin ou une portée d’injection n’infère pas qui possède une commande.
 
-N'ouvrez pas une WebSocket uniquement pour attacher un listener d'état tout en laissant sa file entrante bornée sans lecteur ; son overflow termine fatalement la session. Consultez [SSE](/fr-FR/core/sse) et [WebSocket](/fr-FR/core/web-socket) pour les règles complètes de cycle de vie.
+Quand une portée possède un client, garde-le indépendant de la requête pour une réutilisation browser-wide. S’il capture headers, cookies, utilisateurs, tenants ou credentials, crée-le dans la frontière de requête app/SSR pertinente et fournis cette instance là.
 
-## API
+## Nettoyer la portée realtime
 
-```typescript
-import type { Client } from '@defjs/core'
-import type { InjectionKey, Plugin } from 'vue'
+Ferme un flux ou une session même quand la portée disparaît mid-connect. Abort le démarrage, ferme un handle arrivé tard, consomme l’unique itérateur, attends la promesse terminale :
 
-declare const HTTP_CLIENT: InjectionKey<Client>
-declare function createClientPlugin(client: Client): Plugin
-declare function injectClient(): Client
+```vue twoslash
+<script setup lang="ts">
+import { defineEventStream, struct, type EventStreamHandle } from '@defjs/core'
+import { injectClient } from '@defjs/vue'
+import { onScopeDispose, ref } from 'vue'
+
+const client = injectClient()
+const messages = ref<string[]>([])
+const notifications = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  path: '/notifications',
+  events: { message: struct.string() },
+})
+
+const controller = new AbortController()
+let disposed = false
+let stream: EventStreamHandle<string> | undefined
+
+const stop = () => {
+  disposed = true
+  controller.abort()
+  stream?.close('scope-disposed')
+}
+onScopeDispose(stop)
+
+void (async () => {
+  const [error, nextStream] = await client.execute(notifications(), { signal: controller.signal })
+  if (error) return
+
+  stream = nextStream
+  if (disposed) {
+    nextStream.close('scope-disposed')
+    await nextStream.closed
+    return
+  }
+
+  try {
+    for await (const event of nextStream) {
+      messages.value.push(event.data)
+    }
+  } finally {
+    nextStream.close('scope-finished')
+    await nextStream.closed
+  }
+})()
+</script>
+
+<template>
+  <ul>
+    <li v-for="message in messages" :key="message">{{ message }}</li>
+  </ul>
+</template>
 ```
 
-Crée un plugin Vue qui fournit l’instance client reçue.
+WebSocket : même séquence — abort la prep, ferme une session tardive, consomme `session.receive`, désabonne `onStateChange` / `onRuntimeError`, ferme, attends `session.closed`. Garde le cleanup idempotent ; disposal et complétion d’itérateur peuvent se rencontrer.
 
-Renvoie le client le plus proche et lève une erreur s’il n’existe pas.
+## Portée SSR
 
-Clé d’injection publique pour les providers natifs de sous-arbre.
+`createClientPlugin(client)` fournit une instance à une app Vue. Dans le navigateur, partage-la quand endpoint, intercepteurs et état capturé sont sûrs à partager. Pendant le SSR, crée et installe un client séparé par requête quand headers, cookies, utilisateurs, tenants ou credentials diffèrent.
 
-## Étapes suivantes
+Unmount de l’app, retrait du plugin et disposal de portée de composant n’aborte **pas** HTTP, ne ferme pas SSE/WebSocket, ne désabonne pas les écouteurs et ne dispose pas le client core. Le propriétaire qui démarre le travail doit le finir.
 
-- [Client](/fr-FR/core/client) couvre la composition des options Core et la portée du client.
-- [Commandes](/fr-FR/core/commands) couvre les définitions d'endpoint et les entrées de commande.
-- [Intercepteurs](/fr-FR/core/interceptors) couvre le contrat d'intercepteur Core.
+## Référence
+
+Exports publics depuis `@defjs/vue` :
+
+```typescript twoslash
+import { HTTP_CLIENT, createClientPlugin, injectClient } from '@defjs/vue'
+
+type VueApi = {
+  HTTP_CLIENT: typeof HTTP_CLIENT
+  createClientPlugin: typeof createClientPlugin
+  injectClient: typeof injectClient
+}
+
+const api: VueApi = { HTTP_CLIENT, createClientPlugin, injectClient }
+void api
+```
+
+- `HTTP_CLIENT` — `InjectionKey<Client>` pour `provide` / `inject` natifs
+- `createClientPlugin(client)` — `Plugin` Vue qui fournit ce client
+- `injectClient()` — `Client` le plus proche, ou throw
+
+Crée clients et options dans `@defjs/core`. Voir [Client](../core/client.md), [Commandes](../core/commands.md), [Intercepteurs](../core/interceptors.md), [SSE](../core/sse.md) et [WebSocket](../core/web-socket.md).
+
+## Recettes liées
+
+- [GET avec un 404 déclaré](../recipes/get-declared-404.md)
+- [Annuler un appel HTTP](../recipes/cancel-http.md)
+- [Consommer un flux SSE](../recipes/consume-sse.md)
+- [Ouvrir une session WebSocket](../recipes/websocket-session.md)

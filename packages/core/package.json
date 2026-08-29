@@ -17,10 +17,6 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./http": {
-      "types": "./dist/http.d.ts",
-      "default": "./dist/http.js"
-    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -42,8 +38,5 @@
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"
-  },
-  "engines": {
-    "node": ">=22"
   }
 }

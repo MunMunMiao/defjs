@@ -1,200 +1,214 @@
 ---
-title: OpenTelemetry Server
-description: アプリケーションが渡す OpenTelemetry Tracer と任意の Meter で、Defjs のアウトバウンド HTTP、SSE、WebSocket クライアントを計装します。
+title: OpenTelemetry server
+description: 自分の Tracer と任意の Meter で、アウトバウンドの Defjs トランスポート計測を有効にします。
 ---
 
-# `@defjs/opentelemetry-server`
+# OpenTelemetry server
 
-パッケージ名に server とありますが、このアダプターが計装するのは Defjs クライアントのアウトバウンド処理です。インバウンドのサーバー計装ではなく、OpenTelemetry SDK の初期化も行いません。
+クライアント作成時にアウトバウンド計測を有効にします。`@defjs/opentelemetry-server` は HTTP、SSE、WebSocket のインターセプターを追記します。インバウンドのサーバー計測では**なく**、OpenTelemetry SDK の初期化もし**ません**。
 
-アプリケーションは次を所有します。
+## Basic Setup
 
-- SDK とプロバイダーの初期化
-- exporter と processor の設定
-- コンテキストマネージャーとアクティブコンテキストの設定
-- サンプリング、属性ポリシー、マスキング
-- force-flush と shutdown
+SDK は別途初期化します。その API オブジェクトを渡します。
 
-アプリケーションが用意した `Tracer` と任意の `Meter` を `withOpenTelemetryServer(...)` へ渡します。
-
-## クライアントを設定する
-
-```typescript
+```typescript twoslash
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
 import { metrics, trace } from '@opentelemetry/api'
 
-// Initialize and register the application's SDK/providers before this point.
 const tracer = trace.getTracer('orders-service')
 const meter = metrics.getMeter('orders-service')
+const readOrders = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders',
+})
 
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
+
+const [error] = await client.execute(readOrders())
+if (error) console.error(error.kind, error.code)
+```
+
+`tracer` は必須です。`meter` は任意 — 省略するとパッケージメトリクスは無効です。`propagator` なし → アダプタは複合の W3C Trace Context + W3C Baggage propagator を作ります。グローバル SDK 設定の読み取りや初期化はしません。
+
+`withOpenTelemetryServer(options)` は core の `ClientOption` を返します。`createClient` 時に適用し、有効なトランスポートごとにインターセプターを 1 つ追記します。HTTP、SSE、WebSocket はデフォルト有効。`{ enabled: false }` で 1 トランスポートを無効にします。
+
+アダプタは、リクエストがトランスポート層で失敗してもトランスポートテレメトリを作れます。何かがエクスポートされるかは、あなたの SDK と exporter 次第です。
+
+## スコープ
+
+SDK の init、プロバイダ、exporter、プロセッサ、コンテキスト、サンプリング、redaction、flush、shutdown は呼び出し側の所有です。このパッケージは、渡された `Tracer`、任意の `Meter`、任意の `TextMapPropagator` を消費します。redactor や sensitive-key policy は内蔵しません。
+
+キャッシュ、リトライ、メッセージ単位スパン、アプリのコマンド結果方針はありません。サーバー側 Node.js 向けです。公開パッケージは Node.js 22+、ピアは `@defjs/core`、`@opentelemetry/api` 1.x、`@opentelemetry/core` 2.x が要ります。
+
+公開 API: `withOpenTelemetryServer` と `OpenTelemetryServerOptions`、`OpenTelemetryServerHttpOptions`、`OpenTelemetryServerSSEOptions`、`OpenTelemetryServerWebSocketOptions`。
+
+## options とフック
+
+フックは変更する transport の隣に置きます。同期 `startSpanHook(request)` は span 作成前に実行されて初期 `Attributes` を返し、application 属性は最後に適用されるので built-in を上書きできます。`requestHook` と `responseHook` は作成済み span を受け、`void` または Promise を返せます。hook failure は `defjs.otel.hook.error` を記録しても操作を止めず、start hook failure は built-in 属性へフォールバックします。
+
+```typescript twoslash
+import { createClient, createResolvedRequestUrl, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
 const client = createClient(
   withEndpoint('https://api.example.com'),
   withOpenTelemetryServer({
     tracer,
-    meter,
-    webSocket: {
-      queryPropagation: false,
+    http: {
+      startSpanHook(request) {
+        const attributes = { 'app.operation': request.operation ?? 'unclassified' }
+        if (!request.baseEndpoint) return attributes
+        const url = createResolvedRequestUrl(request.baseEndpoint, request.endpoint)
+        if (request.queryString) url.search = request.queryString
+        url.searchParams.delete('access_token')
+        return { ...attributes, 'url.full': url.href }
+      },
+      requestHook(span, request) {
+        span.setAttribute('app.request.started', true)
+      },
+      responseHook(span, response) {
+        span.setAttribute('app.status', response.status)
+      },
     },
+    sse: { enabled: false },
+    webSocket: { enabled: false },
+  }),
+)
+
+void client
+```
+
+フック署名:
+
+- 3 transport 共通: `startSpanHook(request): Attributes`（同期、span 作成前）
+- HTTP: `requestHook(span, request)` と `responseHook(span, response, request)`
+- SSE: `requestHook(span, request)` と `responseHook(span, stream, request)`
+- WebSocket: `requestHook(span, request)` と `responseHook(span, session, request)`
+
+空のトランスポートオブジェクトはそのトランスポートを有効にします。古い boolean のトランスポートスイッチと古いトップレベルフックは拒否されます — トランスポート options オブジェクトとトランスポートスコープのフックを使ってください。
+
+## operation の同一性と伝播
+
+コマンドに安定した同一性があるとき、`defineRequest`、`defineEventStream`、`defineWebSocket` に静的な `operation` を付けます。アダプタは span 名と `defjs.operation` に使います。解決済み path、識別子、テナント、query 文字列から同一性を導出しません。
+
+```typescript twoslash
+import { defineEventStream, defineRequest, defineWebSocket, struct } from '@defjs/core'
+
+const readOrders = defineRequest({
+  method: 'GET',
+  operation: 'orders.read',
+  path: '/orders',
+})
+const orderEvents = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
+  operation: 'orders.watch',
+  path: '/orders/events',
+  events: { update: struct.json(struct.object({ id: struct.number() })) },
+})
+const orderSocket = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  operation: 'orders.connect',
+  path: '/orders/socket',
+  incoming: { update: struct.object({ id: struct.number() }) },
+})
+
+void readOrders
+void orderEvents
+void orderSocket
+```
+
+span 名は `GET orders.read`、`SSE orders.watch`、`WebSocket orders.connect` になります。`operation` なしのフォールバックは method / `SSE` / `WebSocket` で、`defjs.operation` は省略されます。
+
+HTTP と SSE は伝播フィールドをリクエストヘッダーに注入します。既存の `Headers` インスタンスは再利用してミューテートし、なければ新しい `Headers` を作ります。WebSocket の query 伝播は**オプトイン**です（ブラウザーは任意のハンドシェイクヘッダーを足せません）。
+
+```ts
+import { createClient, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
+const client = createClient(
+  withEndpoint('https://api.example.com'),
+  withOpenTelemetryServer({
+    tracer,
+    webSocket: { queryPropagation: true },
   }),
 )
 ```
 
-アダプターは、有効なトランスポートごとにインターセプターを 1 つ追加します。オプションは通常のクライアント順序で実行されるため、ほかのインターセプターに対する配置によってスパンが包む処理範囲が変わります。
+`queryPropagation` があると、propagator フィールドが接続 query 文字列に追記されます。先に URL ログ、プロキシ可視性、アクセスログ、baggage、保持を見直してください。`requireParentSpan: true` はアクティブな親がないとき、span 作成・伝播・フック・メトリクスを飛ばし、`next` をそのまま呼びます。
 
-### Operation identity
+## HTTP、SSE、WebSocket の意味論
 
-各 endpoint definition に `operation` を静的に設定します。これは span と metric が使う低カーディナリティの identity です。
+アダプタが測るのはトランスポート寿命であり、コマンド解釈の全段階ではありません。
 
-```typescript
-const readOrder = defineRequest({
-  method: 'GET',
-  operation: 'orders.read',
-  path: '/orders/:id',
-  // input and output omitted
+- **HTTP** — span は HTTP インターセプター内で始まり、Defjs の `HttpResponse` を得たときに終わります。status 振り分け、表現検査、Struct デコードはその後です。後の `RESPONSE_VALIDATION_FAILED` や `UNDECLARED_STATUS` は、終わったトランスポート span を更新できません。
+- **SSE** — span は `stream.closed` が確定するまで開いたままです。`sse.connected`、その後 `sse.closed` / `sse.aborted` / `sse.error` を記録します。1 論理ストリーム（再接続含む）→ 1 span。イベント単位の span はありません。
+- **WebSocket** — span は `session.closed` が確定するまで開いたままです。イベント: `websocket.connected`、`websocket.closed`、`websocket.error`。再接続する物理ソケットは論理セッションの一部のままです。メッセージ単位の span はありません。
+
+最終のコマンド結果が、トランスポートだけより要るなら、`client.execute(...)` をアプリ span で包みます。
+
+```typescript twoslash
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
+import { withOpenTelemetryServer } from '@defjs/opentelemetry-server'
+import { SpanStatusCode, trace } from '@opentelemetry/api'
+
+const tracer = trace.getTracer('orders-service')
+const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer }))
+const readOrders = defineRequest({ method: 'GET', operation: 'orders.read', path: '/orders' })
+
+const outcome = await tracer.startActiveSpan('orders.command', async (span) => {
+  try {
+    const outcome = await client.execute(readOrders())
+    const [error] = outcome
+    if (error) {
+      span.setAttribute('error.type', error.code)
+      span.setStatus({ code: SpanStatusCode.ERROR })
+    }
+    return outcome
+  } finally {
+    span.end()
+  }
 })
+
+void outcome
 ```
 
-operation がある場合、span name は `GET orders.read`、`SSE orders.watch`、`WebSocket orders.connect` となり、`defjs.operation` も記録されます。ない場合は従来の fallback のまま、HTTP method、`SSE`、`WebSocket` を名前に使い、operation attribute は追加しません。resolved URL や identifier を含む path から identity を推測せず、resolved URL を telemetry や log にコピーしないでください。
+外側の span はあなたのもの。プラグインはそれでも低レベルのトランスポート span を報告します — 問いが二つあります。
 
-## オプション
+## Reference
 
-```typescript
-interface OpenTelemetryServerOptions {
-  tracer: Tracer
-  meter?: Meter
-  propagator?: TextMapPropagator
-  requireParentSpan?: boolean
-  http?: OpenTelemetryServerHttpOptions
-  sse?: OpenTelemetryServerSSEOptions
-  webSocket?: OpenTelemetryServerWebSocketOptions
-}
-```
+`meter` を渡したとき:
 
-各トランスポートオプションは `enabled?: boolean`、`requestHook`、`responseHook` を受け取ります。WebSocket は `queryPropagation?: boolean` も受け取ります。
+| メトリクス                                   | 意味                                              |
+| -------------------------------------------- | ------------------------------------------------- |
+| `http.client.request.duration`               | HTTP リクエスト所要時間（秒）                     |
+| `defjs.client.sse.connect.duration`          | SSE ハンドル返却までの時間                        |
+| `defjs.client.sse.connection.duration`       | ハンドル返却 → 終端 close                         |
+| `defjs.client.sse.active_streams`            | 保留中の `closed` を持つ論理 SSE ハンドル         |
+| `defjs.client.websocket.connect.duration`    | WebSocket セッション返却までの時間                |
+| `defjs.client.websocket.connection.duration` | セッション返却 → 終端 close                       |
+| `defjs.client.websocket.active_connections`  | 保留中の `closed` を持つ論理 WebSocket セッション |
 
-3 つのトランスポートはすべてデフォルトで有効です。オプションオブジェクトで個別に無効化します。
+アクティブな SSE/WebSocket 計測は論理リソース（再接続ギャップ含む）を数え、物理ソケットや個別 HTTP 試行は数えません。
 
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  http: { enabled: false },
-  sse: { enabled: true },
-  webSocket: { enabled: false },
-})
-```
+HTTP span は method、解決済み `url.full`、利用可能ならサーバー address/port、受信時のレスポンス status を記録します。デフォルトの `url.full` は任意の `request.baseEndpoint` に対して `request.endpoint` を解決するだけで、独立した `request.queryString` を追加しません。これは構築境界であって redaction ではありません。完全またはマスク済みの application URL は `startSpanHook` で作ります。status `400+` → span status `ERROR`、status 文字列を `error.type` に。status `100..399` は span status を未設定のまま。status 0 のトランスポート結果にはレスポンス status がありません。キャンセルは status 未設定のまま。タイムアウト/その他のトランスポート失敗は `TIMEOUT` または `NETWORK_ERROR` を使います。メトリクスの次元は安定したものです。method、静的 operation、サーバー address/port、レスポンス status、低カーディナリティの error type。
 
-以前の boolean トランスポートフィールド、最上位フック、`webSocketQueryPropagation` は、ランタイムで移行エラーになります。現在の形式は、トランスポートオプションオブジェクト、トランスポート単位のフック、`webSocket.queryPropagation` です。
+SSE/WebSocket の接続メトリクスは接続時間、論理接続寿命、アクティブリソース数、`defjs.result`、operation、サーバー address/port、低カーディナリティの失敗型を記録します。リクエスト/レスポンスボディ、メッセージペイロード、キュー長、メッセージ単位 span はデフォルトではありません。
 
-## 伝播
+`url.full` と `recordException(...)` は機微になり得るものとして扱ってください。Defjs は自動 redact しません。operation 名とフック属性は許可リストに保ち、`startSpanHook` または SDK のプロセッサ/exporter で redact してください。プライバシー、カーディナリティ、保持、redaction を見直さずに、生 URL、query 文字列、ヘッダー、baggage、ペイロードをカスタムテレメトリへコピーしないでください。
 
-`propagator` を省略すると、パッケージは W3C Trace Context と W3C Baggage を含む独自の `CompositePropagator` を作ります。グローバルな propagator 設定は読みません。
+WebSocket の query 伝播は、トレースコンテキストと baggage をブラウザー、プロキシ、アクセスログ、テレメトリに晒し得ます。資格情報チャネルではありません。`withCredentials(true)` は HTTP/SSE の Fetch 資格情報であり — WebSocket 認証ではありません。
 
-HTTP と SSE は、その propagator が生成したすべてのフィールドをリクエストヘッダーへ注入します。`req.headers` がすでに `Headers` インスタンスなら、現在の実装はその同じインスタンスを再利用して直接変更します。それ以外の場合は、新しい `Headers` オブジェクトを作ります。WebSocket のクエリ伝播はデフォルトで `false` です。`queryPropagation: true` の場合だけ有効になり、ブラウザーソケットは任意のハンドシェイクヘッダーを追加できないため、propagator が生成したすべてのフィールドを接続クエリ文字列へ追加します。
+アダプタは SDK の init/shutdown をせず、core クライアントやトランスポートハンドルも破棄しません。テレメトリの flush と、HTTP/SSE/WebSocket 作業の close は呼び出し側です。[Interceptors](../core/interceptors.md)、[SSE](../core/sse.md)、[WebSocket](../core/web-socket.md) を見てください。
 
-各インターセプターはスパンを作る前に、リクエストヘッダーに対して `propagator.extract(...)` も呼び出します。この carrier は、アプリケーションが管理する信頼済み入力として扱ってください。信頼できない呼び出し元に `traceparent`、`tracestate`、`baggage` を渡させないでください。これらのフィールドによって、アクティブな親コンテキストが置き換わる可能性があります。信頼できない伝播フィールドは、このインターセプターへ届く前に削除または正規化してください。
+## 関連レシピ
 
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  webSocket: {
-    queryPropagation: true,
-  },
-})
-```
-
-有効にする前に、デプロイ先での URL 伝播をレビューしてください。トレースコンテキストと baggage は、ブラウザー、プロキシ、アクセスログ、テレメトリーシステムに記録される可能性があります。カスタム propagator は `traceparent` 以外のフィールドも追加できます。サーバーが対応している場合は、プロトコルとしてレビュー済みの最初のメッセージ、または有効期間が短い単回使用の接続チケットを推奨します。
-
-`requireParentSpan: true` は、インターセプターが計装を始める前にアクティブな親スパンの有無を確認します。アクティブスパンがなければスパン作成、伝播、フック、メトリクスをすべて省略し、次のハンドラーを変更せず呼び出します。
-
-## フックの動作
-
-フックはトランスポート固有のスパンとリクエストまたは結果を受け取ります。
-
-```typescript
-withOpenTelemetryServer({
-  tracer,
-  http: {
-    requestHook(span, request) {
-      span.setAttribute('app.operation', 'list-orders')
-    },
-    responseHook(span, response, request) {
-      span.setAttribute('app.operation', request.operation ?? 'unclassified')
-      span.setAttribute('app.result_class', response.status < 500 ? 'accepted' : 'server-error')
-    },
-  },
-})
-```
-
-第 3 引数は元の transport `HttpRequest` です。明示的な `operation` を使い、`request.endpoint`、resolved URL、path から identity を再構築しないでください。
-
-フックは `void` または `Promise<void>` を返せますが、クライアント操作を待たせません。同期 throw と非同期 rejection は捕捉され、操作を停止せず `defjs.otel.hook.error` として記録されます。この telemetry 記録自体の失敗も隔離されます。
-
-許可リストに含めた、カーディナリティの低い属性を使ってください。生のヘッダー、クエリ文字列、ボディ、baggage、イベント ID、メッセージペイロード、認証情報は付けないでください。
-
-## HTTP セマンティクス
-
-HTTP インターセプターは `SpanKind.CLIENT` スパンを作り、次を記録します。
-
-- endpoint が静的 operation を宣言した場合は `${method} ${operation}` を span name にし、`defjs.operation` を記録
-- operation がない場合は従来どおり request method のみを fallback に使用
-- `http.request.method`
-- `url.full`
-- `server.address` と任意の `server.port`
-- 実際のレスポンスステータスを受信した場合のみ `http.response.status_code`
-
-HTTP セマンティック規約への完全な準拠を示すものではありません。
-
-HTTP スパンステータスと `error.type` には次のルールが適用されます。
-
-- ステータス `100` から `399` はスパンステータスを未設定のままにし、`error.type` を設定しません。
-- ステータス `400` 以上はクライアントスパンを `ERROR` にし、`error.type` にステータスコードの文字列を設定します。
-- Defjs のステータス 0 トランスポート結果は `http.response.status_code` を設定しません。呼び出し側による中止はステータスを未設定のままにし、`error.type` も設定しません。タイムアウトは `ERROR` / `TIMEOUT`、その他のトランスポート障害は `ERROR` / `NETWORK_ERROR` を使用します。
-- インターセプターを通ってエラーが送出されると、スパンを `ERROR` にし、例外を記録し、その `Error.name` または別の低カーディナリティのフォールバックを `error.type` として使用します。
-
-HTTP スパンは、HTTP インターセプターが Defjs `HttpResponse` を受け取った時点で終了します。高レベル出力のステータスディスパッチと Struct デコードは、インターセプターから戻った後に行われます。そのため、後から発生した `RESPONSE_VALIDATION_FAILED` や `UNDECLARED_STATUS` は終了済みスパンを更新できません。
-
-Meter がある場合、HTTP は `http.client.request.duration` を秒単位で記録します。属性にはメソッド、サーバーアドレスとポート、任意のレスポンスステータス、任意の `error.type` が含まれます。このメトリクスは HTTP スパンと同じレスポンスステータスと `error.type` の分類を適用します。
-
-## SSE セマンティクス
-
-SSE の起動に成功すると、`stream.closed` が確定するまでスパンを開いたままにします。`sse.connected` を記録し、対象となるクローズ経路で `sse.closed`、`sse.aborted`、`sse.error` のいずれかを記録します。
-
-Meter を指定した SSE 計装は次のメトリクスを使います。
-
-| メトリクス                             | 意味                                        |
-| -------------------------------------- | ------------------------------------------- |
-| `defjs.client.sse.connect.duration`    | 論理ストリームハンドルが返るまでの時間。    |
-| `defjs.client.sse.connection.duration` | ハンドルの返却から終端クローズまでの時間。  |
-| `defjs.client.sse.active_streams`      | `closed` Promise が未確定の論理ハンドル数。 |
-
-これらは Defjs 独自のメトリクスです。アクティブカウンターは物理的な再接続試行の間も数え続けます。現在オープンしている HTTP 接続の数ではありません。
-
-## WebSocket セマンティクス
-
-起動に成功すると、`session.closed` が確定するまで WebSocket スパンを開いたままにします。`websocket.connected` を記録し、対象となる経路で `websocket.closed` または `websocket.error` を記録します。
-
-Meter を指定した WebSocket 計装は次のメトリクスを使います。
-
-| メトリクス                                   | 意味                                          |
-| -------------------------------------------- | --------------------------------------------- |
-| `defjs.client.websocket.connect.duration`    | 論理セッションが返るまでの時間。              |
-| `defjs.client.websocket.connection.duration` | セッションの返却から終端クローズまでの時間。  |
-| `defjs.client.websocket.active_connections`  | `closed` Promise が未確定の論理セッション数。 |
-
-メトリクス名は接続ですが、実装が数えるのは再接続遅延の間も含む論理セッションです。物理ソケット数ではありません。
-
-汎用 WebSocket セマンティック規約は、ここでは安定していません。パッケージはメッセージごとのスパンを作らず、ペイロードとキュー長もデフォルトでは記録しません。
-
-## 機密データとテスト範囲の限界
-
-デフォルトの `url.full` は serialized query string ではなく request endpoint と base endpoint から解決されますが、resolved path に sensitive identifier が含まれる場合があります。これは transport metadata であり、operation identity の情報源ではありません。`operation` は静的に保ち、resolved URL を telemetry や log にコピーせず、URL attribute の export 前に SDK/exporter の redaction を設定してください。WebSocket propagation は別に実際の query string へ field を追加します。
-
-`recordException(...)` には、送出されたエラーと一部のクローズ原因が渡ります。エラーメッセージとスタックは機密データを含むことがあります。SDK レベルの processor と exporter で適切にマスキングしてください。このアダプターはアプリケーションに代わって例外を無害化しません。
-
-デプロイ前に、サービスが使う SDK、exporter、processor、context manager、自動計装と組み合わせて検証してください。実トラフィックで、end-to-end baggage、マスキング、shutdown/flush、スパンの重複を確認します。
-
-## 次に読む
-
-- [Interceptors](/ja-JP/core/interceptors) — ほかのクライアントインターセプターとの順序
-- [SSE](/ja-JP/core/sse) と [WebSocket](/ja-JP/core/web-socket) — ここで計測する論理ハンドルとセッションの存続期間
+- [ローカル Fetch ハンドルでテストする](../recipes/test-with-handle.md)
+- [SSE ストリームを消費する](../recipes/consume-sse.md)
+- [WebSocket セッションを開く](../recipes/websocket-session.md)

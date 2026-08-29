@@ -1,286 +1,79 @@
 ---
 title: Commands
-description: Definiere Endpunkte, erzeuge Command-Builder und Commands, bilde Struct-Eingaben auf den Wire ab und leite HTTP-Output-Typen ab.
+description: Endpoints definieren, opake Commands bauen, Inputs mappen und Transport-Ergebnisse inferieren.
 ---
 
 # Commands
 
-Defjs unterscheidet drei zusammengehörige Stufen:
+Eine Definition → Builder → opaker Command → `client.execute`. Dieselbe Pipeline für HTTP, SSE und WebSocket.
 
-1. Eine **Endpunktdefinition** beschreibt einen stabilen HTTP-, SSE- oder WebSocket-Vertrag.
-2. Ein **Command-Builder** ist die Funktion, die `defineRequest`, `defineEventStream` oder `defineWebSocket` zurückgibt.
-3. Ein **Command** ist der Wert, den ein Aufruf dieses Builders mit einer Eingabe erzeugt. Übergib ihn an `client.execute(...)`.
+## Basic Setup
 
-```typescript
-const getUser = defineRequest({
-  method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-})
+```typescript twoslash
+import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
-const command = getUser({ path: { id: 42 } })
-const result = await client.execute(command)
+const client = createClient(withEndpoint('https://api.example.com'))
+const health = defineRequest({ method: 'GET', path: '/health' })
+const [error, data, response] = await client.execute(health())
+if (!error) console.log(data, response.status)
 ```
 
-Das Objekt für `defineRequest` ist die Endpunktdefinition, `getUser` der Command-Builder und `command` der Command.
+## Definition wählen
 
-## HTTP-Endpunktdefinitionen
+| Definition               | Vertrag                                                            | Erfolgreicher Wert                       |
+| ------------------------ | ------------------------------------------------------------------ | ---------------------------------------- |
+| `defineRequest(...)`     | Method, relativer Path, optionaler Input, optionaler Status-Output | Dekodierte Daten + `HttpResponse`        |
+| `defineEventStream(...)` | Path, Buffer-/Queue-Limits, Event-Name → Struct-Map                | `EventStreamHandle` + Open-Snapshot      |
+| `defineWebSocket(...)`   | Path, Incoming-Map, optionale Outgoing-Map, Queue-Limit            | `WebSocketSession` + Connection-Snapshot |
 
-`defineRequest(...)` akzeptiert diese Felder:
+Kein `input` → Builder nimmt kein Argument. Mit `input` → Struct-Wert übergeben, auch wenn jedes nested Field optional ist. Optionale `path`-/`query`-/`headers`-Sections dürfen fehlen; eine Section mit required Field nicht. Ein Body-Wrapper vorhanden heißt: Body ist required.
 
-| Feld           | Bedeutung                                                                                                             |
-| -------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `method`       | String mit der HTTP-Methode.                                                                                          |
-| `operation`    | Optionale explizite statische Identität mit niedriger Kardinalität für Telemetrie und Diagnose.                       |
-| `path`         | Relativer Endpunktpfad mit optionalen Platzhaltern der Form `:name`.                                                  |
-| `input`        | Struct zur strukturellen Dekodierung der Command-Eingabe.                                                             |
-| `build`        | Schemagebundene Projektion von Eingabefeldern auf Request-Bestandteile. Benötigt `input`.                             |
-| `output`       | Zuordnung von Status zu Struct für Response-Dekodierung und Ergebnisableitung.                                        |
-| `responseType` | Optionaler Modus `json`, `text`, `blob` oder `arraybuffer`, nur mit deklariertem `output`; andernfalls nicht erlaubt. |
+Halte Commands opak. Grab nicht in Tags oder Symbole.
 
-`operation?: string` ist auch für SSE- und WebSocket-Definitionen verfügbar. Setze den Wert ausdrücklich aus dem Endpunktvertrag, etwa `users.lookup`; leite ihn nicht aus einem gerenderten Pfad, einer URL, Benutzer- oder Mandantendaten, Request-IDs oder anderen Werten hoher Kardinalität ab.
+## Automatisches Request-Mapping
 
-Verwende `struct.request(...)`, wenn sich Command-Felder direkt auf Wire-Abschnitte abbilden lassen:
+Nutze `struct.request(...)`, wenn logischer Input schon Path / Query / Headers / Body hat:
 
-```typescript
+```typescript twoslash
 import { defineRequest, struct } from '@defjs/core'
 
 const createUser = defineRequest({
   method: 'POST',
-  path: '/organizations/:organizationId/users',
+  path: '/users',
   input: struct.request({
-    path: struct.object({
-      organizationId: struct.string().alias('organization_id'),
-    }),
-    query: struct.object({
-      notify: struct.boolean().optional(),
-    }),
-    headers: struct.object({
-      requestId: struct.string().alias('x-request-id'),
-    }),
-    body: struct.json(
-      struct.object({
-        displayName: struct.string().alias('display_name'),
-      }),
-    ),
+    body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: [
-    { status: 201, body: struct.object({ id: struct.number() }) },
-    { status: 409, body: struct.object({ message: struct.string() }) },
-  ],
+  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
 })
-
-const command = createUser({
-  path: { organizationId: 'acme' },
-  query: { notify: true },
-  headers: { requestId: 'request-42' },
-  body: { displayName: 'Ada' },
-})
+void createUser
 ```
 
-Aufrufer verwenden die logischen Feldnamen. Aliasse bestimmen die Wire-Schlüssel.
+Aliasse schreiben nur outbound Wire-Keys um. Geparste Werte und Command-Inputs behalten logische Namen.
 
-## Optionalität des Command-Builders
+## Custom `build`
 
-Ein Builder ohne `input` akzeptiert kein Argument:
+Greif zu `build(request, input)`, wenn Caller-Shape und Wire-Shape auseinanderlaufen. Das ist eine eingeschränkte Projektion — kein Ort für Auth-Policy-Branching oder Side Effects.
 
-```typescript
-const health = defineRequest({ method: 'GET', path: '/health' })
-health()
-```
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-Wenn `input` deklariert ist, bleibt das Wurzelargument des Commands erforderlich. Innerhalb von `struct.request(...)` kann ein Abschnitt `path`, `query` oder `headers`, dessen Felder alle optional oder nullish sind, als Ganzes fehlen; das Parsing normalisiert jeden fehlenden Abschnitt zu `{}`. Ein Abschnitt mit mindestens einem Pflichtfeld bleibt erforderlich. Auch ein Body-Abschnitt bleibt erforderlich, selbst wenn seine inneren Objektfelder optional sind.
-
-```typescript
 const search = defineRequest({
   method: 'GET',
   path: '/search',
-  input: struct.request({
-    query: struct.object({ q: struct.string() }),
-  }),
-})
-
-search({ query: { q: 'docs' } })
-// search() // TypeScript error: an argument is required.
-// search({ query: {} }) // TypeScript and runtime error: q is required.
-```
-
-Request-Abschnitte mit ausschließlich optionalen Feldern dürfen fehlen, das Command-Argument selbst bleibt jedoch vorhanden:
-
-```typescript
-const OptionalSections = struct.request({
-  path: struct.object({ locale: struct.string().optional() }),
-  query: struct.object({ page: struct.number().optional() }),
-  headers: struct.object({ traceId: struct.string().optional() }),
-})
-const list = defineRequest({ method: 'GET', path: '/items', input: OptionalSections })
-
-list({})
-list({ query: { page: 2 } })
-
-const [optionalError, normalized] = struct.parse(OptionalSections, {})
-if (optionalError) throw optionalError
-// normalized ist { path: {}, query: {}, headers: {} }.
-
-const filtered = defineRequest({
-  method: 'GET',
-  path: '/items',
-  input: struct.request({
-    query: struct.object({ q: struct.string(), page: struct.number().optional() }),
-  }),
-})
-
-filtered({ query: { q: 'docs' } })
-// filtered({}) // TypeScript-Fehler: query enthält das erforderliche Feld q.
-```
-
-Dies prüft strukturelle Anwesenheit und Typen, nicht fachliche Autorisierung, Wertebereiche, Beträge, Formate oder Zustandsübergänge.
-
-## Automatischer Request-Aufbau
-
-Wenn `input` ein `struct.request(...)` ist und `build` fehlt, ordnet Defjs die deklarierten Abschnitte automatisch zu:
-
-- `path` ersetzt Pfadplatzhalter.
-- `query` wird zu Query-Parametern.
-- `headers` wird zu Request-Headern.
-- `body` verwendet seinen Body-Wrapper.
-
-Request-Bodies müssen eine unterstützte Grenze deklarieren:
-
-```typescript
-struct.json(struct.object({ name: struct.string() }))
-struct.text()
-struct.urlencoded({ name: struct.string() })
-struct.formData({ file: struct.file() })
-struct.blob()
-struct.arrayBuffer()
-```
-
-Lege kein bloßes `struct.object(...)` in `request.body` ab; `struct.request(...)` weist es zurück. HTTP unterstützt alle Body-Formen. SSE weist einen Body-Abschnitt zurück, WebSocket sowohl Header- als auch Body-Abschnitte.
-
-## Eigenes `build`
-
-Verwende `build(request, input)`, wenn logische Felder an andere Wire-Positionen oder unter andere Schlüssel gehören. Der Parameter `input` ist eine **schemagebundene Projektion**, nicht der geparste Wert des Aufrufers.
-
-```typescript
-const createBatch = defineRequest({
-  method: 'POST',
-  path: '/accounts/:account_id/users',
-  input: struct.object({
-    accountId: struct.number(),
-    users: struct.array(
-      struct.object({
-        displayName: struct.string(),
-        email: struct.string(),
-      }),
-    ),
-  }),
+  input: struct.object({ q: struct.string(), page: struct.number().optional() }),
   build(request, input) {
-    request.setPathParams({ account_id: input.accountId })
-    request.setJson({
-      users: input.users.map((user) => ({
-        display_name: user.displayName,
-        email: user.email,
-      })),
-    })
+    request.withQuery({ q: input.q, page: input.page ?? 1 })
   },
-  output: [{ status: 202, body: struct.object({ accepted: struct.number() }) }],
+  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
 })
+void search
 ```
 
-Eine Projektion kann:
+## Status-Output-Shapes
 
-- deklarierte Felder auswählen;
-- Zielschlüssel für den Wire bestimmen;
-- ein Array Element für Element mit `.map(...)` projizieren;
-- ein ausgewähltes Objekt mit seinen Feldaliasen kodieren, wenn es an JSON gebunden wird.
+`output` kann eine Status → Struct-Map oder ein `{ status, body }[]` sein. Exakter Status gewinnt. Array-Einträge: ein späterer Match überschreibt einen früheren gruppierten Match. Keine passende Deklaration → `UNDECLARED_STATUS` vor Body-Decode.
 
-Eine Projektion kann keine Aufruferwerte untersuchen, abhängig von ihnen verzweigen, beliebige Transformationen berechnen, die Anzahl der Arrayelemente ändern oder Literalwerte einschleusen. `request.setJson({ version: 'v1' })` ist beispielsweise keine gültige Projektion, weil `'v1'` nicht aus der Bindungsansicht der Eingabe stammt.
+## Verwandte Rezepte
 
-Normalisiere und validiere Anwendungsdaten, bevor du den Command erzeugst. `build` ist für deklaratives Wire-Mapping gedacht.
-
-### Fähigkeiten von `build`
-
-| Ziel                                                                | HTTP | SSE  | WebSocket |
-| ------------------------------------------------------------------- | ---- | ---- | --------- |
-| `setPathParams`, `setQueryParams`                                   | Ja   | Ja   | Ja        |
-| `setHeaders`, `addHeaders`                                          | Ja   | Ja   | Nein      |
-| JSON-, Text-, HTML-, Formular-, Blob- und ArrayBuffer-Body-Methoden | Ja   | Nein | Nein      |
-
-Der TypeScript-Build-Context ist transportspezifisch. Laufzeitprüfungen weisen nicht unterstützte Ausgaben ebenfalls zurück, falls die Typprüfung umgangen wurde.
-
-## Ableitung des HTTP-Outputs
-
-`output` unterstützt eine Objektzuordnung oder ein Array aus Status-Body-Paaren:
-
-```typescript
-const User = struct.object({ id: struct.number() })
-const NotFound = struct.object({ message: struct.string() })
-const Conflict = struct.object({ conflict: struct.string() })
-
-const objectOutput = {
-  '200': User,
-  '404': NotFound,
-}
-
-const getUsers = defineRequest({
-  method: 'GET',
-  path: '/users',
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-    { status: [409, 422], body: Conflict },
-  ],
-})
-```
-
-Der HTTP-Erfolgstyp ist die Union der deklarierten 2xx-Bodies. `error.data` bleibt mit dem deklarierten Nicht-2xx-Status korreliert. `defineRequest(...)` verwendet ein Const-Generic, sodass Inline-Statuseinträge und gruppierte Statusarrays ihre Literale ohne `as const` behalten. Nach `client.execute(getUsers())` engt `error.status === 404` die Daten auf `NotFound` ein; der übrige Zweig `409 | 422` engt sie auf `Conflict` ein.
-
-Sobald `output` deklariert ist, braucht jeder zurückgegebene Status ein passendes Struct. Ein nicht zugeordneter 2xx- oder Nicht-2xx-Status erzeugt `UNDECLARED_STATUS`. Ohne `output` wird der Response-Body nicht gelesen oder dekodiert und nach bestem Bemühen abgebrochen; das Ergebnis ist `undefined`.
-
-## SSE- und WebSocket-Definitionen
-
-`defineEventStream(...)` verwendet statt des HTTP-`output` eine `events`-Zuordnung. Eventnamen wählen Structs aus; ein optionaler Eintrag `default` verarbeitet zur Laufzeit nicht deklarierte Namen.
-
-```typescript
-const notifications = defineEventStream({
-  maxBufferSize: 64 * 1024,
-  maxQueueSize: 100,
-  path: '/notifications',
-  events: {
-    message: struct.json(struct.object({ text: struct.string() })),
-    default: struct.string(),
-  },
-})
-```
-
-`defineWebSocket(...)` deklariert Zuordnungen für eingehende und optional ausgehende Nachrichten. Nachrichtenumschläge verwenden `type` als Diskriminator.
-
-```typescript
-const chat = defineWebSocket({
-  maxIncomingQueueSize: 100,
-  path: '/chat',
-  incoming: {
-    message: struct.object({ text: struct.string() }),
-  },
-  outgoing: {
-    send: struct.object({ text: struct.string() }),
-  },
-})
-```
-
-[SSE](/de-DE/core/sse) und [WebSocket](/de-DE/core/web-socket) erklären Dekodierung, Warteschlangen, Reconnect und die Verantwortung für das Schließen.
-
-## Commands als opake Werte behandeln
-
-Anwendungscode sollte Commands erzeugen und an `Client.execute(...)` übergeben. Verlasse dich nicht auf Transport-Tags oder strukturelle Reflexion.
-
-Der zentrale Paketeinstieg exportiert derzeit Transport-Command-Interfaces und Low-Level-Executor-Funktionen. Für den empfohlenen Ablauf werden diese Exporte nicht benötigt; eine langfristige Stabilitätszusage ist in dieser Dokumentation nicht festgelegt. Die von der Laufzeitverteilung verwendeten Command-Tag-Symbole und Guard-Funktionen werden dort nicht exportiert.
-
-## Weiter
-
-- [Client](/de-DE/core/client) behandelt Ausführungs-Overloads und Optionskomposition.
-- [HTTP](/de-DE/core/http) ist die Referenz für URLs, Kodierung, Responses und Abbruch.
-- [Struct](/de-DE/core/struct) erklärt strikte strukturelle Dekodierung.
+- [GET mit deklariertem 404](../recipes/get-declared-404.md)
+- [POST JSON](../recipes/post-json.md)

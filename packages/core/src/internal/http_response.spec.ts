@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { makeResponse } from './http_response'
+import { getHttpErrorMessage, makeResponse } from './http_response'
 
 describe('Response', () => {
   test('should make response', () => {
@@ -32,8 +32,56 @@ describe('Response', () => {
     expect(res.status).toBe(0)
     expect(res.statusText).toBe('')
     expect(res.error).toBeInstanceOf(Error)
-    expect((res.error as Error).message).toContain('(unknown url)')
-    expect((res.error as Error).message).toContain(': 0')
+    expect((res.error as Error).message).toBe('Http failure response: 0')
+  })
+
+  test('should omit resolved urls from http failure messages', () => {
+    expect(
+      getHttpErrorMessage({
+        status: 404,
+        statusText: 'Not Found',
+        url: 'https://secret.example/users/1?token=abc',
+      }),
+    ).toBe('Http failure response: 404 - Not Found')
+    expect(
+      getHttpErrorMessage({
+        status: 500,
+        statusText: '',
+        url: '',
+      }),
+    ).toBe('Http failure response: 500')
+  })
+
+  test('should copy request headers and url when short-circuiting', () => {
+    const requestHeaders = new Headers({ 'x-request-id': 'req-1' })
+    const request = {
+      baseEndpoint: 'https://example.com',
+      endpoint: '/cached',
+      headers: requestHeaders,
+      method: 'GET',
+    }
+    const res = makeResponse({
+      body: { cached: true },
+      request,
+      status: 200,
+    })
+
+    expect(res.headers.get('x-request-id')).toBe('req-1')
+    expect(res.headers).not.toBe(requestHeaders)
+    expect(res.url).toBe('https://example.com/cached')
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ cached: true })
+    expect(requestHeaders.get('x-request-id')).toBe('req-1')
+    expect(requestHeaders.has('authorization')).toBe(false)
+  })
+
+  test('should copy endpoint when request has no baseEndpoint', () => {
+    const res = makeResponse({
+      request: { endpoint: '/local', method: 'GET' },
+      status: 200,
+    })
+    expect(res.url).toBe('/local')
+    expect(res.headers).toBeInstanceOf(Headers)
   })
 
   test('should not treat non-2xx status as a transport or representation error', () => {

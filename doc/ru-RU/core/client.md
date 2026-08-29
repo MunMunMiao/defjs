@@ -1,151 +1,88 @@
 ---
 title: Клиент
-description: Создавайте явные клиенты, комбинируйте опции, выполняйте команды разных транспортов и проверяйте актуальную конфигурацию.
+description: Создай явный клиент, собери опции, выполни команды и владей cleanup.
 ---
 
 # Клиент
 
-Создайте `Client` явно и передайте его коду, который выполняет команды.
+`Client` держит эндпоинт + конфиг транспорта и диспатчит команды HTTP, SSE и WebSocket. Он не кеширует, не auto-retry и не нянчит открытые стримы.
 
-```typescript
+## Базовая настройка
+
+```typescript twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
 ```
 
-Клиент хранит конфигурацию и распределяет команды между HTTP, SSE и WebSocket. У него нет глобального реестра или фонового менеджера жизненного цикла.
+## Собери опции
 
-## Композиция опций
+Опции применяются слева направо. Setters заменяют; `withInterceptors(...items)` дописывает.
 
-Опции выполняются слева направо.
+```typescript twoslash
+import { createClient, createHttpInterceptor, withCredentials, withEndpoint, withInterceptors } from '@defjs/core'
 
-```typescript
-const client = createClient(
-  withEndpoint('https://old.example.com'),
-  withEndpoint('https://api.example.com'),
-  withInterceptors(operationLogger),
-  withInterceptors(authInterceptor, retryInterceptor),
-)
-```
-
-Итоговый эндпоинт — `https://api.example.com`. Порядок перехватчиков: `operationLogger`, `authInterceptor`, затем `retryInterceptor`.
-
-Композиция подчиняется трём правилам:
-
-1. Опции-сеттеры заменяют значение. Это относится к `withEndpoint`, реализациям транспортов, сериализатору query, учётным данным, конфигурации XSRF и отдельным настройкам SSE или WebSocket.
-2. `withInterceptors(...items)` добавляет элементы в конец. Несколько вызовов сохраняют порядок регистрации перехватчиков.
-3. `withSSEOptions(...)` и `withWebSocketOptions(...)` поверхностно заменяют каждое заданное поле верхнего уровня. Вложенные объекты переподключения и heartbeat глубоко не объединяются.
-
-Например, второй объект `reconnect` ниже полностью заменяет первый и не сохраняет `attempts: 5`.
-
-```typescript
-const client = createClient(
-  withWebSocketOptions({
-    reconnect: { attempts: 5, delayMs: 500 },
-  }),
-  withWebSocketOptions({
-    reconnect: { delayMs: 2_000 },
-  }),
-)
-```
-
-Групповые опции игнорируют свойства со значением `undefined`. Любое другое переданное поле верхнего уровня целиком заменяет текущее значение.
-
-### Основные опции
-
-| Опция                            | Эффект                                                               |
-| -------------------------------- | -------------------------------------------------------------------- |
-| `withEndpoint(url)`              | Задаёт абсолютный базовый эндпоинт для всех транспортов.             |
-| `withHTTPHandle(fetch)`          | Заменяет реализацию Fetch для HTTP.                                  |
-| `withSSEHandle(fetch)`           | Заменяет реализацию Fetch для SSE.                                   |
-| `withWebSocketHandle(WebSocket)` | Заменяет конструктор WebSocket.                                      |
-| `withInterceptors(...items)`     | Добавляет в конец перехватчики разных транспортов.                   |
-| `withQueryParamsSerializer(fn)`  | Заменяет сериализацию query для HTTP, SSE и WebSocket.               |
-| `withCredentials(boolean)`       | При `true` использует Fetch `credentials: 'include'` для HTTP и SSE. |
-| `withXSRF(options?)`             | Настраивает добавление XSRF-токена в HTTP.                           |
-| `withSSEOptions(options)`        | Поверхностно заменяет заданные поля SSE.                             |
-| `withWebSocketOptions(options)`  | Поверхностно заменяет заданные поля WebSocket.                       |
-
-Отдельные вспомогательные функции SSE и WebSocket задают одно соответствующее поле верхнего уровня. Значения по умолчанию и последствия для жизненного цикла описаны на страницах транспортов.
-
-## Выполнение команд
-
-У `Client.execute` три перегрузки. Каждая возвращает трёхэлементный кортеж с ошибкой на первом месте.
-
-Для выполнения HTTP, SSE и WebSocket параметр `timeout` должен быть положительным безопасным целым числом в диапазоне `1..2_147_483_647`; `0`, отрицательные и дробные значения, `NaN`, `Infinity` и значения выше предела возвращают `REQUEST_VALIDATION_FAILED` до создания ресурса request, stream или socket.
-
-### HTTP
-
-```typescript
-const [error, data, response] = await client.execute(requestCommand, {
-  signal,
-  timeout: 5_000,
+const audit = createHttpInterceptor(async (request, next) => {
+  const started = performance.now()
+  const response = await next(request)
+  console.info(request.operation ?? request.method, response.status, Math.round(performance.now() - started))
+  return response
 })
+
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(audit), withCredentials(true))
+void client
 ```
 
-Третий элемент — обёртка Defjs `HttpResponse`, если ответ доступен. Опции HTTP включают `abort` или `timeout`, дополнительный псевдоним `signal`, `context` и наблюдателей прогресса загрузки в обе стороны.
+Смешанные interceptors фильтруются по транспорту в момент execute; относительный порядок среди выбранного kind сохраняется.
 
-### SSE
+## Execute по транспорту
 
-```typescript
-const [error, stream, startupOpen] = await client.execute(streamCommand, {
-  signal,
+- HTTP → `[error, data, response]`
+- SSE → `[error, stream, open]` (`open` — снимок старта; `stream.open` может меняться после reconnect)
+- WebSocket → `[error, session, connection]`
+
+WebSocket execute может переопределить `beforeConnect`, `heartbeat`, `protocols` и `reconnect`. `timeout` — положительное safe integer в `1..2_147_483_647`.
+
+Cleanup на тебе: abort HTTP, close SSE + `await stream.closed`, close WebSocket + `await session.closed`.
+
+## Подставь тестовый транспорт
+
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({ path: struct.object({ id: struct.number() }) }),
+  output: { 200: struct.object({ id: struct.number(), name: struct.string() }) },
 })
+
+const handle: typeof fetch = async () => Response.json({ id: 7, name: 'Ada' })
+const client = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(handle))
+const [error, user] = await client.execute(getUser({ path: { id: 7 } }))
+if (!error) console.log(user.name)
 ```
 
-Третий элемент — проверенный снимок открытия при запуске. `stream.open` — отдельный геттер с актуальным значением, которое может измениться после попыток переподключения. SSE принимает отмену и `HttpContext` при выполнении; переподключение настраивается на клиенте. Обязательные ограничения `maxBufferSize` и `maxQueueSize` принадлежат определению каждого event stream.
+## Scope на сервере vs в браузере
 
-### WebSocket
+На сервере создавай клиент внутри границы запроса, когда опции или замыкания interceptor’ов захватывают auth, cookies, пользователей или tenants. Идентичность клиента сама по себе — не security boundary.
 
-```typescript
-const [error, session, startupConnection] = await client.execute(socketCommand, {
-  signal,
-  reconnect: { attempts: 3 },
-})
-```
+## Справка
 
-Третий элемент — снимок подключения при запуске. `session.connection` — геттер с актуальным значением; он может описывать более позднюю физическую попытку. При выполнении WebSocket принимает отмену, а также отдельные опции `beforeConnect`, `heartbeat`, `protocols` и `reconnect`. Обязательное ограничение `maxIncomingQueueSize` и необязательное `maxOutgoingQueueSize` принадлежат определению каждого WebSocket. При выполнении `HttpContext` не поддерживается.
+| Helper                                                                                                        | Эффект                                               |
+| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `withEndpoint(url)`                                                                                           | Абсолютный base endpoint для всех транспортов        |
+| `withHTTPHandle(fetch)`                                                                                       | Заменить Fetch для HTTP                              |
+| `withSSEHandle(fetch)`                                                                                        | Заменить Fetch для SSE                               |
+| `withWebSocketHandle(WebSocket)`                                                                              | Заменить конструктор WebSocket                       |
+| `withInterceptors(...items)`                                                                                  | Дописать смешанные interceptors                      |
+| `withQueryParamsSerializer(fn)`                                                                               | Заменить сериализацию query                          |
+| `withCredentials(boolean)`                                                                                    | Fetch `credentials: 'include'` для HTTP/SSE при true |
+| `withXSRF(options?)`                                                                                          | HTTP XSRF cookie → header                            |
+| `withSSEReconnect` / `withSSEOnInvalidEvent`                                                                  | Крутилки SSE                                         |
+| `withWebSocketReconnect` / `withWebSocketHeartbeat` / `withWebSocketProtocols` / `withWebSocketBeforeConnect` | Крутилки WebSocket                                   |
 
-Точные ветки ошибок описаны в разделе [«Ошибки»](/ru-RU/core/errors), а жизненный цикл транспортов — в разделах [HTTP](/ru-RU/core/http), [SSE](/ru-RU/core/sse) и [WebSocket](/ru-RU/core/web-socket).
+## Связанные рецепты
 
-## Область клиента
-
-Браузерное приложение может хранить клиент на уровне модуля, если его эндпоинт и замыкания содержат только безопасное для браузера состояние, не зависящее от запроса.
-
-```typescript
-export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
-```
-
-Не переиспользуйте серверный клиент между запросами, если его опции или перехватчики захватывают данные авторизации, cookie, арендатора, пользователя или контекста запроса. Создавайте такой клиент внутри границы серверного запроса.
-
-У `Client` нет метода `dispose()`. Он не отслеживает активные запросы, потоки и сеансы. Код, который запускает работу, должен отменить HTTP-запрос, закрыть хендл SSE или сеанс WebSocket на соответствующей границе жизненного цикла.
-
-## Расширенная проверка
-
-`isClient(value)` проверяет маркер клиента во время выполнения.
-
-```typescript
-import { isClient } from '@defjs/core'
-
-export function keepClient(value: unknown) {
-  return isClient(value) ? value : undefined
-}
-```
-
-`getClientConfig(client)` возвращает актуальный изменяемый объект конфигурации, который хранит клиент. Это не снимок и не readonly-представление.
-
-```typescript
-import { getClientConfig, type Client } from '@defjs/core'
-
-export function interceptorCount(client: Client): number {
-  return getClientConfig(client).interceptors.length
-}
-```
-
-Изменение этого объекта влияет на последующие выполнения и обходит обычную композицию опций. Используйте его для диагностики или тщательно проверенного интеграционного кода. Если аргумент не является корректным клиентом, `getClientConfig` выбрасывает `TypeError`.
-
-## Что дальше
-
-- [Команды](/ru-RU/core/commands) — значения, которые передаются в `execute`.
-- [Перехватчики](/ru-RU/core/interceptors) — фильтрация и луковичный порядок.
-- [Контекст](/ru-RU/core/context) — метаданные HTTP и SSE в области запроса.
+- [Тест с локальным Fetch handle](../recipes/test-with-handle.md)
+- [Отменить HTTP-вызов](../recipes/cancel-http.md)

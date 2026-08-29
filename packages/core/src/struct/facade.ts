@@ -49,6 +49,27 @@ function structOr<const T extends readonly [StructLike, ...StructLike[]]>(...opt
   return createUnionStruct(options)
 }
 
+/**
+ * Facade for building protocol-boundary structs and parsing values.
+ *
+ * Prefer this entry point over internal constructors. Compose shapes with
+ * `struct.object` / `struct.request`, then parse with `struct.parse` or let
+ * HTTP/SSE/WebSocket endpoints apply the same contracts at the wire boundary.
+ *
+ * @example
+ * ```ts
+ * const User = struct.object({
+ *   id: struct.number(),
+ *   displayName: struct.string().alias('display_name'),
+ * })
+ *
+ * const getUserInput = struct.request({
+ *   path: struct.object({ id: struct.number() }),
+ * })
+ *
+ * const [error, user] = struct.parse(User, { id: 1, displayName: 'Ada' })
+ * ```
+ */
 export const struct = {
   any: createAnyStruct,
   array: createArrayStruct,

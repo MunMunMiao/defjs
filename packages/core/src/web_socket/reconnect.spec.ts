@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest'
-import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait, type NormalizedReconnectConfig } from './reconnect'
+import { computeReconnectDelay, wait } from '../internal/backoff'
+import { normalizeReconnectConfig, shouldReconnect, type NormalizedReconnectConfig } from './reconnect'
 import type { SocketLifecycleOutcome } from './web_socket'
 
 describe('reconnect config', () => {
@@ -166,7 +167,7 @@ describe('computeReconnectDelay', () => {
       shouldReconnect: () => true,
     }
     vi.spyOn(Math, 'random').mockReturnValue(1)
-    expect(() => computeReconnectDelay(config, 2)).toThrow('WebSocket reconnect delay must be finite')
+    expect(() => computeReconnectDelay(config, 2)).toThrow('Reconnect delay must be finite')
     vi.restoreAllMocks()
   })
 
@@ -206,7 +207,7 @@ describe('wait', () => {
   })
 
   test('rejects non-finite waits before Node can emit a timer overflow warning', async () => {
-    await expect(wait(Number.POSITIVE_INFINITY, new AbortController().signal)).rejects.toThrow('WebSocket reconnect delay must be finite')
+    await expect(wait(Number.POSITIVE_INFINITY, new AbortController().signal)).rejects.toThrow('Reconnect delay must be finite')
   })
 
   test('rejects when signal is already aborted', async () => {

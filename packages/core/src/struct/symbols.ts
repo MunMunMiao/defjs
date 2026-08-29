@@ -1,2 +1,2 @@
-export const DEFINITION = Symbol('struct.definition')
-export const OMIT = Symbol('struct.omit')
+export const DEFINITION: unique symbol = Symbol.for('defjs.struct.definition')
+export const OMIT: unique symbol = Symbol.for('defjs.struct.omit')

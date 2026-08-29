@@ -1,7 +1,7 @@
 import type { Command } from './command'
 import { isEventStreamCommand, isHttpCommand, isWebSocketCommand } from './command'
 import type { ClientConfig } from './config'
-import { applyClientOptions, createClientConfig } from './config'
+import { createClientConfig } from './config'
 import type { ClientOption } from './option'
 import type { HttpCommand, HttpExecuteOptions } from '../http/http'
 import { executeHttpCommand } from '../http/http'
@@ -21,44 +21,51 @@ import { executeWebSocketCommand } from '../web_socket/web_socket'
 
 export const CLIENT = Symbol('Client')
 
+/**
+ * Defjs client: holds config and `execute`s HTTP, SSE, and WebSocket commands.
+ */
 export type Client = {
   readonly [CLIENT]: ClientConfig
 
-  execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
-    command: HttpCommand<TInput, TOutput>,
-    options?: HttpExecuteOptions,
-  ): ReturnType<typeof executeHttpCommand<TInput, TOutput>>
-
+  /** Open an SSE command and return stream open/await results. */
   execute<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
     command: EventStreamCommand<TInput, TEvents>,
     options?: EventStreamExecuteOptions,
   ): Promise<StreamAwaitResult<EventStreamData<TEvents>>>
 
+  /** Open a WebSocket command and return session await results. */
   execute<TInput extends AnyStruct | undefined, TIncoming extends SocketStructs, TOutgoing extends SocketStructs | undefined>(
     command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
     options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
-}
 
-export function isClient(value: unknown): value is Client {
-  return typeof value === 'object' && value !== null && CLIENT in value
-}
-
-export function getClientConfig(client: Client): ClientConfig {
-  if (!isClient(client)) {
-    throw new TypeError('Value is not a valid Client instance')
-  }
-
-  return client[CLIENT]
-}
-
-export function createClient(...options: ClientOption[]): Client {
-  const conf = applyClientOptions(createClientConfig(), options)
-
-  function execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
+  /** Run an HTTP command and return an await-result tuple. */
+  execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
     command: HttpCommand<TInput, TOutput>,
     options?: HttpExecuteOptions,
   ): ReturnType<typeof executeHttpCommand<TInput, TOutput>>
+}
+
+/**
+ * Create a Defjs client from option helpers.
+ *
+ * Options are applied in order. Prefer creating the client inside the
+ * request boundary when interceptors close over auth or tenants.
+ *
+ * @param options - Client option helpers such as `withEndpoint`.
+ * @returns A client that can `execute` HTTP, SSE, and WebSocket commands.
+ *
+ * @example
+ * ```ts
+ * const client = createClient(withEndpoint('https://api.example.com'))
+ * ```
+ */
+export function createClient(...options: ClientOption[]): Client {
+  const conf = createClientConfig()
+  for (const option of options) {
+    option(conf)
+  }
+
   function execute<TInput extends AnyStruct | undefined, TEvents extends EventStructs>(
     command: EventStreamCommand<TInput, TEvents>,
     options?: EventStreamExecuteOptions,
@@ -67,6 +74,10 @@ export function createClient(...options: ClientOption[]): Client {
     command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
     options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
+  function execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
+    command: HttpCommand<TInput, TOutput>,
+    options?: HttpExecuteOptions,
+  ): ReturnType<typeof executeHttpCommand<TInput, TOutput>>
   function execute(command: Command, options?: unknown): Promise<unknown> {
     if (isHttpCommand(command)) {
       return executeHttpCommand(conf, command, options as HttpExecuteOptions | undefined)

@@ -51,6 +51,6 @@ describe('useClient', () => {
       return null
     }
 
-    expect(() => render(createElement(Child))).toThrow('No HTTP client provided')
+    expect(() => render(createElement(Child))).toThrow('No Defjs client provided. Did you forget to wrap your app in <ClientProvider>?')
   })
 })

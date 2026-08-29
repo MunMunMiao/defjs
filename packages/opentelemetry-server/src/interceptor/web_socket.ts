@@ -1,6 +1,6 @@
 import type { HttpRequest, WebSocketSessionLike } from '@defjs/core'
 import { createWebSocketInterceptor, ERR_ABORTED } from '@defjs/core'
-import type { Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
+import type { Attributes, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
 import { context, trace } from '@opentelemetry/api'
 import { headersGetter, queryStringSetter } from '../propagation/carrier'
 import type { WebSocketClientMetrics } from '../telemetry/metrics'
@@ -10,7 +10,7 @@ import {
   createServerMetricAttributes,
   durationSeconds,
 } from '../telemetry/metrics'
-import { addSpanEvent, createWebSocketSpan, endSpan, runSpanHook, setSpanError } from '../telemetry/trace'
+import { addSpanEvent, createWebSocketSpan, endSpan, resolveStartSpanHook, runSpanHook, setSpanError } from '../telemetry/trace'
 import { resolveUrl } from '../telemetry/url'
 
 export interface WebSocketInterceptorOptions {
@@ -19,6 +19,7 @@ export interface WebSocketInterceptorOptions {
   metrics?: WebSocketClientMetrics
   requireParentSpan?: boolean
   queryPropagation?: boolean
+  startSpanHook?: (request: HttpRequest) => Attributes
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
   responseHook?: (span: Span, session: WebSocketSessionLike, req: HttpRequest) => Promise<void> | void
 }
@@ -27,7 +28,7 @@ export function createOpenTelemetryWebSocketInterceptor(
   options: WebSocketInterceptorOptions,
 ): ReturnType<typeof createWebSocketInterceptor> {
   return createWebSocketInterceptor(async (req, next) => {
-    const { tracer, propagator, metrics, requireParentSpan, queryPropagation = false, requestHook, responseHook } = options
+    const { tracer, propagator, metrics, requireParentSpan, queryPropagation = false, startSpanHook, requestHook, responseHook } = options
 
     if (requireParentSpan && !trace.getActiveSpan()) {
       return next(req)
@@ -36,7 +37,19 @@ export function createOpenTelemetryWebSocketInterceptor(
     const url = resolveUrl(req.endpoint, req.baseEndpoint)
 
     const parentCtx = propagator.extract(context.active(), req.headers ?? new Headers(), headersGetter)
-    const span = createWebSocketSpan(tracer, url, parentCtx, req.operation)
+    const startSpanHookResult = resolveStartSpanHook(startSpanHook, req)
+    const span = createWebSocketSpan(
+      tracer,
+      url,
+      parentCtx,
+      req.operation,
+      startSpanHookResult.ok ? startSpanHookResult.attributes : undefined,
+    )
+    if (!startSpanHookResult.ok) {
+      runSpanHook(span, 'startSpanHook', () => {
+        throw startSpanHookResult.error
+      })
+    }
     const spanCtx = trace.setSpan(parentCtx, span)
 
     let queryParams = req.queryParams

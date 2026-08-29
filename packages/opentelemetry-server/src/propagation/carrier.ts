@@ -36,19 +36,3 @@ export const queryStringSetter: TextMapSetter<QueryStringCarrier> = {
     }
   },
 }
-
-export const queryStringGetter: TextMapGetter<QueryStringCarrier> = {
-  keys(carrier) {
-    if (!carrier) {
-      return []
-    }
-    return Array.from(carrier.params.keys())
-  },
-  get(carrier, key) {
-    if (!carrier || !key) {
-      return undefined
-    }
-    const value = carrier.params.get(key)
-    return value ?? undefined
-  },
-}

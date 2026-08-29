@@ -1,0 +1,6 @@
+[install]
+linker = "isolated"
+peer = true
+
+[run]
+bun = true

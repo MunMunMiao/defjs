@@ -1,13 +1,14 @@
 import { ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode } from '@opentelemetry/api'
 import { describe, expect, test, vi } from 'vitest'
-import { createMockTracer } from '../test-utils'
+import { createMockTracer, makeHttpRequest } from '../test-utils'
 import {
   addSpanEvent,
   createHttpSpan,
   createSSESpan,
   createWebSocketSpan,
   endSpan,
+  resolveStartSpanHook,
   runSpanHook,
   setSpanError,
   setSpanHttpResponse,
@@ -43,6 +44,53 @@ describe('trace helpers', () => {
     expect(spans[0]?.name).toBe('WebSocket')
     expect(spans[0]?.kind).toBe(SpanKind.CLIENT)
     expect(spans[0]?.attributes['url.full']).toBe('wss://api.example.com/ws')
+  })
+
+  test('span creators merge application attributes into initial startSpan options last', () => {
+    const { tracer } = createMockTracer()
+
+    createHttpSpan(tracer, 'POST', 'https://api.example.com/test', ROOT_CONTEXT, undefined, {
+      'app.tenant': 'http',
+      'url.full': 'https://tenant.example/http',
+    })
+    createSSESpan(tracer, 'https://api.example.com/events', ROOT_CONTEXT, undefined, {
+      'app.tenant': 'sse',
+      'url.full': 'https://tenant.example/sse',
+    })
+    createWebSocketSpan(tracer, 'wss://api.example.com/ws', ROOT_CONTEXT, undefined, {
+      'app.tenant': 'webSocket',
+      'url.full': 'wss://tenant.example/socket',
+    })
+
+    expect(vi.mocked(tracer.startSpan).mock.calls.map((call) => call[1]?.attributes)).toEqual([
+      {
+        'app.tenant': 'http',
+        'http.request.method': 'POST',
+        'url.full': 'https://tenant.example/http',
+      },
+      { 'app.tenant': 'sse', 'url.full': 'https://tenant.example/sse' },
+      { 'app.tenant': 'webSocket', 'url.full': 'wss://tenant.example/socket' },
+    ])
+  })
+
+  test('resolveStartSpanHook returns synchronous application attributes', () => {
+    const request = makeHttpRequest()
+    const hook = vi.fn(() => ({ 'app.tenant': 'acme' }))
+
+    expect(resolveStartSpanHook(hook, request)).toEqual({ ok: true, attributes: { 'app.tenant': 'acme' } })
+    expect(hook).toHaveBeenCalledWith(request)
+  })
+
+  test('resolveStartSpanHook returns no attributes when omitted', () => {
+    expect(resolveStartSpanHook(undefined, makeHttpRequest())).toEqual({ ok: true })
+  })
+
+  test('resolveStartSpanHook preserves throw undefined with an explicit failure discriminator', () => {
+    expect(
+      resolveStartSpanHook(() => {
+        throw undefined
+      }, makeHttpRequest()),
+    ).toEqual({ ok: false, error: undefined })
   })
 
   test('uses an explicit static operation without deriving identity from the URL', () => {

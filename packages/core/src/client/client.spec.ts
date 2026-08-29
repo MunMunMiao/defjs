@@ -1,29 +1,29 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { defineRequest } from '../http'
 import { createHttpInterceptor } from '../interceptor'
-import { makeResponse } from '../internal/http_response'
+import { struct } from '../struct'
 import { createClient } from './client'
-import type { ClientSSEOptions } from './config'
-import { DEFAULT_HTTP_OPTIONS, DEFAULT_QUERY_PARAMS_SERIALIZER, DEFAULT_SSE_OPTIONS } from './config'
+import { DEFAULT_HTTP_OPTIONS, DEFAULT_SSE_OPTIONS } from './config'
 import {
   withCredentials,
   withEndpoint,
+  withHeaders,
   withHTTPHandle,
   withInterceptors,
   withQueryParamsSerializer,
   withSSEHandle,
   withSSEOnInvalidEvent,
-  withSSEOptions,
   withSSEReconnect,
+  withTimeout,
   withWebSocketBeforeConnect,
   withWebSocketHandle,
   withWebSocketHeartbeat,
-  withWebSocketOptions,
+  withWebSocketOnInvalidEvent,
   withWebSocketProtocols,
   withWebSocketReconnect,
   withXSRF,
 } from './index'
 import type { Client } from './client'
-import { getClientConfig, isClient } from './client'
 
 describe('Client', () => {
   let baseClient: Client
@@ -32,38 +32,68 @@ describe('Client', () => {
     baseClient = createClient(withEndpoint('https://example.com/v1'))
   })
 
-  test('should create client with normalized endpoint and default transport options', () => {
-    const config = getClientConfig(baseClient)
+  test('withHeaders and withTimeout apply to HTTP execute', async () => {
+    const seen: { headers: Headers; timedOut: boolean }[] = []
+    const client = createClient(
+      withEndpoint('https://example.com'),
+      withHeaders({ 'X-Tenant': 'acme', 'X-Override': 'default' }),
+      withTimeout(30),
+      withHTTPHandle(async (input, init) => {
+        const request = new Request(input, init)
+        seen.push({ headers: new Headers(request.headers), timedOut: false })
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        return Response.json({ ok: true })
+      }),
+    )
 
-    expect(config.endpoint).toBe('https://example.com/v1')
-    expect(config.http).toEqual(DEFAULT_HTTP_OPTIONS)
-    expect(config.sse).toEqual(DEFAULT_SSE_OPTIONS)
-    expect(config.webSocket).toMatchObject({ handle: globalThis.WebSocket })
-    expect(config.queryParamsSerializer).toBe(DEFAULT_QUERY_PARAMS_SERIALIZER)
-    expect(config.http.handle).toBe(config.sse.handle)
-    expect(DEFAULT_QUERY_PARAMS_SERIALIZER(new URLSearchParams({ a: '1' }))).toBe('a=1')
+    const usePing = defineRequest({
+      method: 'GET',
+      path: '/ping',
+      input: struct.request({
+        headers: struct.object({ override: struct.string().alias('X-Override') }),
+      }),
+      output: { 200: struct.object({ ok: struct.boolean() }) },
+    })
+
+    const [headerError] = await client.execute(usePing({ headers: { override: 'command' } }), { timeout: 5_000 })
+    expect(headerError).toBeNull()
+    expect(seen[0]?.headers.get('X-Tenant')).toBe('acme')
+    expect(seen[0]?.headers.get('X-Override')).toBe('command')
+
+    const [timeoutError] = await client.execute(usePing({ headers: { override: 'command' } }))
+    expect(timeoutError?.kind).toBe('transport')
+    expect(timeoutError?.code).toBe('TIMEOUT')
   })
 
-  test('should isClient return true for client', () => {
-    expect(isClient(baseClient)).toBe(true)
+  test('withTimeout rejects invalid zero', () => {
+    expect(() => withTimeout(0)).toThrow(RangeError)
   })
 
-  test('should isClient return false for non-client', () => {
-    expect(isClient({})).toBe(false)
+  test('withEndpoint is used for execute URL', async () => {
+    const seen: string[] = []
+    const client = createClient(
+      withEndpoint('https://original.example'),
+      withHTTPHandle(async (input) => {
+        seen.push(input instanceof Request ? input.url : String(input))
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { 'content-type': 'application/json' },
+          status: 200,
+        })
+      }),
+    )
+
+    const usePing = defineRequest({
+      method: 'GET',
+      output: { 200: struct.object({ ok: struct.boolean() }) },
+      path: '/ping',
+    })
+    const [error] = await client.execute(usePing())
+
+    expect(error).toBeNull()
+    expect(seen).toEqual(['https://original.example/ping'])
   })
 
-  test('should getClientConfig return client config', () => {
-    const config = getClientConfig(baseClient)
-
-    expect(config.endpoint).toBe('https://example.com/v1')
-    expect(config.interceptors).toEqual([])
-  })
-
-  test('should getClientConfig throw for non-client', () => {
-    expect(() => getClientConfig({} as never)).toThrowError()
-  })
-
-  test('DEFAULT_HTTP_OPTIONS.handle and DEFAULT_SSE_OPTIONS.handle are bound to globalThis(detachable without losing this)', async () => {
+  test('DEFAULT_HTTP_OPTIONS.handle and DEFAULT_SSE_OPTIONS.handle are bound to globalThis', async () => {
     const { handle: httpDetached } = DEFAULT_HTTP_OPTIONS
     const { handle: sseDetached } = DEFAULT_SSE_OPTIONS
 
@@ -71,19 +101,20 @@ describe('Client', () => {
     await expect(sseDetached('about:blank').catch(() => 'caught')).resolves.toBeDefined()
   })
 
-  test('should apply all client option helpers', () => {
-    const customFetch = vi.fn(async () => new Response('ok', { status: 200 })) as unknown as typeof fetch
-    const interceptor = createHttpInterceptor(async (_request) => makeResponse({ body: 'ok', status: 200 }))
+  test('HTTP handle, credentials, interceptors, serializer, and xsrf apply on execute', async () => {
+    const customFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      expect(request.headers.get('x-custom-xsrf-token')).toBe('xsrf-token')
+      expect(request.credentials).toBe('include')
+      expect(new URL(request.url).search).toBe('?serialized=q=zen')
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    }) as unknown as typeof fetch
+    const interceptor = createHttpInterceptor(async (request, next) => next(request))
     const serializer = (params: URLSearchParams) => `serialized=${params.toString()}`
-    const beforeConnect = vi.fn()
     const tokenProvider = vi.fn(() => 'xsrf-token')
-
-    class MockWebSocket extends EventTarget {
-      static CONNECTING = 0
-      static OPEN = 1
-      static CLOSING = 2
-      static CLOSED = 3
-    }
 
     const client = createClient(
       withEndpoint('https://api.example.com'),
@@ -97,153 +128,47 @@ describe('Client', () => {
         headerName: 'X-CUSTOM-XSRF-TOKEN',
         tokenProvider,
       }),
-      withWebSocketHandle(MockWebSocket as unknown as typeof WebSocket),
-      withWebSocketBeforeConnect(beforeConnect),
-      withWebSocketProtocols(['json']),
-      withWebSocketHeartbeat({
-        intervalMs: 1_000,
-        timeoutMs: 5_000,
-      }),
-      withWebSocketReconnect({
-        attempts: 3,
-        delayMs: 1_000,
-      }),
     )
 
-    const config = getClientConfig(client)
-
-    expect(config.endpoint).toBe('https://api.example.com')
-    expect(config.withCredentials).toBe(true)
-    expect(config.http.handle).toBe(customFetch)
-    expect(config.sse.handle).toBe(customFetch)
-    expect(config.interceptors).toEqual([interceptor])
-    expect(config.queryParamsSerializer).toBe(serializer)
-    expect(config.xsrf).toEqual({
-      cookieName: 'CUSTOM-XSRF-TOKEN',
-      headerName: 'X-CUSTOM-XSRF-TOKEN',
-      tokenProvider,
+    const request = defineRequest({
+      method: 'POST',
+      path: '/items',
+      input: struct.request({ query: struct.object({ q: struct.string() }) }),
+      output: { 200: struct.object({ ok: struct.boolean() }) },
     })
-    expect(config.webSocket.handle).toBe(MockWebSocket)
-    expect(config.webSocket.beforeConnect).toBe(beforeConnect)
-    expect(config.webSocket.protocols).toEqual(['json'])
-    expect(config.webSocket.heartbeat).toEqual({
-      intervalMs: 1_000,
-      timeoutMs: 5_000,
-    })
-    expect(config.webSocket.reconnect).toEqual({
-      attempts: 3,
-      delayMs: 1_000,
-    })
+    const [error, data] = await client.execute(request({ query: { q: 'zen' } }))
+    expect(error).toBeNull()
+    expect(data).toEqual({ ok: true })
+    expect(customFetch).toHaveBeenCalledOnce()
+    expect(tokenProvider).toHaveBeenCalled()
   })
 
-  test('should support withXSRF default options', () => {
-    const client = createClient(withEndpoint('https://example.com'), withXSRF())
-
-    expect(getClientConfig(client).xsrf).toEqual({
-      cookieName: 'XSRF-TOKEN',
-      headerName: 'X-XSRF-TOKEN',
-      tokenProvider: undefined,
-    })
-  })
-
-  test('should support withSSEOptions helper', () => {
-    const customFetch = vi.fn(async () => new Response('ok', { status: 200 })) as unknown as typeof fetch
+  test('per-field SSE and WebSocket helpers are accepted by createClient', () => {
     const onInvalidEvent = vi.fn()
-
-    const client = createClient(
-      withEndpoint('https://example.com'),
-      withSSEOptions({
-        handle: customFetch,
-        onInvalidEvent,
-        reconnect: { attempts: 3, delayMs: 2000 },
-      }),
-    )
-
-    const config = getClientConfig(client).sse
-    expect(config.handle).toBe(customFetch)
-    expect(config.onInvalidEvent).toBe(onInvalidEvent)
-    expect(config.reconnect).toEqual({ attempts: 3, delayMs: 2000 })
-  })
-
-  test('should support individual SSE option helpers', () => {
-    const onInvalidEvent = vi.fn()
+    const beforeConnect = vi.fn()
+    class MockWebSocket extends EventTarget {
+      static CONNECTING = 0
+      static OPEN = 1
+      static CLOSING = 2
+      static CLOSED = 3
+    }
 
     const client = createClient(
       withEndpoint('https://example.com'),
       withSSEOnInvalidEvent(onInvalidEvent),
       withSSEReconnect({ attempts: 5, delayMs: 500 }),
-    )
-
-    const config = getClientConfig(client).sse
-    expect(config.onInvalidEvent).toBe(onInvalidEvent)
-    expect(config.reconnect).toEqual({ attempts: 5, delayMs: 500 })
-  })
-
-  test('withSSEOptions ignores undefined fields', () => {
-    const before = getClientConfig(baseClient).sse
-
-    const client = createClient(
-      withEndpoint('https://example.com'),
-      withSSEOptions({
-        handle: undefined,
-        onInvalidEvent: undefined,
-        reconnect: undefined,
-      } as ClientSSEOptions),
-    )
-
-    const config = getClientConfig(client).sse
-    expect(config.handle).toBe(before.handle)
-    expect(config.onInvalidEvent).toBeUndefined()
-    expect(config.reconnect).toBeUndefined()
-  })
-
-  test('should support grouped withWebSocketOptions helper', () => {
-    const beforeConnect = vi.fn()
-
-    class MockWebSocket extends EventTarget {
-      static CONNECTING = 0
-      static OPEN = 1
-      static CLOSING = 2
-      static CLOSED = 3
-    }
-
-    const client = createClient(
-      withEndpoint('https://example.com'),
-      withWebSocketOptions({
-        handle: MockWebSocket as unknown as typeof WebSocket,
-        beforeConnect,
-        heartbeat: { intervalMs: 100 },
-        protocols: ['json'],
-        reconnect: { attempts: 2 },
-      }),
-    )
-
-    const config = getClientConfig(client).webSocket
-
-    expect(config.handle).toBe(MockWebSocket)
-    expect(config.beforeConnect).toBe(beforeConnect)
-    expect(config.heartbeat).toEqual({ intervalMs: 100 })
-    expect(config.protocols).toEqual(['json'])
-    expect(config.reconnect).toEqual({ attempts: 2 })
-  })
-
-  test('withWebSocketOptions ignores undefined fields', () => {
-    class MockWebSocket extends EventTarget {
-      static CONNECTING = 0
-      static OPEN = 1
-      static CLOSING = 2
-      static CLOSED = 3
-    }
-
-    const base = createClient(
-      withEndpoint('https://example.com'),
+      withWebSocketOnInvalidEvent(onInvalidEvent),
       withWebSocketHandle(MockWebSocket as unknown as typeof WebSocket),
+      withWebSocketBeforeConnect(beforeConnect),
       withWebSocketProtocols(['json']),
+      withWebSocketHeartbeat({ intervalMs: 1_000, timeoutMs: 5_000 }),
+      withWebSocketReconnect({ attempts: 3, delayMs: 1_000 }),
     )
 
-    const next = createClient(withEndpoint('https://example.com'), withWebSocketOptions({}))
+    expect(client.execute).toEqual(expect.any(Function))
+  })
 
-    expect(getClientConfig(base).webSocket.handle).toBe(MockWebSocket)
-    expect(getClientConfig(next).webSocket.handle).toBe(globalThis.WebSocket)
+  test('unused base client is constructable', () => {
+    expect(baseClient.execute).toEqual(expect.any(Function))
   })
 })

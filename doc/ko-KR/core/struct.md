@@ -1,16 +1,16 @@
 ---
 title: Struct
-description: 엄격한 구조 디코딩, 필수·선택 입력, alias, StructError 처리를 설명합니다.
+description: 요청·응답 형태를 모델링하고, unknown을 파싱하고, 와이어 body를 인코딩해요.
 ---
 
 # Struct
 
-Struct는 엄격한 구조 디코딩과 wire 형식 인코딩을 설명합니다. 필수 값이 누락되거나 값이 유효하지 않으면 기본값을 만들지 않고 실패합니다.
+요청(과 그 응답)을 Struct로 모델링해요. `Infer`로 TypeScript 타입을, `struct.parse(...)`로 런타임 검사를 받아요 — throw 없이 error-first 튜플이에요.
 
-root entry에서 `struct` facade와 `Infer<T>`를 사용하세요.
+## Basic Setup
 
-```typescript
-import { struct, type Infer, type StructInput } from '@defjs/core'
+```typescript twoslash
+import { defineRequest, struct, type Infer } from '@defjs/core'
 
 const User = struct.object({
   id: struct.number(),
@@ -19,50 +19,43 @@ const User = struct.object({
 })
 
 type User = Infer<typeof User>
-// { id: number; name: string; active: boolean }
+
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/users',
+  input: struct.request({
+    body: struct.json(
+      struct.object({
+        name: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  output: { 201: User },
+})
+
+const [parseError, user] = struct.parse(User, { id: 7, name: 'Ada', active: true })
+if (!parseError) console.log(user.name)
+void createUser
 ```
 
-## Constructor
+파싱된 출력은 선언된 필드만 유지해요. 필수 필드 누락, 잘못된 원시값, 잘못된 중첩 값, 잘못된 튜플 길이, 허용되지 않은 `null` → `StructError`, 부분 값 없음. Struct는 불변이에요. `.optional()` 등은 새 Struct를 돌려줘요.
 
-자주 쓰는 constructor는 다음과 같습니다.
+## 필수, optional, null
 
-```typescript
-struct.string()
-struct.number()
-struct.boolean()
-struct.bigint()
-struct.date()
-struct.null()
-struct.literal('ready')
-struct.enum(['pending', 'done'])
-struct.array(struct.string())
-struct.tuple([struct.string(), struct.number()])
-struct.object({ id: struct.number() })
-struct.record(struct.number())
-struct.or(struct.string(), struct.number())
-struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
-struct.discriminatedUnion('kind', [
-  struct.object({ kind: struct.literal('click'), x: struct.number() }),
-  struct.object({ kind: struct.literal('key'), key: struct.string() }),
-])
-```
+존재와 null 허용은 별개예요.
 
-`struct.any()`와 `struct.unknown()`은 `null`과 `undefined`를 제외한 모든 값을 받으며, 두 값을 허용할 때도 같은 modifier를 사용합니다. 바이너리 constructor로는 `struct.blob()`, `struct.file()`, `struct.arrayBuffer()`가 있습니다.
+| Declaration                  | Missing / `undefined`       | `null` | Valid value    |
+| ---------------------------- | --------------------------- | ------ | -------------- |
+| `struct.string()`            | 거부                        | 거부   | 문자열 수락    |
+| `struct.string().optional()` | 수락; 없는 객체 필드는 생략 | 거부   | 문자열 수락    |
+| `struct.string().null()`     | 거부                        | 수락   | 문자열 수락    |
+| `struct.string().nullish()`  | 수락; 없는 객체 필드는 생략 | 수락   | 문자열 수락    |
+| `struct.null()`              | 거부                        | 수락   | 다른 값은 거부 |
 
-모든 Struct는 다음 modifier를 지원합니다.
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-struct.string().optional()
-struct.string().null()
-struct.string().nullish()
-struct.string().alias('wire_name')
-```
-
-## 엄격한 파싱
-
-커맨드 밖에서 디코딩하려면 `struct.parse(schema, input)`를 사용하세요. 고정된 error-first 튜플을 반환합니다.
-
-```typescript
 const Profile = struct.object({
   name: struct.string(),
   nickname: struct.string().optional(),
@@ -70,192 +63,191 @@ const Profile = struct.object({
   note: struct.string().nullish(),
 })
 
-const [error, profile] = struct.parse(Profile, input)
-
-if (error) {
-  // profile is undefined
-  return
-}
+const [error, profile] = struct.parse(Profile, {
+  name: 'Ada',
+  biography: null,
+  note: undefined,
+})
+if (error) throw error
+console.log(profile.name, profile.nickname, profile.biography, profile.note)
 ```
 
-```typescript
-type ParseResult<T> = [error: null, value: T] | [error: StructError, value: undefined]
-```
+루트에서 optional은 `undefined`일 수 있어요. 객체 안에서는 생략된 optional/nullish 필드가 없는 채로 남아요. `struct.request(...)`에서 전부 optional인 섹션은 생략할 수 있고 (`{}`로 정규화); 필수 필드가 있는 섹션은 필수예요. body 래퍼가 있으면 → 안쪽 필드가 optional이어도 body는 필수예요.
 
-모든 modifier에는 같은 규칙이 적용됩니다. 누락 값과 `undefined`는 `.optional()` 또는 `.nullish()`에서만, 명시적 `null`은 `.null()` 또는 `.nullish()`에서만 허용됩니다. `.null()`은 값을 optional로 만들지 않습니다.
+## 요청 body 래퍼
 
-누락된 optional 및 nullish 객체 필드는 출력에서 생략되고, 최상위에서는 `undefined`로 디코딩됩니다. 알 수 없는 key는 버리며, 디코딩한 object와 record 출력은 null prototype을 사용합니다.
+`struct.request(...)`는 `path`, `query`, `headers`, `body`를 나눠요. body에는 명시적 코덱이 필요해요.
 
-Node의 strict deep equality는 prototype도 비교하므로 Struct로 파싱한 객체는 필드가 같은 객체 리터럴과 깊은 동등성을 갖지 않습니다. 이 경계를 명시적으로 확인하거나 assertion 안에서만 shallow copy를 만드세요.
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-```typescript
-import assert from 'node:assert/strict'
-
-const [error, profile] = struct.parse(struct.object({ name: struct.string() }), { name: 'Ada' })
-assert.equal(error, null)
-assert.equal(Object.getPrototypeOf(profile), null)
-assert.deepEqual({ ...profile }, { name: 'Ada' })
-```
-
-이 spread는 assertion 전용 얕은 복사입니다. 중첩된 Struct 객체도 null prototype을 사용합니다. 테스트 matcher를 맞추기 위해서만 운영 경로에 전역 normalize 또는 clone 계층을 추가하지 마세요.
-
-`exactOptionalPropertyTypes`를 활성화하면 추론된 객체 입력은 정확한 optional property를 사용합니다. optional 또는 nullish key에 `undefined`를 할당하지 말고 key 자체를 생략하세요.
-
-```typescript
-const OptionalProfile = struct.object({
-  nickname: struct.string().optional(),
+const createUser = defineRequest({
+  method: 'POST',
+  path: '/organizations/:organizationId/users',
+  input: struct.request({
+    path: struct.object({ organizationId: struct.string() }),
+    query: struct.object({ notify: struct.boolean().optional() }),
+    headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
+    body: struct.json(
+      struct.object({
+        displayName: struct.string().alias('display_name'),
+      }),
+    ),
+  }),
 })
 
-type OptionalProfileInput = StructInput<typeof OptionalProfile>
-
-const omitted: OptionalProfileInput = {}
-// @ts-expect-error With exactOptionalPropertyTypes, omit optional keys instead.
-const explicitUndefined: OptionalProfileInput = { nickname: undefined }
-```
-
-런타임의 `struct.parse`는 unknown 입력에 포함된 명시적 `undefined`를 방어적으로 허용하고 해당 key를 생략합니다. 이 정규화가 정적으로 추론된 호출자 입력 타입을 넓히지는 않습니다.
-
-## 필수 Object 및 Request 입력
-
-Struct가 optional 또는 nullish가 아니면 객체 property는 TypeScript와 런타임 모두에서 필수입니다. `struct.request(...)`에 선언한 각 section도 필수이며, 선언하지 않은 section은 입력 타입에 나타나지 않습니다.
-
-```typescript
-const Input = struct.request({
-  path: struct.object({ id: struct.string() }),
-  query: struct.object({ page: struct.number().optional() }),
+const command = createUser({
+  path: { organizationId: 'acme' },
+  query: { notify: true },
+  headers: { requestId: 'request-42' },
+  body: { displayName: 'Ada' },
 })
-
-// { path: { id: string }; query: { page?: number } }
+void command
 ```
 
-`query`를 생략하면 오류이고 `query: {}`는 유효합니다. 필수 필드 누락, 명시적 `undefined`, 금지된 `null`, 잘못된 런타임 타입은 부분 값을 반환하지 않고 전체 파싱을 실패시킵니다.
+| Wrapper                    | Parsed value  | Wire boundary                                                        |
+| -------------------------- | ------------- | -------------------------------------------------------------------- |
+| `struct.json(inner)`       | `inner`의 값  | JSON 텍스트, `application/json`                                      |
+| `struct.text()`            | `string`      | 텍스트, `text/plain;charset=UTF-8`                                   |
+| `struct.urlencoded(shape)` | shape의 객체  | `URLSearchParams`, `application/x-www-form-urlencoded;charset=UTF-8` |
+| `struct.formData(shape)`   | shape의 객체  | `FormData`; 플랫폼이 multipart boundary 설정                         |
+| `struct.blob()`            | `Blob`        | Blob 타입 또는 `application/octet-stream`                            |
+| `struct.file()`            | `File`        | 네이티브 `File` (name + type)                                        |
+| `struct.arrayBuffer()`     | `ArrayBuffer` | 버퍼, `application/octet-stream`                                     |
 
-복합 Struct는 첫 번째로 확정된 issue에서 중단합니다. 튜플 입력 길이는 선언과 정확히 같아야 합니다. `struct.or(...)`는 계속 순서대로 대안을 시도하고 `struct.discriminatedUnion(...)`은 선언된 분기를 선택합니다.
+`struct.file()`은 form 필드용 값 Struct예요 — 단독 `request.body`가 아니에요. 바이너리 body는 `struct.blob()`과 `struct.arrayBuffer()`예요. 맨 object/array/primitive Struct는 `request.body`로 유효하지 않아요. SSE는 `body`를 거부해요. WebSocket 요청 입력은 `body`와 `headers`를 거부해요.
 
-discriminator 필드가 alias를 사용하면 `struct.discriminatedUnion(...)`은 option 선언 순서에 따라 실제로 존재하는 첫 wire discriminator를 읽습니다. 분기를 선택한 뒤에는 이후 option의 alias를 읽지 않습니다.
+## 별칭
 
-Struct는 선언한 구조만 강제하며 애플리케이션 인가, 범위, 금액, 형식, 상태 전이 규칙은 검증하지 않습니다. 공개 refine/range/format DSL도 없습니다.
+`.alias(...)`는 논리 이름과 와이어 이름을 분리해요. `struct.parse(...)`는 논리 키를 써요. JSON과 flat 요청 코덱은 별칭을 인코딩하고, JSON 응답 디코딩은 와이어 키를 논리 필드로 다시 매핑해요.
 
-`struct.number()`는 양수와 음수 `Infinity`를 허용하고 JavaScript number 중 `NaN`만 제외합니다. 커맨드를 만들기 전에 애플리케이션 코드에서 finite, range, domain 검사를 적용하세요. `build`는 호출자 런타임 값이 아닌 스키마에 결합된 프로젝션을 받으므로 이런 검사를 `build`에 넣지 마세요.
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-## 요청 body
-
-`struct.request(...)`는 wire section을 직접 묶습니다.
-
-```typescript
-const input = struct.request({
-  path: struct.object({ organizationId: struct.string() }),
-  query: struct.object({ includeDisabled: struct.boolean().optional() }),
-  headers: struct.object({ requestId: struct.string().alias('x-request-id') }),
-  body: struct.json(
-    struct.object({
-      displayName: struct.string().alias('display_name'),
-    }),
-  ),
-})
-```
-
-Body 경계는 다음과 같습니다.
-
-| Struct                     | 인코딩            |
-| -------------------------- | ----------------- |
-| `struct.json(inner)`       | JSON              |
-| `struct.text()`            | Plain text        |
-| `struct.urlencoded(shape)` | `URLSearchParams` |
-| `struct.formData(shape)`   | `FormData`        |
-| `struct.blob()`            | `Blob`            |
-| `struct.arrayBuffer()`     | `ArrayBuffer`     |
-
-자동 요청 매핑과 트랜스포트 제한은 [커맨드](/ko-KR/core/commands)를 참고하세요.
-
-## Alias
-
-`.alias(name)`은 논리 TypeScript key를 바꾸지 않고 wire key만 바꿉니다.
-
-```typescript
-const UserBody = struct.object({
-  id: struct.number().alias('user_id'),
+const User = struct.object({
   displayName: struct.string().alias('display_name'),
 })
 
-const [logicalError, logicalUser] = struct.parse(UserBody, { id: 1, displayName: 'Ada' })
-if (logicalError) throw logicalError
+const [parseError, user] = struct.parse(User, { displayName: 'Ada' })
+if (parseError) throw parseError
+console.log(user.displayName)
 
-const [wireKeyError] = struct.parse(UserBody, { user_id: 1, display_name: 'Ada' })
-if (!wireKeyError) throw new Error('struct.parse must read logical keys')
+const [wireError] = struct.parse(User, { display_name: 'Ada' })
+console.log(wireError?.issues[0]?.path)
 ```
 
-`logicalUser`는 `{ id, displayName }`을 사용하고, `wireKeyError`는 논리 key `id`가 없음을 가리킵니다. 공개 `struct.parse`는 논리 값만 읽으며 wire key를 단독 parse 입력으로 취급하지 않습니다.
+| Boundary                                     | Field                       |
+| -------------------------------------------- | --------------------------- |
+| `struct.parse(User, ...)`                    | 논리 `displayName`          |
+| JSON 요청 인코딩                             | 와이어 `display_name`       |
+| JSON 응답 디코딩                             | 와이어 → 논리 `displayName` |
+| Query, header, URL-encoded, multipart 인코딩 | 키로 와이어 별칭            |
 
-transport JSON 인코딩/디코딩에서만 wire alias가 적용됩니다.
+별칭은 중첩 필드, 배열, 객체, 유니온, discriminator에서 동작해요. 앱 코드에는 논리 이름을 두고, 외부 이름은 Struct에 두세요.
 
-```typescript
-import { createClient, defineRequest, withEndpoint, withHTTPHandle } from '@defjs/core'
+## 파싱 실패
 
-let requestWireBody: unknown
-const echoUser = defineRequest({
-  method: 'POST',
-  path: '/users',
-  input: struct.request({ body: struct.json(UserBody) }),
-  output: { 200: UserBody },
-})
-const client = createClient(
-  withEndpoint('https://example.test'),
-  withHTTPHandle(async (input, init) => {
-    requestWireBody = await new Request(input, init).json()
-    return Response.json({ user_id: 1, display_name: 'Ada' })
-  }),
-)
+`struct.parse(...)`는 `[null, value]` 또는 `[StructError, undefined]`를 돌려줘요. `StructError`는 `Error`를 확장하고 `issues`와 `format()`, `flatten()`, `prettify()`를 노출해요.
 
-const [requestError, responseUser] = await client.execute(echoUser({ body: { id: 1, displayName: 'Ada' } }))
-if (requestError) throw requestError
-```
+```typescript twoslash
+import { struct, StructError } from '@defjs/core'
 
-`requestWireBody`는 `{ user_id, display_name }`이고, `responseUser`는 다시 `{ id, displayName }`입니다. 자동 요청 구성에서도 outbound path, query, header, URL-encoded, multipart key에 alias를 사용합니다. 사용자 정의 `build` 프로젝션에 명시한 target key는 바뀌지 않습니다.
+const User = struct.object({ id: struct.number(), name: struct.string() })
+const [error, value] = struct.parse(User, { id: 'not-a-number' })
 
-## `StructError`
-
-구조적 디코딩 실패는 흔히 `RequestError.cause`로 `StructError`를 만듭니다.
-
-```typescript
-import { StructError, type RequestError, type StructIssue } from '@defjs/core'
-
-export function structIssues(error: RequestError): readonly StructIssue[] {
-  if (error.kind === 'definition' && error.cause instanceof StructError) {
-    return error.cause.issues
-  }
-  return []
+if (error) {
+  console.log(error instanceof StructError)
+  console.log(error.issues[0]?.code, error.issues[0]?.path)
+  console.log(error.flatten().fieldErrors)
+  console.log(error.format(), error.prettify())
 }
+void value
 ```
 
-`StructError`는 다음 값을 제공합니다.
+`StructIssue`에는 `code`, `expected`, `message`, `path`, `received`가 있어요. 이슈는 신뢰할 수 없는 입력을 담을 수 있어요 — 로그하거나 반환하기 전에 마스킹하세요. `struct.parse(..., { errorMap })` rewrites issue messages for that call only. 결정적이고 요청별 상태가 없게 유지하세요.
 
-- 원본 `StructIssue[]`인 `issues`
-- 중첩 메시지 tree인 `format()`
-- 최상위 form 및 field 메시지인 `flatten()`
-- 사람이 읽을 수 있는 여러 줄 문자열인 `prettify()`
+Struct 검증은 구조만이에요. 공개 range, format, refinement, 인증, 상태 전이 규칙은 없어요. 그런 검사는 명령을 만들기 전에 해요.
 
-`StructIssue.received`에는 입력 또는 응답 데이터가 들어갈 수 있습니다. 기본 메시지에도 해당 값을 표현한 내용이 포함될 수 있습니다. 특히 record에서는 path와 형식화된 key도 신뢰할 수 없는 데이터에서 올 수 있습니다. `issues`, 메시지, `format()`, `flatten()`, `prettify()`를 로그에 남기거나 반환하기 전에 검토하고 민감 정보를 마스킹하세요.
+## Reference
 
-## 전역 오류 메시지
+`@defjs/core`의 공개 생성자예요 (내부는 facade API가 아니에요).
 
-`setErrorMap(...)`은 프로세스 전체의 메시지 생성을 교체합니다.
+```typescript twoslash
+import { struct } from '@defjs/core'
 
-```typescript
-import { setErrorMap } from '@defjs/core'
+const Any = struct.any()
+const ArrayOfStrings = struct.array(struct.string())
+const Bytes = struct.arrayBuffer()
+const BigIntValue = struct.bigint()
+const BlobValue = struct.blob()
+const BooleanValue = struct.boolean()
+const DateValue = struct.date()
+const Discriminated = struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('created'), id: struct.number() }),
+  struct.object({ kind: struct.literal('deleted'), id: struct.number() }),
+])
+const Status = struct.enum(['draft', 'published'])
+const FileValue = struct.file()
+const Form = struct.formData({ file: struct.file() })
+const Combined = struct.intersection(struct.object({ id: struct.number() }), struct.object({ name: struct.string() }))
+const JsonBody = struct.json(struct.object({ ok: struct.boolean() }))
+const Literal = struct.literal('ready')
+const NullValue = struct.null()
+const NumberValue = struct.number()
+const ObjectValue = struct.object({ id: struct.number() })
+const Union = struct.or(struct.string(), struct.number())
+const RecordValue = struct.record(struct.number())
+const Request = struct.request({ path: struct.object({ id: struct.number() }) })
+const StringValue = struct.string()
+const TextBody = struct.text()
+const Tuple = struct.tuple([struct.string(), struct.number()])
+const Unknown = struct.unknown()
+const FormUrlEncoded = struct.urlencoded({ name: struct.string() })
 
-setErrorMap((issue) => {
-  if (issue.code === 'invalid_type') {
-    return `Invalid value at ${issue.path.join('.')}`
-  }
-  return undefined
-})
+void [Any, ArrayOfStrings, Bytes, BigIntValue, BlobValue, BooleanValue, DateValue, Discriminated, Status, FileValue, Form, Combined]
+void [
+  JsonBody,
+  Literal,
+  NullValue,
+  NumberValue,
+  ObjectValue,
+  Union,
+  RecordValue,
+  Request,
+  StringValue,
+  TextBody,
+  Tuple,
+  Unknown,
+  FormUrlEncoded,
+]
 ```
 
-이 map은 클라이언트 범위가 아니라 전역입니다. 변경하면 같은 JavaScript 실행 환경의 모든 클라이언트에서 이후 생성되는 Struct issue에 영향을 줍니다. callback에 요청별 상태를 넣지 말고, 하나의 프로세스를 공유하는 애플리케이션에서는 설치 시점을 조율하세요.
+| Constructor                      | Input                                     | Inferred output            |
+| -------------------------------- | ----------------------------------------- | -------------------------- |
+| `struct.number()`                | `NaN`이 아닌 숫자                         | `number`, ±`Infinity` 포함 |
+| `struct.date()`                  | `Date`, 숫자, 또는 날짜 문자열            | 유효한 `Date`              |
+| `struct.bigint()`                | `bigint` 또는 `BigInt(...)`가 받는 문자열 | `bigint`                   |
+| `struct.enum(...)`               | 선언된 문자열 또는 숫자 멤버              | 그 literal 유니온          |
+| `struct.discriminatedUnion(...)` | 필수 literal discriminator가 있는 객체    | 선택된 객체 분기           |
+| `struct.or(...)`                 | 첫 번째 맞는 분기; 인코딩은 모호성 검사   | 분기 출력의 유니온         |
+| `struct.intersection(...)`       | 모든 멤버가 수락하는 값                   | 출력의 교집합              |
+| `struct.record(value)`           | 값이 `value`와 맞는 plain 객체            | 파싱된 값의 Record         |
+| `struct.tuple(items)`            | 선언 길이와 정확히 같은 배열              | 고정 길이 튜플             |
 
-## 다음 단계
+모든 Struct는 `.alias(name)`, `.optional()`, `.null()`, `.nullish()`를 지원해요. `struct.discriminatedUnion`은 필수 literal discriminator가 있는 객체 옵션이 필요하고 중복을 거부해요.
 
-- [커맨드](/ko-KR/core/commands)에서는 Struct 필드를 요청과 메시지에 매핑합니다.
-- [오류](/ko-KR/core/errors)에서는 Struct 실패가 실행 튜플에 나타나는 방식을 설명합니다.
-- [HTTP](/ko-KR/core/http)에서는 응답 디코딩과 표현 오류를 설명합니다.
+`struct`, `Infer`, `Struct`, `StructError`, 관련 공개 타입은 `@defjs/core`에서 import 하세요. 파서로는 `struct.parse(...)`를 쓰세요. `createObjectStruct`, 정의 심볼, 코덱 내부, `packages/core/src`는 import하지 마세요.
+
+Facade non-promises:
+
+- Object/record 출력은 null prototype을 써요 — `Object.prototype` 메서드를 가정하지 마세요.
+- 알 수 없는 객체 키는 버려요.
+- `struct.number()`는 `NaN`을 거부하고 infinity는 수락해요.
+- `struct.or(...)`는 분기 순서로 시도하고, 분기가 어긋나면 모호한 인코딩을 거부해요.
+- `struct.intersection(...)`는 선언 순서로 멤버를 파싱해요.
+- Struct는 경계를 검증할 뿐, 캐시하거나 인가하거나 전송 리소스를 소유하지 않아요.
+
+## 관련 레시피
+
+- [POST JSON](../recipes/post-json.md)
+- [선언된 404가 있는 GET](../recipes/get-declared-404.md)

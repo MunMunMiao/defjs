@@ -1,219 +1,196 @@
 ---
 title: React
-description: React Context で Defjs クライアントを共有し、API に合わせて設定し、Effect からリクエストとリアルタイムリソースを片付けます。
+description: プロバイダを入れ、クライアントを読み、ユーザーを取得し、effect の再実行時に abort します。
 ---
 
-# `@defjs/react`
+# React
 
-このパッケージは `@defjs/core` 用の薄い Context アダプターです。`ClientProvider` はアプリケーションが作成した client を提供し、`useClient()` は最も近い instance を返します。client factory、cache、retry、resource lifecycle は追加しません。
+既存の `@defjs/core` クライアントを React ツリーに繋ぎます。得られるのは Context と `useClient()` です。このパッケージはクライアントを**作らず**、キャッシュも足さず、コマンドをリトライせず、トランスポートリソースも破棄しません。作業を始めたコンポーネント、effect、データライブラリが所有します。
 
-## クライアントを提供する
+## Basic Setup
 
-`@defjs/core` で client を作成・設定し、その instance を明示的に渡します。
+`@defjs/core`、`@defjs/react`、React 18+ を入れます。ESM。Node で動かすときは Node.js 22+ です。
 
-```tsx
-import { createClient, withEndpoint } from '@defjs/core'
-import { ClientProvider } from '@defjs/react'
-import { UserProfile } from './UserProfile'
+`bun add @defjs/core @defjs/react react`
 
-const client = createClient(withEndpoint('https://api.example.com'))
+クライアントを提供し、ユーザーを取得して変更時に abort します。
 
-export function App() {
-  return (
-    <ClientProvider client={client}>
-      <UserProfile id={7} />
-    </ClientProvider>
-  )
-}
-```
-
-`ClientProvider` は渡されたものと同一の instance を公開します。作成と差し替えの時期、および request と realtime resource の lifecycle は呼び出し側が所有します。
-
-## 最も近いクライアントを読む
-
-`useClient()` は React component または custom Hook 内で呼び出します。provider の外では例外になり、ネストした provider は通常の React Context の最寄り規則に従います。
-
-```tsx
-import { useClient } from '@defjs/react'
-
-export function UserProfile() {
-  const client = useClient()
-  return null
-}
-```
-
-設定 option はすべて `@defjs/core` から使用します。
-
-```tsx
-import { createClient, withCredentials, withEndpoint } from '@defjs/core'
-
-const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
-```
-
-## インターセプターファクトリー
-
-interceptor value を作り、core の `withInterceptors(...)` で合成してから client を React に渡します。
-
-```tsx
-import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
-import { ClientProvider } from '@defjs/react'
-
-const auth = createHttpInterceptor((request, next) => {
-  const headers = new Headers(request.headers)
-  headers.set('Authorization', `Bearer ${readAccessToken()}`)
-  return next({ ...request, headers })
-})
-
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
-
-export function ApiBoundary({ children }: { children: React.ReactNode }) {
-  return <ClientProvider client={client}>{children}</ClientProvider>
-}
-```
-
-factory が request 固有の credential を捕捉する場合は、その client を作成する request boundary 内で呼び出してください。
-
-## HTTP エフェクトのライフサイクルを管理する
-
-エフェクト内でキャンセルを作り、クリーンアップ後の完了結果を無視します。
-
-```tsx
-import { useEffect, useState } from 'react'
-import { useClient } from '@defjs/react'
-import { getUser } from './api'
-
-export function UserProfile({ id }: { id: number }) {
-  const client = useClient()
-  const [name, setName] = useState('')
-  const [errorMessage, setErrorMessage] = useState('')
-
-  useEffect(() => {
-    const abort = new AbortController()
-
-    void client
-      .execute(getUser({ path: { id } }), { signal: abort.signal })
-      .then(([error, user]) => {
-        if (abort.signal.aborted) {
-          return
-        }
-
-        if (error) {
-          setErrorMessage('Unable to load user.')
-          return
-        }
-
-        setErrorMessage('')
-        setName(user.name)
-      })
-      .catch(() => {
-        if (!abort.signal.aborted) {
-          setErrorMessage('Unable to load user.')
-        }
-      })
-
-    return () => abort.abort()
-  }, [client, id])
-
-  return errorMessage ? <p>{errorMessage}</p> : <p>{name}</p>
-}
-```
-
-Defjs は想定されるリクエスト失敗をタプルで返します。クエリライブラリの `queryFn` など、例外を期待する統合境界でだけエラーを例外へ変換してください。
-
-## Client Component 境界
-
-パッケージ entry は Client Component boundary です。アプリケーション所有の wrapper で browser client を作成して明示的に提供できます。
-
-```tsx
-// app/ApiProvider.tsx
-'use client'
-
+```tsx twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
 
-const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
   return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-header、cookie、tenant state、credential を扱う server code は request boundary ごとに別の client を作成してください。アダプターは並行 SSR を分離せず、client の処理も破棄しません。
-
-## リアルタイム処理のライフサイクルを管理する
-
-プロバイダーのアンマウントは、子孫が開始したリソースをクローズしません。WebSocket を開くエフェクトは、起動を中断し、遅れて届いたセッションをクローズし、受信キューを消費し、オブザーバーの購読を解除し、アクティブなセッションをクローズする必要があります。
-
-```tsx
-import { useEffect } from 'react'
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
 import { useClient } from '@defjs/react'
-import { openNotificationsSocket } from './api'
-import { handleNotification } from './notifications'
-import { recordRealtimeFailure } from './telemetry'
+import { useEffect, useState } from 'react'
 
-export function LiveNotifications() {
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
+
+export function UserName({ id }: { id: number }) {
+  const client = useClient()
+  const [name, setName] = useState<string>()
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    void client.execute(getUser({ path: { id } }), { signal: controller.signal }).then(([error, user]) => {
+      if (controller.signal.aborted) return
+      setName(error ? undefined : user.name)
+    })
+
+    return () => controller.abort()
+  }, [client, id])
+
+  return <span>{name ?? 'Loading...'}</span>
+}
+```
+
+`ClientProvider` は普通の Context プロバイダです。違う `client` prop は子孫が見るものを変えます — クローンも差し替えも破棄もしません。入れ子のプロバイダは明示的な境界を作ります。
+
+開発では React が effect を複数回セットアップ/クリーンアップすることがあります。signal チェックは、古い promise が今の描画に書き込むのを止めます。タプルのエラーはそれでもデータです。
+
+## `useClient` で読む
+
+`useClient()` は最も近い `Client` を返します。描画中（コンポーネントまたはカスタムフック）で呼んでください。プロバイダがなければ throw します。
+
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
+import { useClient } from '@defjs/react'
+
+const health = defineRequest({
+  method: 'GET',
+  path: '/health',
+  output: { 200: struct.object({ ok: struct.boolean() }) },
+})
+
+export function HealthCheck() {
+  const client = useClient()
+
+  const check = async () => {
+    const [error, result] = await client.execute(health())
+    if (error) {
+      console.error(error.kind, error.code)
+      return
+    }
+    console.log(result.ok)
+  }
+
+  return (
+    <button type="button" onClick={() => void check()}>
+      Check service
+    </button>
+  )
+}
+```
+
+フックはクライアントを渡すだけです。作業を始めず、トランスポートを購読せず、エラーファーストのタプルを例外にもしません。
+
+## クエリ作業を所有する
+
+クエリライブラリがキャッシュ、リトライ、古い結果の抑制、キャンセルを所有できます。それが渡す signal を渡します。
+
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
+import { useCallback } from 'react'
+import { useClient } from '@defjs/react'
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
+
+export function useUserQueryFn(id: number) {
+  const client = useClient()
+
+  return useCallback(
+    async ({ signal }: { signal: AbortSignal }) => {
+      const [error, user] = await client.execute(getUser({ path: { id } }), { signal })
+      if (error) throw error
+      return user
+    },
+    [client, id],
+  )
+}
+```
+
+同じコマンドを第二の effect で包まないでください — 所有者が二人だと、キャンセルと古い結果の扱いが曖昧になります。
+
+## リアルタイム作業を所有する
+
+SSE と WebSocket のハンドルは `client.execute(...)` より長生きします。起動を await する前にクリーンアップを登録し、破棄後に届いたハンドルを閉じ、その単一イテレータを消費し、終端 promise を await します。
+
+```tsx twoslash
+import { defineWebSocket, struct } from '@defjs/core'
+import { useClient } from '@defjs/react'
+import { useEffect } from 'react'
+
+const notifications = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/notifications',
+  incoming: {
+    message: struct.object({ text: struct.string() }),
+  },
+})
+
+export function Notifications() {
   const client = useClient()
 
   useEffect(() => {
-    const abort = new AbortController()
+    const controller = new AbortController()
     let disposed = false
-    let closeActiveSession: ((reason: string) => void) | undefined
+    let closeActive: (() => void) | undefined
 
     void (async () => {
-      const [error, session] = await client.execute(openNotificationsSocket(), {
-        signal: abort.signal,
-      })
+      const [error, session] = await client.execute(notifications(), { signal: controller.signal })
+      if (error) return
 
-      if (error) {
-        if (!abort.signal.aborted) {
-          recordRealtimeFailure({ operation: 'notifications-startup' })
-        }
-        return
+      let closed = false
+      const close = () => {
+        if (closed) return
+        closed = true
+        session.close(1000, 'effect-disposed')
       }
-
-      const unsubscribeError = session.onRuntimeError(() => {
-        recordRealtimeFailure({ operation: 'notifications' })
-      })
-      let closeRequested = false
-
-      const closeSession = (reason: string) => {
-        if (closeRequested) {
-          return
-        }
-        closeRequested = true
-        unsubscribeError()
-        session.close(1000, reason)
-      }
-      closeActiveSession = closeSession
+      closeActive = close
 
       if (disposed) {
-        closeSession('effect-disposed')
+        close()
         await session.closed
         return
       }
 
       try {
         for await (const message of session.receive) {
-          if (disposed) {
-            break
-          }
-          handleNotification(message)
+          console.info(message.text)
         }
       } finally {
-        closeSession('consumer-finished')
+        close()
         await session.closed
       }
-    })().catch(() => {
-      if (!abort.signal.aborted) {
-        recordRealtimeFailure({ operation: 'notifications-consumer' })
-      }
-    })
+    })()
 
     return () => {
       disposed = true
-      abort.abort()
-      closeActiveSession?.('effect-disposed')
+      controller.abort()
+      closeActive?.()
     }
   }, [client])
 
@@ -221,31 +198,27 @@ export function LiveNotifications() {
 }
 ```
 
-このコード片では、`recordRealtimeFailure` をアプリケーションのテレメトリー関数としています。`session.receive` を意図的に消費しています。有限の受信キューを未読のままにすると、オーバーフローがセッションを致命的に終了します。SSE ハンドルにも同じ起動・クリーンアップ規則を適用してください。
+`EventStreamHandle` も同じ規則です。`finally` で close し、`stream.closed` を await。WebSocket 消費者は状態/ランタイムエラーリスナーも購読解除し、`session.receive` を読み続けてください — 読まれない有界キューはオーバーフローし得ます。
 
-プロバイダーのアンマウントや再マウントはクライアントスコープを変えます。ただし、`dispose`、リクエストの中断、ハンドルやセッションのクローズは行いません。Core `Client` にそのライフサイクル API がないためです。
+## SSR とクライアントスコープ
 
-## API
+パッケージエントリは Client Component 境界です。ブラウザーアプリは、エンドポイント・インターセプター・掴んだ状態がブラウザー安全でリクエスト非依存なら、モジュールスコープのクライアントを共有できます。SSR では、ヘッダー・cookie・ユーザー・テナント・資格情報が違うとき、リクエスト境界ごとに別のクライアントを作ります。
 
-```typescript
-import type { Client } from '@defjs/core'
-import type { JSX, ReactNode } from 'react'
+プロバイダの unmount は HTTP を abort せず、SSE/WebSocket を閉じず、リスナーを購読解除せず、`dispose` も呼びません。`@defjs/react` にそうしたライフサイクル API はありません。各操作を始めたコードが、終わらせるかキャンセルする必要があります。
 
-interface ClientProviderProps {
-  client: Client
-  children?: ReactNode
-}
+## Reference
 
-declare function ClientProvider(props: ClientProviderProps): JSX.Element
-declare function useClient(): Client
-```
+`@defjs/react` からの公開エクスポート:
 
-渡された client を descendants に提供します。`children` は任意です。
+- `ClientProvider` — `ClientProviderProps` を受け、渡されたクライアントを提供
+- `useClient` — 最も近いクライアント、または throw
+- `ClientProviderProps` — `{ client: Client; children?: ReactNode }`
 
-最も近い client を返し、存在しなければ例外を投げます。
+クライアントと options は `@defjs/core` で作ります。[Client](../core/client.md)、[Errors](../core/errors.md)、[SSE](../core/sse.md)、[WebSocket](../core/web-socket.md) を見てください。
 
-## 次に読む
+## 関連レシピ
 
-- [Client](/ja-JP/core/client) — Core オプション合成とスコープ
-- [Errors](/ja-JP/core/errors) — タプルを例外へ変換する統合境界
-- [SSE](/ja-JP/core/sse) と [WebSocket](/ja-JP/core/web-socket) — リアルタイムリソースの所有権
+- [宣言済み 404 付きの GET](../recipes/get-declared-404.md)
+- [HTTP 呼び出しをキャンセルする](../recipes/cancel-http.md)
+- [SSE ストリームを消費する](../recipes/consume-sse.md)
+- [WebSocket セッションを開く](../recipes/websocket-session.md)

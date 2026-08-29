@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
+import { ERR_TIMEOUT } from '../error'
 import {
   awaitWithSignal,
   createAbortTimeoutConflictError,
@@ -24,16 +25,49 @@ describe('abort helpers', () => {
     expect(merged.reason).toBe('stop')
   })
 
-  test('should merge timeout into abort signals', async () => {
+  test('should merge timeout into abort signals', () => {
+    vi.useFakeTimers()
     const controller = new AbortController()
     const merged = mergeAbortSignals(controller.signal, [], 20)
 
-    await new Promise((resolve) => {
-      setTimeout(resolve, 40)
-    })
+    vi.advanceTimersByTime(20)
 
     expect(merged.aborted).toBe(true)
-    expect(merged.reason).toBeInstanceOf(Error)
+    expect(merged.reason).toBe(ERR_TIMEOUT)
+  })
+
+  test('should use a platform timer instead of AbortSignal.timeout', () => {
+    vi.useFakeTimers()
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout')
+    const controller = new AbortController()
+    mergeAbortSignals(controller.signal, [], 50)
+
+    expect(timeoutSpy).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(1)
+    timeoutSpy.mockRestore()
+    controller.abort('stop')
+  })
+
+  test('should clear the timeout timer when another signal aborts first', () => {
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout')
+    const controller = new AbortController()
+    const merged = mergeAbortSignals(controller.signal, [], 60_000)
+    controller.abort('stop')
+
+    expect(merged.aborted).toBe(true)
+    expect(clearSpy).toHaveBeenCalled()
+    clearSpy.mockRestore()
+  })
+
+  test('should clear the timeout timer when a merged signal is already aborted', () => {
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout')
+    const controller = new AbortController()
+    controller.abort('already stopped')
+    const merged = mergeAbortSignals(controller.signal, [], 60_000)
+
+    expect(merged.aborted).toBe(true)
+    expect(clearSpy).toHaveBeenCalled()
+    clearSpy.mockRestore()
   })
 
   test.each([-1, 0, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])('should reject invalid transport timeout %s', (timeout) => {
@@ -61,7 +95,7 @@ describe('abort helpers', () => {
 
     expect(error.kind).toBe('definition')
     expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error.message).toBe('with.abort and with.timeout cannot be used together')
+    expect(error.message).toBe('abort and timeout cannot be used together')
     expect(error.cause).toBeInstanceOf(Error)
   })
 

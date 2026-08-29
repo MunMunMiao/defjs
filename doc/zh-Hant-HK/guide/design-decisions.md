@@ -1,78 +1,112 @@
 ---
-title: 設計決策
-description: 說明 Defjs 為何明確建立 client、按 transport 區分 tuple、把 lifecycle option 留在 execution、以 projection 建構 request，以及 observer 的邊界。
+title: Design decisions
+description: 點解 Defjs 要將 contracts、commands、transport results、decoding 同 ownership 寫得咁明確。
 ---
 
-# 設計決策
+# Design decisions
 
-本頁只解釋目前 API 背後的取捨。欄位與預設值請查閱對應的 reference page。
+Defjs 刻意做咗幾個 trade-offs。Convenience APIs 好多時會隱藏邊個 own 住 request、stream 或者 session。Defjs 要呢條 boundary 睇得見，等你可以 reuse 同一個 endpoint contract，又唔會靜靜雞拎住 cache、retry scheduler 或者 resource manager。
 
-## 明確建立 Client
+## Explicit clients
 
-Defjs 沒有 process-wide default client。`createClient(...)` 令所有權在呼叫位置清楚可見；應用程式亦可因應不同 endpoint、credentials、測試或 request scope 建立不同 client。
+代價：冇 process-wide default。呢個代價喺 server 上面好有用 — 當 options 或者 closures capture auth、cookies、users、tenants 或者 request metadata 時，喺 request boundary 入面 create client。Explicit client 都唔會 isolate interceptor capture 嘅 state，而 `struct.parse(..., { errorMap })` 只覆蓋嗰一次 parse 嘅文案。Client identity 本身唔係 security boundary。
 
-這種隔離並不絕對。Interceptor 與 option callback 可以透過 closure 共用應用程式 state，所以兩個 client object 不會自動隔離周邊所有狀態。`setErrorMap(...)` 亦是 process-global。伺服器端 option 或 closure 一旦包含 request、user、tenant、cookie 或 authorization 資料，就應建立 request-scoped client。
+Client 負責 dispatch commands。佢唔 own 住 active work。邊個開始 HTTP request、SSE stream 或者 WebSocket session，就要 cancel 或者 close，再 await terminal promise。
 
-明確的 client 亦較容易交代資源所有權，但 client 並非 resource manager。它不會追蹤或 dispose 進行中的 HTTP request、SSE handle 或 WebSocket session。
+## Definitions、builders 同 commands
 
-## Transport-Specific Tuple
+Definition 係穩定嘅 contract：method、path、input Struct、output mapping、transport limits。Builder 係 callable view。Call 佢會 create 一個 opaque command，畀單次 execution 用。
 
-所有受支援的 command 都回傳 error-first 三項 tuple，但第三項保留各 transport 自己的意思：
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-```typescript
-const [httpError, data, response] = await client.execute(httpCommand)
-const [sseError, stream, startupOpen] = await client.execute(sseCommand)
-const [socketError, session, startupConnection] = await client.execute(socketCommand)
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: {
+    200: struct.object({ id: struct.number(), name: struct.string() }),
+    404: struct.object({ message: struct.string() }),
+  },
+})
+
+const command = getUser({ path: { id: 7 } })
 ```
 
-這樣就不會把 HTTP response wrapper、SSE startup-open snapshot 與 WebSocket startup-connection snapshot 塞進同一個含糊抽象。第二項亦遵循相同原則：HTTP 回傳解碼後的 data，SSE 回傳 logical stream handle，WebSocket 則回傳 logical session。
+Background job 同 UI owner 可以用唔同 cancel/retry policy 去 execute 同一個 `getUser` 形狀。Command 保持 opaque，就唔會令 app code 依賴 internal transport tags 或者 symbols。
 
-Tuple 令預期內的 startup failure 保持明確，毋須強迫應用程式以 exception 控制流程。但這不保證任意 interceptor、callback、listener 或不受支援的值永遠不會 reject 或 throw。
+## Transport-specific results
 
-## Lifecycle Option 由 Execution 決定
+三種傳輸都用 error-first tuple。如果淨係一個 generic「response」，lifecycle facts 就會被抹走。
 
-Endpoint definition 用來描述穩定的 wire contract，同時擁有 transport queue 上限。至於 cancellation、timeout、heartbeat 同 reconnect，應由真正負責這次工作的 execution 決定。
+- HTTP → `[error, data, response]` — decoded output + `HttpResponse`
+- SSE → `[error, stream, open]` — 一條 logical stream + startup response snapshot
+- WebSocket → `[error, session, connection]` — logical session + startup connection snapshot
 
-HTTP 同 SSE 可在 execution 時傳入 cancellation option。WebSocket 亦可為單次 execution 設定 `beforeConnect`、heartbeat、reconnect 同 protocol option。Transport 共用的預設值放入 client option；WebSocket incoming/outgoing 容量仍由 endpoint 定義。
+第三個 value 係 snapshot，唔係保證之後 reconnect 都係同一條 physical connection 嘅 promise。Startup 失敗時，如果 transport 已經先產出 response/snapshot，第三項仍然可以有。Startup 之後，lifecycle control 屬於 return 出嚟嘅 handle 或者 session。
 
-這樣一來，command 就可以重用。Background job 同互動頁面可按各自的 lifecycle 執行同一個 command，不必重新定義 path 或 message schema。
+## Runtime decoding
 
-## `build` 使用 Projection
+TypeScript inference 描述你 expect 嘅嘢；佢唔可以喺 runtime check server response。Struct parsing 係 contract 嘅另一半。Defjs 會喺 request construction 之前 validate command input，decode 揀中嘅 representation，再 parse 對應嘅 Struct。
 
-自訂 `build(request, input)` 會收到由 input Struct 衍生的 **declarative binding view**，拿不到呼叫方實際傳入的 runtime value。
+呢個次序令 status 同 body 保持分開嘅 facts。Exact declared status selection 發生喺 body decode **之前**。Declared non-2xx → typed `error.data`。Malformed declared body → `RESPONSE_VALIDATION_FAILED`。Undeclared status → `UNDECLARED_STATUS`（唔係 untyped success/failure）。比起「收到咩 JSON 就係咩」更嚴，但你可以做安全決策。
 
-這個 view 只記錄來源欄位如何投影至 path、query、headers 同 body。它支援 field projection、明確 wire key 同 array 一對一投影，但刻意禁止按值分支、任意 transform，以及注入 literal projection value。
+## `build` 嘅界限
 
-這個限制確保 request construction 一直綁定已宣告的 Struct 欄位。建立 command 前，應用應先處理 normalization 同 business validation。支援的 projection 形式見 [Commands](/zh-Hant-HK/core/commands)。
+當 input 已經有 path/query/headers/body 時，automatic `struct.request(...)` mapping 係 default。Custom `build(request, input)` 係 constrained projection，用喺 caller shape 同 wire shape 唔一樣：
 
-## Observer 不負責控制流
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-SSE `onInvalidEvent` 只觀察被丟棄的 event。它拋出的錯誤同回傳的 rejected promise 會與 stream control flow 隔離，後續處理仍會繼續；但 async observer 依然會被 await，可能拖慢後續 message。
+const createBatch = defineRequest({
+  method: 'POST',
+  path: '/accounts/:account_id/users',
+  input: struct.object({
+    accountId: struct.number(),
+    users: struct.array(
+      struct.object({
+        displayName: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  build(request, input) {
+    request.setPathParams({ account_id: input.accountId })
+    request.setJson({
+      users: input.users.map((user) => ({
+        display_name: user.displayName,
+        email: user.email,
+      })),
+    })
+  },
+  output: { 202: struct.object({ accepted: struct.number() }) },
+})
 
-WebSocket state 與 runtime-error listener 也是 observer。它們拋出的錯誤同 rejected promise 會被隔離：state listener 失敗會轉交 runtime-error listener，runtime-error listener 失敗會在可用時交給全局 `reportError`，其餘 listener 同 lifecycle work 仍會繼續。
+const command = createBatch({
+  accountId: 42,
+  users: [{ displayName: 'Ada', email: 'ada@example.com' }],
+})
+```
 
-Lifecycle decision 應以回傳的 handle 或 session 為準。Observer 只適合做受限 logging、metrics 或 state update；擁有者 dispose 時要移除它們。
+`input` 係 schema-bound view，唔係 caller 嘅 runtime object。Projection 可以 select declared fields、rename targets，同將一個 source array item map 去一個 output item。佢唔可以按 values branch、inject literals，或者改 cardinality。Normalize business data，同做 value-dependent validation，都要喺 create command 之前搞掂。
 
-## Sourcemap 部署
+## Observers 同 policy placement
 
-必須明確選擇 production sourcemap policy：
+Interceptors 用嚟做 transport-wide policy：auth、tracing、short-circuit、reviewed retry。佢哋淨係為自己嗰個 transport run，同以 onion order compose。Execution options 用嚟做 work-specific lifetime：`signal`、`timeout`、WebSocket heartbeat、opt-in reconnect。
 
-- **public**：隨 bundle 公開部署 map。Map 包含 `sourcesContent`；即使 source path 是 relative path，應用程式與 dependency source 仍可被公開取得。
+Observers 報告發生咗咩事，但唔會變成第二個 owner。SSE `onInvalidEvent`、WebSocket state listeners，同 runtime-error listeners 用嚟做 bounded diagnostics 同 metrics。Return 出嚟嘅 stream/session 仍然 own iteration、close、unsubscribe 同 terminal waiting。Caching、stale-result suppression、idempotency，同 domain error mapping 應該包喺 `client.execute(...)` 外圍，等你嘅 app 睇到自己嘅 policy 同 state。
 
-- **hidden**：只移除 bundle 內的 source-map reference；應把 map 私下上傳至 error platform，並且不可公開部署。Map file 本身仍含 sensitive path 與 `sourcesContent`，「hidden」不代表安全。
+## OpenAPI、sourcemaps 同 telemetry
 
-- **disabled**：不產生 production map。這可避免 map disclosure，但會犧牲 production stack 的 source-level symbolication，debugging 更困難。
+Defjs 唔會 generate 或者 sync 第二份 OpenAPI contract。如果 OpenAPI 已經係 authoritative，就保留佢，再喺 app boundary 加 runtime validation。對新 service，endpoint definitions 同 Structs 可以直接做 wire contract — 唔使第二個 source of truth。
 
-Private map 的 access 與 retention 應像其他 debugging artifact 一樣受限。Relative path 本身不是 confidentiality boundary。
+`withOpenTelemetryServer(...)` 會為 client 加 **outbound** Defjs instrumentation。佢唔會 initialize OpenTelemetry SDK。`tracer` 必填，`meter` 可選，三種傳輸預設開，WebSocket query propagation 預設關。Keep operation names static 同 low-cardinality。Propagation、hooks、URLs、headers、payloads、causes 同 retention 都當可能敏感，要 review。
 
-## OpenAPI Boundary
+Sourcemaps 係 deployment decision，唔係 Defjs behavior。Public map 帶 `sourcesContent` 會曝光 source；hidden map 仍然有 source 同 paths；disable maps 就冇 source-level symbolication。將 private maps 當 deployable debugging artifacts，配明確 access 同 retention rules。
 
-只選一個 authoritative contract source。已有組織級 OpenAPI workflow 時，應繼續使用 mature generator，並在 application boundary 明確設定 runtime validator；只產生 TypeScript type 並不能作 runtime response validation。Greenfield Defjs service 則直接以 Defjs Struct 與 endpoint definition 描述 wire contract。
+## Related recipes
 
-Core 不會新增 OpenAPI generator/exporter，亦不會把 OpenAPI 與 Defjs 維護成需要同步的 dual source。Dual-source drift 比在清晰 boundary 組合成熟工具更差。
-
-## 相關參考
-
-- [Client](/zh-Hant-HK/core/client)：option 組合與 client scope。
-- [Errors](/zh-Hant-HK/core/errors)：tuple failure 與 response availability。
-- [SSE](/zh-Hant-HK/core/sse) 與 [WebSocket](/zh-Hant-HK/core/web-socket)：logical handle、實體連線嘗試與 terminal close。
+- [GET with a declared 404](../recipes/get-declared-404.md)
+- [Test with a local Fetch handle](../recipes/test-with-handle.md)

@@ -1,54 +1,53 @@
 import type { ClientOption, EventStreamHandle, HttpRequest, HttpResponse, WebSocketSessionLike } from '@defjs/core'
-import type { Meter, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
+import type { Attributes, Meter, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
 import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
 import { createOpenTelemetryHttpInterceptor } from './interceptor/http'
 import { createOpenTelemetrySSEInterceptor } from './interceptor/sse'
 import { createOpenTelemetryWebSocketInterceptor } from './interceptor/web_socket'
 import { createHttpClientMetrics, createSSEClientMetrics, createWebSocketClientMetrics } from './telemetry/metrics'
 
-export interface OpenTelemetryServerHttpOptions {
-  /** Enable HTTP tracing, default true */
+/** Shared per-transport OpenTelemetry client options. */
+export interface OpenTelemetryServerTransportOptions<TResponse> {
+  /** Whether this transport's instrumentation is enabled. Defaults to `true`. */
   enabled?: boolean
-  /** Hook to customize HTTP span before request */
+  /** Add application attributes when the client span is created. */
+  startSpanHook?: (request: HttpRequest) => Attributes
+  /** Customize the client span before the request is sent. */
   requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
-  /** Hook to customize HTTP span after response */
-  responseHook?: (span: Span, res: HttpResponse<unknown>, req: HttpRequest) => Promise<void> | void
+  /** Customize the client span after the transport result is returned. */
+  responseHook?: (span: Span, res: TResponse, req: HttpRequest) => Promise<void> | void
 }
 
-export interface OpenTelemetryServerSSEOptions {
-  /** Enable SSE tracing, default true */
-  enabled?: boolean
-  /** Hook to customize SSE span before request */
-  requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
-  /** Hook to customize SSE span after stream is returned */
-  responseHook?: (span: Span, stream: EventStreamHandle<unknown>, req: HttpRequest) => Promise<void> | void
-}
-
-export interface OpenTelemetryServerWebSocketOptions {
-  /** Enable WebSocket tracing, default true */
-  enabled?: boolean
-  /** WebSocket query string propagation, default false */
+export type OpenTelemetryServerHttpOptions = OpenTelemetryServerTransportOptions<HttpResponse<unknown>>
+export type OpenTelemetryServerSSEOptions = OpenTelemetryServerTransportOptions<EventStreamHandle<unknown>>
+export interface OpenTelemetryServerWebSocketOptions extends OpenTelemetryServerTransportOptions<WebSocketSessionLike> {
+  /**
+   * Inject trace context into the WebSocket URL query string.
+   * Defaults to `false`; enable only after reviewing URL propagation exposure.
+   */
   queryPropagation?: boolean
-  /** Hook to customize WebSocket span before connect */
-  requestHook?: (span: Span, req: HttpRequest) => Promise<void> | void
-  /** Hook to customize WebSocket span after session is returned */
-  responseHook?: (span: Span, session: WebSocketSessionLike, req: HttpRequest) => Promise<void> | void
 }
 
+/**
+ * Options for {@link withOpenTelemetryServer}.
+ *
+ * Pass an application-owned OpenTelemetry `Tracer` (and optional `Meter`).
+ * This package does not initialize the OpenTelemetry SDK.
+ */
 export interface OpenTelemetryServerOptions {
-  /** External OTel tracer (required) */
+  /** OpenTelemetry tracer used for outbound client spans. */
   tracer: Tracer
-  /** Optional external OTel meter for metrics collection */
+  /** Optional meter; when set, per-transport client metrics are recorded. */
   meter?: Meter
-  /** Propagator, default W3C TraceContext + Baggage Composite */
+  /** Context propagator. Defaults to W3C Trace Context + Baggage. */
   propagator?: TextMapPropagator
-  /** Only create outgoing span when an active parent span exists */
+  /** When `true`, only create an outgoing span if an active parent span exists. */
   requireParentSpan?: boolean
-  /** HTTP tracing options */
+  /** HTTP transport instrumentation options. */
   http?: OpenTelemetryServerHttpOptions
-  /** SSE tracing options */
+  /** SSE transport instrumentation options. */
   sse?: OpenTelemetryServerSSEOptions
-  /** WebSocket tracing options */
+  /** WebSocket transport instrumentation options. */
   webSocket?: OpenTelemetryServerWebSocketOptions
 }
 
@@ -56,9 +55,24 @@ interface TransportSwitch {
   enabled?: boolean
 }
 
+/**
+ * Client option that installs outbound OpenTelemetry interceptors for HTTP, SSE, and WebSocket.
+ *
+ * Does not initialize the OpenTelemetry SDK — supply a `tracer` (and optional `meter`) from your app.
+ * Each transport can be toggled or customized via `http`, `sse`, and `webSocket`.
+ *
+ * @param options - Tracer, optional meter/propagator, and per-transport settings.
+ * @returns A `ClientOption` for `createClient(...)`.
+ *
+ * @example
+ * ```ts
+ * const client = createClient(
+ *   withEndpoint('https://api.example.com'),
+ *   withOpenTelemetryServer({ tracer }),
+ * )
+ * ```
+ */
 export function withOpenTelemetryServer(options: OpenTelemetryServerOptions): ClientOption {
-  assertNoRemovedOptions(options)
-
   const {
     tracer,
     meter,
@@ -76,6 +90,7 @@ export function withOpenTelemetryServer(options: OpenTelemetryServerOptions): Cl
           propagator,
           metrics: meter ? createHttpClientMetrics(meter) : undefined,
           requireParentSpan,
+          startSpanHook: options.http?.startSpanHook,
           requestHook: options.http?.requestHook,
           responseHook: options.http?.responseHook,
         }),
@@ -89,6 +104,7 @@ export function withOpenTelemetryServer(options: OpenTelemetryServerOptions): Cl
           propagator,
           metrics: meter ? createSSEClientMetrics(meter) : undefined,
           requireParentSpan,
+          startSpanHook: options.sse?.startSpanHook,
           requestHook: options.sse?.requestHook,
           responseHook: options.sse?.responseHook,
         }),
@@ -103,6 +119,7 @@ export function withOpenTelemetryServer(options: OpenTelemetryServerOptions): Cl
           metrics: meter ? createWebSocketClientMetrics(meter) : undefined,
           requireParentSpan,
           queryPropagation: options.webSocket?.queryPropagation,
+          startSpanHook: options.webSocket?.startSpanHook,
           requestHook: options.webSocket?.requestHook,
           responseHook: options.webSocket?.responseHook,
         }),
@@ -113,32 +130,4 @@ export function withOpenTelemetryServer(options: OpenTelemetryServerOptions): Cl
 
 function isTransportEnabled(option: TransportSwitch | undefined): boolean {
   return option?.enabled !== false
-}
-
-function assertNoRemovedOptions(options: OpenTelemetryServerOptions): void {
-  const unsafeOptions = options as OpenTelemetryServerOptions & {
-    requestHook?: unknown
-    responseHook?: unknown
-    webSocketQueryPropagation?: unknown
-  }
-
-  assertTransportOptionObject('http', options.http)
-  assertTransportOptionObject('sse', options.sse)
-  assertTransportOptionObject('webSocket', options.webSocket)
-
-  if ('requestHook' in unsafeOptions) {
-    throw new TypeError('requestHook has been moved to http.requestHook, sse.requestHook, or webSocket.requestHook.')
-  }
-  if ('responseHook' in unsafeOptions) {
-    throw new TypeError('responseHook has been moved to http.responseHook, sse.responseHook, or webSocket.responseHook.')
-  }
-  if ('webSocketQueryPropagation' in unsafeOptions) {
-    throw new TypeError('webSocketQueryPropagation has been moved to webSocket.queryPropagation.')
-  }
-}
-
-function assertTransportOptionObject(name: 'http' | 'sse' | 'webSocket', option: unknown): void {
-  if (typeof option === 'boolean') {
-    throw new TypeError(`${name}: ${option} has been removed; use ${name}: { enabled: ${option} }.`)
-  }
 }

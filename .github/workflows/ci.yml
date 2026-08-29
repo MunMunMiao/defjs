@@ -4,50 +4,19 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
   checks:
-    uses: ./.github/workflows/_checks.yml
-    secrets: inherit
-
-  dependency-review:
-    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          fail-on-severity: moderate
-
-  version-packages:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: checks
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/setup-pnpm-deps
-      - name: Create or update Version Packages PR
-        uses: changesets/action@v1
-        with:
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
-          commitMode: github-api
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          bun-version: 1.4.0
+      - run: bun ci
+      - name: Install Playwright browsers
+        run: bunx --bun playwright install --with-deps chromium firefox
+      - run: bun run verify

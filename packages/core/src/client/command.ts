@@ -4,10 +4,10 @@ import type { EventStructs, EventStreamCommand } from '../sse/sse'
 import type { AnyStruct } from '../struct'
 import type { SocketStructs, WebSocketCommand } from '../web_socket/web_socket'
 
-export const COMMAND_TYPE = Symbol.for('defjs.command.type')
-export const HTTP_COMMAND = Symbol.for('defjs.command.http')
-export const EVENT_STREAM_COMMAND = Symbol.for('defjs.command.event-stream')
-export const WEB_SOCKET_COMMAND = Symbol.for('defjs.command.web-socket')
+export const COMMAND_TYPE: unique symbol = Symbol.for('defjs.command.type')
+export const HTTP_COMMAND: unique symbol = Symbol.for('defjs.command.http')
+export const EVENT_STREAM_COMMAND: unique symbol = Symbol.for('defjs.command.event-stream')
+export const WEB_SOCKET_COMMAND: unique symbol = Symbol.for('defjs.command.web-socket')
 
 export type CommandType = typeof HTTP_COMMAND | typeof EVENT_STREAM_COMMAND | typeof WEB_SOCKET_COMMAND
 

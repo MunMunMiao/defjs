@@ -1,219 +1,196 @@
 ---
 title: React
-description: شارك Defjs client عبر React context، واضبطه للـ API، ونظّف requests وrealtime resources داخل effects.
+description: ثبّت المزوّد، اقرأ العميل، اجلب مستخدمًا، وأجهض عندما يُعاد تشغيل التأثير.
 ---
 
-# `@defjs/react`
+# React
 
-هذه الحزمة محوّل Context خفيف لـ `@defjs/core`. يوفّر `ClientProvider` عميلاً أنشأه التطبيق، ويعيد `useClient()` أقرب نسخة. لا تضيف الحزمة مصنع عميل أو cache أو سياسة retry أو دورة حياة للموارد.
+اربط عميل `@defjs/core` موجودًا في شجرة React. تحصل على Context و`useClient()`. الحزمة **لا** تنشئ عميلًا، ولا تضيف cache، ولا تعيد محاولة الأوامر، ولا تتخلص من موارد النقل. المكوّن أو التأثير أو مكتبة البيانات التي تبدأ العمل تملكه.
 
-## توفير Client
+## الإعداد الأساسي
 
-أنشئ العميل واضبطه بواسطة `@defjs/core`، ثم مرّر النسخة صراحة:
+ثبّت `@defjs/core` و`@defjs/react` وReact 18+. ESM؛ Node.js 22+ عند التشغيل في Node:
 
-```tsx
-import { createClient, withEndpoint } from '@defjs/core'
-import { ClientProvider } from '@defjs/react'
-import { UserProfile } from './UserProfile'
+`bun add @defjs/core @defjs/react react`
 
-const client = createClient(withEndpoint('https://api.example.com'))
+وفّر العميل، ثم اجلب مستخدمًا وأجهض عند التغيير:
 
-export function App() {
-  return (
-    <ClientProvider client={client}>
-      <UserProfile id={7} />
-    </ClientProvider>
-  )
-}
-```
-
-يوفّر `ClientProvider` النسخة نفسها تماماً. يقرر المستدعي متى ينشئها أو يستبدلها، ويظل مسؤولاً عن الطلبات وموارد الوقت الحقيقي.
-
-## قراءة أقرب Client
-
-استدعِ `useClient()` داخل مكوّن React أو Hook مخصص. يرمي خطأ خارج provider، وتتبع providers المتداخلة قاعدة أقرب React Context.
-
-```tsx
-import { useClient } from '@defjs/react'
-
-export function UserProfile() {
-  const client = useClient()
-  return null
-}
-```
-
-تأتي جميع خيارات الإعداد من `@defjs/core`:
-
-```tsx
-import { createClient, withCredentials, withEndpoint } from '@defjs/core'
-
-const client = createClient(withEndpoint('https://api.example.com'), withCredentials(true))
-```
-
-## مصانع المعترضات
-
-أنشئ قيم interceptor وركّبها بواسطة `withInterceptors(...)` من core قبل تمرير العميل إلى React:
-
-```tsx
-import { createClient, createHttpInterceptor, withEndpoint, withInterceptors } from '@defjs/core'
-import { ClientProvider } from '@defjs/react'
-
-const auth = createHttpInterceptor((request, next) => {
-  const headers = new Headers(request.headers)
-  headers.set('Authorization', `Bearer ${readAccessToken()}`)
-  return next({ ...request, headers })
-})
-
-const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(auth))
-
-export function ApiBoundary({ children }: { children: React.ReactNode }) {
-  return <ClientProvider client={client}>{children}</ClientProvider>
-}
-```
-
-إذا كان factory يلتقط بيانات اعتماد خاصة بالطلب، فاستدعه داخل حد الطلب الذي ينشئ العميل.
-
-## إدارة دورة حياة تأثيرات HTTP
-
-أنشئ cancellation داخل effect وتجاهل الاكتمال بعد cleanup:
-
-```tsx
-import { useEffect, useState } from 'react'
-import { useClient } from '@defjs/react'
-import { getUser } from './api'
-
-export function UserProfile({ id }: { id: number }) {
-  const client = useClient()
-  const [name, setName] = useState('')
-  const [errorMessage, setErrorMessage] = useState('')
-
-  useEffect(() => {
-    const abort = new AbortController()
-
-    void client
-      .execute(getUser({ path: { id } }), { signal: abort.signal })
-      .then(([error, user]) => {
-        if (abort.signal.aborted) {
-          return
-        }
-
-        if (error) {
-          setErrorMessage('Unable to load user.')
-          return
-        }
-
-        setErrorMessage('')
-        setName(user.name)
-      })
-      .catch(() => {
-        if (!abort.signal.aborted) {
-          setErrorMessage('Unable to load user.')
-        }
-      })
-
-    return () => abort.abort()
-  }, [client, id])
-
-  return errorMessage ? <p>{errorMessage}</p> : <p>{name}</p>
-}
-```
-
-يعيد Defjs إخفاقات الطلب المتوقعة في tuples. لا تحوّل error إلى قيمة مرمية إلا عند حد تكامل يتوقع exceptions، مثل `queryFn` في query library.
-
-## حد Client Component
-
-مدخل الحزمة هو Client Component boundary. يمكن لغلاف يملكه التطبيق إنشاء عميل المتصفح وتمريره صراحة:
-
-```tsx
-// app/ApiProvider.tsx
-'use client'
-
+```tsx twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 import { ClientProvider } from '@defjs/react'
 import type { ReactNode } from 'react'
 
-const client = createClient(withEndpoint(process.env.NEXT_PUBLIC_API_ENDPOINT!))
+const client = createClient(withEndpoint('https://api.example.com'))
 
 export function ApiProvider({ children }: { children: ReactNode }) {
   return <ClientProvider client={client}>{children}</ClientProvider>
 }
 ```
 
-ينبغي لكود الخادم الذي يحمل headers أو cookies أو tenant state أو credentials إنشاء عميل منفصل داخل كل request boundary. لا يعزل المحوّل طلبات SSR المتزامنة ولا يتخلص من العمل الذي يملكه العميل.
-
-## إدارة دورة حياة التأثيرات الفورية
-
-لا يغلق provider unmount الموارد التي بدأها الأحفاد. يجب على effect تفتح WebSocket إلغاء startup، وإغلاق session تصل متأخرة، واستهلاك incoming queue، وإلغاء اشتراك observers، وإغلاق session النشطة.
-
-```tsx
-import { useEffect } from 'react'
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
 import { useClient } from '@defjs/react'
-import { openNotificationsSocket } from './api'
-import { handleNotification } from './notifications'
-import { recordRealtimeFailure } from './telemetry'
+import { useEffect, useState } from 'react'
 
-export function LiveNotifications() {
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
+
+export function UserName({ id }: { id: number }) {
+  const client = useClient()
+  const [name, setName] = useState<string>()
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    void client.execute(getUser({ path: { id } }), { signal: controller.signal }).then(([error, user]) => {
+      if (controller.signal.aborted) return
+      setName(error ? undefined : user.name)
+    })
+
+    return () => controller.abort()
+  }, [client, id])
+
+  return <span>{name ?? 'Loading...'}</span>
+}
+```
+
+`ClientProvider` مزوّد Context عادي. خاصية `client` مختلفة تغيّر ما يراه الأحفاد — بلا استنساخ أو استبدال أو تخلّص. المزوّدون المتداخلون ينشئون حدودًا صريحة.
+
+React قد يضبط وينظّف تأثيرًا أكثر من مرة في التطوير. فحص الإشارة يمنع وعدًا قديمًا من الكتابة في التصيير الحالي. خطأ الـ tuple ما زال بيانات.
+
+## اقرأ بـ `useClient`
+
+`useClient()` يُرجع أقرب `Client`. استدعه أثناء التصيير (مكوّن أو خطاف مخصص). يرمي عندما لا يوجد مزوّد:
+
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
+import { useClient } from '@defjs/react'
+
+const health = defineRequest({
+  method: 'GET',
+  path: '/health',
+  output: { 200: struct.object({ ok: struct.boolean() }) },
+})
+
+export function HealthCheck() {
+  const client = useClient()
+
+  const check = async () => {
+    const [error, result] = await client.execute(health())
+    if (error) {
+      console.error(error.kind, error.code)
+      return
+    }
+    console.log(result.ok)
+  }
+
+  return (
+    <button type="button" onClick={() => void check()}>
+      Check service
+    </button>
+  )
+}
+```
+
+الخطاف يوفّر العميل فقط. لا يبدأ عملًا، ولا يشترك في نقل، ولا يحوّل الـ tuple الذي يضع الخطأ أولاً إلى استثناء.
+
+## امتلك عمل الاستعلام
+
+مكتبة استعلام يمكنها امتلاك التخزين المؤقت وإعادة المحاولة وقمع النتائج القديمة والإلغاء. أعطها الإشارة التي توفّرها:
+
+```tsx twoslash
+import { defineRequest, struct } from '@defjs/core'
+import { useCallback } from 'react'
+import { useClient } from '@defjs/react'
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: { 200: struct.object({ name: struct.string() }) },
+})
+
+export function useUserQueryFn(id: number) {
+  const client = useClient()
+
+  return useCallback(
+    async ({ signal }: { signal: AbortSignal }) => {
+      const [error, user] = await client.execute(getUser({ path: { id } }), { signal })
+      if (error) throw error
+      return user
+    },
+    [client, id],
+  )
+}
+```
+
+لا تلف نفس الأمر في تأثير ثانٍ — مالكان يجعلان الإلغاء ومعالجة النتائج القديمة غامضين.
+
+## امتلك العمل الفوري
+
+معالجات SSE وWebSocket تعيش أطول من `client.execute(...)`. سجّل التنظيف قبل انتظار البدء، أغلق معالجًا يصل بعد التخلص، استهلك مكرّره الواحد، انتظر وعده النهائي:
+
+```tsx twoslash
+import { defineWebSocket, struct } from '@defjs/core'
+import { useClient } from '@defjs/react'
+import { useEffect } from 'react'
+
+const notifications = defineWebSocket({
+  maxIncomingQueueSize: 100,
+  path: '/notifications',
+  incoming: {
+    message: struct.object({ text: struct.string() }),
+  },
+})
+
+export function Notifications() {
   const client = useClient()
 
   useEffect(() => {
-    const abort = new AbortController()
+    const controller = new AbortController()
     let disposed = false
-    let closeActiveSession: ((reason: string) => void) | undefined
+    let closeActive: (() => void) | undefined
 
     void (async () => {
-      const [error, session] = await client.execute(openNotificationsSocket(), {
-        signal: abort.signal,
-      })
+      const [error, session] = await client.execute(notifications(), { signal: controller.signal })
+      if (error) return
 
-      if (error) {
-        if (!abort.signal.aborted) {
-          recordRealtimeFailure({ operation: 'notifications-startup' })
-        }
-        return
+      let closed = false
+      const close = () => {
+        if (closed) return
+        closed = true
+        session.close(1000, 'effect-disposed')
       }
-
-      const unsubscribeError = session.onRuntimeError(() => {
-        recordRealtimeFailure({ operation: 'notifications' })
-      })
-      let closeRequested = false
-
-      const closeSession = (reason: string) => {
-        if (closeRequested) {
-          return
-        }
-        closeRequested = true
-        unsubscribeError()
-        session.close(1000, reason)
-      }
-      closeActiveSession = closeSession
+      closeActive = close
 
       if (disposed) {
-        closeSession('effect-disposed')
+        close()
         await session.closed
         return
       }
 
       try {
         for await (const message of session.receive) {
-          if (disposed) {
-            break
-          }
-          handleNotification(message)
+          console.info(message.text)
         }
       } finally {
-        closeSession('consumer-finished')
+        close()
         await session.closed
       }
-    })().catch(() => {
-      if (!abort.signal.aborted) {
-        recordRealtimeFailure({ operation: 'notifications-consumer' })
-      }
-    })
+    })()
 
     return () => {
       disposed = true
-      abort.abort()
-      closeActiveSession?.('effect-disposed')
+      controller.abort()
+      closeActive?.()
     }
   }, [client])
 
@@ -221,31 +198,27 @@ export function LiveNotifications() {
 }
 ```
 
-يفترض هذا fragment أن `recordRealtimeFailure` دالة telemetry يملكها التطبيق. وهو يستهلك `session.receive` عمدًا؛ ترك incoming queue المحدودة بلا قراءة يجعل overflow النهائي خطأً قاتلًا للجلسة. طبّق الانضباط نفسه في startup وcleanup على مقابض SSE.
+نفس القاعدة لـ `EventStreamHandle`: أغلق في `finally`، انتظر `stream.closed`. مستهلكو WebSocket يجب أيضًا أن يلغوا اشتراك مستمعي الحالة/أخطاء وقت التشغيل ويستمروا في قراءة `session.receive` — طابور محدود غير مقروء يمكن أن يفيض.
 
-يغيّر provider unmount/remount نطاق العميل. لكنه لا يستدعي `dispose` ولا يلغي requests ولا يغلق handles أو sessions، لأن core `Client` لا يملك lifecycle API من هذا النوع.
+## SSR ونطاق العميل
 
-## API
+مدخل الحزمة حد Client Component. تطبيق متصفح يمكنه مشاركة عميل على مستوى الوحدة عندما تكون نقطة النهاية والمعترضات والحالة الملتقطة آمنة للمتصفح ومستقلة عن الطلب. لـ SSR، أنشئ عميلًا منفصلًا داخل كل حدود طلب عندما تختلف الرؤوس أو ملفات تعريف الارتباط أو المستخدمون أو المستأجرون أو بيانات الاعتماد.
 
-```typescript
-import type { Client } from '@defjs/core'
-import type { JSX, ReactNode } from 'react'
+إلغاء تركيب المزوّد **لا** يجهض HTTP، ولا يغلق SSE/WebSocket، ولا يلغي اشتراك المستمعين، ولا يستدعي `dispose`. `@defjs/react` بلا واجهة دورة حياة كهذه. الكود الذي يبدأ كل عملية يجب أن ينهيها أو يلغيها.
 
-interface ClientProviderProps {
-  client: Client
-  children?: ReactNode
-}
+## المرجع
 
-declare function ClientProvider(props: ClientProviderProps): JSX.Element
-declare function useClient(): Client
-```
+الصادرات العامة من `@defjs/react`:
 
-يوفّر العميل المحدد للأبناء. `children` اختياري.
+- `ClientProvider` — يقبل `ClientProviderProps`، يوفّر العميل المُمرَّر
+- `useClient` — أقرب عميل، أو يرمي
+- `ClientProviderProps` — `{ client: Client; children?: ReactNode }`
 
-يعيد أقرب عميل موفّر ويرمي خطأ عند غيابه.
+أنشئ العملاء والخيارات في `@defjs/core`. انظر [العميل](../core/client.md) و[الأخطاء](../core/errors.md) و[SSE](../core/sse.md) و[WebSocket](../core/web-socket.md).
 
-## التالي
+## وصفات ذات صلة
 
-- تغطي [العميل](/ar/core/client) تركيب خيارات core ونطاقها.
-- تغطي [الأخطاء](/ar/core/errors) حدود التكامل التي تحول tuple إلى exception.
-- تغطي [SSE](/ar/core/sse) و[WebSocket](/ar/core/web-socket) ملكية موارد realtime.
+- [GET مع 404 معلَن](../recipes/get-declared-404.md)
+- [إلغاء استدعاء HTTP](../recipes/cancel-http.md)
+- [استهلاك تدفق SSE](../recipes/consume-sse.md)
+- [فتح جلسة WebSocket](../recipes/websocket-session.md)

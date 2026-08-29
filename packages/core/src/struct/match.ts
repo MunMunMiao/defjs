@@ -19,10 +19,6 @@ export function selectUnionOptions(options: readonly StructLike<unknown, unknown
   return matches
 }
 
-export function selectUnionOption(options: readonly StructLike<unknown, unknown, boolean>[], value: unknown): RuntimeStruct | undefined {
-  return selectUnionOptions(options, value)[0]
-}
-
 export function matchesDefinition(definition: StructDefinition, value: unknown, struct: RuntimeStruct): boolean {
   if (value === null) {
     if (definition.kind === 'null' || definition.flags.nullable) {

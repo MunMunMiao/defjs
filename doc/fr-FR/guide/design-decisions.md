@@ -1,78 +1,114 @@
 ---
 title: Décisions de conception
-description: Pourquoi Defjs privilégie les clients explicites, les tuples propres au transport, les projections et les observateurs.
+description: Pourquoi Defjs garde explicites les contrats, commandes, résultats de transport, décodage et propriété.
 ---
 
 # Décisions de conception
 
-Cette page expose les raisons qui ont conduit à l'API actuelle. Les pages de référence décrivent les champs et leurs valeurs par défaut.
+Defjs fait quelques compromis volontaires. Les API de confort masquent souvent qui possède une requête, un flux ou une session. Defjs garde cette frontière visible pour que tu réutilises le même contrat d’endpoint sans ramasser en silence un cache, un planificateur de retry ou un gestionnaire de ressources.
 
 ## Clients explicites
 
-Defjs ne fournit aucun client global par défaut à l'échelle du processus. `createClient(...)` rend le propriétaire visible au point d'appel et permet à l'application de séparer ses clients selon les endpoints, les identifiants, les tests ou la portée d'une requête.
+`createClient(...)` fait de la config d’endpoint une valeur explicite. Des environnements ou portées de requête différents obtiennent des endpoints, credentials, intercepteurs, sérialiseurs et handles de transport différents.
 
-Cette isolation reste partielle. Les intercepteurs et callbacks d'option peuvent capturer un même état applicatif ; deux objets client ne sont donc pas forcément isolés de leur environnement. `setErrorMap(...)` agit lui aussi sur tout le processus. Côté serveur, créez un client par requête dès qu'une option ou une fonction capturée contient des données de requête, d'utilisateur, de tenant, de cookie ou d'autorisation.
+Le coût : pas de défaut process-wide. Ce coût aide sur un serveur — crée le client dans la frontière de la requête quand les options ou closures capturent auth, cookies, utilisateurs, tenants ou métadonnées de requête. Un client explicite n’isole pas pour autant l’état capturé par un intercepteur. L’identité du client n’est pas une frontière de sécurité à elle seule.
 
-Un client explicite facilite aussi l'identification du propriétaire des ressources, mais il ne les gère pas lui-même. Il ne suit et ne libère ni les requêtes HTTP, ni les handles SSE, ni les sessions WebSocket actifs.
+Un client dispatche des commandes. Il ne possède pas le travail actif. Qui démarre une requête HTTP, un flux SSE ou une session WebSocket doit l’annuler ou la fermer et attendre la promesse terminale.
 
-## Tuples propres au transport
+## Définitions, builders et commandes
 
-Toutes les commandes prises en charge renvoient un tuple à trois éléments, avec l'erreur en premier. Le troisième garde le sens propre à son transport :
+La définition est le contrat stable : méthode, chemin, Struct d’entrée, mapping de sortie, limites de transport. Le builder est la vue appelable. L’appeler crée une commande opaque pour une seule exécution.
 
-```typescript
-const [httpError, data, response] = await client.execute(httpCommand)
-const [sseError, stream, startupOpen] = await client.execute(sseCommand)
-const [socketError, session, startupConnection] = await client.execute(socketCommand)
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({
+    path: struct.object({ id: struct.number() }),
+  }),
+  output: {
+    200: struct.object({ id: struct.number(), name: struct.string() }),
+    404: struct.object({ message: struct.string() }),
+  },
+})
+
+const command = getUser({ path: { id: 7 } })
 ```
 
-Cette distinction évite de confondre dans une abstraction vague un wrapper de réponse HTTP, un instantané d'ouverture SSE au démarrage et un instantané de connexion WebSocket au démarrage. Le deuxième élément suit la même logique : HTTP renvoie les données décodées, SSE un handle logique de flux et WebSocket une session logique.
+Un job d’arrière-plan et un propriétaire UI peuvent exécuter la même forme `getUser` avec des politiques d’annulation/retry différentes. Garder la commande opaque empêche le code app de dépendre des tags ou symboles de transport internes.
 
-Le tuple rend explicites les échecs attendus au démarrage sans imposer un contrôle de flux par exceptions. Il ne garantit pas qu'un intercepteur, un callback, un listener ou une valeur non prise en charge ne puisse jamais rejeter une promesse ou lever une exception.
+## Résultats propres à chaque transport
 
-## Les options de cycle de vie appartiennent à l'exécution
+Les trois transports utilisent un tuple erreur en premier. Une seule « response » générique effacerait les faits de cycle de vie.
 
-Les définitions d'endpoint décrivent des contrats d'échange stables et possèdent les limites des files de transport. L'annulation, le timeout, le heartbeat et la reconnexion relèvent de l'exécution qui possède le travail.
+- HTTP → `[error, data, response]` — sortie décodée + `HttpResponse`
+- SSE → `[error, stream, open]` — un flux logique + instantané de réponse au démarrage
+- WebSocket → `[error, session, connection]` — session logique + instantané de connexion au démarrage
 
-HTTP et SSE acceptent des options d'annulation à l'exécution. WebSocket accepte aussi, pour chaque exécution, les options `beforeConnect`, heartbeat, reconnexion et sous-protocoles. Les options du client fournissent des valeurs par défaut réutilisables lorsque le transport le permet ; les capacités entrante et sortante de WebSocket restent définies sur l'endpoint.
+La troisième valeur est un instantané, pas une promesse que de futurs reconnects gardent la même connexion physique. Un échec de démarrage peut quand même inclure une réponse/instantané si le transport en a produit un d’abord. Après le démarrage, le contrôle du cycle de vie appartient au handle ou à la session renvoyés.
 
-Cette séparation permet de réutiliser une commande. Un traitement en arrière-plan et un écran interactif peuvent l'exécuter avec des durées de vie différentes sans redéfinir son chemin ni son schéma de message.
+## Décodage à l’exécution
 
-## `build` utilise des projections
+L’inférence TypeScript décrit ce que tu attends ; elle ne peut pas vérifier une réponse serveur à l’exécution. Le parsing Struct est la seconde moitié du contrat. Defjs valide l’entrée de la commande avant la construction de la requête, décode la représentation choisie, puis parse le Struct correspondant.
 
-Le `build(request, input)` personnalisé reçoit une vue de liaison déclarative dérivée de la Struct d'entrée. Il n'a pas accès aux valeurs fournies à l'exécution par l'appelant.
+Cet ordre garde statut et body comme des faits séparés. La sélection exacte du statut déclaré a lieu **avant** le décodage du body. Non-2xx déclaré → `error.data` typé. Body déclaré malformé → `RESPONSE_VALIDATION_FAILED`. Statut non déclaré → `UNDECLARED_STATUS` (pas un succès/échec non typé). Plus strict que « n’importe quel JSON arrivé », mais tu peux décider en sécurité.
 
-Cette vue indique comment les champs source se projettent vers `path`, `query`, `headers` et `body`. Le modèle permet de sélectionner des champs, de choisir explicitement les clés du format d'échange et de projeter un tableau élément par élément. Il interdit volontairement les branches dépendantes des valeurs, les transformations arbitraires et l'injection de valeurs littérales.
+## Les limites de `build`
 
-Cette contrainte lie la construction de la requête aux champs déclarés par les Structs. Effectuez la normalisation et la validation métier dans l'application avant de créer une commande. Consultez [Commandes](/fr-FR/core/commands) pour les formes de projection prises en charge.
+Le mapping automatique `struct.request(...)` est le défaut quand l’entrée a déjà path/query/headers/body. Un `build(request, input)` custom est une projection contrainte quand la forme appelant et la forme wire diffèrent :
 
-## Les observateurs ne contrôlent pas le flux
+```typescript twoslash
+import { defineRequest, struct } from '@defjs/core'
 
-Le callback SSE `onInvalidEvent` observe les événements écartés. Les exceptions et les promesses rejetées sont isolées du flux de contrôle du stream, qui poursuit son traitement ; un observateur asynchrone reste toutefois attendu et peut retarder les messages suivants.
+const createBatch = defineRequest({
+  method: 'POST',
+  path: '/accounts/:account_id/users',
+  input: struct.object({
+    accountId: struct.number(),
+    users: struct.array(
+      struct.object({
+        displayName: struct.string(),
+        email: struct.string(),
+      }),
+    ),
+  }),
+  build(request, input) {
+    request.setPathParams({ account_id: input.accountId })
+    request.setJson({
+      users: input.users.map((user) => ({
+        display_name: user.displayName,
+        email: user.email,
+      })),
+    })
+  },
+  output: { 202: struct.object({ accepted: struct.number() }) },
+})
 
-Les listeners WebSocket d'état et d'erreur d'exécution sont eux aussi des observateurs. Les exceptions et les promesses rejetées sont isolées : l'échec d'un listener d'état est transmis aux listeners d'erreur d'exécution, l'échec de ces derniers au `reportError` global s'il existe, tandis que les autres listeners et le cycle de vie continuent.
+const command = createBatch({
+  accountId: 42,
+  users: [{ displayName: 'Ada', email: 'ada@example.com' }],
+})
+```
 
-Pilotez le cycle de vie avec le handle ou la session renvoyé. Réservez les observateurs à une journalisation bornée, aux métriques ou aux mises à jour d'état, puis retirez-les lorsque leur propriétaire disparaît.
+`input` est une vue liée au schéma, pas l’objet runtime de l’appelant. La projection peut sélectionner des champs déclarés, renommer des cibles et mapper un élément de tableau source vers un élément de sortie. Elle ne peut pas brancher sur des valeurs, injecter des littéraux ou changer la cardinalité. Normalise les données métier et fais la validation dépendante des valeurs avant de créer la commande.
 
-## Déploiement des sourcemaps
+## Placement des observateurs et des politiques
 
-Choisissez explicitement la politique de sourcemap de production :
+Les intercepteurs servent à la politique transversale au transport : auth, tracing, short-circuit, retry revu. Ils ne tournent que pour leur transport et se composent en ordre oignon. Les options d’exécution servent à la durée de vie du travail : `signal`, `timeout`, heartbeat WebSocket, reconnect opt-in.
 
-- **public** : déployez la map avec le bundle. Elle contient `sourcesContent` ; le source de l’application et des dépendances est donc accessible publiquement, même avec des chemins relatifs.
+Les observateurs rapportent ce qui s’est passé sans devenir un second propriétaire. `onInvalidEvent` SSE, les écouteurs d’état WebSocket et les écouteurs d’erreurs runtime servent aux diagnostics et métriques bornés. Le flux/session renvoyé possède toujours l’itération, la fermeture, le désabonnement et l’attente terminale. Cache, suppression de résultats périmés, idempotence et mapping d’erreurs de domaine appartiennent autour de `client.execute(...)`, où ton app voit sa propre politique et son état.
 
-- **hidden** : retirez la référence source-map du bundle, envoyez la map en privé à la plateforme d’erreurs et ne la déployez pas publiquement. Le fichier map contient toujours des chemins sensibles et `sourcesContent` ; « hidden » ne le rend pas sûr.
+## OpenAPI, sourcemaps et télémétrie
 
-- **disabled** : ne produisez aucune map en production. Cela évite sa divulgation, mais sacrifie la symbolication source-level des stacks de production et complique le debugging.
+Defjs ne génère ni ne synchronise un second contrat OpenAPI. Si OpenAPI est déjà autoritatif, garde-le et ajoute la validation runtime à la frontière de l’app. Pour un nouveau service, les définitions d’endpoint et les Structs peuvent être le contrat wire direct — pas de seconde source de vérité.
 
-Restreignez l’accès et la rétention des maps privées comme pour tout artefact de débogage. Des chemins relatifs ne constituent pas une frontière de confidentialité.
+`withOpenTelemetryServer(...)` ajoute de l’instrumentation Defjs **sortante** à un client. Il n’initialise pas un SDK OpenTelemetry. `tracer` est requis, `meter` est optionnel, les trois transports sont activés par défaut, et la propagation query WebSocket est désactivée par défaut. Garde les noms d’opération statiques et à faible cardinalité. Passe en revue propagation, hooks, URL, en-têtes, payloads, causes et rétention comme potentiellement sensibles.
 
-## Frontière OpenAPI
+Les sourcemaps sont une décision de déploiement, pas un comportement Defjs. Une map publique avec `sourcesContent` expose le source ; une map cachée contient encore le source et les chemins ; désactiver les maps retire la symbolication au niveau source. Traite les maps privées comme des artefacts de debug déployables avec accès et règles de rétention explicites.
 
-Choisissez une seule source de contrat autoritative. Une organisation disposant déjà d’un workflow OpenAPI doit le conserver et utiliser un mature generator avec un runtime validator explicite à la frontière applicative ; les types TypeScript générés ne valident pas les responses au runtime. Pour un service greenfield Defjs, définissez directement le wire contract avec les Structs et endpoints Defjs.
+## Recettes liées
 
-Core n’ajoutera pas d’OpenAPI generator/exporter et ne maintiendra pas OpenAPI et Defjs comme deux sources synchronisées. Le dual-source drift est pire que la composition d’outils existants à une frontière claire.
-
-## Références associées
-
-- [Client](/fr-FR/core/client) décrit la composition des options et la portée du client.
-- [Erreurs](/fr-FR/core/errors) décrit les échecs des tuples et la disponibilité de la réponse.
-- [SSE](/fr-FR/core/sse) et [WebSocket](/fr-FR/core/web-socket) distinguent handles logiques, tentatives physiques et fermeture définitive.
+- [GET avec un 404 déclaré](../recipes/get-declared-404.md)
+- [Tester avec un handle Fetch local](../recipes/test-with-handle.md)

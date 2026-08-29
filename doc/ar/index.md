@@ -1,71 +1,66 @@
 ---
-layout: home
-
-hero:
-  name: Defjs
-  text: أوامر مضبوطة الأنواع لـ HTTP وSSE وWebSocket
-  tagline: عرّف أشكال البيانات المنقولة باستخدام Structs، وأنشئ عملاء صريحين، وأبقِ نتيجة كل وسيلة نقل ودلالات دورة حياتها واضحة.
-  actions:
-    - theme: brand
-      text: ابدأ هنا
-      link: /ar/guide/getting-started
-    - theme: alt
-      text: عرض على GitHub
-      link: https://github.com/defjs/defjs
-
-features:
-  - title: عقود نقاط النهاية
-    details: افصل بين تعريف نقطة النهاية ومنشئ الأمر وقيمة الأمر. تفك Structs ترميز مدخلات المستدعي وبيانات النقل بنيويًا وقت التشغيل.
-  - title: نتائج خاصة بكل وسيلة نقل
-    details: تستخدم HTTP وSSE وWebSocket جميعًا tuple يبدأ بالخطأ ويتكون من ثلاثة عناصر، ويكون العنصر الثالث غلاف استجابة أو لقطة فتح عند البدء أو لقطة اتصال عند البدء.
-  - title: سلاسل المعترضات
-    details: سجّل معترضات HTTP وSSE وWebSocket على العميل. ترشّح كل وسيلة نقل معترضاتها وتشغّلها بترتيب البصلة.
-  - title: دورة حياة صريحة
-    details: يستطيع SSE إعادة محاولة أخطاء الشبكة والقراءة. إعادة اتصال WebSocket اختيارية. ويبقى التطبيق مسؤولًا عن التكرار والإلغاء والإغلاق النهائي.
-  - title: فك الترميز وقت التشغيل
-    details: فك ترميز input وresponses وstream events وWebSocket messages بعقود Struct نفسها التي تقود TypeScript inference.
-  - title: تكاملات التطبيق
-    details: شارك clients عبر Vue أو React، وأضف outbound OpenTelemetry instrumentation في خدمات الخادم.
+title: Defjs
+description: أوامر HTTP وSSE وWebSocket مُنوَّعة الأنواع مع عميل صريح ونتائج تضع الخطأ أولاً.
 ---
 
-## أنشئ Client API مضبوط النوع
+# Defjs
 
-ابدأ بوصف عقد HTTP أو SSE أو WebSocket الذي يستدعيه تطبيقك. يحوّل Defjs هذا التعريف إلى command builder، ويتحقق من البيانات وقت التشغيل، ويُبقي نتيجة transport واضحة.
+عرّف نقطة نهاية، وابنِ أمرًا معتمًا، ثم نفّذه. نفس الشكل لـ HTTP وSSE وWebSocket.
 
-مسار HTTP الأساسي صغير: أنشئ client للـ API، وعرّف endpoint، واستدعِ command builder، ثم نفّذ command.
-
-```typescript
+```ts get-health.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
-
-const getUser = defineRequest({
+const getHealth = defineRequest({
   method: 'GET',
-  path: '/users/:id',
-  input: struct.request({
-    path: struct.object({ id: struct.number() }),
-  }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  path: '/health',
+  output: { 200: struct.object({ ok: struct.boolean() }) },
 })
 
-const [error, user, response] = await client.execute(getUser({ path: { id: 1 } }))
-
-if (error) {
-  console.error(error.kind, error.code)
-} else {
-  console.log(user.name, response.status)
-}
+const [error, result, response] = await client.execute(getHealth())
+if (!error) console.log(result.ok, response.status)
 ```
 
-وجّه client إلى الخدمة التي يستعملها تطبيقك، واجعل Structs مطابقة لعقد response الفعلي. يظل تطبيقك مسؤولًا عن credentials وحالة UI وretries والإلغاء وتنظيف الموارد.
+Defjs لا تخزّن النتائج، ولا تعيد المحاولة نيابةً عنك، ولا تغلق التدفقات إن نسيت. أنت تملك الإلغاء والتنظيف.
 
-## تابع القراءة
+## اختر وسيلة النقل
 
-- تبدأ صفحة [البدء](/ar/guide/getting-started) بالتثبيت وأول request مضبوط النوع داخل تطبيقك.
-- تشرح صفحة [Client](/ar/core/client) تركيب options والأشكال الثلاثة لـ `execute`.
-- تعرّف صفحة [Commands](/ar/core/commands) endpoints وcommand builders وcommands وschema-bound projections.
-- توثّق صفحات [HTTP](/ar/core/http) و[SSE](/ar/core/sse) و[WebSocket](/ar/core/web-socket) سلوك transports وملكية lifecycle.
-- توضّح صفحات [Vue](/ar/plugins/vue) و[React](/ar/plugins/react) و[OpenTelemetry Server](/ar/plugins/opentelemetry-server) ربط Defjs بإطار تطبيقك وإعداد telemetry.
+| ما تحتاجه                    | ابدأ من                           | النتيجة عند النجاح                       |
+| ---------------------------- | --------------------------------- | ---------------------------------------- |
+| طلب + استجابة حسب الحالة     | [HTTP](./core/http.md)            | بيانات مفكوكة + `HttpResponse`           |
+| تغذية أحداث خادم طويلة العمر | [SSE](./core/sse.md)              | تدفق واحد + لقطة `open` عند البدء        |
+| جلسة ثنائية الاتجاه          | [WebSocket](./core/web-socket.md) | جلسة واحدة + لقطة `connection` عند البدء |
+
+جديد هنا؟ نفّذ [البدء](./guide/getting-started.md)، ثم خذ [وصفة](./recipes/get-declared-404.md). تريد «لماذا»؟ اقرأ [قرارات التصميم](./guide/design-decisions.md) بعد أن تشغّل شيئًا.
+
+## اختر الحزمة
+
+| الحزمة                        | متى                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| `@defjs/core`                 | `createClient` (HTTP + SSE + WebSocket)                                              |
+| `@defjs/react`                | `ClientProvider` / `useClient` — انظر [React](./plugins/react.md)                    |
+| `@defjs/vue`                  | Plugin + `injectClient` — انظر [Vue](./plugins/vue.md)                               |
+| `@defjs/opentelemetry-server` | spans/metrics صادرة — انظر [OpenTelemetry Server](./plugins/opentelemetry-server.md) |
+
+## أشكال النتيجة
+
+وسائل النقل الثلاث تُرجع tuple من ثلاثة عناصر يضع الخطأ أولاً. المواضع متطابقة؛ المعاني ليست كذلك:
+
+- HTTP → `[error, data, response]`
+- SSE → `[error, stream, open]`
+- WebSocket → `[error, session, connection]`
+
+عند فشل البدء يكون العنصر الثاني `undefined`. العنصر الثالث يوجد فقط إذا أنتجت وسيلة النقل استجابة أو لقطة أولاً. انظر [الأخطاء](./core/errors.md).
+
+## الملكية بجملة واحدة
+
+أجهض HTTP عندما يصبح قديماً. أغلق SSE و`await stream.closed`. أغلق WebSocket و`await session.closed`. على الخادم، أنشئ العميل داخل حدود الطلب عندما تلتقط الخيارات ملفات تعريف الارتباط أو المصادقة أو بيانات المستأجر. احجب عناوين URL والرؤوس والأجسام قبل تسجيلها.
+
+## وصفات ذات صلة
+
+- [GET مع 404 معلَن](./recipes/get-declared-404.md)
+- [POST JSON](./recipes/post-json.md)
+- [إلغاء استدعاء HTTP](./recipes/cancel-http.md)
+- [استهلاك تدفق SSE](./recipes/consume-sse.md)
+- [فتح جلسة WebSocket](./recipes/websocket-session.md)
+- [الاختبار بـ Fetch محلي](./recipes/test-with-handle.md)

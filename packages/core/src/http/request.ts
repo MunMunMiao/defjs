@@ -1,16 +1,22 @@
 import type { QueryParamsSerializer } from '../client/config'
-import type { HttpContext } from '../internal/context'
 import type { HttpProgressFn, HttpRequest, HttpResponseType } from '../internal/http_request'
 import type { RequestBuildHandler } from '../internal/request_builder'
 import { createBaseTransportRequest } from '../internal/transport_request'
 import type { AnyStruct } from '../struct'
 import { applyRequestContentType } from './transport/body'
 
+/**
+ * One status-to-body mapping used in the array form of `RequestOutputShape`.
+ * `status` may be a single code or a list of codes that share the same body struct.
+ */
 export type ResponseGroupItem<S extends number = number, B extends AnyStruct = AnyStruct> = {
   body: B
   status: S | readonly S[]
 }
 
+/**
+ * Declared HTTP response shapes keyed by status code, as a map or a list of `ResponseGroupItem`s.
+ */
 export type RequestOutputShape = { [key: number]: AnyStruct } | readonly ResponseGroupItem[]
 
 export function createHttpRequest<TInput extends AnyStruct | undefined>(
@@ -21,7 +27,7 @@ export function createHttpRequest<TInput extends AnyStruct | undefined>(
   options: {
     abort: AbortSignal
     baseEndpoint: string
-    context?: HttpContext
+    defaultHeaders?: Headers
     downloadProgress?: HttpProgressFn
     input?: TInput
     operation?: string
@@ -40,7 +46,7 @@ export function createHttpRequest<TInput extends AnyStruct | undefined>(
   const { built, request } = createBaseTransportRequest(method, path, input, build, {
     abort: options.abort,
     baseEndpoint: options.baseEndpoint,
-    context: options.context,
+    defaultHeaders: options.defaultHeaders,
     input: options.input,
     operation: options.operation,
     queryParamsSerializer: options.queryParamsSerializer,

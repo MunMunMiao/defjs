@@ -1,7 +1,12 @@
 import type { ClientConfig, EventStreamHandle, HttpRequest, HttpResponse, WebSocketSessionLike } from '@defjs/core'
 import { createClient, withEndpoint } from '@defjs/core'
-import type { Meter, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
-import type { OpenTelemetryServerHttpOptions, OpenTelemetryServerSSEOptions, OpenTelemetryServerWebSocketOptions } from './option'
+import type { Attributes, Meter, Span, TextMapPropagator, Tracer } from '@opentelemetry/api'
+import type {
+  OpenTelemetryServerHttpOptions,
+  OpenTelemetryServerSSEOptions,
+  OpenTelemetryServerTransportOptions,
+  OpenTelemetryServerWebSocketOptions,
+} from './option'
 import { withOpenTelemetryServer } from './option'
 
 function noop(): void {
@@ -89,17 +94,20 @@ const fullOption = withOpenTelemetryServer({
   requireParentSpan: true,
   http: {
     enabled: true,
+    startSpanHook: (_request) => ({ 'app.transport': 'http' }),
     requestHook: noop,
     responseHook: noop,
   },
   sse: {
     enabled: true,
+    startSpanHook: (_request) => ({ 'app.transport': 'sse' }),
     requestHook: noop,
     responseHook: noop,
   },
   webSocket: {
     enabled: true,
     queryPropagation: true,
+    startSpanHook: (_request) => ({ 'app.transport': 'webSocket' }),
     requestHook: noop,
     responseHook: noop,
   },
@@ -126,11 +134,23 @@ type SSEResponseHook = NonNullable<OpenTelemetryServerSSEOptions['responseHook']
 type WebSocketResponseHook = NonNullable<OpenTelemetryServerWebSocketOptions['responseHook']>
 
 type HttpResponseArg = Expect<Equal<Parameters<HttpResponseHook>[1], HttpResponse<unknown>>>
+type HttpOptsAlias = Expect<Equal<OpenTelemetryServerHttpOptions, OpenTelemetryServerTransportOptions<HttpResponse<unknown>>>>
+type SSEOptsAlias = Expect<Equal<OpenTelemetryServerSSEOptions, OpenTelemetryServerTransportOptions<EventStreamHandle<unknown>>>>
 type SSEResponseArg = Expect<Equal<Parameters<SSEResponseHook>[1], EventStreamHandle<unknown>>>
 type WebSocketResponseArg = Expect<Equal<Parameters<WebSocketResponseHook>[1], WebSocketSessionLike>>
 type HttpResponseRequestArg = Expect<Equal<Parameters<HttpResponseHook>[2], HttpRequest>>
 type SSEResponseRequestArg = Expect<Equal<Parameters<SSEResponseHook>[2], HttpRequest>>
 type WebSocketResponseRequestArg = Expect<Equal<Parameters<WebSocketResponseHook>[2], HttpRequest>>
+
+type HttpStartSpanHook = NonNullable<OpenTelemetryServerHttpOptions['startSpanHook']>
+type SSEStartSpanHook = NonNullable<OpenTelemetryServerSSEOptions['startSpanHook']>
+type WebSocketStartSpanHook = NonNullable<OpenTelemetryServerWebSocketOptions['startSpanHook']>
+type HttpStartSpanRequestArg = Expect<Equal<Parameters<HttpStartSpanHook>[0], HttpRequest>>
+type SSEStartSpanRequestArg = Expect<Equal<Parameters<SSEStartSpanHook>[0], HttpRequest>>
+type WebSocketStartSpanRequestArg = Expect<Equal<Parameters<WebSocketStartSpanHook>[0], HttpRequest>>
+type HttpStartSpanHookResult = Expect<Equal<ReturnType<HttpStartSpanHook>, Attributes>>
+type SSEStartSpanHookResult = Expect<Equal<ReturnType<SSEStartSpanHook>, Attributes>>
+type WebSocketStartSpanHookResult = Expect<Equal<ReturnType<WebSocketStartSpanHook>, Attributes>>
 
 // Hook parameter types stay transport-specific.
 type HttpRequestHook = NonNullable<OpenTelemetryServerHttpOptions['requestHook']>
@@ -159,6 +179,17 @@ withOpenTelemetryServer({ tracer: makeTracer(), responseHook: noop })
 // @ts-expect-error old top-level webSocketQueryPropagation is not supported
 withOpenTelemetryServer({ tracer: makeTracer(), webSocketQueryPropagation: true })
 
+// @ts-expect-error startSpanHook belongs to transport options only
+withOpenTelemetryServer({ tracer: makeTracer(), startSpanHook: () => ({}) })
+
+withOpenTelemetryServer({
+  tracer: makeTracer(),
+  http: {
+    // @ts-expect-error startSpanHook must synchronously return Attributes
+    startSpanHook: async () => ({ 'app.tenant': 'a' }),
+  },
+})
+
 // @ts-expect-error old boolean HTTP toggle is not supported
 withOpenTelemetryServer({ tracer: makeTracer(), http: false })
 
@@ -178,11 +209,19 @@ export type Cases =
   | OptionIsCallable
   | FullOptionType
   | HttpResponseArg
+  | HttpOptsAlias
+  | SSEOptsAlias
   | SSEResponseArg
   | WebSocketResponseArg
   | HttpResponseRequestArg
   | SSEResponseRequestArg
   | WebSocketResponseRequestArg
+  | HttpStartSpanRequestArg
+  | SSEStartSpanRequestArg
+  | WebSocketStartSpanRequestArg
+  | HttpStartSpanHookResult
+  | SSEStartSpanHookResult
+  | WebSocketStartSpanHookResult
   | HttpRequestArg
   | HttpRequestHookResult
   | HttpResponseHookResult

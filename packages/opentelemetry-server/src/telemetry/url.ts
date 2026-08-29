@@ -1,9 +1,11 @@
+import { createResolvedRequestUrl } from '@defjs/core'
+
 export function resolveUrl(endpoint: string, baseEndpoint?: string): string {
   if (!baseEndpoint) {
     return endpoint
   }
   try {
-    return new URL(endpoint, baseEndpoint).toString()
+    return createResolvedRequestUrl(baseEndpoint, endpoint).toString()
   } catch {
     return endpoint
   }
@@ -14,7 +16,7 @@ export function resolveHttpUrl(endpoint: string, baseEndpoint?: string): { url: 
     return { url: endpoint }
   }
   try {
-    const parsed = new URL(endpoint, baseEndpoint)
+    const parsed = createResolvedRequestUrl(baseEndpoint, endpoint)
     return {
       url: parsed.toString(),
       serverAddress: parsed.hostname,

@@ -1,151 +1,88 @@
 ---
 title: Client
-description: Créez un client explicite, composez ses options, exécutez les commandes et inspectez sa configuration active.
+description: Crée un client explicite, compose les options, exécute des commandes et possède le nettoyage.
 ---
 
 # Client
 
-Créez explicitement un `Client`, puis transmettez-le au code qui exécute les commandes.
+Un `Client` détient la config d’endpoint + transport et dispatche les commandes HTTP, SSE et WebSocket. Il ne met pas en cache, ne relance pas auto et ne babysitte pas les flux ouverts.
 
-```typescript
+## Basic Setup
+
+```typescript twoslash
 import { createClient, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
 ```
 
-Le client conserve sa configuration et dirige les commandes vers HTTP, SSE ou WebSocket. Il ne gère ni registre global ni cycle de vie en arrière-plan.
+## Composer les options
 
-## Composition des options
+Les options s’appliquent de gauche à droite. Les setters remplacent ; `withInterceptors(...items)` append.
 
-Les options s'exécutent de gauche à droite.
+```typescript twoslash
+import { createClient, createHttpInterceptor, withCredentials, withEndpoint, withInterceptors } from '@defjs/core'
 
-```typescript
-const client = createClient(
-  withEndpoint('https://old.example.com'),
-  withEndpoint('https://api.example.com'),
-  withInterceptors(operationLogger),
-  withInterceptors(authInterceptor, retryInterceptor),
-)
-```
-
-L'endpoint final est `https://api.example.com`. L'ordre des intercepteurs est `operationLogger`, `authInterceptor`, puis `retryInterceptor`.
-
-La composition suit trois règles :
-
-1. Les helpers qui définissent une valeur la remplacent. Cela comprend `withEndpoint`, les implémentations des transports, le sérialiseur de query, le mode Fetch `credentials`, la configuration XSRF et chaque réglage SSE ou WebSocket individuel.
-2. `withInterceptors(...items)` ajoute les éléments à la suite. Plusieurs appels conservent l'ordre d'ajout des intercepteurs.
-3. `withSSEOptions(...)` et `withWebSocketOptions(...)` remplacent chaque champ de premier niveau défini. La fusion reste superficielle : les objets imbriqués de reconnexion ou de heartbeat ne sont pas fusionnés en profondeur.
-
-Dans l'exemple suivant, le second objet de reconnexion remplace le premier. Il ne conserve pas `attempts: 5`.
-
-```typescript
-const client = createClient(
-  withWebSocketOptions({
-    reconnect: { attempts: 5, delayMs: 500 },
-  }),
-  withWebSocketOptions({
-    reconnect: { delayMs: 2_000 },
-  }),
-)
-```
-
-Les helpers d'options groupées ignorent les propriétés à `undefined`. Toute autre propriété fournie au premier niveau remplace entièrement la valeur en cours.
-
-### Options principales
-
-| Option                           | Effet                                                                                     |
-| -------------------------------- | ----------------------------------------------------------------------------------------- |
-| `withEndpoint(url)`              | Définit l'endpoint de base absolu utilisé par tous les transports.                        |
-| `withHTTPHandle(fetch)`          | Remplace l'implémentation Fetch pour HTTP.                                                |
-| `withSSEHandle(fetch)`           | Remplace l'implémentation Fetch pour SSE.                                                 |
-| `withWebSocketHandle(WebSocket)` | Remplace le constructeur WebSocket.                                                       |
-| `withInterceptors(...items)`     | Ajoute à la suite des intercepteurs de transports différents.                             |
-| `withQueryParamsSerializer(fn)`  | Remplace la sérialisation de la query pour HTTP, SSE et WebSocket.                        |
-| `withCredentials(boolean)`       | Utilise `credentials: 'include'` avec Fetch pour HTTP et SSE lorsque la valeur est vraie. |
-| `withXSRF(options?)`             | Configure l'injection du token XSRF pour HTTP.                                            |
-| `withSSEOptions(options)`        | Remplace les champs SSE définis, sans fusion profonde.                                    |
-| `withWebSocketOptions(options)`  | Remplace les champs WebSocket définis, sans fusion profonde.                              |
-
-Les helpers SSE et WebSocket individuels définissent chacun le champ de premier niveau correspondant. Les pages des transports indiquent leurs valeurs par défaut et leurs conséquences sur le cycle de vie.
-
-## Exécuter des commandes
-
-`Client.execute` possède trois surcharges. Chacune renvoie un tuple à trois éléments, avec l'erreur en premier.
-
-Pour l'exécution HTTP, SSE et WebSocket, `timeout` doit être un entier sûr positif compris entre `1` et `2_147_483_647` ; `0`, les valeurs négatives ou fractionnaires, `NaN`, `Infinity` et les valeurs supérieures à cette limite renvoient `REQUEST_VALIDATION_FAILED` avant la création de toute ressource de requête, de flux ou de socket.
-
-### HTTP
-
-```typescript
-const [error, data, response] = await client.execute(requestCommand, {
-  signal,
-  timeout: 5_000,
+const audit = createHttpInterceptor(async (request, next) => {
+  const started = performance.now()
+  const response = await next(request)
+  console.info(request.operation ?? request.method, response.status, Math.round(performance.now() - started))
+  return response
 })
+
+const client = createClient(withEndpoint('https://api.example.com'), withInterceptors(audit), withCredentials(true))
+void client
 ```
 
-Le troisième élément est un wrapper Defjs `HttpResponse` lorsqu'une réponse est disponible. Les options HTTP comprennent `abort` ou `timeout`, l'alias supplémentaire `signal`, `context`, ainsi que les observateurs de progression d'envoi et de téléchargement.
+Les intercepteurs mixtes sont filtrés par transport à l’exécution ; l’ordre relatif parmi le kind sélectionné reste.
 
-### SSE
+## Exécuter par transport
 
-```typescript
-const [error, stream, startupOpen] = await client.execute(streamCommand, {
-  signal,
+- HTTP → `[error, data, response]`
+- SSE → `[error, stream, open]` (`open` est l’instantané de démarrage ; `stream.open` peut changer après reconnect)
+- WebSocket → `[error, session, connection]`
+
+L’execute WebSocket peut overrider `beforeConnect`, `heartbeat`, `protocols` et `reconnect`. `timeout` doit être un entier sûr positif dans `1..2_147_483_647`.
+
+Tu possèdes le nettoyage : abort HTTP, ferme SSE + `await stream.closed`, ferme WebSocket + `await session.closed`.
+
+## Injecter un transport de test
+
+```typescript twoslash
+import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
+
+const getUser = defineRequest({
+  method: 'GET',
+  path: '/users/:id',
+  input: struct.request({ path: struct.object({ id: struct.number() }) }),
+  output: { 200: struct.object({ id: struct.number(), name: struct.string() }) },
 })
+
+const handle: typeof fetch = async () => Response.json({ id: 7, name: 'Ada' })
+const client = createClient(withEndpoint('https://fixture.invalid'), withHTTPHandle(handle))
+const [error, user] = await client.execute(getUser({ path: { id: 7 } }))
+if (!error) console.log(user.name)
 ```
 
-Le troisième élément est l'instantané d'ouverture validé au démarrage. `stream.open` est un getter dynamique distinct, qui peut changer après une tentative de reconnexion. L'exécution SSE accepte l'annulation et `HttpContext` ; la reconnexion se configure sur le client. Les limites obligatoires `maxBufferSize` et `maxQueueSize` appartiennent à chaque définition d'event stream.
+## Portée serveur vs navigateur
 
-### WebSocket
+Sur un serveur, crée le client dans la frontière de la requête quand les options ou closures d’intercepteur capturent auth, cookies, utilisateurs ou tenants. L’identité du client n’est pas une frontière de sécurité à elle seule.
 
-```typescript
-const [error, session, startupConnection] = await client.execute(socketCommand, {
-  signal,
-  reconnect: { attempts: 3 },
-})
-```
+## Référence
 
-Le troisième élément est l'instantané de connexion au démarrage. `session.connection` est un getter dynamique qui peut décrire une tentative de connexion physique ultérieure. L'exécution WebSocket accepte l'annulation et les options `beforeConnect`, `heartbeat`, `protocols` et `reconnect` propres à cette exécution. La limite obligatoire `maxIncomingQueueSize` et la limite facultative `maxOutgoingQueueSize` appartiennent à chaque définition WebSocket. L'exécution n'accepte pas `HttpContext`.
+| Helper                                                                                                        | Effet                                                   |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `withEndpoint(url)`                                                                                           | Endpoint de base absolu pour tous les transports        |
+| `withHTTPHandle(fetch)`                                                                                       | Remplace Fetch pour HTTP                                |
+| `withSSEHandle(fetch)`                                                                                        | Remplace Fetch pour SSE                                 |
+| `withWebSocketHandle(WebSocket)`                                                                              | Remplace le constructeur WebSocket                      |
+| `withInterceptors(...items)`                                                                                  | Append des intercepteurs mixtes                         |
+| `withQueryParamsSerializer(fn)`                                                                               | Remplace la sérialisation de query                      |
+| `withCredentials(boolean)`                                                                                    | Fetch `credentials: 'include'` pour HTTP/SSE quand true |
+| `withXSRF(options?)`                                                                                          | Cookie XSRF HTTP → en-tête                              |
+| `withSSEReconnect` / `withSSEOnInvalidEvent`                                                                  | Réglages SSE                                            |
+| `withWebSocketReconnect` / `withWebSocketHeartbeat` / `withWebSocketProtocols` / `withWebSocketBeforeConnect` | Réglages WebSocket                                      |
 
-Consultez [Erreurs](/fr-FR/core/errors) pour les branches d'échec exactes, ainsi que [HTTP](/fr-FR/core/http), [SSE](/fr-FR/core/sse) et [WebSocket](/fr-FR/core/web-socket) pour le cycle de vie de chaque transport.
+## Recettes liées
 
-## Portée du client
-
-Une application navigateur peut conserver un client au niveau du module si son endpoint et les fonctions qu'il capture ne contiennent qu'un état adapté au navigateur et indépendant des requêtes.
-
-```typescript
-export const apiClient = createClient(withEndpoint(import.meta.env.VITE_API_ENDPOINT))
-```
-
-Côté serveur, ne réutilisez pas un client entre plusieurs requêtes si ses options ou intercepteurs capturent des données d'autorisation, des cookies, un tenant, un utilisateur ou un contexte de requête. Créez-le dans la portée de la requête serveur.
-
-Un `Client` n'a pas de méthode `dispose()`. Il ne suit ni les requêtes, ni les flux SSE, ni les sessions WebSocket actifs. Le code qui démarre un travail doit annuler ou fermer la ressource à la limite de cycle de vie correspondante.
-
-## Inspection avancée
-
-Utilisez `isClient(value)` pour tester le marqueur du client à l'exécution.
-
-```typescript
-import { isClient } from '@defjs/core'
-
-export function keepClient(value: unknown) {
-  return isClient(value) ? value : undefined
-}
-```
-
-`getClientConfig(client)` renvoie l'objet de configuration mutable vivant détenu par le client. Ce n'est ni un instantané ni une vue en lecture seule.
-
-```typescript
-import { getClientConfig, type Client } from '@defjs/core'
-
-export function interceptorCount(client: Client): number {
-  return getClientConfig(client).interceptors.length
-}
-```
-
-Modifier cet objet change les exécutions suivantes et contourne la composition normale des options. Réservez-le au diagnostic ou à du code d'intégration soigneusement relu. `getClientConfig` lève une `TypeError` si son argument n'est pas un client valide.
-
-## Étapes suivantes
-
-- [Commandes](/fr-FR/core/commands) définit les valeurs transmises à `execute`.
-- [Intercepteurs](/fr-FR/core/interceptors) explique le filtrage et l'ordre « oignon ».
-- [Contexte](/fr-FR/core/context) présente les métadonnées par requête pour HTTP et SSE.
+- [Tester avec un handle Fetch local](../recipes/test-with-handle.md)
+- [Annuler un appel HTTP](../recipes/cancel-http.md)

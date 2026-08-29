@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
-import { globalSetupPath, packageRoot } from './test/shared'
+import { packageRoot } from './test/shared.ts'
 
 export default defineConfig({
   root: packageRoot,
@@ -17,7 +17,7 @@ export default defineConfig({
   },
   test: {
     name: 'vue-browser',
-    globalSetup: globalSetupPath,
+    globalSetup: resolve(packageRoot, '../../test/browser-api-server-setup.ts'),
     browser: {
       enabled: true,
       api: 63316,

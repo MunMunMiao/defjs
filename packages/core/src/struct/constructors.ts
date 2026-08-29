@@ -200,7 +200,11 @@ function createRequestBodyDescriptor(body: StructLike<unknown, unknown, boolean>
 
   const definition = (body as unknown as RuntimeStruct)[DEFINITION]
   if (definition.kind === 'requestBody') {
-    return { codec: definition.codec, struct: definition.struct as unknown as RuntimeStruct }
+    return {
+      codec: definition.codec,
+      contentType: definition.contentType,
+      struct: definition.struct as unknown as RuntimeStruct,
+    }
   }
   if (definition.kind === 'blob') {
     return { codec: 'blob', struct: body as unknown as RuntimeStruct }
@@ -215,12 +219,14 @@ function createRequestBodyDescriptor(body: StructLike<unknown, unknown, boolean>
 export function createRequestBodyStruct<const C extends RequestBodyCodec, S extends StructLike<unknown, unknown, boolean>>(
   codec: C,
   struct: S,
+  contentType?: string | null,
 ): RequestBodyStruct<C, S> {
   assertStruct(struct, `${codec} body`)
 
   return castStruct<RequestBodyStruct<C, S>>(
     makeStruct({
       codec,
+      ...(contentType !== undefined ? { contentType } : {}),
       flags: DEFAULT_FLAGS,
       kind: 'requestBody',
       struct,
@@ -228,8 +234,11 @@ export function createRequestBodyStruct<const C extends RequestBodyCodec, S exte
   )
 }
 
-export function createJsonBodyStruct<S extends StructLike<unknown, unknown, boolean>>(struct: S): RequestBodyStruct<'json', S> {
-  return createRequestBodyStruct('json', struct)
+export function createJsonBodyStruct<S extends StructLike<unknown, unknown, boolean>>(
+  struct: S,
+  options?: { contentType?: string | null },
+): RequestBodyStruct<'json', S> {
+  return createRequestBodyStruct('json', struct, options?.contentType)
 }
 
 export function createUrlencodedBodyStruct<T extends ObjectShape>(shape: T): RequestBodyStruct<'urlencoded', ObjectStruct<T>> {

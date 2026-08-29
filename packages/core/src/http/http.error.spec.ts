@@ -5,7 +5,7 @@ import { ERR_ABORTED } from '../error'
 import { createHttpInterceptor } from '../interceptor'
 import type { HttpResponse } from '../internal/http_response'
 import { makeResponse } from '../internal/http_response'
-import { struct } from '../struct'
+import { StructError, struct } from '../struct'
 import { defineRequest } from './index'
 import type { HttpExecuteOptions } from './http'
 
@@ -70,6 +70,15 @@ describe('request http runtime errors', () => {
     }
 
     expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error).toBeInstanceOf(Error)
+    expect(error.name).toBe('DefinitionError')
+    expect(error.cause).toBeInstanceOf(StructError)
+    if (!(error.cause instanceof StructError)) {
+      throw new Error('Expected the original StructError cause')
+    }
+    expect(error.cause.format()._errors).toEqual([])
+    expect(error.cause.flatten().fieldErrors['id']).toEqual(['Expected number at id, received "oops"'])
+    expect(error.cause.prettify()).toBe('× id: Expected number at id, received "oops"')
   })
 
   test('should stop before build and transport when a required request section is missing', async () => {
@@ -167,9 +176,10 @@ describe('request http runtime errors', () => {
     expect(result).toBeUndefined()
     expect(response?.error).toBeInstanceOf(SyntaxError)
     expect(error?.code).toBe('UNDECLARED_STATUS')
-    if (error?.kind !== 'definition') {
-      throw new Error('Expected definition error')
+    if (error?.kind !== 'definition' || error.code !== 'UNDECLARED_STATUS') {
+      throw new Error('Expected undeclared status definition error')
     }
+    expect(error.status).toBe(response?.status)
     expect(error.cause).not.toBe(response?.error)
   })
 
@@ -188,11 +198,13 @@ describe('request http runtime errors', () => {
     expect(response?.status).toBe(500)
     expect(error?.kind).toBe('definition')
 
-    if (error?.kind !== 'definition') {
-      throw new Error('Expected definition error')
+    if (error?.kind !== 'definition' || error.code !== 'UNDECLARED_STATUS') {
+      throw new Error('Expected undeclared status definition error')
     }
 
     expect(error.code).toBe('UNDECLARED_STATUS')
+    expect(error.status).toBe(500)
+    expect(error.response).toBe(response)
   })
 
   test('should return definition error when build throws', async () => {
@@ -218,7 +230,7 @@ describe('request http runtime errors', () => {
     expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
   })
 
-  test('should return transport error when interceptor chain throws', async () => {
+  test('should return a definition error when interceptor chain throws', async () => {
     const throwingInterceptor = createHttpInterceptor(async () => {
       throw new Error('interceptor boom')
     })
@@ -237,13 +249,16 @@ describe('request http runtime errors', () => {
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
-    expect(error?.kind).toBe('transport')
+    expect(error?.kind).toBe('definition')
 
-    if (error?.kind !== 'transport') {
-      throw new Error('Expected transport error')
+    if (error?.kind !== 'definition') {
+      throw new Error('Expected definition error')
     }
 
-    expect(error.code).toBe('NETWORK_ERROR')
+    expect(error.code).toBe('INTERCEPTOR_FAILED')
+    expect(error).toBeInstanceOf(Error)
+    expect(error.cause).toBeInstanceOf(Error)
+    expect((error.cause as Error).message).toBe('interceptor boom')
   })
 
   test.each([
@@ -334,7 +349,8 @@ describe('request http runtime errors', () => {
     expect(transportSignal?.aborted).toBe(true)
     await expect(hiddenResponse).resolves.toMatchObject({ error: ERR_ABORTED, status: 0 })
     if (mode === 'throw') {
-      expect(error).toMatchObject({ cause: interceptorError, code: 'NETWORK_ERROR' })
+      expect(error).toMatchObject({ cause: interceptorError, code: 'INTERCEPTOR_FAILED', kind: 'definition' })
+      expect(error).toBeInstanceOf(Error)
       expect(response).toBeUndefined()
     } else {
       expect(error).toBeNull()
@@ -417,7 +433,7 @@ describe('request http runtime errors', () => {
     expect(response).toBeUndefined()
     expect(error?.kind).toBe('definition')
     expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+    expect(error?.message).toBe('abort and timeout cannot be used together')
   })
 
   test('should prefer HTTP cancellation config conflict over an already aborted signal', async () => {
@@ -437,7 +453,7 @@ describe('request http runtime errors', () => {
     expect(response).toBeUndefined()
     expect(error?.kind).toBe('definition')
     expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
-    expect(error?.message).toBe('with.abort and with.timeout cannot be used together')
+    expect(error?.message).toBe('abort and timeout cannot be used together')
   })
 
   test.each([-1, 0, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
@@ -735,7 +751,7 @@ describe('request http runtime errors', () => {
     expect(result).toBeUndefined()
     expect(response?.status).toBe(500)
     expect(error?.kind).toBe('http')
-    expect(error?.message).toBe('Http failure response for https://example.com/test: 500 - Server Error')
+    expect(error?.message).toBe('Http failure response: 500 - Server Error')
   })
 
   test('should classify an explicit response error before parsing a declared output struct', async () => {
@@ -898,5 +914,155 @@ describe('request http runtime errors', () => {
     }
 
     expect(error.code).toBe('TIMEOUT')
+  })
+
+  test('should release the timeout timer after a successful request without aborting its signal', async () => {
+    vi.useFakeTimers()
+    let requestSignal: AbortSignal | undefined
+    const successfulClient = createClient(
+      withEndpoint('https://example.com'),
+      withHTTPHandle(async () => new Response(null, { status: 204 })),
+      withInterceptors(
+        createHttpInterceptor((request, next) => {
+          requestSignal = request.abort
+          return next(request)
+        }),
+      ),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/success' })
+
+    try {
+      const [error, result, response] = await successfulClient.execute(useRequest(), { timeout: 60_000 })
+
+      expect(error).toBeNull()
+      expect(result).toBeUndefined()
+      expect(response?.status).toBe(204)
+      expect(requestSignal?.aborted).toBe(false)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('should release the timeout timer when request construction fails', async () => {
+    vi.useFakeTimers()
+    const buildError = new Error('build failed')
+    const useRequest = defineRequest({
+      build() {
+        throw buildError
+      },
+      input: struct.object({ id: struct.string() }),
+      method: 'GET',
+      path: '/build-error',
+    })
+
+    try {
+      const [error, result, response] = await client.execute(useRequest({ id: 'request' }), { timeout: 60_000 })
+
+      expect(error).toMatchObject({ cause: buildError, code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+      expect(result).toBeUndefined()
+      expect(response).toBeUndefined()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('should return TIMEOUT when an interceptor never settles after next resolves', async () => {
+    vi.useFakeTimers()
+    let markNextResolved!: () => void
+    const nextResolved = new Promise<void>((resolve) => {
+      markNextResolved = resolve
+    })
+    const hangingClient = createClient(
+      withEndpoint('https://example.com'),
+      withHTTPHandle(async () => new Response(null, { status: 204 })),
+      withInterceptors(
+        createHttpInterceptor(async (request, next) => {
+          await next(request)
+          markNextResolved()
+          return await new Promise<never>(() => undefined)
+        }),
+      ),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/hang-after-next' })
+
+    try {
+      const pending = hangingClient.execute(useRequest(), { timeout: 40 })
+      let outcome: Awaited<typeof pending> | undefined
+      void pending.then((result) => {
+        outcome = result
+      })
+
+      await nextResolved
+      await vi.advanceTimersByTimeAsync(40)
+
+      expect(outcome?.[0]).toMatchObject({ code: 'TIMEOUT', kind: 'transport' })
+      expect(outcome?.[1]).toBeUndefined()
+      expect(outcome?.[2]).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('should time out a hanging HTTP handle with a platform timer', async () => {
+    vi.useFakeTimers()
+    const hangingClient = createClient(
+      withEndpoint('https://example.com'),
+      withHTTPHandle(() => new Promise<Response>(() => undefined)),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/hang' })
+
+    try {
+      const pending = hangingClient.execute(useRequest(), { timeout: 40 })
+      await vi.advanceTimersByTimeAsync(40)
+
+      const [error, result, response] = await pending
+      expect(error).toMatchObject({ code: 'TIMEOUT', kind: 'transport' })
+      expect(result).toBeUndefined()
+      expect(response).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('should settle interceptor finally before returning TIMEOUT', async () => {
+    const logs: string[] = []
+    const hangingClient = createClient(
+      withEndpoint('https://example.com'),
+      withHTTPHandle(() => new Promise<Response>(() => undefined)),
+      withInterceptors(
+        createHttpInterceptor(async (req, next) => {
+          try {
+            return await next(req)
+          } finally {
+            logs.push('after')
+          }
+        }),
+      ),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/hang' })
+
+    const [error] = await hangingClient.execute(useRequest(), { timeout: 40 })
+
+    expect(error).toMatchObject({ code: 'TIMEOUT', kind: 'transport' })
+    expect(logs).toEqual(['after'])
+  })
+
+  test('should classify a non-Error interceptor throw as INTERCEPTOR_FAILED', async () => {
+    const guardedClient = createClient(
+      withEndpoint('https://example.com'),
+      withInterceptors(
+        createHttpInterceptor(async () => {
+          throw 'interceptor boom'
+        }),
+      ),
+    )
+    const useRequest = defineRequest({ method: 'GET', path: '/intercepted' })
+
+    const [error] = await guardedClient.execute(useRequest())
+
+    expect(error).toMatchObject({ code: 'INTERCEPTOR_FAILED', kind: 'definition', message: 'interceptor boom' })
+    expect(error).toBeInstanceOf(Error)
   })
 })

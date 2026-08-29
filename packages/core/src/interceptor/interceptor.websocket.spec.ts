@@ -1,8 +1,7 @@
-import type { FnReturn } from '../internal/utility_types'
 import { describe, expect, test } from 'vitest'
 import type { HttpRequest } from '../http'
 import type { WebSocketInterceptorFn, WebSocketSessionLike } from './interceptor'
-import { createWebSocketInterceptor, makeWebSocketInterceptorChain } from './interceptor'
+import { createWebSocketInterceptor, makeChain } from './interceptor'
 
 describe('WebSocket interceptor chain', () => {
   test('should apply WebSocket interceptors and pass modified request to handler', async () => {
@@ -34,10 +33,10 @@ describe('WebSocket interceptor chain', () => {
       return {
         connection: {},
         state: 'open',
-      } as unknown as FnReturn<WebSocketInterceptorFn>
+      } as unknown as ReturnType<WebSocketInterceptorFn>
     }
 
-    const chain = makeWebSocketInterceptorChain(interceptors)
+    const chain = makeChain(interceptors)
     await chain(baseRequest, fakeWsHandler)
 
     expect(callOrder).toEqual(['first', 'second'])
@@ -56,7 +55,7 @@ describe('WebSocket interceptor chain', () => {
       return { ...session, wrapped: true }
     }
 
-    const chain = makeWebSocketInterceptorChain([interceptor])
+    const chain = makeChain([interceptor])
     const result = await chain({ endpoint: '/ws', method: 'GET' }, async () => fakeSession)
 
     expect((result as unknown as { wrapped: boolean }).wrapped).toBe(true)

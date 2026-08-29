@@ -5,36 +5,49 @@ import type { ClientConfig, ClientWebSocketOptions, WebSocketHandle } from '../c
 import type { RequestError } from '../error'
 import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
 import type { WebSocketSessionLike } from '../interceptor/interceptor'
-import { makeWebSocketInterceptorChain, resolveWebSocketInterceptors } from '../interceptor/interceptor'
+import { makeChain, resolveWebSocketInterceptors } from '../interceptor/interceptor'
 import type { UseCancellationConfig } from '../internal/abort'
 import {
   awaitWithSignal,
   createAbortTimeoutConflictError,
   hasAbortTimeoutConflict,
   mergeAbortSignals,
+  resolveAbortTransportError,
   snapshotCancellationConfig,
   validateTransportTimeout,
 } from '../internal/abort'
 import { AsyncQueue } from '../internal/async_queue'
-import { createDeferred } from '../internal/deferred'
 import type { EndpointCommandBuilder } from '../internal/endpoint_command'
 import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
 import { parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpRequest } from '../internal/http_request'
 import type { RequestBuild, RequestBuildHandler } from '../internal/request_builder'
+import { buildRequest } from '../internal/request_builder'
 import type { AnyStruct, Infer } from '../struct'
-import { createWebSocketBuild, createWebSocketRequest, createWebSocketUrlFromRequest } from './build'
-import { extractCloseInfo, resolveAbortTransportError, serializeOutgoingWebSocketMessage, transformWebSocketMessage } from './codec'
+import { createWebSocketRequest, createWebSocketUrlFromRequest } from './build'
+import { extractCloseInfo, MissingWebSocketStructError, serializeOutgoingWebSocketMessage, transformWebSocketMessage } from './codec'
 import type { WebSocketCloseSnapshot } from './codec'
 import type { HeartbeatRuntime } from './heartbeat'
 import { startHeartbeat, stopHeartbeat, validateHeartbeatConfig } from './heartbeat'
-import type { SendQueue } from './queue'
-import { createSendQueue } from './queue'
-import { computeReconnectDelay, normalizeReconnectConfig, shouldReconnect, wait } from './reconnect'
+import { computeReconnectDelay, wait } from '../internal/backoff'
+import { normalizeReconnectConfig, shouldReconnect } from './reconnect'
 
+/** Lifecycle state of a managed WebSocket session. */
 export type WebSocketState = 'aborted' | 'closed' | 'closing' | 'connecting' | 'error' | 'idle' | 'open' | 'reconnecting'
 
+/** Map of WebSocket message type names to payload structs. */
 export type SocketStructs = { [key: string]: AnyStruct }
+
+export interface NormalizedWebSocketIncoming {
+  data: unknown
+  type: string
+}
+
+export type NormalizedWebSocketOutgoing = boolean | null | number | string | readonly unknown[] | { readonly [key: string]: unknown }
+
+export type WebSocketIncomingNormalizer = (decoded: unknown) => NormalizedWebSocketIncoming | undefined
+
+export type WebSocketOutgoingNormalizer = (type: string, encodedPayload: unknown) => NormalizedWebSocketOutgoing
 
 type SimplifySocket<T> = { [K in keyof T]: T[K] } & {}
 
@@ -73,12 +86,14 @@ type DefaultIncomingSocketUnion<TIncoming extends SocketStructs> = 'default' ext
   ? NormalizeSocketMessage<string, Infer<TIncoming['default']>>
   : never
 
+/** Incoming message shape inferred from an incoming `SocketStructs` map. */
 export type WebSocketIncomingData<TIncoming extends SocketStructs> = [
   KnownIncomingSocketUnion<TIncoming> | DefaultIncomingSocketUnion<TIncoming>,
 ] extends [never]
   ? never
   : KnownIncomingSocketUnion<TIncoming> | DefaultIncomingSocketUnion<TIncoming>
 
+/** Outgoing message shape inferred from an outgoing `SocketStructs` map. */
 export type WebSocketOutgoingData<TOutgoing extends SocketStructs | undefined> = TOutgoing extends SocketStructs
   ? [KnownOutgoingSocketUnion<TOutgoing>] extends [never]
     ? never
@@ -92,6 +107,8 @@ interface WebSocketDefinitionBase<
   incoming: TIncoming
   maxIncomingQueueSize: number
   maxOutgoingQueueSize?: number
+  normalizeIncoming?: WebSocketIncomingNormalizer
+  normalizeOutgoing?: WebSocketOutgoingNormalizer
   operation?: string
   outgoing?: TOutgoing
   path: string
@@ -116,6 +133,7 @@ type WebSocketDefinitionWithBuild<
   input: TInput
 }
 
+/** Contract describing a WebSocket endpoint: path, message structs, and queue limits. */
 export type WebSocketDefinition<
   TInput extends AnyStruct | undefined = undefined,
   TIncoming extends SocketStructs = SocketStructs,
@@ -124,6 +142,7 @@ export type WebSocketDefinition<
   | WebSocketDefinitionWithoutBuild<TInput, TIncoming, TOutgoing>
   | (TInput extends AnyStruct ? WebSocketDefinitionWithBuild<TInput, TIncoming, TOutgoing> : never)
 
+/** Connection metadata for the current WebSocket generation. */
 export interface WebSocketConnectionInfo {
   extensions?: string
   generation: number
@@ -131,23 +150,27 @@ export interface WebSocketConnectionInfo {
   url?: string
 }
 
+/** How a WebSocket session ended: closed, aborted, or error. */
 export type WebSocketCloseInfo =
   | { kind: 'closed'; code?: number; reason?: string; wasClean?: boolean }
   | { kind: 'aborted'; cause?: unknown; code?: number; reason?: string; wasClean?: boolean }
   | { kind: 'error'; cause: unknown; code?: number; reason?: string; wasClean?: boolean }
 
-export interface WebSocketSession<TIncoming = unknown, TOutgoing = never> {
+/** Typed WebSocket session: send/receive messages, observe state, and close. */
+export interface WebSocketSession<TIncoming = unknown, TOutgoing = never> extends AsyncDisposable {
   readonly bufferedAmount: number
   readonly connection: WebSocketConnectionInfo
   readonly closed: Promise<WebSocketCloseInfo>
   readonly receive: AsyncIterable<TIncoming>
   readonly state: WebSocketState
   close(code?: number, reason?: string): void
+  [Symbol.asyncDispose](): PromiseLike<void>
   onRuntimeError(listener: (error: unknown) => void): () => void
   onStateChange(listener: (state: WebSocketState) => void): () => void
   send(message: TOutgoing): void
 }
 
+/** Await-result tuple from opening a WebSocket via `client.execute`. */
 export type SocketAwaitResult<TIncoming, TOutgoing = never> =
   | [error: null, socket: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
   | [error: RequestError<unknown>, socket: undefined, connection: WebSocketConnectionInfo | undefined]
@@ -159,13 +182,16 @@ interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
   reconnect?: ClientWebSocketOptions['reconnect']
 }
 
+/** Client configuration for WebSocket execute (heartbeat, reconnect, abort). */
 export type UseWebSocketConfig<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketBaseConfig<TIncoming, TOutgoing> &
   UseCancellationConfig
 
+/** Per-execute options for WebSocket commands, including an optional `AbortSignal`. */
 export type WebSocketExecuteOptions<TIncoming = unknown, TOutgoing = unknown> = UseWebSocketConfig<TIncoming, TOutgoing> & {
   signal?: AbortSignal
 }
 
+/** Executable WebSocket command produced by a `WebSocketCommandBuilder`. */
 export interface WebSocketCommand<
   TInput extends AnyStruct | undefined,
   TIncoming extends SocketStructs,
@@ -175,6 +201,7 @@ export interface WebSocketCommand<
   readonly input: EndpointInput<TInput> | undefined
 }
 
+/** Builder function that creates `WebSocketCommand` values from endpoint input. */
 export type WebSocketCommandBuilder<
   TInput extends AnyStruct | undefined,
   TIncoming extends SocketStructs,
@@ -198,12 +225,14 @@ type SocketRefState = {
   transition: number
 }
 
+/** Reason recorded when the session is closed via `session.close()`. */
 export type ManualSocketCloseReason = {
   code?: number
   kind: 'manual-web-socket-close'
   reason?: string
 }
 
+/** Heartbeat ping/ack configuration for a live WebSocket session. */
 export interface WebSocketHeartbeatConfig<TIncoming = unknown, TOutgoing = unknown> {
   intervalMs: number
   isAck?: (message: TIncoming) => boolean
@@ -216,6 +245,25 @@ function castParsedWebSocketInput<TInput extends AnyStruct | undefined>(value: u
   return value as ParsedInput<TInput>
 }
 
+/**
+ * Declare a typed WebSocket command builder.
+ *
+ * Pass path, incoming (and optional outgoing) message structs, and queue limits.
+ * Call the returned builder with input to get a `WebSocketCommand` for `client.execute`.
+ *
+ * @param definition - WebSocket contract (path, structs, queue limits, optional input).
+ * @returns A builder that creates `WebSocketCommand` values from input.
+ *
+ * @example
+ * ```ts
+ * const useChat = defineWebSocket({
+ *   maxIncomingQueueSize: 16,
+ *   path: '/ws/chat',
+ *   incoming: { message: struct.object({ text: struct.string() }) },
+ *   outgoing: { message: struct.object({ text: struct.string() }) },
+ * })
+ * ```
+ */
 export function defineWebSocket<
   TInput extends AnyStruct,
   TIncoming extends SocketStructs = SocketStructs,
@@ -338,7 +386,10 @@ async function runWebSocketCommand<
 
   let built: RequestBuild
   try {
-    built = createWebSocketBuild(parsedInput, endpoint.build, endpoint.input)
+    built = buildRequest(parsedInput, endpoint.build, {
+      input: endpoint.input,
+      transport: 'webSocket',
+    })
   } catch (error) {
     const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
     state.error = definitionError
@@ -402,12 +453,12 @@ async function runWebSocketCommand<
       const incomingQueue = new AsyncQueue<WebSocketIncomingData<TIncoming>>({
         maxSize: endpoint.maxIncomingQueueSize,
       })
-      const closedDeferred = createDeferred<WebSocketCloseInfo>()
+      const closedDeferred = Promise.withResolvers<WebSocketCloseInfo>()
       const sessionController = {
         currentSocket: undefined as WebSocketHandle | undefined,
         heartbeat: undefined as HeartbeatRuntime<WebSocketIncomingData<TIncoming>> | undefined,
       }
-      const sendQueue = createSendQueue(endpoint.maxOutgoingQueueSize ?? 0)
+      const sendQueue: string[] = []
       let startupSettled = false
       let finished = false
       let latestConnection: WebSocketConnectionInfo | undefined
@@ -415,6 +466,13 @@ async function runWebSocketCommand<
       let generation = 0
       let activeAttempt: ActiveSocketAttempt | undefined
       let manualClose: ManualSocketCloseReason | undefined
+      const messagePumpTasks = new Set<Promise<void>>()
+      let disposeTask: Promise<void> | undefined
+      let disposeTimer: ReturnType<typeof setTimeout> | undefined
+      let disposeTimeout: DOMException | undefined
+      let hasCloseError = false
+      let closeError: unknown
+      let physicalCleanupDetach: (() => void) | undefined
 
       const hasReconnectPredicate = reconnect?.hasShouldReconnect ?? false
       const beforeConnect = (beforeConnectOption ?? clientConfig.webSocket.beforeConnect) as
@@ -423,18 +481,21 @@ async function runWebSocketCommand<
       const baseProtocols = [...(protocolsOption ?? clientConfig.webSocket.protocols ?? endpoint.protocols ?? [])]
       const session = createWebSocketSession(
         endpoint.outgoing,
+        endpoint.normalizeOutgoing,
         incomingQueue,
         closedDeferred.promise,
         state,
         sessionController,
         sendQueue,
+        endpoint.maxOutgoingQueueSize ?? 0,
         WebSocketCtor.OPEN,
         () => finished || signal.aborted,
         requestClose,
+        disposeSession,
         // Type boundary: createWebSocketSession is generic over TIncoming/TOutgoing; the cast aligns the locally-typed session with the endpoint's struct types.
       ) as WebSocketSession<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>
 
-      void run().catch((cause) => {
+      const lifecycleTask = run().catch((cause) => {
         finish({ cause, kind: 'error' })
       })
 
@@ -719,6 +780,7 @@ async function runWebSocketCommand<
                   finish({ cause, kind: 'error' })
                 },
                 WebSocketCtor.OPEN,
+                endpoint.normalizeOutgoing,
               )
             }
           }
@@ -730,11 +792,26 @@ async function runWebSocketCommand<
             }
             let transformed: WebSocketIncomingData<TIncoming> | undefined
             try {
-              transformed = await awaitWithSignal(() => transformWebSocketMessage(endpoint.incoming, event.data), messageSignal)
+              transformed = await awaitWithSignal(
+                () => transformWebSocketMessage(endpoint.incoming, event.data, endpoint.normalizeIncoming),
+                messageSignal,
+              )
             } catch (error) {
-              if (!finished && !messageController.signal.aborted) {
-                emitRuntimeError(state, error)
+              if (finished || messageController.signal.aborted) {
+                return
               }
+              if (error instanceof MissingWebSocketStructError) {
+                await notifyWebSocketInvalidEvent(
+                  clientConfig.webSocket.onInvalidEvent,
+                  {
+                    reason: 'missing-struct',
+                    message: { type: error.type, data: error.decoded },
+                  },
+                  messageSignal,
+                )
+                return
+              }
+              emitRuntimeError(state, error)
               return
             }
             if (finished || sessionController.currentSocket !== socket || typeof transformed === 'undefined') {
@@ -793,7 +870,11 @@ async function runWebSocketCommand<
               return
             }
             rawMessages.push(event)
-            void pumpMessages()
+            const messagePumpTask = pumpMessages()
+            messagePumpTasks.add(messagePumpTask)
+            void messagePumpTask.finally(() => {
+              messagePumpTasks.delete(messagePumpTask)
+            })
           }
 
           const handleError = () => {
@@ -803,7 +884,7 @@ async function runWebSocketCommand<
             errorCloseTimer = setTimeout(() => {
               errorCloseTimer = undefined
               finish({ cause: runtimeCause, kind: 'error' }, { skipNativeClose: true })
-            }, ERROR_CLOSE_GRACE_MS)
+            }, SOCKET_CLOSE_GRACE_MS)
             try {
               socket.close()
             } catch {
@@ -828,6 +909,9 @@ async function runWebSocketCommand<
               cause: runtimeCause,
               opened,
             }
+            if (disposeTask) {
+              activeAttempt?.abortMessagePumpForDisposal()
+            }
             if (typeof runtimeCause !== 'undefined') {
               rawMessages.length = 0
               settleAttempt(closeOutcome)
@@ -839,6 +923,11 @@ async function runWebSocketCommand<
           }
 
           activeAttempt = {
+            abortMessagePumpForDisposal() {
+              if (closeObserved) {
+                messageController.abort()
+              }
+            },
             cancel(keepCurrentSocket = false) {
               settleAttempt(
                 {
@@ -878,11 +967,11 @@ async function runWebSocketCommand<
           requestNativeCloseBestEffort(activeSocket)
         }
         if (activeSocket && options.keepPhysicalCleanup) {
-          installPhysicalCleanup(activeSocket, sessionController)
+          physicalCleanupDetach = installPhysicalCleanup(activeSocket, sessionController)
         }
         activeAttempt?.cancel(options.keepPhysicalCleanup)
 
-        sendQueue.clear()
+        sendQueue.length = 0
         if (final.kind === 'closed') {
           incomingQueue.close()
           state.error = undefined
@@ -951,6 +1040,47 @@ async function runWebSocketCommand<
           throw cause
         }
       }
+
+      function disposeSession(): Promise<void> {
+        return (disposeTask ??= Promise.resolve().then(disposeOnce))
+      }
+
+      async function disposeOnce(): Promise<void> {
+        try {
+          try {
+            session.close()
+          } catch (cause) {
+            hasCloseError = true
+            closeError = cause
+          }
+          activeAttempt?.abortMessagePumpForDisposal()
+
+          if (!finished) {
+            disposeTimer = setTimeout(() => {
+              /* istanbul ignore if -- @preserve defensive: lifecycle completion clears this timer before a later timer task can run */
+              if (finished) {
+                return
+              }
+              disposeTimeout = new DOMException('WebSocket close event was not observed before teardown timeout', 'TimeoutError')
+              finish(toClosedInfo({}, manualClose), { skipNativeClose: true })
+            }, SOCKET_CLOSE_GRACE_MS)
+          }
+
+          await lifecycleTask
+          await Promise.allSettled([...messagePumpTasks])
+        } finally {
+          clearTimeout(disposeTimer)
+          disposeTimer = undefined
+          physicalCleanupDetach?.()
+        }
+
+        if (hasCloseError) {
+          throw closeError
+        }
+        if (disposeTimeout) {
+          throw disposeTimeout
+        }
+      }
     })
     pendingSessions.add(pendingSession)
     void pendingSession.then(
@@ -966,7 +1096,7 @@ async function runWebSocketCommand<
   }
 
   const wsInterceptors = resolveWebSocketInterceptors(clientConfig.interceptors)
-  const wsChain = makeWebSocketInterceptorChain(wsInterceptors)
+  const wsChain = makeChain(wsInterceptors)
 
   try {
     const session = await awaitWithSignal(() => wsChain(wsRequest, wsHandler), chainSignal)
@@ -1017,6 +1147,16 @@ async function runWebSocketCommand<
   }
 }
 
+/**
+ * Open a WebSocket command against the given client config.
+ *
+ * Prefer `client.execute(command)` in application code; this is the low-level entry used by the client.
+ *
+ * @param clientConfig - Resolved client configuration.
+ * @param command - WebSocket command from a `WebSocketCommandBuilder`.
+ * @param options - Optional execute options (heartbeat, reconnect, abort).
+ * @returns Await-result tuple of `[error, socket, connection]`.
+ */
 export async function executeWebSocketCommand<
   TInput extends AnyStruct | undefined,
   TIncoming extends SocketStructs,
@@ -1040,6 +1180,7 @@ export async function executeWebSocketCommand<
   return runWebSocketCommand(clientConfig, endpoint, input, config, controller, state)
 }
 
+/** Outcome of a single WebSocket connect attempt used by reconnect logic. */
 export type SocketLifecycleOutcome = {
   closeInfo: WebSocketCloseSnapshot
   connection?: WebSocketConnectionInfo
@@ -1048,6 +1189,7 @@ export type SocketLifecycleOutcome = {
 }
 
 type ActiveSocketAttempt = {
+  abortMessagePumpForDisposal(): void
   cancel(keepCurrentSocket?: boolean): void
   socket: WebSocketHandle
 }
@@ -1058,11 +1200,12 @@ type FinishOptions = {
   startupError?: RequestError<unknown>
 }
 
-const ERROR_CLOSE_GRACE_MS = 1_000
+const SOCKET_CLOSE_GRACE_MS = 1_000
 const noop = () => undefined
 
 function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | undefined>(
   outgoing: TOutgoing,
+  normalizeOutgoing: WebSocketOutgoingNormalizer | undefined,
   queue: AsyncQueue<TIncoming>,
   closed: Promise<WebSocketCloseInfo>,
   state: SocketRefState,
@@ -1070,10 +1213,12 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | und
     currentSocket: WebSocketHandle | undefined
     heartbeat: HeartbeatRuntime<TIncoming> | undefined
   },
-  sendQueue: SendQueue,
+  sendQueue: string[],
+  maxOutgoingQueueSize: number,
   openState: number,
   isUnavailable: () => boolean,
   requestClose: (code?: number, reason?: string) => void,
+  disposeSession: () => PromiseLike<void>,
 ): WebSocketSession<TIncoming, WebSocketOutgoingData<TOutgoing>> {
   return {
     get bufferedAmount() {
@@ -1089,6 +1234,9 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | und
     closed,
     close(code?: number, reason?: string) {
       requestClose(code, reason)
+    },
+    [Symbol.asyncDispose]() {
+      return disposeSession()
     },
     get state() {
       return state.status
@@ -1126,7 +1274,7 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | und
         throw new DOMException('WebSocket session is not writable', 'InvalidStateError')
       }
 
-      const serialized = serializeOutgoingWebSocketMessage(outgoing, message)
+      const serialized = serializeOutgoingWebSocketMessage(outgoing, message, normalizeOutgoing)
       if (
         isUnavailable() ||
         state.status !== initialState ||
@@ -1142,15 +1290,21 @@ function createWebSocketSession<TIncoming, TOutgoing extends SocketStructs | und
         openSocket.send(serialized)
         return
       }
-      sendQueue.enqueue(serialized)
+      if (maxOutgoingQueueSize === 0) {
+        throw new Error('WebSocket outgoing queue is disabled')
+      }
+      if (sendQueue.length >= maxOutgoingQueueSize) {
+        throw new Error('WebSocket send queue overflow')
+      }
+      sendQueue.push(serialized)
     },
   }
 }
 
-function flushSendQueue(socket: WebSocketHandle, queue: SendQueue, openState: number): void {
+function flushSendQueue(socket: WebSocketHandle, queue: string[], openState: number): void {
   while (socket.readyState === openState) {
     const next = queue.shift()
-    if (!next) {
+    if (typeof next === 'undefined') {
       return
     }
 
@@ -1182,6 +1336,25 @@ function setSocketState(state: SocketRefState, next: WebSocketState): void {
 
 function emitRuntimeError(state: SocketRefState, error: unknown): void {
   emitRuntimeErrorToListeners([...state.listeners.runtimeError], error)
+}
+
+async function notifyWebSocketInvalidEvent(
+  onInvalidEvent: ClientWebSocketOptions['onInvalidEvent'],
+  context: {
+    reason: 'missing-struct'
+    message: { type: string; data: unknown }
+  },
+  signal: AbortSignal,
+): Promise<void> {
+  if (!onInvalidEvent) {
+    return
+  }
+
+  try {
+    await awaitWithSignal(() => onInvalidEvent(context), signal)
+  } catch {
+    // onInvalidEvent is an observer; observer failures must not tear down the session.
+  }
 }
 
 function emitRuntimeErrorToListeners(listeners: readonly ((error: unknown) => void)[], error: unknown): void {
@@ -1243,8 +1416,13 @@ function requestNativeCloseBestEffort(socket: WebSocketHandle): void {
   }
 }
 
-function installPhysicalCleanup(socket: WebSocketHandle, sessionController: { currentSocket: WebSocketHandle | undefined }): void {
+function installPhysicalCleanup(socket: WebSocketHandle, sessionController: { currentSocket: WebSocketHandle | undefined }): () => void {
+  let detached = false
   const cleanup = () => {
+    if (detached) {
+      return
+    }
+    detached = true
     socket.removeEventListener('close', cleanup)
     /* istanbul ignore else -- @preserve invariant: no replacement socket is created while physical cleanup is pending */
     if (sessionController.currentSocket === socket) {
@@ -1252,6 +1430,7 @@ function installPhysicalCleanup(socket: WebSocketHandle, sessionController: { cu
     }
   }
   socket.addEventListener('close', cleanup, { once: true })
+  return cleanup
 }
 
 function toClosedInfo(snapshot: WebSocketCloseSnapshot, fallback?: ManualSocketCloseReason): WebSocketCloseInfo {
