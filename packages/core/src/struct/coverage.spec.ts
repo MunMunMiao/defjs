@@ -10,11 +10,11 @@ import { resolveStructFields } from './fields'
 import { getStructFields, parseStructTuple as parse, parseStructValue } from './introspection'
 import { matchesRuntimeValue } from './match'
 import { parseValue } from './parse'
-import { DEFAULT_FLAGS, makeStruct } from './runtime'
+import { createPrimitiveStruct, DEFAULT_FLAGS, makeStruct } from './runtime'
 import { assertStruct, resolveObjectShape } from './shape'
 import { DEFINITION, OMIT } from './symbols'
-import type { ObjectDefinition, RuntimeStruct, StructDefinition } from './types'
-import { describeValue, expectedType } from './utils'
+import type { ObjectDefinition, Path, RuntimeStruct, StructDefinition } from './types'
+import { describeValue, expectedType, success } from './utils'
 
 function runtime(value: unknown): RuntimeStruct {
   return value as RuntimeStruct
@@ -158,6 +158,67 @@ describe('struct coverage boundary cases', () => {
       throw err
     }
     expect(value).toBe('plain')
+  })
+
+  test('custom decoders own their paths and parseValue preserves the caller path', () => {
+    const decoderPaths: Path[] = []
+    const decodedString = createPrimitiveStruct({
+      decode: (value, path) => {
+        decoderPaths.push(path)
+        path.push('decoder-owned')
+        return success(value)
+      },
+      expected: 'string',
+      is: (value): value is string => typeof value === 'string',
+      kind: 'string',
+    })
+    const callerPath: Path = ['caller']
+
+    expect(
+      parseValue(runtime(struct.object({ first: decodedString, second: decodedString })), { first: 'a', second: 'b' }, callerPath, 'value'),
+    ).toEqual({ ok: true, value: { first: 'a', second: 'b' } })
+    expect(callerPath).toEqual(['caller'])
+    expect(decoderPaths).toEqual([
+      ['caller', 'first', 'decoder-owned'],
+      ['caller', 'second', 'decoder-owned'],
+    ])
+    expect(decoderPaths[0]).not.toBe(decoderPaths[1])
+  })
+
+  test('errorMap retains discarded paths across reentrant and throwing parses', () => {
+    const retainedPaths: Path[] = []
+    const thrown = new Error('reentrant errorMap')
+    let reentered = false
+    const schema = struct.object({ value: struct.or(struct.string(), struct.number()) })
+
+    const [error] = parse(
+      schema,
+      { value: true },
+      {
+        errorMap: (outerIssue) => {
+          retainedPaths.push(outerIssue.path)
+          if (!reentered) {
+            reentered = true
+            expect(() =>
+              parse(
+                struct.object({ nested: struct.string() }),
+                { nested: 1 },
+                {
+                  errorMap: (innerIssue) => {
+                    retainedPaths.push(innerIssue.path)
+                    throw thrown
+                  },
+                },
+              ),
+            ).toThrow(thrown)
+          }
+          return undefined
+        },
+      },
+    )
+
+    expect(error).toBeInstanceOf(StructError)
+    expect(retainedPaths).toEqual([['value'], ['nested'], ['value'], ['value']])
   })
 
   test('alias-aware parsing stays on the single fail-fast parser', () => {

@@ -24,6 +24,7 @@
     "linkDirectory": false
   },
   "scripts": {
+    "bench:struct": "vitest bench src/struct/struct.bench.ts --config vitest.config.bench.ts --maxWorkers=1 --no-file-parallelism",
     "build": "tsdown --config-loader native --config tsdown.config.ts",
     "test": "vitest run --config vitest.config.ts --coverage"
   },

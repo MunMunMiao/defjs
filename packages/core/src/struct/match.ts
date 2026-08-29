@@ -107,7 +107,8 @@ function matchesObjectValue(struct: RuntimeStruct, value: { [key: string]: unkno
   }
 
   const shape = resolveObjectShape(struct, definition)
-  for (const [key, fieldStruct] of Object.entries(shape)) {
+  for (const key in shape) {
+    const fieldStruct = shape[key]
     const field = fieldStruct as unknown as RuntimeStruct
     const fieldDefinition = field[DEFINITION]
     if (!hasOwnKey(value, key)) {

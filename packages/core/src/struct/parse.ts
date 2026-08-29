@@ -24,6 +24,8 @@ import type {
 } from './types'
 import { expectedType, failure, hasOwnKey, isObjectIntersectionStruct, isPlainObject, success } from './utils'
 
+const discriminatorWireKeyCache = new WeakMap<DiscriminatedUnionDefinition, WeakMap<RuntimeStruct, string | undefined>>()
+
 export function parseValue(
   struct: RuntimeStruct,
   input: unknown,
@@ -31,13 +33,27 @@ export function parseValue(
   mode: ParseMode,
   useAliases = false,
 ): InternalParseResult<unknown> {
+  return parseValueAtPath(struct, input, [...path], mode, useAliases)
+}
+
+export function parseRootValue(struct: RuntimeStruct, input: unknown, mode: ParseMode, useAliases = false): InternalParseResult<unknown> {
+  return parseValueAtPath(struct, input, [], mode, useAliases)
+}
+
+function parseValueAtPath(
+  struct: RuntimeStruct,
+  input: unknown,
+  path: Path,
+  mode: ParseMode,
+  useAliases: boolean,
+): InternalParseResult<unknown> {
   const definition = struct[DEFINITION]
 
   if (input === undefined) {
     if (definition.flags.optional) {
       return success(mode === 'field' ? OMIT : undefined)
     }
-    return failure(issue(path, mode === 'field' ? 'missing_key' : 'invalid_type', expectedType(definition), input))
+    return failure(issue([...path], mode === 'field' ? 'missing_key' : 'invalid_type', expectedType(definition), input))
   }
 
   if (input === null) {
@@ -50,7 +66,7 @@ export function parseValue(
       definition.kind === 'or' ||
       definition.kind === 'requestBody'
     if (!delegatesNull) {
-      return failure(issue(path, 'invalid_type', expectedType(definition), input))
+      return failure(issue([...path], 'invalid_type', expectedType(definition), input))
     }
   }
 
@@ -105,16 +121,32 @@ export function parseValue(
   }
 }
 
+function parseChildValue(
+  struct: RuntimeStruct,
+  input: unknown,
+  path: Path,
+  segment: number | string,
+  mode: ParseMode,
+  useAliases: boolean,
+): InternalParseResult<unknown> {
+  path.push(segment)
+  try {
+    return parseValueAtPath(struct, input, path, mode, useAliases)
+  } finally {
+    path.pop()
+  }
+}
+
 function parsePrimitiveValue(
   definition: PrimitiveDefinition<PrimitiveKind, unknown, unknown>,
   input: unknown,
   path: Path,
 ): InternalParseResult<unknown> {
   if (!definition.is(input)) {
-    return failure(issue(path, 'invalid_type', definition.expected, input))
+    return failure(issue([...path], 'invalid_type', definition.expected, input))
   }
 
-  return definition.decode ? definition.decode(input, path) : success(input)
+  return definition.decode ? definition.decode(input, [...path]) : success(input)
 }
 
 function parseEnumValue(definition: EnumDefinition<string | number>, input: unknown, path: Path): InternalParseResult<unknown> {
@@ -122,21 +154,21 @@ function parseEnumValue(definition: EnumDefinition<string | number>, input: unkn
   // parser the input has already been validated as non-null/undefined and only enum members can match.
   return definition.values.includes(input as string | number)
     ? success(input)
-    : failure(issue(path, 'invalid_enum', definition.expected, input))
+    : failure(issue([...path], 'invalid_enum', definition.expected, input))
 }
 
 function parseLiteralValue(definition: LiteralDefinition<LiteralValue>, input: unknown, path: Path): InternalParseResult<unknown> {
-  return Object.is(input, definition.value) ? success(input) : failure(issue(path, 'invalid_literal', definition.expected, input))
+  return Object.is(input, definition.value) ? success(input) : failure(issue([...path], 'invalid_literal', definition.expected, input))
 }
 
 function parseArrayValue(definition: ArrayDefinition, input: unknown, path: Path, useAliases: boolean): InternalParseResult<unknown[]> {
   if (!Array.isArray(input)) {
-    return failure(issue(path, 'invalid_type', 'array', input))
+    return failure(issue([...path], 'invalid_type', 'array', input))
   }
 
   const output: unknown[] = []
   for (let index = 0; index < input.length; index += 1) {
-    const result = parseValue(definition.item as RuntimeStruct, input[index], [...path, index], 'value', useAliases)
+    const result = parseChildValue(definition.item as RuntimeStruct, input[index], path, index, 'value', useAliases)
     if (!result.ok) {
       return result
     }
@@ -154,14 +186,14 @@ function parseObjectValue(
   cachedField?: { inputKey: string; value: unknown },
 ): InternalParseResult<{ [key: string]: unknown }> {
   if (!isPlainObject(input)) {
-    return failure(issue(path, 'invalid_type', 'object', input))
+    return failure(issue([...path], 'invalid_type', 'object', input))
   }
 
   const output: { [key: string]: unknown } = Object.create(null)
   for (const field of resolveStructFields(struct, definition)) {
     const inputKey = useAliases ? field.wireKey : field.key
     const inputValue = cachedField?.inputKey === inputKey ? cachedField.value : hasOwnKey(input, inputKey) ? input[inputKey] : undefined
-    const result = parseValue(field.struct, inputValue, [...path, field.key], 'field', useAliases)
+    const result = parseChildValue(field.struct, inputValue, path, field.key, 'field', useAliases)
     if (!result.ok) {
       return result
     }
@@ -179,12 +211,12 @@ function parseRecordValue(
   useAliases: boolean,
 ): InternalParseResult<{ [key: string]: unknown }> {
   if (!isPlainObject(input)) {
-    return failure(issue(path, 'invalid_type', 'record', input))
+    return failure(issue([...path], 'invalid_type', 'record', input))
   }
 
   const output: { [key: string]: unknown } = Object.create(null)
   for (const key of Object.keys(input)) {
-    const result = parseValue(definition.value as RuntimeStruct, input[key], [...path, key], 'field', useAliases)
+    const result = parseChildValue(definition.value as RuntimeStruct, input[key], path, key, 'field', useAliases)
     if (!result.ok) {
       return result
     }
@@ -202,7 +234,7 @@ function parseRequestValue(
   useAliases: boolean,
 ): InternalParseResult<{ [key: string]: unknown }> {
   if (!isPlainObject(input)) {
-    return failure(issue(path, 'invalid_type', 'object', input))
+    return failure(issue([...path], 'invalid_type', 'object', input))
   }
 
   const output: { [key: string]: unknown } = Object.create(null)
@@ -214,7 +246,7 @@ function parseRequestValue(
     const sectionValue = hasOwnKey(input, sectionKey) ? input[sectionKey] : undefined
     if (sectionValue === undefined) {
       if (sectionStruct[DEFINITION].kind === 'object') {
-        const emptyResult = parseValue(sectionStruct, {}, [...path, sectionKey], 'field', useAliases)
+        const emptyResult = parseChildValue(sectionStruct, {}, path, sectionKey, 'field', useAliases)
         if (emptyResult.ok) {
           output[sectionKey] = emptyResult.value
           continue
@@ -223,7 +255,7 @@ function parseRequestValue(
       return failure(issue([...path, sectionKey], 'missing_key', expectedType(sectionStruct[DEFINITION]), undefined))
     }
 
-    const result = parseValue(sectionStruct, sectionValue, [...path, sectionKey], 'field', useAliases)
+    const result = parseChildValue(sectionStruct, sectionValue, path, sectionKey, 'field', useAliases)
     if (!result.ok) {
       return result
     }
@@ -239,17 +271,17 @@ function parseRequestBodyValue(
   mode: ParseMode,
   useAliases: boolean,
 ): InternalParseResult<unknown> {
-  return parseValue(definition.struct as RuntimeStruct, input, path, mode, useAliases)
+  return parseValueAtPath(definition.struct as RuntimeStruct, input, path, mode, useAliases)
 }
 
 function parseTupleValue(definition: TupleDefinition, input: unknown, path: Path, useAliases: boolean): InternalParseResult<unknown[]> {
   if (!Array.isArray(input) || input.length !== definition.items.length) {
-    return failure(issue(path, 'invalid_type', `tuple of length ${definition.items.length}`, input))
+    return failure(issue([...path], 'invalid_type', `tuple of length ${definition.items.length}`, input))
   }
 
   const output: unknown[] = []
   for (let index = 0; index < definition.items.length; index += 1) {
-    const result = parseValue(definition.items[index] as RuntimeStruct, input[index], [...path, index], 'value', useAliases)
+    const result = parseChildValue(definition.items[index] as RuntimeStruct, input[index], path, index, 'value', useAliases)
     if (!result.ok) {
       return result
     }
@@ -260,12 +292,31 @@ function parseTupleValue(definition: TupleDefinition, input: unknown, path: Path
 
 function parseUnionValue(definition: UnionDefinition, input: unknown, path: Path, useAliases: boolean): InternalParseResult<unknown> {
   for (const option of definition.options) {
-    const result = parseValue(option as RuntimeStruct, input, path, 'value', useAliases)
+    const result = parseValueAtPath(option as RuntimeStruct, input, path, 'value', useAliases)
     if (result.ok) {
       return result
     }
   }
-  return failure(issue(path, 'invalid_union', expectedType(definition), input))
+  return failure(issue([...path], 'invalid_union', expectedType(definition), input))
+}
+
+function resolveDiscriminatorWireKey(
+  definition: DiscriminatedUnionDefinition,
+  option: RuntimeStruct,
+  optionDefinition: ObjectDefinition,
+): string | undefined {
+  const cached = discriminatorWireKeyCache.get(definition)
+  if (cached?.has(option)) {
+    return cached.get(option)
+  }
+
+  const wireKey = resolveStructFields(option, optionDefinition).find((field) => field.key === definition.discriminator)?.wireKey
+  const optionCache = cached ?? new WeakMap<RuntimeStruct, string | undefined>()
+  optionCache.set(option, wireKey)
+  if (!cached) {
+    discriminatorWireKeyCache.set(definition, optionCache)
+  }
+  return wireKey
 }
 
 function parseDiscriminatedUnionValue(
@@ -275,7 +326,7 @@ function parseDiscriminatedUnionValue(
   useAliases: boolean,
 ): InternalParseResult<unknown> {
   if (!isPlainObject(input)) {
-    return failure(issue(path, 'invalid_type', 'object', input))
+    return failure(issue([...path], 'invalid_type', 'object', input))
   }
 
   const discriminatorPath = [...path, definition.discriminator]
@@ -301,12 +352,12 @@ function parseDiscriminatedUnionValue(
     if (optionDefinition.kind !== 'object') {
       continue
     }
-    const discriminator = resolveStructFields(runtime, optionDefinition).find((field) => field.key === definition.discriminator)
-    if (!discriminator || !hasOwnKey(input, discriminator.wireKey)) {
+    const wireKey = resolveDiscriminatorWireKey(definition, runtime, optionDefinition)
+    if (wireKey === undefined || !hasOwnKey(input, wireKey)) {
       continue
     }
 
-    const value = input[discriminator.wireKey]
+    const value = input[wireKey]
     if (value === undefined) {
       return failure(issue(discriminatorPath, 'missing_key', definition.expected, undefined))
     }
@@ -315,16 +366,16 @@ function parseDiscriminatedUnionValue(
       return failure(issue(discriminatorPath, 'invalid_union', definition.expected, value))
     }
     const targetDefinition = target[DEFINITION] as ObjectDefinition
-    const targetDiscriminator = resolveStructFields(target, targetDefinition).find((field) => field.key === definition.discriminator)
+    const targetWireKey = resolveDiscriminatorWireKey(definition, target, targetDefinition)
     /* istanbul ignore if -- constructor invariant: every target has the declared discriminator field */
-    if (!targetDiscriminator) {
+    if (targetWireKey === undefined) {
       return failure(issue(discriminatorPath, 'invalid_union', definition.expected, value))
     }
-    if (targetDiscriminator.wireKey !== discriminator.wireKey) {
+    if (targetWireKey !== wireKey) {
       return failure(issue(discriminatorPath, 'invalid_union', definition.expected, value))
     }
     return parseObjectValue(target, targetDefinition, input, path, true, {
-      inputKey: discriminator.wireKey,
+      inputKey: wireKey,
       value,
     })
   }
@@ -337,12 +388,12 @@ function parseIntersectionValue(
   path: Path,
   useAliases: boolean,
 ): InternalParseResult<unknown> {
-  const leftResult = parseValue(definition.left as RuntimeStruct, input, path, 'value', useAliases)
+  const leftResult = parseValueAtPath(definition.left as RuntimeStruct, input, path, 'value', useAliases)
   if (!leftResult.ok) {
     return leftResult
   }
 
-  const rightResult = parseValue(definition.right as RuntimeStruct, input, path, 'value', useAliases)
+  const rightResult = parseValueAtPath(definition.right as RuntimeStruct, input, path, 'value', useAliases)
   if (!rightResult.ok) {
     return rightResult
   }

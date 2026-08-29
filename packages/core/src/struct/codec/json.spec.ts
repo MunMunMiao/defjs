@@ -322,22 +322,42 @@ describe('codec/json.ts', () => {
     expect(decodeJson(Message, { type: 'text', message_body: 'hello' })).toEqual({ type: 'text', body: 'hello' })
   })
 
-  test('reuses resolved discriminator metadata from a getter-defined shape', () => {
+  test('caches recursive discriminator metadata across repeated and derived alias decodes', () => {
+    let recursiveReads = 0
     let typeReads = 0
-    const Message = struct.discriminatedUnion('type', [
-      struct.object({
-        body: struct.string().alias('message_body'),
-        get type() {
-          typeReads += 1
-          if (typeReads > 2) {
-            throw new Error('schema discriminator reread')
-          }
-          return struct.literal('text').alias('kind')
-        },
-      }),
-    ])
+    const message = struct.object({
+      body: struct.string().alias('message_body'),
+      get replies() {
+        recursiveReads += 1
+        return struct.array(message).alias('thread')
+      },
+      get type() {
+        typeReads += 1
+        if (typeReads > 2) {
+          throw new Error('schema discriminator reread')
+        }
+        return struct.literal('text').alias('kind')
+      },
+    })
+    const Message = struct.discriminatedUnion('type', [message])
+    const OptionalMessage = Message.optional()
+    const NullishMessage = Message.nullish()
+    const input = {
+      kind: 'text',
+      message_body: 'hello',
+      thread: [{ kind: 'text', message_body: 'reply', thread: [] }],
+    }
+    const expected = {
+      body: 'hello',
+      replies: [{ body: 'reply', replies: [], type: 'text' }],
+      type: 'text',
+    }
 
-    expect(decodeJson(Message, { kind: 'text', message_body: 'hello' })).toEqual({ type: 'text', body: 'hello' })
+    expect(decodeJson(Message, input)).toEqual(expected)
+    expect(decodeJson(Message, input)).toEqual(expected)
+    expect(decodeJson(OptionalMessage, input)).toEqual(expected)
+    expect(decodeJson(NullishMessage, input)).toEqual(expected)
+    expect(recursiveReads).toBe(1)
     expect(typeReads).toBe(2)
   })
 

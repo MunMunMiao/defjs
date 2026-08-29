@@ -30,6 +30,48 @@ describe('encode.ts', () => {
     })
   })
 
+  test('object encode and matching preserve resolved-shape own-key semantics', () => {
+    const shape = {
+      beta: struct.string(),
+      2: struct.string(),
+      alpha: struct.string(),
+    }
+    Object.defineProperty(shape, 'hidden', { configurable: true, enumerable: false, value: struct.number() })
+    Object.defineProperty(shape, '__proto__', { configurable: true, enumerable: true, value: struct.boolean() })
+
+    const schema = struct.object(shape)
+    const value = { 2: 'two', alpha: 'a', beta: 'b', hidden: 1 }
+    Object.defineProperty(value, '__proto__', { configurable: true, enumerable: true, value: true })
+    const polluted = Object.getOwnPropertyDescriptor(Object.prototype, 'polluted')
+    Object.defineProperty(Object.prototype, 'polluted', { configurable: true, enumerable: true, value: 'polluted', writable: true })
+
+    try {
+      const encoded = encode(schema, value) as Record<string, unknown>
+      const duplicateAliases = struct.object({ first: struct.string().alias('same'), second: struct.string().alias('same') })
+      const inheritedField = struct.object({ polluted: struct.string() })
+
+      expect(Object.getPrototypeOf(encoded)).toBeNull()
+      expect(Object.entries(encoded)).toEqual([
+        ['2', 'two'],
+        ['beta', 'b'],
+        ['alpha', 'a'],
+        ['hidden', 1],
+        ['__proto__', true],
+      ])
+      expect(Object.getOwnPropertyDescriptor(encoded, '__proto__')).toMatchObject({ enumerable: true, value: true })
+      expect(Object.hasOwn(encoded, 'polluted')).toBe(false)
+      expect(encode(duplicateAliases, { first: 'first', second: 'second' })).toEqual({ first: 'first', second: 'second' })
+      expect(matchesRuntimeValue(schema as unknown as RuntimeStruct, value)).toBe(true)
+      expect(matchesRuntimeValue(inheritedField as unknown as RuntimeStruct, {})).toBe(false)
+    } finally {
+      if (polluted) {
+        Object.defineProperty(Object.prototype, 'polluted', polluted)
+      } else {
+        delete (Object.prototype as { polluted?: unknown }).polluted
+      }
+    }
+  })
+
   test('struct.or encodes via first matching option(date vs string)', () => {
     const s = struct.or(struct.date(), struct.string())
     expect(encode(s, new Date('2026-05-12T10:00:00Z'))).toBe('2026-05-12T10:00:00.000Z')

@@ -115,7 +115,8 @@ export function encodeValue(struct: RuntimeStruct, value: unknown, options: Enco
       }
       const output: { [key: string]: unknown } = Object.create(null)
       const shape = resolveObjectShape(struct, definition)
-      for (const [key, fieldStruct] of Object.entries(shape)) {
+      for (const key in shape) {
+        const fieldStruct = shape[key]
         if (!hasOwnKey(value, key)) {
           continue
         }
