@@ -102,7 +102,7 @@ Repository development, testing, building, packaging, and publishing use Bun `1.
 
 The repository-validated and supported minimum compiler/lib contract uses `target: 'ES2022'` with `lib: ['ES2022', 'ESNext.Disposable', 'DOM', 'DOM.Iterable']`. The gate is pinned to TypeScript 7; older compiler versions are not promised. This supported set is verified together rather than claiming that every entry is independently forced by one declaration, and it supplies types only — not runtime Web API polyfills.
 
-**SSE reconnect behavior change:** without `withSSEReconnect(...)`, SSE no longer retries network/stream-read failures. Pass `withSSEReconnect({ attempts: 3 })` (or another reviewed budget) for EventSource-style retries.
+**SSE reconnect behavior change:** without `withSSEReconnect(...)`, SSE no longer retries network/stream-read failures. Pass `withSSEReconnect({ attempts: 3 })` (or another reviewed budget) to retry those failures.
 
 When using a checkout through `file:` or a workspace link, run `bun run build` in the checkout before compiling or running the external consumer. The checkout manifest points to generated `dist/` files; published packages already contain those files.
 
@@ -112,7 +112,7 @@ After compiling an application to ESM, the repository-tested command is:
 bun run dist/index.js
 ```
 
-Browser applications use their bundler and the platform Fetch, EventSource-compatible Fetch stream, and WebSocket capabilities required by the transports they enable.
+Browser applications use their bundler and the platform Fetch stream and WebSocket capabilities required by the transports they enable.
 
 ## Documentation
 

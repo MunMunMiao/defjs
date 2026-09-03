@@ -37,7 +37,7 @@ if (error) {
 
 `defineEventStream(...)` 要 `events`、正 safe integer 的 `maxBufferSize`、正 safe integer 的 `maxQueueSize`，以及相对 `path`。Method 默认 `GET`。
 
-请求输入可以有 `path`、`query`、`headers`——不能有 `body`。自定义 `build` 只有 path/query/header setter。你没设 `Accept` 时，Defjs 会发 `Accept: text/event-stream`。
+请求输入可以有 `path`、`query`、`headers` 和 `body`。自定义 `build` 拿到和 HTTP 一样的 request helper，包括 body setter。你没设 `Accept` 时，Defjs 会发 `Accept: text/event-stream`。
 
 一条逻辑流可以跨多次物理 Fetch。即使没配 reconnect options，SSE 默认也会重试瞬时网络和流读取失败；没有 `attempts` 上限时这些重试无界。你仍只拿到一个 handle 和一个 async iterator。
 

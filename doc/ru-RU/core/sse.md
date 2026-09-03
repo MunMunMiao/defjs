@@ -37,7 +37,7 @@ if (error) {
 
 `defineEventStream(...)` нужен `events`, положительный safe-integer `maxBufferSize`, положительный safe-integer `maxQueueSize` и относительный `path`. Method по умолчанию `GET`.
 
-Request input может иметь `path`, `query` и `headers` — не `body`. Кастомный `build` получает только path/query/header setters. Defjs шлёт `Accept: text/event-stream`, если ты ещё не поставил `Accept`.
+Request input может иметь `path`, `query`, `headers` и `body`. Кастомный `build` получает те же request helpers, что и HTTP, включая body setters. Defjs шлёт `Accept: text/event-stream`, если ты ещё не поставил `Accept`.
 
 Один логический стрим может охватить несколько физических Fetch-попыток. SSE по умолчанию ретраит транзиентные network и stream-read сбои даже без reconnect options; без лимита `attempts` эти ретраи unbounded. Ты всё равно получаешь один handle и один async iterator.
 

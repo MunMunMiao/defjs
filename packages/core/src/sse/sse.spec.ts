@@ -154,6 +154,62 @@ describe('request event stream runtime', () => {
     await expect(stream.closed).resolves.toEqual({ code: 'eof' })
   })
 
+  test('should send declared JSON body on POST event streams', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const request = input instanceof Request ? input : new Request(input)
+      expect(request.method).toBe('POST')
+      expect(request.headers.get('content-type')).toBe('application/json')
+      expect(await request.text()).toBe('{"model":"grok","stream":true}')
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: pong\n\n'))
+            controller.close()
+          },
+        }),
+        {
+          headers: { 'content-type': 'text/event-stream' },
+          status: 200,
+        },
+      )
+    })
+    const client = createClient(withEndpoint('https://api.example.com'), withSSEHandle(fetchMock))
+    const chat = defineEventStream({
+      maxBufferSize: 1024,
+      maxQueueSize: 16,
+      method: 'POST',
+      path: '/v1/chat/completions',
+      input: struct.request({
+        body: struct.json(
+          struct.object({
+            model: struct.string(),
+            stream: struct.boolean(),
+          }),
+        ),
+      }),
+      events: {
+        message: struct.string(),
+      },
+    })
+
+    const [error, stream] = await client.execute(
+      chat({
+        body: {
+          model: 'grok',
+          stream: true,
+        },
+      }),
+    )
+
+    expect(error).toBeNull()
+    if (!stream) {
+      throw new Error('Expected stream')
+    }
+    expect(fetchMock).toHaveBeenCalledOnce()
+    await expect(collectStreamEvents(stream)).resolves.toEqual([{ data: 'pong', event: 'message', id: undefined }])
+    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+  })
+
   test('should handle SSE events without id', async () => {
     const useNoIdStream = defineEventStream({
       maxBufferSize: 1024,

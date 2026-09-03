@@ -1,10 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { struct, type AnyStruct } from '../struct'
-import { buildRequest, type RequestBuildHandler } from './request_builder'
-
-function unsupportedSseBuild<TInput extends AnyStruct>(build: RequestBuildHandler<TInput>): RequestBuildHandler<TInput, 'sse'> {
-  return build as unknown as RequestBuildHandler<TInput, 'sse'>
-}
+import { struct } from '../struct'
+import { buildRequest } from './request_builder'
 
 describe('request_builder formUrlEncoded', () => {
   test('formUrlEncoded uses a single URLSearchParams instance(no double allocation)', () => {
@@ -526,21 +522,24 @@ describe('request_builder general', () => {
 })
 
 describe('request_builder request-shaped input', () => {
-  test('enforces SSE request build constraints', () => {
+  test('builds SSE json body from struct.request and custom build', () => {
     const queryInput = struct.request({ query: struct.object({ id: struct.number() }) })
     expect(buildRequest({ query: { id: 1 } }, undefined, { input: queryInput, transport: 'sse' }).query).toEqual({ id: 1 })
 
     const bodyInput = struct.request({ body: struct.json(struct.object({ ok: struct.boolean() })) })
-    expect(() => buildRequest({ body: { ok: true } }, undefined, { input: bodyInput, transport: 'sse' })).toThrow(
-      'SSE request input does not support body section',
+    const autoBuilt = buildRequest({ body: { ok: true } }, undefined, { input: bodyInput, transport: 'sse' })
+    expect(autoBuilt.bodyContentType).toBe('application/json')
+    expect(autoBuilt.body).toBe('{"ok":true}')
+
+    const customBuilt = buildRequest(
+      { body: { ok: true } },
+      (request, view) => {
+        request.setJson({ ok: view.body.ok })
+      },
+      { input: bodyInput, transport: 'sse' },
     )
-    expect(() =>
-      buildRequest(
-        { body: { ok: true } },
-        unsupportedSseBuild<typeof bodyInput>((request, view) => request.setJson({ ok: view.body.ok })),
-        { input: bodyInput, transport: 'sse' },
-      ),
-    ).toThrow('SSE build() does not support request body')
+    expect(customBuilt.bodyContentType).toBe('application/json')
+    expect(customBuilt.body).toBe('{"ok":true}')
   })
 
   test('builds request locations and json body from struct.request', () => {

@@ -37,7 +37,7 @@ if (error) {
 
 `defineEventStream(...)`에는 `events`, 양의 안전 정수 `maxBufferSize`, 양의 안전 정수 `maxQueueSize`, 상대 `path`가 필요해요. 메서드 기본값은 `GET`이에요.
 
-요청 입력에는 `path`, `query`, `headers`가 있을 수 있고 — `body`는 없어요. 커스텀 `build`는 path/query/header setter만 받아요. `Accept`를 이미 설정하지 않았다면 Defjs가 `Accept: text/event-stream`을 보내요.
+요청 입력에는 `path`, `query`, `headers`, `body`가 있을 수 있어요. 커스텀 `build`는 HTTP와 같은 request helper(body setter 포함)를 받아요. `Accept`를 이미 설정하지 않았다면 Defjs가 `Accept: text/event-stream`을 보내요.
 
 하나의 논리 스트림은 여러 물리 Fetch 시도를 걸칠 수 있어요. SSE는 재연결 옵션 없이도 일시적 네트워크·스트림 읽기 실패를 기본 재시도해요. `attempts` 한도가 없으면 그 재시도는 무제한이에요. 그래도 핸들과 async iterator는 하나예요.
 

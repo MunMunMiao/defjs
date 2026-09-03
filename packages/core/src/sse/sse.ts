@@ -255,7 +255,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
       timeout: cancellation.timeout,
       transport: 'sse',
       withCredentials: clientConfig.withCredentials,
-    }).request
+    })
   } catch (error) {
     const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
     return [definitionError, undefined, undefined]

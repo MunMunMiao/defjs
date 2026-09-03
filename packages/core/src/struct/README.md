@@ -328,7 +328,7 @@ updateUser({
 3. `headers` -> HTTP headers；
 4. `body` -> body wrapper 指定的 codec。
 
-`struct.request` 只声明 sections 和 body codec；它本身不执行 materialize，也不能独立构建请求。`path`、`query` 和 `headers` 必须是 flat object Struct。`urlencoded` 和 `formData` 的便捷构造器也接收 flat shape；JSON body 可以嵌套对象。SSE request input 不支持 body；WebSocket request input 只支持 path 和 query，不支持 headers 和 body，这些是 transport runtime 的限制。
+`struct.request` 只声明 sections 和 body codec；它本身不执行 materialize，也不能独立构建请求。`path`、`query` 和 `headers` 必须是 flat object Struct。`urlencoded` 和 `formData` 的便捷构造器也接收 flat shape；JSON body 可以嵌套对象。HTTP 和 SSE request input 支持 body；WebSocket request input 只支持 path 和 query，不支持 headers 和 body，这些是 transport runtime 的限制。
 
 Path placeholder 应传入原始 scalar 值；Core 在替换时会对每个值恰好执行一次 `encodeURIComponent`。调用方不要预编码，否则 `%` 会再次编码为 `%25`。
 

@@ -127,13 +127,6 @@ export interface WebSocketRequestBuildContext {
   setQueryParams(projection: BuildRecordProjection): void
 }
 
-export interface SSERequestBuildContext {
-  addHeaders(projection: BuildRecordProjection): void
-  setHeaders(projection: BuildRecordProjection): void
-  setPathParams(projection: BuildRecordProjection): void
-  setQueryParams(projection: BuildRecordProjection): void
-}
-
 export type RequestBuild = {
   body?: HttpRequest['body']
   bodyContentType?: string | null
@@ -151,9 +144,7 @@ export type RequestBuildInput<TInput extends AnyStruct | undefined> = [TInput] e
 
 export type RequestBuildContext<TTransport extends RequestTransport = 'http'> = TTransport extends 'webSocket'
   ? WebSocketRequestBuildContext
-  : TTransport extends 'sse'
-    ? SSERequestBuildContext
-    : RequestBuilder
+  : RequestBuilder
 
 export type RequestBuildHandler<TInput extends AnyStruct | undefined, TTransport extends RequestTransport = 'http'> = (
   request: RequestBuildContext<TTransport>,
@@ -736,9 +727,6 @@ function isArrayProjection(value: unknown): value is ArrayProjection {
 }
 
 function assertRequestShapeTransport(definition: RequestDefinition, transport: RequestTransport): void {
-  if (transport === 'sse' && definition.body) {
-    throw new Error('SSE request input does not support body section')
-  }
   if (transport === 'webSocket') {
     if (definition.headers) {
       throw new Error('WebSocket request input does not support headers section')
@@ -755,9 +743,6 @@ function assertTransportBuild(build: RequestBuild, transport: RequestTransport):
   }
 
   if (transport === 'sse') {
-    if (typeof build.body !== 'undefined' || typeof build.bodyContentType !== 'undefined') {
-      throw new Error('SSE build() does not support request body')
-    }
     /* istanbul ignore if -- unreachable: the builder never produces withCredentials */
     if (typeof build.withCredentials !== 'undefined') {
       throw new Error('SSE build() does not support withCredentials()')

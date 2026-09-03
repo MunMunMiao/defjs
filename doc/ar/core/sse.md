@@ -37,7 +37,7 @@ if (error) {
 
 `defineEventStream(...)` يحتاج `events` و`maxBufferSize` عددًا صحيحًا آمنًا موجبًا و`maxQueueSize` عددًا صحيحًا آمنًا موجبًا و`path` نسبيًا. الطريقة الافتراضية `GET`.
 
-مدخل الطلب قد يملك `path` و`query` و`headers` — لا `body`. `build` المخصص يحصل على معيّنات path/query/header فقط. Defjs ترسل `Accept: text/event-stream` عندما لم تضبط `Accept` بالفعل.
+مدخل الطلب قد يملك `path` و`query` و`headers` و`body`. `build` المخصص يحصل على نفس مساعدات الطلب كما في HTTP، بما فيها معيّنات body. Defjs ترسل `Accept: text/event-stream` عندما لم تضبط `Accept` بالفعل.
 
 تدفق منطقي واحد يمكن أن يمتد عبر عدة محاولات Fetch مادية. SSE تعيد محاولة أعطال الشبكة وقراءة التدفق العابرة افتراضيًا حتى بلا خيارات إعادة اتصال؛ بلا حد `attempts` تلك المحاولات بلا حدود. ما زلت تحصل على معالج واحد ومكرّر غير متزامن واحد.
 

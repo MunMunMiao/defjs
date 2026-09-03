@@ -37,7 +37,7 @@ if (error) {
 
 `defineEventStream(...)` needs `events`, positive safe-integer `maxBufferSize`, positive safe-integer `maxQueueSize`, and a relative `path`. Method defaults to `GET`.
 
-Request input may have `path`, `query`, and `headers` — not `body`. Custom `build` gets path/query/header setters only. Defjs sends `Accept: text/event-stream` when you didn’t already set `Accept`.
+Request input may have `path`, `query`, `headers`, and `body`. Custom `build` gets the same request helpers as HTTP, including body setters. Defjs sends `Accept: text/event-stream` when you didn’t already set `Accept`.
 
 One logical stream can span several physical Fetch attempts **when** you opt into reconnect. Without `withSSEReconnect`, transient network and stream-read failures end the logical stream. You still get one handle and one async iterator when the open succeeds.
 
@@ -121,7 +121,7 @@ Observer runs at the transform boundary. Its failure is isolated unless the acti
 
 ## Reconnect
 
-**Behavior change:** SSE reconnect is opt-in. Without `withSSEReconnect(...)`, network and stream-read failures are **not** retried (same as `attempts: 0`). For EventSource-style retries, pass `withSSEReconnect({ attempts: 3 })` (or another reviewed budget). Normal EOF is not retried. Status/content-type validation, parser limits, message transform failures, queue overflow, and normal EOF stay terminal for the logical stream.
+**Behavior change:** SSE reconnect is opt-in. Without `withSSEReconnect(...)`, network and stream-read failures are **not** retried (same as `attempts: 0`). Pass `withSSEReconnect({ attempts: 3 })` (or another reviewed budget) to retry those failures. Normal EOF is not retried. Status/content-type validation, parser limits, message transform failures, queue overflow, and normal EOF stay terminal for the logical stream.
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -143,7 +143,7 @@ const client = createClient(
 
 `attempts` counts retries after the initial attempt; defaults to `3` when a reconnect object is set. `attempts: 0` disables retry. Omitting `withSSEReconnect` also disables retry. `delayMs` is the initial interval; `factor` grows it; `maxDelayMs` caps the base. SSE `jitter` is a **0–1 multiplicative factor**, same as WebSocket. A stream `retry:` field updates the current interval. Policy callback returning false / throwing / rejecting ends the logical stream.
 
-Latest parsed event ID becomes `Last-Event-ID` on a later attempt. Know the server’s replay semantics before unbounded reconnect.
+Latest parsed event ID becomes `Last-Event-ID` on a later attempt. A later attempt resends the same Fetch request, including method and body. Know the server’s replay semantics before unbounded reconnect.
 
 ## Buffer and queue limits
 

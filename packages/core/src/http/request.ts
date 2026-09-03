@@ -3,7 +3,6 @@ import type { HttpProgressFn, HttpRequest, HttpResponseType } from '../internal/
 import type { RequestBuildHandler } from '../internal/request_builder'
 import { createBaseTransportRequest } from '../internal/transport_request'
 import type { AnyStruct } from '../struct'
-import { applyRequestContentType } from './transport/body'
 
 /**
  * One status-to-body mapping used in the array form of `RequestOutputShape`.
@@ -43,7 +42,7 @@ export function createHttpRequest<TInput extends AnyStruct | undefined>(
     }
   },
 ): HttpRequest {
-  const { built, request } = createBaseTransportRequest(method, path, input, build, {
+  const request = createBaseTransportRequest(method, path, input, build, {
     abort: options.abort,
     baseEndpoint: options.baseEndpoint,
     defaultHeaders: options.defaultHeaders,
@@ -55,19 +54,13 @@ export function createHttpRequest<TInput extends AnyStruct | undefined>(
     withCredentials: options.withCredentials,
   })
 
-  const httpRequest: HttpRequest = {
+  return {
     ...request,
-    body: built.body,
-    bodyContentType: built.bodyContentType,
-    bodyContentTypeSource: built.body,
     downloadProgress: options.downloadProgress,
     responseType: options.responseType,
     uploadProgress: options.uploadProgress,
     xsrf: options.xsrf,
   }
-
-  applyRequestContentType(httpRequest, request.headers)
-  return httpRequest
 }
 
 export function resolveDefaultResponseType(

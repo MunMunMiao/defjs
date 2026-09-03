@@ -161,4 +161,3 @@ Most defjs packages are still evolving before stable 1.0; overall API may evolve
 - [Google API design guide](https://cloud.google.com/apis/design)
 - [Tanstack Query](https://tanstack.com/query)
 - [Rxjs](https://rxjs.dev)
-- [Fetch-event-source](https://github.com/Azure/fetch-event-source)

@@ -248,7 +248,7 @@ request-time:
 4. path/query/header/urlencoded/formData 输出是 flat record；JSON body 支持递归 object projection、whole-source binding 和 array `map(...)` projection。
 5. 同一个 request 区域多次写入时，最终 materialize 结果按最后一次写入为准，不做隐式 merge。
 6. array projection v1 只支持 JSON 内的 one-to-one `map`；不支持 `filter`、`reduce`、`flatMap`、index access 或 callback 外泄 source。
-7. transport 能力是硬边界：WebSocket 不支持 headers/body，SSE 不支持 body，HTTP 支持完整 body helpers。
+7. transport 能力是硬边界：WebSocket 不支持 headers/body，SSE 与 HTTP 支持完整 body helpers。
 
 ## `defineXXX.build` 与 `struct` 绑定
 
@@ -460,8 +460,8 @@ In `build(ctx, input)`, explicit object literal keys are the final wire keys and
 | `setPathParams`                                      | 合法 | 合法 | 合法      |
 | `setQueryParams`                                     | 合法 | 合法 | 合法      |
 | `setHeaders`                                         | 合法 | 合法 | 非法      |
-| `setJson` / `setFormUrlEncoded` / `setFormData`      | 合法 | 非法 | 非法      |
-| `setArrayBuffer` / `setBlob` / `setText` / `setHtml` | 合法 | 非法 | 非法      |
+| `setJson` / `setFormUrlEncoded` / `setFormData`      | 合法 | 合法 | 非法      |
+| `setArrayBuffer` / `setBlob` / `setText` / `setHtml` | 合法 | 合法 | 非法      |
 
 ## HTTP
 
@@ -667,13 +667,7 @@ const watchUserInfo = defineEventStream({
 })
 ```
 
-SSE 的目标 `ctx` 只暴露：
-
-1. `ctx.setPathParams(...)`
-2. `ctx.setQueryParams(...)`
-3. `ctx.setHeaders(...)`
-
-SSE 走 GET，没有请求体，所以 build ctx 不存在 `setBody / setJson / setText / setHtml / setXml / setFormData / setFormUrlEncoded`。
+SSE 的目标 `ctx` 与 HTTP 相同，暴露完整 `RequestBuilder`（含 `setJson` / `setText` / `setHtml` / `setFormData` / `setFormUrlEncoded` / `setBlob` / `setArrayBuffer`）。Method 默认 `GET`，需要请求体时显式设 `POST`（或其他方法）并声明 `body`。
 
 ### 调用
 

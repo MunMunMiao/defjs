@@ -38,6 +38,26 @@ const useEvents = defineEventStream({
   events: { message: struct.object({ text: struct.string() }) },
 })
 
+const chatStream = defineEventStream({
+  maxBufferSize: 1024,
+  maxQueueSize: 16,
+  method: 'POST',
+  path: '/v1/chat/completions',
+  input: struct.request({
+    body: struct.json(
+      struct.object({
+        model: struct.string(),
+        stream: struct.boolean(),
+      }),
+    ),
+  }),
+  build(request, view) {
+    request.setJson({ model: view.body.model, stream: view.body.stream })
+  },
+  events: { message: struct.string() },
+})
+void chatStream
+
 const command = useEvents()
 expectTypeOf(command[COMMAND_TYPE]).toEqualTypeOf<typeof EVENT_STREAM_COMMAND>()
 expectTypeOf(command.endpoint.path).toEqualTypeOf<string>()

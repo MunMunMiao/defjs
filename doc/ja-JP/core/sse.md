@@ -37,7 +37,7 @@ if (error) {
 
 `defineEventStream(...)` には `events`、正の安全な整数の `maxBufferSize`、正の安全な整数の `maxQueueSize`、相対 `path` が要ります。method のデフォルトは `GET` です。
 
-リクエスト入力には `path`、`query`、`headers` を持てます — `body` は不可。カスタム `build` は path/query/header の setter だけを受け取ります。`Accept` をすでに立てていなければ、Defjs は `Accept: text/event-stream` を送ります。
+リクエスト入力には `path`、`query`、`headers`、`body` を持てます。カスタム `build` は HTTP と同じ request helper（body setter 含む）を受け取ります。`Accept` をすでに立てていなければ、Defjs は `Accept: text/event-stream` を送ります。
 
 1 つの論理ストリームは、複数の物理 Fetch 試行にまたがれます。SSE は再接続 options がなくても、一時的なネットワークとストリーム読み取り失敗をデフォルトでリトライします。`attempts` 上限がなければ、そのリトライは無制限です。ハンドルと非同期イテレータはそれでも 1 つです。
 

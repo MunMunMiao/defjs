@@ -37,7 +37,7 @@ if (error) {
 
 `defineEventStream(...)` a besoin de `events`, d’un `maxBufferSize` entier sûr positif, d’un `maxQueueSize` entier sûr positif, et d’un `path` relatif. La méthode par défaut est `GET`.
 
-L’entrée de requête peut avoir `path`, `query` et `headers` — pas `body`. Un `build` custom n’obtient que les setters path/query/header. Defjs envoie `Accept: text/event-stream` quand tu n’as pas déjà posé `Accept`.
+L’entrée de requête peut avoir `path`, `query`, `headers` et `body`. Un `build` custom obtient les mêmes helpers de requête que HTTP, y compris les setters de body. Defjs envoie `Accept: text/event-stream` quand tu n’as pas déjà posé `Accept`.
 
 Un flux logique peut couvrir plusieurs tentatives Fetch physiques. SSE relance par défaut les échecs réseau et de lecture de flux transitoires même sans options de reconnect ; sans limite `attempts` ces retries sont non bornés. Tu obtiens quand même un handle et un itérateur async.
 

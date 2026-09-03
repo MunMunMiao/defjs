@@ -37,7 +37,7 @@ if (error) {
 
 `defineEventStream(...)` 需要 `events`、正的 safe-integer `maxBufferSize`、正的 safe-integer `maxQueueSize`，以及相對 `path`。Method 預設是 `GET`。
 
-Request input 可以有 `path`、`query`、`headers` — 沒有 `body`。自訂 `build` 只拿到 path／query／header setters。你沒設 `Accept` 時，Defjs 會送 `Accept: text/event-stream`。
+Request input 可以有 `path`、`query`、`headers` 和 `body`。自訂 `build` 拿到和 HTTP 一樣的 request helpers，包括 body setters。你沒設 `Accept` 時，Defjs 會送 `Accept: text/event-stream`。
 
 一個邏輯串流可以跨多次實體 Fetch attempts。即使沒設 reconnect options，SSE 預設仍會重試暫時性的網路與串流讀取失敗；沒有 `attempts` 上限時，那些重試是無界的。你仍只拿到一個 handle 與一個 async iterator。
 
