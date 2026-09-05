@@ -1249,6 +1249,54 @@ describe('request_builder request-shaped input', () => {
     ).toThrow('build input binding belongs to a different build context')
   })
 
+  test('bound views do not expose binding metadata as own symbols', () => {
+    const input = struct.request({
+      body: struct.json(
+        struct.object({
+          name: struct.string(),
+          users: struct.array(struct.object({ id: struct.number() })),
+        }),
+      ),
+    })
+
+    buildRequest(
+      { body: { name: 'Miao', users: [{ id: 1 }] } },
+      (_ctx, view) => {
+        expect(Object.keys(view.body)).toEqual(['name', 'users'])
+        expect(Object.getOwnPropertySymbols(view.body)).toEqual([])
+        expect(Object.keys(view.body.users)).toEqual([])
+        expect(Object.getOwnPropertySymbols(view.body.users)).toEqual([])
+        expect(Object.prototype.propertyIsEnumerable.call(view.body.users, 'map')).toBe(false)
+      },
+      { input },
+    )
+  })
+
+  test('forged binding metadata is not a bound source', () => {
+    const input = struct.request({
+      query: struct.object({
+        id: struct.number(),
+      }),
+    })
+    const forged = Object.create(null) as { id?: number }
+    forged.id = 1
+    const stolen = Symbol('defjs.request.boundSource')
+    Object.defineProperty(forged, stolen, {
+      enumerable: false,
+      value: { owner: Symbol('forged'), path: ['query'], struct: input },
+    })
+
+    expect(() =>
+      buildRequest(
+        { query: { id: 2 } },
+        (ctx) => {
+          ctx.setQueryParams(forged as never)
+        },
+        { input },
+      ),
+    ).toThrow('query binding values must come from build input')
+  })
+
   test('rejects array item fields used outside their map projection', () => {
     const input = struct.request({
       body: struct.json(

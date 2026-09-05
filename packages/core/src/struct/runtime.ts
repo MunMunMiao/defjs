@@ -40,9 +40,8 @@ export function makeStruct(definition: StructDefinition): RuntimeStruct {
       },
     })
 
-  const struct: RuntimeStruct = {
+  return {
     [DEFINITION]: definition,
-    _struct: undefined as never,
     alias(name: string) {
       if (typeof name !== 'string') {
         throw new TypeError('alias() requires a string name')
@@ -65,12 +64,5 @@ export function makeStruct(definition: StructDefinition): RuntimeStruct {
     optional() {
       return withFlags({ optional: true })
     },
-  }
-
-  Object.defineProperty(struct, '_struct', {
-    enumerable: false,
-    value: undefined,
-  })
-
-  return struct
+  } as RuntimeStruct
 }

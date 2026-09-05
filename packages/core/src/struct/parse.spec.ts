@@ -117,6 +117,7 @@ describe('parse.ts object and composite values', () => {
     expect(parse(struct.literal(null), null)).toEqual([null, null])
     expect(parse(struct.or(struct.null(), struct.string()), null)).toEqual([null, null])
     expect(parse(struct.intersection(struct.null(), struct.null()), null)).toEqual([null, null])
+    expect(parse(struct.intersection(struct.unknown(), struct.string()), 'x')).toEqual([null, 'x'])
 
     const Body = struct.request({ body: struct.json(struct.null()) })
     expect(parse(Body, { body: null })).toEqual([null, { body: null }])
@@ -164,6 +165,27 @@ describe('parse.ts object and composite values', () => {
     expect(intersectionError?.issues[0]?.path).toEqual(['first'])
     expect(intersectionValue).toBeUndefined()
     expect(intersectionRightReads).toBe(0)
+
+    let intersectionThirdReads = 0
+    const threeWayInput = {
+      first: 1,
+      get later() {
+        throw new Error('later intersection was read')
+      },
+      get third() {
+        intersectionThirdReads += 1
+        throw new Error('third intersection was read')
+      },
+    }
+    const ThreeWay = struct.intersection(
+      struct.object({ first: struct.string() }),
+      struct.object({ later: struct.string() }),
+      struct.object({ third: struct.string() }),
+    )
+    const [threeWayError] = parse(ThreeWay, threeWayInput)
+    expect(threeWayError).toBeInstanceOf(StructError)
+    expect(threeWayError?.issues[0]?.path).toEqual(['first'])
+    expect(intersectionThirdReads).toBe(0)
   })
 
   test('maps tagged json input key without changing output key', () => {

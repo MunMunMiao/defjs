@@ -1,5 +1,5 @@
 import type { AnyStruct, RequestBodyDescriptor } from '../struct/types'
-import { mapAliasedObjectFields } from '../struct/codec/common'
+import { ALIAS_ENCODE_OPTIONS } from '../struct/codec/common'
 import { encodeValue } from '../struct/encode'
 import { resolveStructFields } from '../struct/fields'
 import { resolveObjectShape } from '../struct/shape'
@@ -26,26 +26,25 @@ export interface RequestAutoBuildOptions {
   transport?: RequestTransport
 }
 
-const BOUND_SOURCE = Symbol('defjs.request.boundSource')
-const ARRAY_PROJECTION = Symbol('defjs.request.arrayProjection')
+declare const BOUND_SOURCE: unique symbol
+declare const ARRAY_PROJECTION: unique symbol
 
 type BoundPathSegment = string | symbol
 
-type BoundSource = {
-  readonly [BOUND_SOURCE]: {
-    readonly owner: symbol
-    readonly path: readonly BoundPathSegment[]
-    readonly struct: RuntimeStruct
-  }
+type BoundSourceMeta = {
+  readonly owner: symbol
+  readonly path: readonly BoundPathSegment[]
+  readonly struct: RuntimeStruct
 }
 
-type ArrayProjection = {
-  readonly [ARRAY_PROJECTION]: {
-    readonly itemProjection: unknown
-    readonly itemToken: symbol
-    readonly source: BoundSource
-  }
+type ArrayProjectionMeta = {
+  readonly itemProjection: unknown
+  readonly itemToken: symbol
+  readonly source: BoundSourceMeta
 }
+
+const boundSources = new WeakMap<object, BoundSourceMeta>()
+const arrayProjections = new WeakMap<object, ArrayProjectionMeta>()
 
 type BuildBoundRef<TOutput = unknown> = {
   readonly [BOUND_SOURCE]: {
@@ -468,10 +467,8 @@ function createBoundView(struct: RuntimeStruct, path: readonly BoundPathSegment[
   }
 
   const view: { [key: PropertyKey]: unknown } = Object.create(null)
-  Object.defineProperty(view, BOUND_SOURCE, {
-    enumerable: false,
-    value: { owner, path, struct },
-  })
+  const source = { owner, path, struct }
+  boundSources.set(view, source)
 
   if (definition.kind === 'request') {
     defineBoundSection(view, 'path', definition.path, path, owner)
@@ -496,13 +493,13 @@ function createBoundView(struct: RuntimeStruct, path: readonly BoundPathSegment[
       value: (callback: (item: unknown) => unknown) => {
         const itemToken = Symbol('arrayItem')
         const itemView = createBoundView(definition.item as RuntimeStruct, [itemToken], owner)
-        return {
-          [ARRAY_PROJECTION]: {
-            itemProjection: callback(itemView),
-            itemToken,
-            source: view as BoundSource,
-          },
-        } satisfies ArrayProjection
+        const projection = Object.create(null)
+        arrayProjections.set(projection, {
+          itemProjection: callback(itemView),
+          itemToken,
+          source,
+        })
+        return projection
       },
     })
   }
@@ -542,8 +539,8 @@ function materializeRecordProjection(
   target: 'formData' | 'headers' | 'path' | 'query' | 'urlencoded',
   owner: symbol,
 ): { [key: string]: RequestBuildValue } {
-  if (isBoundSource(projection)) {
-    const source = projection[BOUND_SOURCE]
+  const source = getBoundSource(projection)
+  if (source) {
     assertBoundOwner(source, owner)
     return encodeFlatRecord(source.struct, readBoundSource(source, input, scope), target)
   }
@@ -564,16 +561,16 @@ function materializeRecordProjection(
 }
 
 function materializeProjection(projection: unknown, input: unknown, scope: BuildScope, target: string, owner: symbol): unknown {
-  if (isBoundSource(projection)) {
-    const source = projection[BOUND_SOURCE]
+  const source = getBoundSource(projection)
+  if (source) {
     assertBoundOwner(source, owner)
     return encodeSourceValue(source.struct, readBoundSource(source, input, scope), target)
   }
 
-  if (isArrayProjection(projection)) {
-    const arrayProjection = projection[ARRAY_PROJECTION]
-    assertBoundOwner(arrayProjection.source[BOUND_SOURCE], owner)
-    const sourceValue = readBoundSource(arrayProjection.source[BOUND_SOURCE], input, scope)
+  const arrayProjection = getArrayProjection(projection)
+  if (arrayProjection) {
+    assertBoundOwner(arrayProjection.source, owner)
+    const sourceValue = readBoundSource(arrayProjection.source, input, scope)
     if (!Array.isArray(sourceValue)) {
       throw new Error('ArrayProjection source must resolve to an array')
     }
@@ -618,7 +615,7 @@ function materializeSingleTextProjection(
   return value
 }
 
-function readBoundSource(source: BoundSource[typeof BOUND_SOURCE], input: unknown, scope: BuildScope): unknown {
+function readBoundSource(source: BoundSourceMeta, input: unknown, scope: BuildScope): unknown {
   let current: unknown = input
   for (const segment of source.path) {
     if (typeof segment === 'symbol') {
@@ -633,7 +630,7 @@ function readBoundSource(source: BoundSource[typeof BOUND_SOURCE], input: unknow
   return current
 }
 
-function assertBoundOwner(source: BoundSource[typeof BOUND_SOURCE], owner: symbol): void {
+function assertBoundOwner(source: BoundSourceMeta, owner: symbol): void {
   if (source.owner !== owner) {
     throw new Error('build input binding belongs to a different build context')
   }
@@ -647,9 +644,7 @@ function encodeSourceValue(struct: RuntimeStruct, value: unknown, target: string
 }
 
 function encodeKeyedValue(struct: RuntimeStruct, value: unknown): unknown {
-  return encodeValue(struct, value, {
-    encodeObject: (objectStruct, objectValue, encodeChild) => mapAliasedObjectFields(objectStruct, objectValue, encodeChild),
-  })
+  return encodeValue(struct, value, ALIAS_ENCODE_OPTIONS)
 }
 
 function encodeFlatRecord(
@@ -718,12 +713,12 @@ function assertTextBodyValue(value: unknown): asserts value is string {
   }
 }
 
-function isBoundSource(value: unknown): value is BoundSource {
-  return isPlainObject(value) && BOUND_SOURCE in value
+function getBoundSource(value: unknown): BoundSourceMeta | undefined {
+  return isPlainObject(value) ? boundSources.get(value) : undefined
 }
 
-function isArrayProjection(value: unknown): value is ArrayProjection {
-  return isPlainObject(value) && ARRAY_PROJECTION in value
+function getArrayProjection(value: unknown): ArrayProjectionMeta | undefined {
+  return isPlainObject(value) ? arrayProjections.get(value) : undefined
 }
 
 function assertRequestShapeTransport(definition: RequestDefinition, transport: RequestTransport): void {

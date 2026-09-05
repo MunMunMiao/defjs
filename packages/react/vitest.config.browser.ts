@@ -15,11 +15,11 @@ export default defineConfig({
     include: ['react', 'react-dom/client', '@testing-library/react'],
   },
   test: {
+    api: 63317,
     name: 'react-browser',
     globalSetup: resolve(packageRoot, '../../test/browser-api-server-setup.ts'),
     browser: {
       enabled: true,
-      api: 63317,
       provider: playwright(),
       connectTimeout: 120_000,
       headless: true,

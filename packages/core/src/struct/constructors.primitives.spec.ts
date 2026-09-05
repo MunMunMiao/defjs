@@ -109,6 +109,12 @@ describe('constructors.ts intersection', () => {
     )
   })
 
+  test('intersection of one struct is the struct itself', () => {
+    const named = struct.object({ name: struct.string() })
+
+    expect(parse(struct.intersection(named), { name: 'x' })).toEqual([null, { name: 'x' }])
+  })
+
   test('intersection merges two object structs field-wise', () => {
     const named = struct.object({ name: struct.string() })
     const aged = struct.object({ age: struct.number() })
@@ -121,6 +127,36 @@ describe('constructors.ts intersection', () => {
     expect(okVal).toEqual({ name: 'x', age: 30 })
 
     const [badErr] = parse(person, { name: 'x', age: 'bad' })
+    expect(badErr).toBeInstanceOf(StructError)
+  })
+
+  test('nested object intersections flatten into one merge', () => {
+    const person = struct.intersection(
+      struct.intersection(struct.object({ name: struct.string() }), struct.object({ age: struct.number() })),
+      struct.object({ active: struct.boolean() }),
+    )
+
+    const [okErr, okVal] = parse(person, { active: true, age: 30, name: 'x' })
+    if (okErr) {
+      throw okErr
+    }
+    expect(okVal).toEqual({ active: true, age: 30, name: 'x' })
+  })
+
+  test('intersection merges three object structs field-wise', () => {
+    const person = struct.intersection(
+      struct.object({ name: struct.string() }),
+      struct.object({ age: struct.number() }),
+      struct.object({ active: struct.boolean() }),
+    )
+
+    const [okErr, okVal] = parse(person, { active: true, age: 30, name: 'x' })
+    if (okErr) {
+      throw okErr
+    }
+    expect(okVal).toEqual({ active: true, age: 30, name: 'x' })
+
+    const [badErr] = parse(person, { active: true, age: 30, name: false })
     expect(badErr).toBeInstanceOf(StructError)
   })
 

@@ -115,6 +115,30 @@ describe('encode.ts', () => {
     expect(encoded.when).toBe('2026-05-12T10:00:00.000Z')
   })
 
+  test('struct.intersection encode keeps a non-object value', () => {
+    const s = struct.intersection(struct.object({ name: struct.string() }), struct.object({ age: struct.number() }))
+    expect(encode(s, 'not-an-object')).toBe('not-an-object')
+  })
+
+  test('struct.intersection encode of mixed sides keeps the last encoded value', () => {
+    const s = struct.intersection(struct.unknown(), struct.object({ name: struct.string() }))
+    expect(encode(s, { extra: true, name: 'x' })).toEqual({ name: 'x' })
+  })
+
+  test('struct.intersection encodes three object sides', () => {
+    const s = struct.intersection(
+      struct.object({ id: struct.string() }),
+      struct.object({ name: struct.string() }),
+      struct.object({ when: struct.date() }),
+    )
+
+    expect(encode(s, { id: 'u_1', name: 'Miao', when: new Date('2026-05-12T10:00:00Z') })).toEqual({
+      id: 'u_1',
+      name: 'Miao',
+      when: '2026-05-12T10:00:00.000Z',
+    })
+  })
+
   test('struct.intersection encodes nested object intersections', () => {
     const account = struct.object({ id: struct.string() })
     const profile = struct.object({ name: struct.string() })
@@ -219,6 +243,52 @@ describe('encode.ts', () => {
     )
 
     expect(encodeStructValue(Payload, { a: 'x', b: 'y' })).toEqual({ a: 'x', b: 'y' })
+  })
+
+  test('union construct does not resolve getter object shapes', () => {
+    let laterReads = 0
+    const Payload = struct.or(
+      struct.object({ name: struct.string() }),
+      struct.object({
+        get later() {
+          laterReads += 1
+          return struct.string()
+        },
+      }),
+    )
+
+    expect(laterReads).toBe(0)
+    expect(encodeStructValue(Payload, { name: 'x' })).toEqual({ name: 'x' })
+  })
+
+  test('compares overlapping union object branches when nested fields are not identity-encoded', () => {
+    const nested = struct.object({ value: struct.string() })
+    const Payload = struct.or(struct.object({ nested }), struct.object({ nested }))
+
+    expect(encodeStructValue(Payload, { nested: { value: 'x' } })).toEqual({ nested: { value: 'x' } })
+  })
+
+  test('compares overlapping union object branches when a field has a codec', () => {
+    const Payload = struct.or(struct.object({ when: struct.date() }), struct.object({ when: struct.date() }))
+
+    expect(encodeStructValue(Payload, { when: new Date('2026-05-12T10:00:00Z') })).toEqual({
+      when: '2026-05-12T10:00:00.000Z',
+    })
+  })
+
+  test('compares overlapping union object branches when field kinds differ', () => {
+    const Payload = struct.or(struct.object({ value: struct.any() }), struct.object({ value: struct.string() }))
+
+    expect(encodeStructValue(Payload, { value: 'x' })).toEqual({ value: 'x' })
+  })
+
+  test('compares overlapping union object branches when field sets differ', () => {
+    const Payload = struct.or(
+      struct.object({ value: struct.string() }),
+      struct.object({ extra: struct.string().optional(), value: struct.string() }),
+    )
+
+    expect(encodeStructValue(Payload, { value: 'x' })).toEqual({ value: 'x' })
   })
 
   test('struct.or falls through when no option matches', () => {

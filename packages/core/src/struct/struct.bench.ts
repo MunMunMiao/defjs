@@ -1,13 +1,21 @@
 import assert from 'node:assert/strict'
-import { afterAll, bench, describe } from 'vitest'
+import { afterAll, describe, test, type BenchRunOptions } from 'vitest'
+import { buildRequest } from '../internal/request_builder'
 import { decodeJson, encodeJson } from './codec/json'
 import { encodeStructValue } from './introspection'
 import { StructError, struct } from './index'
 import type { StructLike } from './types'
 
 const micro = { iterations: 10, time: 500, warmupTime: 100 }
-const largeBatch = { iterations: 1, time: 100, warmupIterations: 1, warmupTime: 20 }
+const largeBatch = { iterations: 10, time: 1000, warmupIterations: 1, warmupTime: 100 }
 let sink: unknown
+
+function measure(name: string, run: () => void, options: BenchRunOptions): void {
+  test(name, async ({ bench }) => {
+    const result = await bench(name, run).run(options)
+    assert.ok(result.latency.samplesCount > 0)
+  })
+}
 
 function record(value: unknown): void {
   sink = value
@@ -279,7 +287,7 @@ assertParse(requestSchema, requestPayload)
 describe('Struct performance', () => {
   describe('construct schema', () => {
     for (const count of [1, 100, 1_000, 10_000]) {
-      bench(
+      measure(
         `construct/schema batch ${count}`,
         () => {
           record(constructSchemaBatch(count))
@@ -287,7 +295,7 @@ describe('Struct performance', () => {
         micro,
       )
     }
-    bench(
+    measure(
       'construct/schema batch 100000',
       () => {
         record(constructSchemaBatch(100_000))
@@ -298,7 +306,7 @@ describe('Struct performance', () => {
 
   describe('parse object', () => {
     for (const { payload, schema } of objectFixtures) {
-      bench(
+      measure(
         `parse/object width ${Object.keys(payload).length}`,
         () => {
           record(struct.parse(schema, payload))
@@ -311,7 +319,7 @@ describe('Struct performance', () => {
       for (let current = payload as { child?: unknown }; current.child; current = current.child as { child?: unknown }) {
         depth += 1
       }
-      bench(
+      measure(
         `parse/object depth ${depth}`,
         () => {
           record(struct.parse(schema, payload))
@@ -319,14 +327,14 @@ describe('Struct performance', () => {
         micro,
       )
     }
-    bench(
+    measure(
       'parse/object depth 64 valid leaf',
       () => {
         record(struct.parse(nestedDepth64Valid.schema, nestedDepth64Valid.payload))
       },
       micro,
     )
-    bench(
+    measure(
       'parse/object depth 64 invalid leaf',
       () => {
         record(struct.parse(nestedDepth64Invalid.schema, nestedDepth64Invalid.payload))
@@ -334,7 +342,7 @@ describe('Struct performance', () => {
       micro,
     )
     for (const { payload, schema } of arrayFixtures) {
-      bench(
+      measure(
         `parse/array length ${payload.length}`,
         () => {
           record(struct.parse(schema, payload))
@@ -342,14 +350,14 @@ describe('Struct performance', () => {
         micro,
       )
     }
-    bench(
+    measure(
       'parse/failure first field',
       () => {
         record(struct.parse(failureSchema, failureFirst))
       },
       micro,
     )
-    bench(
+    measure(
       'parse/failure last field',
       () => {
         record(struct.parse(failureSchema, failureLast))
@@ -365,7 +373,7 @@ describe('Struct performance', () => {
         ['middle', Math.floor(size / 2)],
         ['last', size - 1],
       ] as const) {
-        bench(
+        measure(
           `parse/union ${size} ${position} hit`,
           () => {
             record(struct.parse(schema, payloads[index]))
@@ -373,7 +381,7 @@ describe('Struct performance', () => {
           micro,
         )
       }
-      bench(
+      measure(
         `parse/union ${size} all fail`,
         () => {
           record(struct.parse(schema, failure))
@@ -385,14 +393,14 @@ describe('Struct performance', () => {
 
   describe('parse discriminated union', () => {
     for (const { alias, plain, size } of discriminatedFixtures) {
-      bench(
+      measure(
         `parse/discriminated union ${size} plain`,
         () => {
           record(struct.parse(plain.schema, plain.payloads[size - 1]))
         },
         micro,
       )
-      bench(
+      measure(
         `parse/discriminated union ${size} alias decodeJson`,
         () => {
           record(decodeJson(alias.schema, alias.aliasPayloads[size - 1]))
@@ -401,7 +409,7 @@ describe('Struct performance', () => {
       )
     }
     for (const { payload, schema, size } of lateWireDiscriminatedFixtures) {
-      bench(
+      measure(
         `parse/discriminated union ${size} alias late wire key decodeJson`,
         () => {
           record(decodeJson(schema, payload))
@@ -409,7 +417,7 @@ describe('Struct performance', () => {
         micro,
       )
     }
-    bench(
+    measure(
       'parse/discriminated union 32 alias late wire key 64 fields decodeJson',
       () => {
         record(decodeJson(lateWireDiscriminated32x64.schema, lateWireDiscriminated32x64.payload))
@@ -420,14 +428,14 @@ describe('Struct performance', () => {
 
   describe('encode', () => {
     for (const { aliasSchema, payload, plainSchema, width } of objectEncodeFixtures) {
-      bench(
+      measure(
         `encode/object plain width ${width}`,
         () => {
           record(encodeStructValue(plainSchema, payload))
         },
         micro,
       )
-      bench(
+      measure(
         `encode/object alias width ${width}`,
         () => {
           record(encodeJson(aliasSchema, payload))
@@ -436,14 +444,14 @@ describe('Struct performance', () => {
       )
     }
     for (const { branches, payload, schema } of intersectionFixtures) {
-      bench(
+      measure(
         `parse/intersection ${branches} branches`,
         () => {
           record(struct.parse(schema, payload))
         },
         micro,
       )
-      bench(
+      measure(
         `encode/intersection ${branches} branches`,
         () => {
           record(encodeStructValue(schema, payload))
@@ -451,7 +459,7 @@ describe('Struct performance', () => {
         micro,
       )
     }
-    bench(
+    measure(
       'encode/union unique match',
       () => {
         record(encodeStructValue(unionEncodeUnique, unionEncodeUniqueValue))
@@ -459,7 +467,7 @@ describe('Struct performance', () => {
       micro,
     )
     for (const { branches, payload, schema, width } of equivalentUnionFixtures) {
-      bench(
+      measure(
         `encode/union equivalent ${branches} branches width ${width}`,
         () => {
           record(encodeStructValue(schema, payload))
@@ -468,7 +476,7 @@ describe('Struct performance', () => {
       )
     }
     for (const { branches, payload, schema, width } of equivalentUnionWidthFixtures) {
-      bench(
+      measure(
         `encode/union equivalent width sweep ${width} (${branches} branches)`,
         () => {
           record(encodeStructValue(schema, payload))
@@ -479,10 +487,47 @@ describe('Struct performance', () => {
   })
 
   describe('parse request', () => {
-    bench(
+    measure(
       'parse/request four sections',
       () => {
         record(struct.parse(requestSchema, requestPayload))
+      },
+      micro,
+    )
+  })
+
+  describe('additional hot paths', () => {
+    for (const { branches, payload, schema, width } of equivalentUnionFixtures) {
+      assert.deepEqual(plain(encodeJson(schema, payload)), payload)
+      measure(`encode/JSON union equivalent ${branches} branches width ${width}`, () => record(encodeJson(schema, payload)), micro)
+    }
+    for (const size of [8, 128, 1024]) {
+      const values = Array.from({ length: size }, (_, index) => `value${index}`) as [string, ...string[]]
+      const schema = struct.enum(values)
+      const input = values.at(-1)
+      assertParse(schema, input)
+      measure(`parse/enum ${size} last hit`, () => record(struct.parse(schema, input)), micro)
+    }
+    const union32 = unionFixtures[2]
+    assert.ok(union32)
+    const errorMap = () => undefined
+    measure('parse/union 32 last hit with errorMap', () => record(struct.parse(union32.schema, union32.payloads[31], { errorMap })), micro)
+    const options = makeUnionOptions(32)
+    measure('construct/union 32 existing options', () => record(struct.or(...options)), micro)
+    const array = makeArrayFixture(1000)
+    array.payload[0] = { id: 'invalid' as unknown as number, name: 'first' }
+    assert.ok(struct.parse(array.schema, array.payload)[0])
+    measure('parse/array length 1000 first item failure', () => record(struct.parse(array.schema, array.payload)), micro)
+    const parsed = struct.parse(requestSchema, requestPayload)[1]
+    assert.ok(parsed)
+    const built = buildRequest(parsed, undefined, { input: requestSchema })
+    assert.equal(built.body, '{"active":true,"name":"Miao"}')
+    measure(
+      'request/parse and auto JSON build four sections',
+      () => {
+        const [error, value] = struct.parse(requestSchema, requestPayload)
+        if (error) throw error
+        record(buildRequest(value, undefined, { input: requestSchema }))
       },
       micro,
     )

@@ -20,13 +20,14 @@ import type {
   RequestShape,
   RuntimeStruct,
   Struct,
+  StructDefinition,
   StructLike,
   StringStruct,
   TupleStruct,
   UnionStruct,
   UnknownStruct,
 } from './types'
-import { describeValue, failure, isPlainObject, success } from './utils'
+import { describeValue, expectedType, failure, isPlainObject, success } from './utils'
 
 export function createStringStruct(): StringStruct {
   return castStruct<StringStruct>(
@@ -145,14 +146,14 @@ export function createObjectStruct<T extends ObjectShape>(shape: T): ObjectStruc
     throw new TypeError('object struct requires a plain object')
   }
 
-  const declaredShape = snapshotObjectShape(shape)
-
   return castStruct<ObjectStruct<T>>(
     makeStruct({
-      cache: {},
+      cache: {
+        declaredDescriptors: Object.getOwnPropertyDescriptors(shape),
+      },
       flags: DEFAULT_FLAGS,
       kind: 'object',
-      shape: declaredShape,
+      shape,
     }),
   )
 }
@@ -292,10 +293,72 @@ export function createUnionStruct<
 
   return castStruct<UnionStruct<T>>(
     makeStruct({
+      expected: unionOptions.map((option) => expectedType((option as unknown as RuntimeStruct)[DEFINITION])).join(' | '),
       flags: DEFAULT_FLAGS,
       kind: 'or',
       options: unionOptions,
+      uniformIdentityEncode: computeUniformIdentityEncode(unionOptions),
     }),
+  )
+}
+
+function computeUniformIdentityEncode(
+  options: readonly [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]],
+): boolean {
+  const first = options[0] as unknown as RuntimeStruct
+  const firstDefinition = first[DEFINITION]
+  if (firstDefinition.kind === 'object') {
+    const firstShape = identityEncodeShape(first)
+    if (!firstShape) {
+      return false
+    }
+    for (let index = 1; index < options.length; index += 1) {
+      const shape = identityEncodeShape(options[index] as unknown as RuntimeStruct)
+      if (!shape || shape.size !== firstShape.size) {
+        return false
+      }
+      for (const [key, kind] of firstShape) {
+        if (shape.get(key) !== kind) {
+          return false
+        }
+      }
+    }
+    return true
+  }
+
+  return options.every((option) => isIdentityEncodeKind((option as unknown as RuntimeStruct)[DEFINITION].kind))
+}
+
+function identityEncodeShape(struct: RuntimeStruct): Map<string, StructDefinition['kind']> | undefined {
+  const definition = struct[DEFINITION]
+  if (definition.kind !== 'object') {
+    return undefined
+  }
+
+  const encoded = new Map<string, StructDefinition['kind']>()
+  for (const [key, descriptor] of Object.entries(definition.cache.declaredDescriptors)) {
+    if (typeof descriptor.get === 'function') {
+      return undefined
+    }
+    const fieldDefinition = (descriptor.value as RuntimeStruct | undefined)?.[DEFINITION]
+    if (!fieldDefinition || !isIdentityEncodeKind(fieldDefinition.kind)) {
+      return undefined
+    }
+    encoded.set(key, fieldDefinition.kind)
+  }
+  return encoded
+}
+
+function isIdentityEncodeKind(kind: StructDefinition['kind']): boolean {
+  return (
+    kind === 'any' ||
+    kind === 'boolean' ||
+    kind === 'enum' ||
+    kind === 'literal' ||
+    kind === 'null' ||
+    kind === 'number' ||
+    kind === 'string' ||
+    kind === 'unknown'
   )
 }
 
@@ -327,6 +390,9 @@ export function createDiscriminatedUnionStruct<
 ): DiscriminatedUnionStruct<TOptions> {
   const unionOptions = [...options] as unknown as TOptions
   const map = new Map<unknown, StructLike<unknown, unknown, boolean>>()
+  const wireKeyByValue = new Map<unknown, string>()
+  const discriminatorWireKeys: string[] = []
+  const seenWireKeys = new Set<string>()
   const values: unknown[] = []
 
   for (const option of unionOptions) {
@@ -336,7 +402,10 @@ export function createDiscriminatedUnionStruct<
     if (optionDef.kind !== 'object') {
       throw new TypeError('discriminatedUnion options must be object structs')
     }
-    const fieldStruct = optionDef.shape[discriminator] as unknown as RuntimeStruct | undefined
+    const descriptor = optionDef.cache.declaredDescriptors[discriminator]
+    const fieldStruct = (descriptor && typeof descriptor.get === 'function' ? descriptor.get.call(optionDef.shape) : descriptor?.value) as
+      | RuntimeStruct
+      | undefined
     if (!fieldStruct) {
       throw new TypeError(`discriminatedUnion option missing discriminator field "${discriminator}"`)
     }
@@ -351,26 +420,28 @@ export function createDiscriminatedUnionStruct<
     if (map.has(fieldDef.value)) {
       throw new TypeError(`discriminatedUnion duplicate discriminator value: ${JSON.stringify(fieldDef.value)}`)
     }
+    const wireKey = fieldDef.alias ?? discriminator
     map.set(fieldDef.value, option)
+    wireKeyByValue.set(fieldDef.value, wireKey)
+    if (!seenWireKeys.has(wireKey)) {
+      seenWireKeys.add(wireKey)
+      discriminatorWireKeys.push(wireKey)
+    }
     values.push(fieldDef.value)
   }
 
   return castStruct<DiscriminatedUnionStruct<TOptions>>(
     makeStruct({
       discriminator,
+      discriminatorWireKeys,
       expected: values.map((item) => JSON.stringify(item)).join(' | '),
       flags: DEFAULT_FLAGS,
       kind: 'discriminatedUnion',
       map,
       options: unionOptions,
+      wireKeyByValue,
     }),
   )
-}
-
-function snapshotObjectShape<T extends ObjectShape>(shape: T): T {
-  const snapshot = Object.create(null)
-  Object.defineProperties(snapshot, Object.getOwnPropertyDescriptors(shape))
-  return snapshot as T
 }
 
 export function createBlobStruct(): Struct<Blob, Blob> {
@@ -430,18 +501,42 @@ export function createIntersectionStruct<
     assertStruct(struct, 'intersection item')
   }
 
-  let current = structs[0] as unknown as RuntimeStruct
-  for (let index = 1; index < structs.length; index += 1) {
-    const right = structs[index] as StructLike<unknown, unknown, boolean>
-    current = makeStruct({
-      flags: DEFAULT_FLAGS,
-      kind: 'intersection',
-      left: current,
-      right,
-    })
+  if (structs.length === 1) {
+    return castStruct<Struct<IntersectionInput<T>, IntersectionOutput<T>>>(structs[0] as unknown as RuntimeStruct)
   }
 
-  return castStruct<Struct<IntersectionInput<T>, IntersectionOutput<T>>>(current)
+  const objectSides = structs.every(isObjectIntersectionSide)
+  const options = objectSides ? flattenObjectIntersectionSides(structs) : structs
+
+  return castStruct<Struct<IntersectionInput<T>, IntersectionOutput<T>>>(
+    makeStruct({
+      expected: structs.map((item) => expectedType((item as unknown as RuntimeStruct)[DEFINITION])).join(' & '),
+      flags: DEFAULT_FLAGS,
+      kind: 'intersection',
+      objectSides,
+      options: options as [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]],
+    }),
+  )
+}
+
+function isObjectIntersectionSide(struct: StructLike<unknown, unknown, boolean>): boolean {
+  const definition = (struct as unknown as RuntimeStruct)[DEFINITION]
+  return definition.kind === 'object' || (definition.kind === 'intersection' && definition.objectSides)
+}
+
+function flattenObjectIntersectionSides(
+  structs: readonly StructLike<unknown, unknown, boolean>[],
+): StructLike<unknown, unknown, boolean>[] {
+  const options: StructLike<unknown, unknown, boolean>[] = []
+  for (const struct of structs) {
+    const definition = (struct as unknown as RuntimeStruct)[DEFINITION]
+    if (definition.kind === 'intersection') {
+      options.push(...definition.options)
+    } else {
+      options.push(struct)
+    }
+  }
+  return options
 }
 
 export function createFileStruct(): Struct<File, File> {

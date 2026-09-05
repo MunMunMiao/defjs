@@ -7,7 +7,7 @@ export function resolveObjectShape(_struct: RuntimeStruct, definition: ObjectDef
     return cached
   }
 
-  const shape = readObjectShape(definition.shape)
+  const shape = readObjectShape(definition.shape, definition.cache.declaredDescriptors)
   for (const [key, value] of Object.entries(shape)) {
     assertStruct(value, `object field "${key}"`)
   }
@@ -16,13 +16,11 @@ export function resolveObjectShape(_struct: RuntimeStruct, definition: ObjectDef
   return shape
 }
 
-export function readObjectShape(shape: ObjectShape): ObjectShape {
+export function readObjectShape(shape: ObjectShape, descriptors: PropertyDescriptorMap): ObjectShape {
   const output: { [key: string]: unknown } = Object.create(null)
-  const descriptors = Object.getOwnPropertyDescriptors(shape)
 
   for (const [key, descriptor] of Object.entries(descriptors)) {
     const value = typeof descriptor.get === 'function' ? descriptor.get.call(shape) : descriptor.value
-
     output[key] = value
   }
 

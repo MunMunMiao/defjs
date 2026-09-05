@@ -374,6 +374,7 @@ export type EnumDefinition<T extends number | string> = BaseDefinition & {
   expected: string
   kind: 'enum'
   values: readonly [T, ...T[]]
+  valueSet?: ReadonlySet<T> | null
 }
 
 export type ArrayDefinition = BaseDefinition & {
@@ -382,6 +383,7 @@ export type ArrayDefinition = BaseDefinition & {
 }
 
 export type ObjectDefinitionCache = {
+  declaredDescriptors: PropertyDescriptorMap
   fields?: readonly ResolvedStructField[]
   resolvedShape?: ObjectShape
 }
@@ -419,22 +421,27 @@ export type TupleDefinition = BaseDefinition & {
 }
 
 export type UnionDefinition = BaseDefinition & {
+  expected: string
   kind: 'or'
   options: readonly [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]]
+  uniformIdentityEncode?: boolean
 }
 
 export type DiscriminatedUnionDefinition = BaseDefinition & {
   kind: 'discriminatedUnion'
   discriminator: string
+  discriminatorWireKeys?: readonly string[]
   expected: string
   map: Map<unknown, StructLike<unknown, unknown, boolean>>
   options: readonly [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]]
+  wireKeyByValue?: Map<unknown, string>
 }
 
 export type IntersectionDefinition = BaseDefinition & {
+  expected: string
   kind: 'intersection'
-  left: StructLike<unknown, unknown, boolean>
-  right: StructLike<unknown, unknown, boolean>
+  objectSides: boolean
+  options: readonly [StructLike<unknown, unknown, boolean>, ...StructLike<unknown, unknown, boolean>[]]
 }
 
 export type StructDefinition =

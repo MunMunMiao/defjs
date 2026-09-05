@@ -1,11 +1,12 @@
-import { selectUnionOptions } from './match'
+import { matchesRuntimeValue, selectUnionOptions } from './match'
+import { mapAliasedObjectFields } from './fields'
 
 export { matchesDefinition } from './match'
 import { resolveObjectShape } from './shape'
 import { DEFINITION } from './symbols'
 import { REQUEST_SECTION_KEYS } from './types'
-import type { RuntimeStruct } from './types'
-import { hasOwnKey, isObjectIntersectionStruct, isPlainObject } from './utils'
+import type { ObjectDefinition, RuntimeStruct } from './types'
+import { hasOwnKey, isPlainObject } from './utils'
 
 export interface EncodeOptions {
   encodeObject?: (
@@ -56,6 +57,25 @@ function getComparableEncodedValue(struct: RuntimeStruct, value: unknown, option
     return { alias: definition.alias, value }
   }
   return value
+}
+
+function encodeObjectFields(
+  struct: RuntimeStruct,
+  definition: ObjectDefinition,
+  value: { [key: string]: unknown },
+  options: EncodeOptions,
+  output: { [key: string]: unknown } = Object.create(null),
+): { [key: string]: unknown } {
+  if (options.encodeObject === mapAliasedObjectFields) {
+    return mapAliasedObjectFields(struct, value, (fieldStruct, fieldValue) => encodeValue(fieldStruct, fieldValue, options), output)
+  }
+  const shape = resolveObjectShape(struct, definition)
+  for (const key in shape) {
+    if (hasOwnKey(value, key)) {
+      output[key] = encodeValue(shape[key] as RuntimeStruct, value[key], options)
+    }
+  }
+  return output
 }
 
 export function encodeValue(struct: RuntimeStruct, value: unknown, options: EncodeOptions = {}): unknown {
@@ -113,16 +133,7 @@ export function encodeValue(struct: RuntimeStruct, value: unknown, options: Enco
       if (options.encodeObject) {
         return options.encodeObject(struct, value, (fieldStruct, fieldValue) => encodeValue(fieldStruct, fieldValue, options))
       }
-      const output: { [key: string]: unknown } = Object.create(null)
-      const shape = resolveObjectShape(struct, definition)
-      for (const key in shape) {
-        const fieldStruct = shape[key]
-        if (!hasOwnKey(value, key)) {
-          continue
-        }
-        output[key] = encodeValue(fieldStruct as unknown as RuntimeStruct, value[key], options)
-      }
-      return output
+      return encodeObjectFields(struct, definition, value, options)
     }
 
     case 'request': {
@@ -143,6 +154,16 @@ export function encodeValue(struct: RuntimeStruct, value: unknown, options: Enco
       return encodeValue(definition.struct as unknown as RuntimeStruct, value, options)
 
     case 'or': {
+      if (!options.encodeObject && !options.selectUnionOptions && definition.uniformIdentityEncode) {
+        for (const option of definition.options) {
+          const runtime = option as unknown as RuntimeStruct
+          if (matchesRuntimeValue(runtime, value)) {
+            return encodeValue(runtime, value, options)
+          }
+        }
+        return value
+      }
+
       const selectOptions = options.selectUnionOptions ?? selectUnionOptions
       const matches = selectOptions(definition.options, value)
       const firstOption = matches[0]
@@ -172,14 +193,31 @@ export function encodeValue(struct: RuntimeStruct, value: unknown, options: Enco
     }
 
     case 'intersection': {
-      const leftEncoded = encodeValue(definition.left as RuntimeStruct, value, options)
-      const rightEncoded = encodeValue(definition.right as RuntimeStruct, value, options)
-      return isObjectIntersectionStruct(definition.left) &&
-        isObjectIntersectionStruct(definition.right) &&
-        isPlainObject(leftEncoded) &&
-        isPlainObject(rightEncoded)
-        ? { ...leftEncoded, ...rightEncoded }
-        : rightEncoded
+      if (!definition.objectSides) {
+        return encodeValue(definition.options[definition.options.length - 1] as RuntimeStruct, value, options)
+      }
+
+      if ((!options.encodeObject || options.encodeObject === mapAliasedObjectFields) && isPlainObject(value)) {
+        const output: { [key: string]: unknown } = Object.create(null)
+        for (const option of definition.options) {
+          const runtime = option as RuntimeStruct
+          encodeObjectFields(runtime, runtime[DEFINITION] as ObjectDefinition, value, options, output)
+        }
+        return output
+      }
+
+      const merged: { [key: string]: unknown } = Object.create(null)
+      let merge = true
+      let last: unknown
+      for (const option of definition.options) {
+        last = encodeValue(option as RuntimeStruct, value, options)
+        if (merge && isPlainObject(last)) {
+          Object.assign(merged, last)
+        } else {
+          merge = false
+        }
+      }
+      return merge ? merged : last
     }
   }
 }

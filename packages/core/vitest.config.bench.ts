@@ -2,7 +2,8 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    include: ['src/struct/struct.bench.ts'],
+    benchmark: { include: ['test-out/struct-bench/struct.bench.js'] },
     pool: 'threads',
+    experimental: { viteModuleRunner: false },
   },
 })

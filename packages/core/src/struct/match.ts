@@ -2,7 +2,7 @@ import { resolveObjectShape } from './shape'
 import { DEFINITION } from './symbols'
 import { REQUEST_SECTION_KEYS } from './types'
 import type { RuntimeStruct, StructDefinition, StructLike } from './types'
-import { hasOwnKey, isPlainObject } from './utils'
+import { hasOwnKey, isPlainObject, matchesEnum } from './utils'
 
 export function matchesRuntimeValue(struct: RuntimeStruct, value: unknown): boolean {
   return matchesDefinition(struct[DEFINITION], value, struct)
@@ -54,7 +54,7 @@ export function matchesDefinition(definition: StructDefinition, value: unknown, 
     case 'literal':
       return Object.is(value, definition.value)
     case 'enum':
-      return definition.values.includes(value as never)
+      return matchesEnum(definition, value)
     case 'array':
       return Array.isArray(value) && value.every((item) => matchesRuntimeValue(definition.item as unknown as RuntimeStruct, item))
     case 'tuple':
@@ -92,11 +92,8 @@ export function matchesDefinition(definition: StructDefinition, value: unknown, 
       const target = definition.map.get(value[definition.discriminator]) as RuntimeStruct | undefined
       return target ? matchesRuntimeValue(target, value) : false
     }
-    case 'intersection': {
-      const left = definition.left as RuntimeStruct
-      const right = definition.right as RuntimeStruct
-      return matchesRuntimeValue(left, value) && matchesRuntimeValue(right, value)
-    }
+    case 'intersection':
+      return definition.options.every((option) => matchesRuntimeValue(option as unknown as RuntimeStruct, value))
   }
 }
 

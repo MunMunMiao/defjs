@@ -103,6 +103,10 @@ function formatErrorTreeKey(segment: number | string): string {
 
 let activeErrorMap: ErrorMap | undefined
 
+export function hasErrorMap(): boolean {
+  return activeErrorMap !== undefined
+}
+
 export function runWithErrorMap<T>(map: ErrorMap | undefined, run: () => T): T {
   const previous = activeErrorMap
   activeErrorMap = map

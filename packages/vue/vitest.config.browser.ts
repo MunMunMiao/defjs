@@ -16,11 +16,11 @@ export default defineConfig({
     },
   },
   test: {
+    api: 63316,
     name: 'vue-browser',
     globalSetup: resolve(packageRoot, '../../test/browser-api-server-setup.ts'),
     browser: {
       enabled: true,
-      api: 63316,
       provider: playwright(),
       connectTimeout: 120_000,
       headless: true,

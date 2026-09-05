@@ -125,4 +125,17 @@ describe('facade.ts', () => {
     }
     expect(val).toEqual({ name: 'Miao' })
   })
+
+  test('object struct ignores later replacement of a declared field', () => {
+    const shape = { name: struct.string() }
+    const user = struct.object(shape)
+    shape.name = struct.number() as never
+
+    const [err, val] = parse(user, { name: 'Miao' })
+
+    if (err) {
+      throw err
+    }
+    expect(val).toEqual({ name: 'Miao' })
+  })
 })

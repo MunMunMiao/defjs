@@ -1,5 +1,14 @@
 import { DEFINITION } from './symbols'
-import type { ParseFailure, ParseSuccess, Path, RuntimeStruct, StructDefinition, StructIssue, StructLike } from './types'
+import type { EnumDefinition, ParseFailure, ParseSuccess, Path, RuntimeStruct, StructDefinition, StructIssue } from './types'
+
+export function matchesEnum(definition: EnumDefinition<string | number>, value: unknown): boolean {
+  // One-shot schemas avoid allocating a Set. A second lookup pays for the reusable index.
+  if (definition.valueSet === undefined) {
+    definition.valueSet = null
+    return definition.values.includes(value as string | number)
+  }
+  return (definition.valueSet ??= new Set(definition.values)).has(value as string | number)
+}
 
 export function success<T>(value: T): ParseSuccess<T> {
   return {
@@ -43,16 +52,12 @@ export function expectedType(definition: StructDefinition): string {
       return definition.expected
 
     case 'intersection':
-      return `${expectedType((definition.left as RuntimeStruct)[DEFINITION])} & ${expectedType((definition.right as RuntimeStruct)[DEFINITION])}`
+    case 'or':
+    case 'discriminatedUnion':
+      return definition.expected
 
     case 'object':
       return 'object'
-
-    case 'or':
-      return definition.options.map((option) => expectedType((option as RuntimeStruct)[DEFINITION])).join(' | ')
-
-    case 'discriminatedUnion':
-      return definition.expected
 
     case 'record':
       return `record<${expectedType((definition.value as RuntimeStruct)[DEFINITION])}>`
@@ -69,17 +74,6 @@ export function expectedType(definition: StructDefinition): string {
     case 'unknown':
       return 'unknown'
   }
-}
-
-export function isObjectIntersectionStruct(struct: StructLike<unknown, unknown, boolean>): boolean {
-  const definition = (struct as RuntimeStruct)[DEFINITION]
-  if (definition.kind === 'object') {
-    return true
-  }
-  if (definition.kind === 'intersection') {
-    return isObjectIntersectionStruct(definition.left) && isObjectIntersectionStruct(definition.right)
-  }
-  return false
 }
 
 export function formatPath(path: Path): string {

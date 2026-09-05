@@ -1,5 +1,6 @@
 import { resolveObjectShape } from './shape'
 import { DEFINITION } from './symbols'
+import { hasOwnKey } from './utils'
 import type { ObjectDefinition, RuntimeStruct } from './types'
 
 export interface ResolvedStructField {
@@ -43,4 +44,31 @@ function assertUniqueWireKeys(fields: readonly ResolvedStructField[]): void {
     }
     seen.set(field.wireKey, field.key)
   }
+}
+
+export function mapAliasedObjectFields(
+  struct: RuntimeStruct,
+  value: { [key: string]: unknown },
+  encodeChild: (struct: RuntimeStruct, value: unknown) => unknown,
+  output: { [key: string]: unknown } = Object.create(null),
+): { [key: string]: unknown } {
+  const definition = struct[DEFINITION]
+  if (definition.kind !== 'object') {
+    throw new TypeError('json encode expects object struct')
+  }
+
+  for (const field of resolveStructFields(struct, definition)) {
+    if (!hasOwnKey(value, field.key)) {
+      continue
+    }
+
+    const fieldValue = value[field.key]
+    if (typeof fieldValue === 'undefined') {
+      continue
+    }
+
+    output[field.wireKey] = encodeChild(field.struct, fieldValue)
+  }
+
+  return output
 }

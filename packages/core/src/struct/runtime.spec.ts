@@ -181,4 +181,13 @@ describe('runtime.ts chain methods', () => {
     expect(err).toBeInstanceOf(StructError)
     expect(val).toBeUndefined()
   })
+
+  test('runtime structs do not carry an own _struct property', () => {
+    const value = struct.string()
+
+    expect(Object.hasOwn(value, '_struct')).toBe(false)
+    expect('_struct' in value).toBe(false)
+    expect(isStruct(value)).toBe(true)
+    expect(Object.getOwnPropertySymbols(value)).toEqual([DEFINITION])
+  })
 })

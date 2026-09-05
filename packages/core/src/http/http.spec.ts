@@ -89,6 +89,33 @@ describe('request http runtime', () => {
     expect(result).toEqual({ name: 'Miao' })
   })
 
+  test('should round-trip a custom build bound view through the real test server', async () => {
+    const useEcho = defineRequest({
+      build: (request, input) => {
+        request.setJson(input.body)
+      },
+      input: struct.request({
+        body: struct.json(
+          struct.object({
+            name: struct.string().alias('user_name'),
+          }),
+        ),
+      }),
+      method: 'POST',
+      output: {
+        200: struct.object({
+          name: struct.string().alias('user_name'),
+        }),
+      },
+      path: '/',
+    })
+
+    const [error, result] = await client.execute(useEcho({ body: { name: 'Miao' } }))
+
+    expect(error).toBeNull()
+    expect(result).toEqual({ name: 'Miao' })
+  })
+
   test('should normalize omitted all-optional request sections before building', async () => {
     let capturedRequest: HttpRequest | undefined
     const optionalClient = createClient(

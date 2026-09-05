@@ -430,6 +430,7 @@ describe('struct coverage boundary cases', () => {
   test('coverage guards cover defensive branches without changing public semantics', () => {
     const duplicateDefinition = {
       cache: {
+        declaredDescriptors: {},
         resolvedShape: {
           first: struct.string().alias('same'),
           second: struct.string().alias('same'),
