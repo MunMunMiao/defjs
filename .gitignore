@@ -49,3 +49,6 @@ doc/.vitepress/cache/
 
 junit.xml
 .omo/
+
+.superpowers
+.claude
