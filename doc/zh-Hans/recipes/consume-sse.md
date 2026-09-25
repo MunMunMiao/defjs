@@ -9,7 +9,7 @@ description: 打开类型化事件流，迭代一次，再 close 并 await close
 
 细节见 [SSE](../core/sse.md)。
 
-```ts notifications.ts
+```ts twoslash notifications.ts
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
@@ -45,4 +45,4 @@ if (error) {
 hello from the server
 ```
 
-SSE 默认会重试瞬时网络/读失败。用 `withSSEReconnect({ attempts: N })` 封顶，或 `attempts: 0` 关掉。
+SSE 默认不重试网络或读取失败；必须用 `withSSEReconnect(...)` 显式启用。提供 reconnect 配置后，`attempts` 默认是 `3`；`attempts: 0` 禁用重试。

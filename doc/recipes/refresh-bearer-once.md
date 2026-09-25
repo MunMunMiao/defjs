@@ -9,7 +9,7 @@ description: Attach Authorization and replay once inside one interceptor; next()
 
 See [Interceptors](../core/interceptors.md).
 
-```ts refresh-bearer.ts
+```ts twoslash refresh-bearer.ts
 import { createClient, createHttpInterceptor, defineRequest, struct, withEndpoint, withHTTPHandle, withInterceptors } from '@defjs/core'
 
 const getInvoice = defineRequest({
@@ -52,8 +52,8 @@ function refreshingBearer(read: () => Credential, refresh: (stale: Credential) =
 }
 
 let credential: Credential = { accessToken: 'v1' }
-const handle: typeof fetch = async (_input, init) => {
-  const auth = new Headers(init?.headers).get('authorization')
+const handle: typeof fetch = async (input, init) => {
+  const auth = new Request(input, init).headers.get('authorization')
   if (auth === 'Bearer v1') return Response.json({ code: 'expired_token' }, { status: 401 })
   return Response.json({ total: 42 }, { status: 200 })
 }

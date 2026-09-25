@@ -9,7 +9,7 @@ JSON envelopes 用非空 string `type`。Unsubscribe、`close`，同 `await sess
 
 詳情睇 [WebSocket](../core/web-socket.md)。
 
-```ts chat.ts
+```ts twoslash chat.ts
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://chat.example.com'))

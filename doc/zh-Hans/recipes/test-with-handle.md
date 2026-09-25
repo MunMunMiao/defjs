@@ -9,7 +9,7 @@ description: 用 withHTTPHandle 只换这一个 Client 的 Fetch，command 保�
 
 细节见 [Client](../core/client.md)。
 
-```ts get-user.test.ts
+```ts twoslash get-user.test.ts
 import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
 
 const getUser = defineRequest({

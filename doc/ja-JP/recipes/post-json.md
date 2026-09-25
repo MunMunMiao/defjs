@@ -9,7 +9,7 @@ description: struct.json で JSON ボディを送り、宣言済み 201 をデ�
 
 詳細は [Commands](../core/commands.md) と [HTTP](../core/http.md) を見てください。
 
-```ts create-user.ts
+```ts twoslash create-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com/v1'))

@@ -16,6 +16,13 @@ description: 装插件、provide Client、拉用户，并在响应式变化时 a
 创建 Client，装插件，再按变化 abort 去拉：
 
 ```typescript twoslash
+// @filename: App.vue.d.ts
+import type { DefineComponent } from 'vue'
+declare const App: DefineComponent
+export default App
+
+// @filename: main.ts
+// ---cut---
 import { createClient, withEndpoint } from '@defjs/core'
 import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
@@ -126,7 +133,7 @@ const notifications = defineEventStream({
 
 const controller = new AbortController()
 let disposed = false
-let stream: EventStreamHandle<string> | undefined
+let stream: EventStreamHandle<unknown> | undefined
 
 const stop = () => {
   disposed = true

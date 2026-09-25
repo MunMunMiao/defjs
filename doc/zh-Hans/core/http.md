@@ -121,7 +121,7 @@ Alias 只改写出线上的 key。解析值和 command 输入仍用逻辑名。
 
 `HttpResponse` 有 `url`、`status`、`statusText`、`headers`、`body`、`error`、`ok`。`ok` 只表示 `200 <= status < 300`。这是 Defjs 值，不是原生 `Response`。没有 `output` 时不允许 `responseType`。
 
-## 取消工作
+## 取消工作 {#cancel-the-work}
 
 执行 options 收 `signal`，再配 `abort` 或 `timeout` 其一。**`abort` 和 `timeout` 互斥。** `signal` 可以跟其中任一个搭配。
 

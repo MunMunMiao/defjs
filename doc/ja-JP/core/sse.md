@@ -39,7 +39,7 @@ if (error) {
 
 リクエスト入力には `path`、`query`、`headers`、`body` を持てます。カスタム `build` は HTTP と同じ request helper（body setter 含む）を受け取ります。`Accept` をすでに立てていなければ、Defjs は `Accept: text/event-stream` を送ります。
 
-1 つの論理ストリームは、複数の物理 Fetch 試行にまたがれます。SSE は再接続 options がなくても、一時的なネットワークとストリーム読み取り失敗をデフォルトでリトライします。`attempts` 上限がなければ、そのリトライは無制限です。ハンドルと非同期イテレータはそれでも 1 つです。
+SSE はネットワークや読み取りの失敗をデフォルトではリトライしません。`withSSEReconnect(...)` で明示的に有効にしてください。再接続を設定すると `attempts` のデフォルトは `3` になり、`attempts: 0` はリトライを無効にします。
 
 ## 開いて調べる
 
@@ -121,7 +121,7 @@ const client = createClient(
 
 ## 再接続
 
-再接続設定はデフォルトのリトライ経路をカスタムします — リトライを有効にするために必須ではありません。通常の EOF はリトライしません。ネットワークとストリーム読み取り失敗はリトライできます。status/content-type 検証、パーサ上限、メッセージ変換失敗、キューオーバーフロー、通常 EOF は論理ストリームにとって終端です。
+SSE はネットワークや読み取りの失敗をデフォルトではリトライしません。`withSSEReconnect(...)` で明示的に有効にしてください。再接続を設定すると `attempts` のデフォルトは `3` になり、`attempts: 0` はリトライを無効にします。 通常の EOF はリトライしません。ネットワークとストリーム読み取り失敗はリトライできます。status/content-type 検証、パーサ上限、メッセージ変換失敗、キューオーバーフロー、通常 EOF は論理ストリームにとって終端です。
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -141,9 +141,9 @@ const client = createClient(
 )
 ```
 
-`attempts` は初回試行のあとのリトライ回数です。`attempts: 0` はリトライを無効にします。試行上限なし → 組み込みリトライは無制限。`delayMs` は初期間隔。`factor` で伸ばし、`maxDelayMs` がベースを上限します。SSE の `jitter` は WebSocket と同じ **0–1 の乗法因子**です。ストリームの `retry:` フィールドは現在の間隔を更新します。方針コールバックが false / throw / reject を返すと、論理ストリームは終わります。
+SSE はネットワークや読み取りの失敗をデフォルトではリトライしません。`withSSEReconnect(...)` で明示的に有効にしてください。再接続を設定すると `attempts` のデフォルトは `3` になり、`attempts: 0` はリトライを無効にします。 `delayMs` は初期間隔。`factor` で伸ばし、`maxDelayMs` がベースを上限します。SSE の `jitter` は WebSocket と同じ **0–1 の乗法因子**です。ストリームの `retry:` フィールドは現在の間隔を更新します。方針コールバックが false / throw / reject を返すと、論理ストリームは終わります。
 
-最後にパースしたイベント ID は、後の試行で `Last-Event-ID` になります。無制限再接続の前に、サーバーの再生意味論を把握してください。
+最後にパースしたイベント ID は、後の試行で `Last-Event-ID` になります。再接続の前に、サーバーの再生意味論を把握してください。
 
 ## バッファとキューの上限
 

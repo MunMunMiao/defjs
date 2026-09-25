@@ -9,7 +9,7 @@ description: 執行一次 GET，並依型別化的 200 與已宣告 404 分支�
 
 細節見 [HTTP](../core/http.md) 與[錯誤](../core/errors.md)。
 
-```ts get-user.ts
+```ts twoslash get-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

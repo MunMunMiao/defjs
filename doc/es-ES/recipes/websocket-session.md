@@ -9,7 +9,7 @@ Los envelopes JSON usan un `type` string no vacío. Tú gestionas el unsubscribe
 
 Ver detalles en [WebSocket](../core/web-socket.md).
 
-```ts chat.ts
+```ts twoslash chat.ts
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://chat.example.com'))

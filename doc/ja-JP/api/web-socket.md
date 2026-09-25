@@ -16,10 +16,11 @@ function defineWebSocket(definition: WebSocketDefinition): WebSocketCommandBuild
 - **definition** — `path`、`incoming` structs、任意の `outgoing`、`input`、`build`、キュー上限です。
 - **戻り値** — ビルダーです。入力を渡すと `WebSocketCommand` になります。
 
-```ts
+```ts twoslash
 import { defineWebSocket, struct } from '@defjs/core'
 
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: { message: struct.object({ text: struct.string() }) },
   outgoing: { message: struct.object({ text: struct.string() }) },

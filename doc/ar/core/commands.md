@@ -62,7 +62,7 @@ const search = defineRequest({
   path: '/search',
   input: struct.object({ q: struct.string(), page: struct.number().optional() }),
   build(request, input) {
-    request.withQuery({ q: input.q, page: input.page ?? 1 })
+    request.setQueryParams({ q: input.q, page: input.page })
   },
   output: { 200: struct.object({ items: struct.array(struct.string()) }) },
 })

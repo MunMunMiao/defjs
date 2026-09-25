@@ -9,7 +9,7 @@ description: 타입이 잡힌 이벤트 스트림을 열고, 한 번 순회한 �
 
 자세한 내용은 [SSE](../core/sse.md)를 보세요.
 
-```ts notifications.ts
+```ts twoslash notifications.ts
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
@@ -45,4 +45,4 @@ if (error) {
 hello from the server
 ```
 
-SSE는 일시적인 네트워크/읽기 실패를 기본으로 재시도해요. `withSSEReconnect({ attempts: N })`으로 상한을 두거나, `attempts: 0`으로 끄세요.
+SSE는 기본적으로 네트워크/읽기 실패를 재시도하지 않습니다. `withSSEReconnect(...)`으로 명시적으로 활성화하세요. 재연결을 설정하면 `attempts`의 기본값은 `3`이며, `attempts: 0`은 재시도를 비활성화합니다.

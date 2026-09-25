@@ -16,6 +16,13 @@ description: 플러그인을 설치하고, 클라이언트를 제공하고, 사�
 클라이언트를 만들고 플러그인을 설치한 뒤, 변경 시 abort로 fetch 해요.
 
 ```typescript twoslash
+// @filename: App.vue.d.ts
+import type { DefineComponent } from 'vue'
+declare const App: DefineComponent
+export default App
+
+// @filename: main.ts
+// ---cut---
 import { createClient, withEndpoint } from '@defjs/core'
 import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
@@ -126,7 +133,7 @@ const notifications = defineEventStream({
 
 const controller = new AbortController()
 let disposed = false
-let stream: EventStreamHandle<string> | undefined
+let stream: EventStreamHandle<unknown> | undefined
 
 const stop = () => {
   disposed = true

@@ -121,7 +121,7 @@ else console.log(user.id)
 
 `HttpResponse`에는 `url`, `status`, `statusText`, `headers`, `body`, `error`, `ok`가 있어요. `ok`는 `200 <= status < 300`만 의미해요. Defjs 값이지 네이티브 `Response`가 아니에요. `output`이 없으면 `responseType`은 허용되지 않아요.
 
-## 작업 취소하기
+## 작업 취소하기 {#cancel-the-work}
 
 실행 옵션은 `signal`에 `abort` 또는 `timeout` 중 하나를 받아요. **`abort`와 `timeout`은 서로 배타적이에요.** `signal`은 둘 중 하나와 조합할 수 있어요.
 

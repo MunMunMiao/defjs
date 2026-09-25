@@ -9,7 +9,7 @@ Declare both success and 404 bodies. Branch on `error.kind` and `error.status` â
 
 See [HTTP](../core/http.md) and [Errors](../core/errors.md) for details.
 
-```ts get-user.ts
+```ts twoslash get-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

@@ -39,7 +39,7 @@ if (error) {
 
 요청 입력에는 `path`, `query`, `headers`, `body`가 있을 수 있어요. 커스텀 `build`는 HTTP와 같은 request helper(body setter 포함)를 받아요. `Accept`를 이미 설정하지 않았다면 Defjs가 `Accept: text/event-stream`을 보내요.
 
-하나의 논리 스트림은 여러 물리 Fetch 시도를 걸칠 수 있어요. SSE는 재연결 옵션 없이도 일시적 네트워크·스트림 읽기 실패를 기본 재시도해요. `attempts` 한도가 없으면 그 재시도는 무제한이에요. 그래도 핸들과 async iterator는 하나예요.
+SSE는 기본적으로 네트워크/읽기 실패를 재시도하지 않습니다. `withSSEReconnect(...)`으로 명시적으로 활성화하세요. 재연결을 설정하면 `attempts`의 기본값은 `3`이며, `attempts: 0`은 재시도를 비활성화합니다.
 
 ## 열고 살펴보기
 
@@ -121,7 +121,7 @@ const client = createClient(
 
 ## 재연결
 
-재연결 설정은 기본 재시도 경로를 맞춤 설정해요 — 재시도를 켜는 데 필수는 아니에요. 정상 EOF는 재시도하지 않아요. 네트워크와 스트림 읽기 실패는 재시도할 수 있어요. status/content-type 검증, 파서 한도, 메시지 transform 실패, 큐 오버플로, 정상 EOF는 논리 스트림에 종료예요.
+SSE는 기본적으로 네트워크/읽기 실패를 재시도하지 않습니다. `withSSEReconnect(...)`으로 명시적으로 활성화하세요. 재연결을 설정하면 `attempts`의 기본값은 `3`이며, `attempts: 0`은 재시도를 비활성화합니다. 정상 EOF는 재시도하지 않아요. 네트워크와 스트림 읽기 실패는 재시도할 수 있어요. status/content-type 검증, 파서 한도, 메시지 transform 실패, 큐 오버플로, 정상 EOF는 논리 스트림에 종료예요.
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -141,9 +141,9 @@ const client = createClient(
 )
 ```
 
-`attempts`는 최초 시도 이후 재시도 횟수예요. `attempts: 0`은 재시도를 꺼요. 시도 한도가 없으면 내장 재시도가 무제한이에요. `delayMs`는 초기 간격이고, `factor`가 키우고, `maxDelayMs`가 기본값을 상한해요. SSE `jitter`는 WebSocket과 같은 **0–1 곱셈 인자**예요. 스트림 `retry:` 필드는 현재 간격을 갱신해요. 정책 콜백이 false를 반환하거나 throw/reject하면 논리 스트림이 끝나요.
+SSE는 기본적으로 네트워크/읽기 실패를 재시도하지 않습니다. `withSSEReconnect(...)`으로 명시적으로 활성화하세요. 재연결을 설정하면 `attempts`의 기본값은 `3`이며, `attempts: 0`은 재시도를 비활성화합니다. `delayMs`는 초기 간격이고, `factor`가 키우고, `maxDelayMs`가 기본값을 상한해요. SSE `jitter`는 WebSocket과 같은 **0–1 곱셈 인자**예요. 스트림 `retry:` 필드는 현재 간격을 갱신해요. 정책 콜백이 false를 반환하거나 throw/reject하면 논리 스트림이 끝나요.
 
-가장 최근에 파싱된 이벤트 ID는 이후 시도의 `Last-Event-ID`가 돼요. 무제한 재연결 전에 서버의 재생 의미를 알아 두세요.
+가장 최근에 파싱된 이벤트 ID는 이후 시도의 `Last-Event-ID`가 돼요. 재연결 전에 서버의 재생 의미를 알아 두세요.
 
 ## 버퍼와 큐 한도
 

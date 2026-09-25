@@ -9,7 +9,7 @@ description: withHTTPHandle で 1 クライアント分の Fetch を差し替え
 
 詳細は [Client](../core/client.md) を見てください。
 
-```ts get-user.test.ts
+```ts twoslash get-user.test.ts
 import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
 
 const getUser = defineRequest({

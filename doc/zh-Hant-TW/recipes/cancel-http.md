@@ -9,7 +9,7 @@ description: Abort 或逾時一個 execute 呼叫，並讀取 ABORTED / TIMEOUT�
 
 細節見 [HTTP](../core/http.md#cancel-the-work)。
 
-```ts cancel-report.ts
+```ts twoslash cancel-report.ts
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

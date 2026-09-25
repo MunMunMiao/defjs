@@ -9,7 +9,7 @@ description: 開 typed event stream，iterate 一次，之後 close 同 await cl
 
 詳情睇 [SSE](../core/sse.md)。
 
-```ts notifications.ts
+```ts twoslash notifications.ts
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
@@ -45,4 +45,4 @@ if (error) {
 hello from the server
 ```
 
-SSE 預設會 retry transient network/read failures。用 `withSSEReconnect({ attempts: N })` cap 住，或者 `attempts: 0` 關閉。
+SSE 預設唔會 retry 網絡或讀取失敗；要用 `withSSEReconnect(...)` 明確啟用。提供 reconnect 設定後，`attempts` 預設係 `3`；`attempts: 0` 關閉重試。

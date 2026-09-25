@@ -9,7 +9,7 @@ Defjs does not implement GraphQL `errorPolicy`. Model the wire as HTTP POST with
 
 See [Design Decisions](../guide/design-decisions.md).
 
-```ts graphql-viewer.ts
+```ts twoslash graphql-viewer.ts
 import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle, type Client } from '@defjs/core'
 
 const VIEWER_QUERY = 'query Viewer { viewer { id login } }' as const

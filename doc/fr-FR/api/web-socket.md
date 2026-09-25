@@ -16,10 +16,11 @@ function defineWebSocket(definition: WebSocketDefinition): WebSocketCommandBuild
 - **definition** — `path`, structs `incoming`, `outgoing` optionnel, `input`, `build`, limites de queue.
 - **Renvoie** un builder. Appelle-le avec l’input pour obtenir un `WebSocketCommand`.
 
-```ts
+```ts twoslash
 import { defineWebSocket, struct } from '@defjs/core'
 
 const chat = defineWebSocket({
+  maxIncomingQueueSize: 100,
   path: '/chat',
   incoming: { message: struct.object({ text: struct.string() }) },
   outgoing: { message: struct.object({ text: struct.string() }) },

@@ -9,7 +9,7 @@ Body 包进 `struct.json(...)`。逻辑字段名留在 TypeScript；线上别名
 
 细节见 [Commands](../core/commands.md) 和 [HTTP](../core/http.md)。
 
-```ts create-user.ts
+```ts twoslash create-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com/v1'))

@@ -39,7 +39,7 @@ if (error) {
 
 Request input может иметь `path`, `query`, `headers` и `body`. Кастомный `build` получает те же request helpers, что и HTTP, включая body setters. Defjs шлёт `Accept: text/event-stream`, если ты ещё не поставил `Accept`.
 
-Один логический стрим может охватить несколько физических Fetch-попыток. SSE по умолчанию ретраит транзиентные network и stream-read сбои даже без reconnect options; без лимита `attempts` эти ретраи unbounded. Ты всё равно получаешь один handle и один async iterator.
+По умолчанию SSE не повторяет запросы при сбоях сети или чтения. Включите повторы явно через `withSSEReconnect(...)`. При наличии настройки reconnect значение `attempts` по умолчанию равно `3`; `attempts: 0` отключает повторы.
 
 ## Открой и посмотри
 
@@ -121,7 +121,7 @@ Observer бежит на transform boundary. Его сбой изолирова�
 
 ## Reconnect
 
-Настройки reconnect кастомизируют default retry path — они не обязательны, чтобы включить ретраи. Нормальный EOF не ретраится. Network и stream-read сбои могут ретраиться. Status/content-type validation, parser limits, message transform failures, queue overflow и нормальный EOF — terminal для логического стрима.
+По умолчанию SSE не повторяет запросы при сбоях сети или чтения. Включите повторы явно через `withSSEReconnect(...)`. При наличии настройки reconnect значение `attempts` по умолчанию равно `3`; `attempts: 0` отключает повторы. Нормальный EOF не ретраится. Network и stream-read сбои могут ретраиться. Status/content-type validation, parser limits, message transform failures, queue overflow и нормальный EOF — terminal для логического стрима.
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -141,9 +141,9 @@ const client = createClient(
 )
 ```
 
-`attempts` считает ретраи после initial attempt; `attempts: 0` отключает retry. Нет лимита attempt → unbounded built-in retries. `delayMs` — начальный интервал; `factor` растёт; `maxDelayMs` caps base. SSE `jitter` — **0–1 multiplicative factor**, как WebSocket. Поле стрима `retry:` обновляет текущий интервал. Policy callback, вернувший false / throw / reject, заканчивает логический стрим.
+По умолчанию SSE не повторяет запросы при сбоях сети или чтения. Включите повторы явно через `withSSEReconnect(...)`. При наличии настройки reconnect значение `attempts` по умолчанию равно `3`; `attempts: 0` отключает повторы. `delayMs` — начальный интервал; `factor` растёт; `maxDelayMs` caps base. SSE `jitter` — **0–1 multiplicative factor**, как WebSocket. Поле стрима `retry:` обновляет текущий интервал. Policy callback, вернувший false / throw / reject, заканчивает логический стрим.
 
-Последний распарсенный event ID становится `Last-Event-ID` на более поздней попытке. Знай replay-семантику сервера до unbounded reconnect.
+Последний распарсенный event ID становится `Last-Event-ID` на более поздней попытке. Знай replay-семантику сервера до reconnect.
 
 ## Лимиты buffer и queue
 

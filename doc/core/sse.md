@@ -143,7 +143,7 @@ const client = createClient(
 
 `attempts` counts retries after the initial attempt; defaults to `3` when a reconnect object is set. `attempts: 0` disables retry. Omitting `withSSEReconnect` also disables retry. `delayMs` is the initial interval; `factor` grows it; `maxDelayMs` caps the base. SSE `jitter` is a **0–1 multiplicative factor**, same as WebSocket. A stream `retry:` field updates the current interval. Policy callback returning false / throwing / rejecting ends the logical stream.
 
-Latest parsed event ID becomes `Last-Event-ID` on a later attempt. A later attempt resends the same Fetch request, including method and body. Know the server’s replay semantics before unbounded reconnect.
+Latest parsed event ID becomes `Last-Event-ID` on a later attempt. A later attempt resends the same Fetch request, including method and body. Know the server’s replay semantics before reconnecting.
 
 ## Buffer and queue limits
 

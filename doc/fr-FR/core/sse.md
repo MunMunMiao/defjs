@@ -39,7 +39,7 @@ if (error) {
 
 L’entrée de requête peut avoir `path`, `query`, `headers` et `body`. Un `build` custom obtient les mêmes helpers de requête que HTTP, y compris les setters de body. Defjs envoie `Accept: text/event-stream` quand tu n’as pas déjà posé `Accept`.
 
-Un flux logique peut couvrir plusieurs tentatives Fetch physiques. SSE relance par défaut les échecs réseau et de lecture de flux transitoires même sans options de reconnect ; sans limite `attempts` ces retries sont non bornés. Tu obtiens quand même un handle et un itérateur async.
+SSE ne réessaie pas les échecs réseau ou de lecture par défaut. Active les retries explicitement avec `withSSEReconnect(...)`. Lorsque reconnect est configuré, `attempts` vaut `3` par défaut ; `attempts: 0` désactive les retries.
 
 ## Ouvrir et inspecter
 
@@ -121,7 +121,7 @@ L’observateur tourne à la frontière de transform. Son échec est isolé sauf
 
 ## Reconnect
 
-Les réglages de reconnect personnalisent le chemin de retry par défaut — ils ne sont pas requis pour activer les retries. Un EOF normal n’est pas relancé. Les échecs réseau et de lecture de flux peuvent retry. Validation statut/content-type, limites de parser, échecs de transform de message, overflow de queue et EOF normal sont terminaux pour le flux logique.
+SSE ne réessaie pas les échecs réseau ou de lecture par défaut. Active les retries explicitement avec `withSSEReconnect(...)`. Lorsque reconnect est configuré, `attempts` vaut `3` par défaut ; `attempts: 0` désactive les retries. Un EOF normal n’est pas relancé. Les échecs réseau et de lecture de flux peuvent retry. Validation statut/content-type, limites de parser, échecs de transform de message, overflow de queue et EOF normal sont terminaux pour le flux logique.
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -141,9 +141,9 @@ const client = createClient(
 )
 ```
 
-`attempts` compte les retries après la tentative initiale ; `attempts: 0` désactive le retry. Pas de limite de tentatives → retries built-in non bornés. `delayMs` est l’intervalle initial ; `factor` le fait croître ; `maxDelayMs` plafonne la base. Le `jitter` SSE est un **facteur multiplicatif 0–1**, comme WebSocket. Un champ de flux `retry:` met à jour l’intervalle courant. Un callback de politique qui renvoie false / throw / reject termine le flux logique.
+SSE ne réessaie pas les échecs réseau ou de lecture par défaut. Active les retries explicitement avec `withSSEReconnect(...)`. Lorsque reconnect est configuré, `attempts` vaut `3` par défaut ; `attempts: 0` désactive les retries. `delayMs` est l’intervalle initial ; `factor` le fait croître ; `maxDelayMs` plafonne la base. Le `jitter` SSE est un **facteur multiplicatif 0–1**, comme WebSocket. Un champ de flux `retry:` met à jour l’intervalle courant. Un callback de politique qui renvoie false / throw / reject termine le flux logique.
 
-Le dernier ID d’événement parsé devient `Last-Event-ID` sur une tentative ultérieure. Connais la sémantique de replay du serveur avant un reconnect non borné.
+Le dernier ID d’événement parsé devient `Last-Event-ID` sur une tentative ultérieure. Connais la sémantique de replay du serveur avant un reconnect.
 
 ## Limites de buffer et de queue
 

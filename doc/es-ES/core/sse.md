@@ -39,7 +39,7 @@ if (error) {
 
 La entrada de la solicitud puede tener `path`, `query`, `headers` y `body`. Un `build` personalizado obtiene los mismos helpers de request que HTTP, incluidos los setters de body. Defjs envía `Accept: text/event-stream` cuando no pusiste ya `Accept`.
 
-Un stream lógico puede abarcar varios intentos Fetch físicos. SSE reintenta por defecto fallos transitorios de red y de lectura del stream aunque no haya opciones de reconnect; sin un límite `attempts` esos reintentos son ilimitados. Sigues obteniendo un handle y un iterador async.
+SSE no reintenta fallos de red o lectura por defecto. Activa los reintentos explícitamente con `withSSEReconnect(...)`. Al configurar reconnect, `attempts` vale `3` por defecto; `attempts: 0` desactiva los reintentos.
 
 ## Abrir e inspeccionar
 
@@ -121,7 +121,7 @@ El observador corre en el límite de transformación. Su fallo queda aislado sal
 
 ## Reconnect
 
-Los ajustes de reconnect personalizan la ruta de retry por defecto — no hacen falta para habilitar reintentos. El EOF normal no se reintenta. Los fallos de red y de lectura del stream sí pueden. La validación de estado/content-type, los límites del parser, los fallos de transformación de mensaje, el overflow de cola y el EOF normal son terminales para el stream lógico.
+SSE no reintenta fallos de red o lectura por defecto. Activa los reintentos explícitamente con `withSSEReconnect(...)`. Al configurar reconnect, `attempts` vale `3` por defecto; `attempts: 0` desactiva los reintentos. El EOF normal no se reintenta. Los fallos de red y de lectura del stream sí pueden. La validación de estado/content-type, los límites del parser, los fallos de transformación de mensaje, el overflow de cola y el EOF normal son terminales para el stream lógico.
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -141,9 +141,9 @@ const client = createClient(
 )
 ```
 
-`attempts` cuenta reintentos tras el intento inicial; `attempts: 0` desactiva el retry. Sin límite de intentos → reintentos built-in ilimitados. `delayMs` es el intervalo inicial; `factor` lo crece; `maxDelayMs` tapa la base. El `jitter` de SSE es un **factor multiplicativo 0–1**, igual que WebSocket. Un campo `retry:` del stream actualiza el intervalo actual. El callback de política que devuelve false / lanza / rechaza termina el stream lógico.
+SSE no reintenta fallos de red o lectura por defecto. Activa los reintentos explícitamente con `withSSEReconnect(...)`. Al configurar reconnect, `attempts` vale `3` por defecto; `attempts: 0` desactiva los reintentos. `delayMs` es el intervalo inicial; `factor` lo crece; `maxDelayMs` tapa la base. El `jitter` de SSE es un **factor multiplicativo 0–1**, igual que WebSocket. Un campo `retry:` del stream actualiza el intervalo actual. El callback de política que devuelve false / lanza / rechaza termina el stream lógico.
 
-El último ID de evento parseado se convierte en `Last-Event-ID` en un intento posterior. Conoce la semántica de replay del servidor antes de un reconnect ilimitado.
+El último ID de evento parseado se convierte en `Last-Event-ID` en un intento posterior. Conoce la semántica de replay del servidor antes de un reconnect.
 
 ## Límites de buffer y cola
 

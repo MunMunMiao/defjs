@@ -121,7 +121,7 @@ Aliases 只改 outbound wire keys。剖析後的值與 command inputs 仍用邏�
 
 `HttpResponse` 有 `url`、`status`、`statusText`、`headers`、`body`、`error`、`ok`。`ok` 只代表 `200 <= status < 300`。它是 Defjs 值，不是原生 `Response`。沒有 `output` 時，不允許 `responseType`。
 
-## 取消工作
+## 取消工作 {#cancel-the-work}
 
 執行 options 接受 `signal`，再加上 `abort` 或 `timeout`。**`abort` 與 `timeout` 互斥。** `signal` 可以跟其中一個搭配。
 

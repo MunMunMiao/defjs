@@ -121,7 +121,7 @@ else console.log(user.id)
 
 `HttpResponse` يملك `url` و`status` و`statusText` و`headers` و`body` و`error` و`ok`. `ok` يعني فقط `200 <= status < 300`. قيمة Defjs، وليست `Response` أصليًا. بلا `output`، `responseType` غير مسموح.
 
-## ألغِ العمل
+## ألغِ العمل {#cancel-the-work}
 
 خيارات التنفيذ تأخذ `signal` مع إما `abort` أو `timeout`. **`abort` و`timeout` متنافيان.** يمكن لـ `signal` أن يجتمع مع أي منهما.
 

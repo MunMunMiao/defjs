@@ -9,7 +9,7 @@ description: 型付きイベントストリームを開き、一度だけ反復�
 
 詳細は [SSE](../core/sse.md) を見てください。
 
-```ts notifications.ts
+```ts twoslash notifications.ts
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
@@ -45,4 +45,4 @@ if (error) {
 hello from the server
 ```
 
-SSE は一時的なネットワーク/読み取り失敗をデフォルトでリトライします。`withSSEReconnect({ attempts: N })` で上限を付け、`attempts: 0` で無効にします。
+SSE はネットワークや読み取りの失敗をデフォルトではリトライしません。`withSSEReconnect(...)` で明示的に有効にしてください。再接続を設定すると `attempts` のデフォルトは `3` になり、`attempts: 0` はリトライを無効にします。

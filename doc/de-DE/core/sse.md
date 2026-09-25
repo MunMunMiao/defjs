@@ -39,7 +39,7 @@ if (error) {
 
 Request-Input darf `path`, `query`, `headers` und `body` haben. Custom `build` bekommt dieselben Request-Helper wie HTTP, inklusive Body-Setter. Defjs sendet `Accept: text/event-stream`, wenn du `Accept` nicht schon gesetzt hast.
 
-Ein logischer Stream kann mehrere physische Fetch-Versuche umspannen. SSE retried transient Network- und Stream-Read-Failures defaultmäßig auch ohne Reconnect-Options; ohne `attempts`-Limit sind diese Retries unbounded. Du bekommst trotzdem ein Handle und einen Async-Iterator.
+SSE wiederholt Netzwerk- und Lesefehler standardmäßig nicht. Aktiviere Wiederholungen ausdrücklich mit `withSSEReconnect(...)`. Bei konfiguriertem Reconnect ist der Standardwert für `attempts` gleich `3`; `attempts: 0` deaktiviert Wiederholungen.
 
 ## Öffnen und inspizieren
 
@@ -121,7 +121,7 @@ Observer läuft an der Transform-Grenze. Sein Failure ist isoliert, außer das A
 
 ## Reconnect
 
-Reconnect-Settings customizen den Default-Retry-Pfad — sie sind nicht nötig, um Retries zu enablen. Normales EOF wird nicht retried. Network- und Stream-Read-Failures können retryen. Status-/Content-Type-Validierung, Parser-Limits, Message-Transform-Failures, Queue-Overflow und normales EOF sind terminal für den logischen Stream.
+SSE wiederholt Netzwerk- und Lesefehler standardmäßig nicht. Aktiviere Wiederholungen ausdrücklich mit `withSSEReconnect(...)`. Bei konfiguriertem Reconnect ist der Standardwert für `attempts` gleich `3`; `attempts: 0` deaktiviert Wiederholungen. Normales EOF wird nicht retried. Network- und Stream-Read-Failures können retryen. Status-/Content-Type-Validierung, Parser-Limits, Message-Transform-Failures, Queue-Overflow und normales EOF sind terminal für den logischen Stream.
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -141,9 +141,9 @@ const client = createClient(
 )
 ```
 
-`attempts` zählt Retries nach dem Initial-Attempt; `attempts: 0` disabled Retry. Kein Attempt-Limit → unbounded Built-in-Retries. `delayMs` ist das initiale Interval; `factor` wächst es; `maxDelayMs` cappt die Base. SSE-`jitter` ist ein **0–1-multiplikativer Faktor**, wie WebSocket. Ein Stream-`retry:`-Feld updated das aktuelle Interval. Policy-Callback, der false zurückgibt / throwt / rejectet, endet den logischen Stream.
+SSE wiederholt Netzwerk- und Lesefehler standardmäßig nicht. Aktiviere Wiederholungen ausdrücklich mit `withSSEReconnect(...)`. Bei konfiguriertem Reconnect ist der Standardwert für `attempts` gleich `3`; `attempts: 0` deaktiviert Wiederholungen. `delayMs` ist das initiale Interval; `factor` wächst es; `maxDelayMs` cappt die Base. SSE-`jitter` ist ein **0–1-multiplikativer Faktor**, wie WebSocket. Ein Stream-`retry:`-Feld updated das aktuelle Interval. Policy-Callback, der false zurückgibt / throwt / rejectet, endet den logischen Stream.
 
-Latest geparste Event-ID wird `Last-Event-ID` auf einem späteren Attempt. Kenn die Replay-Semantics des Servers vor unbounded Reconnect.
+Latest geparste Event-ID wird `Last-Event-ID` auf einem späteren Attempt. Kenn die Replay-Semantics des Servers vor Reconnect.
 
 ## Buffer- und Queue-Limits
 

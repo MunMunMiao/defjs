@@ -44,6 +44,12 @@ interface OpenTelemetryServerOptions {
 
 ## OpenTelemetryServerTransportOptions {#OpenTelemetryServerTransportOptions}
 
+### OpenTelemetryServerHttpOptions {#OpenTelemetryServerHttpOptions}
+
+### OpenTelemetryServerSSEOptions {#OpenTelemetryServerSSEOptions}
+
+### OpenTelemetryServerWebSocketOptions {#OpenTelemetryServerWebSocketOptions}
+
 ```ts
 interface OpenTelemetryServerTransportOptions<TResponse> {
   enabled?: boolean

@@ -9,7 +9,7 @@ JSON-envelope’ы используют непустой строковый `typ
 
 Подробности — в [WebSocket](../core/web-socket.md).
 
-```ts chat.ts
+```ts twoslash chat.ts
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://chat.example.com'))

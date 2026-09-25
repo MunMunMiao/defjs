@@ -1,9 +1,13 @@
-import { createFileSystemTypesCache } from '@shikijs/vitepress-twoslash/cache-fs'
-import { transformerTwoslash } from '@shikijs/vitepress-twoslash'
+import { transformerTwoslash, type VitePressPluginTwoslashOptions } from '@shikijs/vitepress-twoslash'
 import llmstxt from 'vitepress-plugin-llms'
 import { tabsMarkdownPlugin } from 'vitepress-plugin-tabs'
 import { defineConfig, type DefaultTheme } from 'vitepress'
+import { JsxEmit } from 'typescript'
 import { createApiSidebar } from './api-catalog.ts'
+
+type TwoslashCache = NonNullable<VitePressPluginTwoslashOptions['typesCache']>
+// Reuse identical translations within this build, without trusting results from older source or configuration.
+const checkedExamples = new Map<string, ReturnType<TwoslashCache['read']>>()
 
 type NavigationCopy = {
   docs: string
@@ -606,18 +610,25 @@ export default defineConfig({
     },
     codeTransformers: [
       transformerTwoslash({
-        throws: false,
-        twoslashOptions: {
-          vfsRoot: process.cwd(),
-          handbookOptions: {
-            noErrors: true,
-            noErrorValidation: true,
-            noStaticSemanticInfo: true,
+        throws: true,
+        typesCache: {
+          read(code, lang) {
+            return checkedExamples.get(`${lang}:${code}`) ?? null
+          },
+          write(code, result, lang) {
+            checkedExamples.set(`${lang}:${code}`, result)
           },
         },
-        typesCache: createFileSystemTypesCache({
-          dir: '.vitepress/cache/twoslash',
-        }),
+        twoslashOptions: {
+          vfsRoot: process.cwd(),
+          compilerOptions: {
+            jsx: JsxEmit.ReactJSX,
+          },
+          handbookOptions: {
+            noErrors: false,
+            noErrorValidation: false,
+          },
+        },
       }),
     ],
     languages: ['js', 'jsx', 'json', 'ts', 'tsx', 'vue'],

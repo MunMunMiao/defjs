@@ -10,8 +10,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "vitepress dev",
-    "build": "vitepress build",
-    "docs:build": "vitepress build",
+    "build": "vitepress build && bun .vitepress/check-links.ts",
+    "docs:build": "bun run build",
+    "test": "bun test ./.vitepress/recipes.spec.ts",
     "preview": "vitepress preview"
   },
   "devDependencies": {

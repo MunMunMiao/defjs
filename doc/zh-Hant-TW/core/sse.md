@@ -39,7 +39,7 @@ if (error) {
 
 Request input 可以有 `path`、`query`、`headers` 和 `body`。自訂 `build` 拿到和 HTTP 一樣的 request helpers，包括 body setters。你沒設 `Accept` 時，Defjs 會送 `Accept: text/event-stream`。
 
-一個邏輯串流可以跨多次實體 Fetch attempts。即使沒設 reconnect options，SSE 預設仍會重試暫時性的網路與串流讀取失敗；沒有 `attempts` 上限時，那些重試是無界的。你仍只拿到一個 handle 與一個 async iterator。
+SSE 預設不重試網路或讀取失敗；必須用 `withSSEReconnect(...)` 明確啟用。提供 reconnect 設定後，`attempts` 預設為 `3`；`attempts: 0` 停用重試。
 
 ## 開啟與檢查
 
@@ -121,7 +121,7 @@ Observer 跑在 transform 邊界。除非 active attempt signal 已 aborted，�
 
 ## 重連
 
-Reconnect 設定是自訂預設重試路徑 — 不是開啟重試的必要條件。正常 EOF 不會重試。網路與串流讀取失敗可以重試。Status／content-type 驗證、parser 限制、message transform 失敗、queue overflow、正常 EOF，對邏輯串流都是終端。
+SSE 預設不重試網路或讀取失敗；必須用 `withSSEReconnect(...)` 明確啟用。提供 reconnect 設定後，`attempts` 預設為 `3`；`attempts: 0` 停用重試。 正常 EOF 不會重試。網路與串流讀取失敗可以重試。Status／content-type 驗證、parser 限制、message transform 失敗、queue overflow、正常 EOF，對邏輯串流都是終端。
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -141,9 +141,9 @@ const client = createClient(
 )
 ```
 
-`attempts` 計算初始 attempt 之後的重試；`attempts: 0` 關掉重試。沒有 attempt 上限 → 內建重試無界。`delayMs` 是起始間隔；`factor` 放大它；`maxDelayMs` 限制基數。SSE 的 `jitter` 是與 WebSocket 相同的 **0–1 乘性因子**。串流的 `retry:` 欄位會更新目前間隔。政策 callback 回傳 false／throw／reject 會結束邏輯串流。
+SSE 預設不重試網路或讀取失敗；必須用 `withSSEReconnect(...)` 明確啟用。提供 reconnect 設定後，`attempts` 預設為 `3`；`attempts: 0` 停用重試。 `delayMs` 是起始間隔；`factor` 放大它；`maxDelayMs` 限制基數。SSE 的 `jitter` 是與 WebSocket 相同的 **0–1 乘性因子**。串流的 `retry:` 欄位會更新目前間隔。政策 callback 回傳 false／throw／reject 會結束邏輯串流。
 
-最新剖析到的 event ID 會在之後的 attempt 變成 `Last-Event-ID`。無界重連前，先搞清楚伺服器的 replay 語意。
+最新剖析到的 event ID 會在之後的 attempt 變成 `Last-Event-ID`。重連前，先搞清楚伺服器的 replay 語意。
 
 ## Buffer 與 queue 限制
 

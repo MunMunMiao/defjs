@@ -9,7 +9,7 @@ Declara tanto el cuerpo de éxito como el de 404. Ramifica con `error.kind` y `e
 
 Ver detalles en [HTTP](../core/http.md) y [Errores](../core/errors.md).
 
-```ts get-user.ts
+```ts twoslash get-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

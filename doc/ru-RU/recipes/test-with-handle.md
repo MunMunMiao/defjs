@@ -9,7 +9,7 @@ description: Подмени Fetch для одного клиента через 
 
 Подробности — в [Клиент](../core/client.md).
 
-```ts get-user.test.ts
+```ts twoslash get-user.test.ts
 import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
 
 const getUser = defineRequest({

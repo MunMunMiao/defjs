@@ -9,7 +9,7 @@ description: withHTTPHandle로 한 클라이언트의 Fetch만 바꾸고 명령�
 
 자세한 내용은 [클라이언트](../core/client.md)를 보세요.
 
-```ts get-user.test.ts
+```ts twoslash get-user.test.ts
 import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
 
 const getUser = defineRequest({

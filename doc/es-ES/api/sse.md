@@ -16,10 +16,12 @@ function defineEventStream(definition: EventStreamDefinition): EventStreamComman
 - **definition** — `path`, mapa `events`, `method` opcional (por defecto `'GET'`), `input`, `build`, límites de buffer/cola.
 - **Devuelve** un builder. Llámalo con el input para obtener un `EventStreamCommand`.
 
-```ts
+```ts twoslash
 import { defineEventStream, struct } from '@defjs/core'
 
 const ticks = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/ticks',
   events: { message: struct.object({ text: struct.string() }) },
 })

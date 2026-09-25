@@ -9,7 +9,7 @@ description: 開啟型別化的事件串流，迭代一次，然後 close 並 aw
 
 細節見 [SSE](../core/sse.md)。
 
-```ts notifications.ts
+```ts twoslash notifications.ts
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
@@ -45,4 +45,4 @@ if (error) {
 hello from the server
 ```
 
-SSE 預設會重試暫時性的網路／讀取失敗。用 `withSSEReconnect({ attempts: N })` 設上限，或用 `attempts: 0` 關掉。
+SSE 預設不重試網路或讀取失敗；必須用 `withSSEReconnect(...)` 明確啟用。提供 reconnect 設定後，`attempts` 預設為 `3`；`attempts: 0` 停用重試。

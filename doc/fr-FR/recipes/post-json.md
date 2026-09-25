@@ -9,7 +9,7 @@ Enveloppe le body dans `struct.json(...)`. Les noms de champs logiques restent e
 
 Voir [Commandes](../core/commands.md) et [HTTP](../core/http.md) pour les détails.
 
-```ts create-user.ts
+```ts twoslash create-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com/v1'))

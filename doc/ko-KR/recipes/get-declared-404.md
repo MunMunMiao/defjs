@@ -9,7 +9,7 @@ description: GET 하나를 실행하고 타입이 잡힌 200과 선언된 404로
 
 자세한 내용은 [HTTP](../core/http.md)와 [오류](../core/errors.md)를 보세요.
 
-```ts get-user.ts
+```ts twoslash get-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

@@ -9,7 +9,7 @@ Déclare les corps de succès et de 404. Branche sur `error.kind` et `error.stat
 
 Voir [HTTP](../core/http.md) et [Erreurs](../core/errors.md) pour les détails.
 
-```ts get-user.ts
+```ts twoslash get-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

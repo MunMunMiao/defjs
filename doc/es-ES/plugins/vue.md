@@ -16,6 +16,13 @@ Instala `@defjs/core`, `@defjs/vue` y Vue 3+. ESM; Node.js 22+ cuando corres en 
 Crea el cliente, instala el plugin y luego carga con abort-on-change:
 
 ```typescript twoslash
+// @filename: App.vue.d.ts
+import type { DefineComponent } from 'vue'
+declare const App: DefineComponent
+export default App
+
+// @filename: main.ts
+// ---cut---
 import { createClient, withEndpoint } from '@defjs/core'
 import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
@@ -126,7 +133,7 @@ const notifications = defineEventStream({
 
 const controller = new AbortController()
 let disposed = false
-let stream: EventStreamHandle<string> | undefined
+let stream: EventStreamHandle<unknown> | undefined
 
 const stop = () => {
   disposed = true

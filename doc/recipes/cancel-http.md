@@ -9,7 +9,7 @@ Pass `signal` plus either `abort` or `timeout` — not both `abort` and `timeout
 
 See [HTTP](../core/http.md#cancel-the-work) for details.
 
-```ts cancel-report.ts
+```ts twoslash cancel-report.ts
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

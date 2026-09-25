@@ -121,7 +121,7 @@ Custom `build` 暴露同一套 location/codec setters。最後一次 body write 
 
 `HttpResponse` 有 `url`、`status`、`statusText`、`headers`、`body`、`error` 同 `ok`。`ok` 淨係指 `200 <= status < 300`。佢係 Defjs value，唔係 native `Response`。冇 `output` 時唔允許 `responseType`。
 
-## Cancel the work
+## Cancel the work {#cancel-the-work}
 
 Execution options 收 `signal`，再加 `abort` 或者 `timeout`。**`abort` 同 `timeout` 互斥。** `signal` 可以同其中一個一齊用。
 

@@ -9,7 +9,7 @@ description: Открой типизированный event stream, итери�
 
 Подробности — в [SSE](../core/sse.md).
 
-```ts notifications.ts
+```ts twoslash notifications.ts
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
@@ -45,4 +45,4 @@ if (error) {
 hello from the server
 ```
 
-SSE по умолчанию ретраит транзиентные network/read сбои. Ограничь через `withSSEReconnect({ attempts: N })` или отключи через `attempts: 0`.
+По умолчанию SSE не повторяет запросы при сбоях сети или чтения. Включите повторы явно через `withSSEReconnect(...)`. При наличии настройки reconnect значение `attempts` по умолчанию равно `3`; `attempts: 0` отключает повторы.

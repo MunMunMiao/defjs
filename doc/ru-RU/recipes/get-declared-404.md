@@ -9,7 +9,7 @@ description: Выполни один GET и ветвись по типизиро
 
 Подробности — в [HTTP](../core/http.md) и [Ошибки](../core/errors.md).
 
-```ts get-user.ts
+```ts twoslash get-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

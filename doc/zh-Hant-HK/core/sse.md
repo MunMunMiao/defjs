@@ -39,7 +39,7 @@ if (error) {
 
 Request input 可以有 `path`、`query`、`headers` 同 `body`。Custom `build` 拎到同 HTTP 一樣嘅 request helpers，包括 body setters。你未 set `Accept` 時，Defjs 會送 `Accept: text/event-stream`。
 
-一條 logical stream 可以跨幾個 physical Fetch attempts。即使冇 reconnect options，SSE 預設都會 retry transient network 同 stream-read failures；冇 `attempts` limit 就係 unbounded。你仍然淨係拎到一個 handle 同一個 async iterator。
+SSE 預設唔會 retry 網絡或讀取失敗；要用 `withSSEReconnect(...)` 明確啟用。提供 reconnect 設定後，`attempts` 預設係 `3`；`attempts: 0` 關閉重試。
 
 ## Open 同 inspect
 
@@ -121,7 +121,7 @@ Observer 喺 transform boundary run。除非 active attempt signal aborted，否
 
 ## Reconnect
 
-Reconnect settings 係 customize default retry path — 唔係一定要先 enable retries。Normal EOF 唔會 retry。Network 同 stream-read failures 可以 retry。Status/content-type validation、parser limits、message transform failures、queue overflow，同 normal EOF 對 logical stream 係 terminal。
+SSE 預設唔會 retry 網絡或讀取失敗；要用 `withSSEReconnect(...)` 明確啟用。提供 reconnect 設定後，`attempts` 預設係 `3`；`attempts: 0` 關閉重試。 Normal EOF 唔會 retry。Network 同 stream-read failures 可以 retry。Status/content-type validation、parser limits、message transform failures、queue overflow，同 normal EOF 對 logical stream 係 terminal。
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -141,7 +141,7 @@ const client = createClient(
 )
 ```
 
-`attempts` 數嘅係 initial attempt 之後嘅 retries；`attempts: 0` 關閉 retry。冇 attempt limit → unbounded built-in retries。`delayMs` 係 initial interval；`factor` 會長大佢；`maxDelayMs` cap base。SSE `jitter` 同 WebSocket 一樣，係 **0–1 multiplicative factor**。Stream `retry:` field 會 update 而家嘅 interval。Policy callback return false / throw / reject 會完結 logical stream。
+SSE 預設唔會 retry 網絡或讀取失敗；要用 `withSSEReconnect(...)` 明確啟用。提供 reconnect 設定後，`attempts` 預設係 `3`；`attempts: 0` 關閉重試。 `delayMs` 係 initial interval；`factor` 會長大佢；`maxDelayMs` cap base。SSE `jitter` 同 WebSocket 一樣，係 **0–1 multiplicative factor**。Stream `retry:` field 會 update 而家嘅 interval。Policy callback return false / throw / reject 會完結 logical stream。
 
 Latest parsed event ID 會喺之後嘅 attempt 變成 `Last-Event-ID`。Unbounded reconnect 之前，先搞清楚 server 嘅 replay semantics。
 

@@ -9,7 +9,7 @@ description: execute 호출을 abort하거나 타임아웃하고 ABORTED / TIMEO
 
 자세한 내용은 [HTTP](../core/http.md#cancel-the-work)를 보세요.
 
-```ts cancel-report.ts
+```ts twoslash cancel-report.ts
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

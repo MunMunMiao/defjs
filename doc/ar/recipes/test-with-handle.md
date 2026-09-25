@@ -9,7 +9,7 @@ description: استبدل Fetch لعميل واحد بـ withHTTPHandle واتر
 
 انظر [العميل](../core/client.md) للتفاصيل.
 
-```ts get-user.test.ts
+```ts twoslash get-user.test.ts
 import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
 
 const getUser = defineRequest({

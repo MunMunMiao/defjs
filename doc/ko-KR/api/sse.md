@@ -16,10 +16,12 @@ function defineEventStream(definition: EventStreamDefinition): EventStreamComman
 - **definition** — `path`, `events` 맵, 선택 `method` (기본 `'GET'`), `input`, `build`, buffer/queue 한도예요.
 - **Returns** 빌더예요. 입력을 넣으면 `EventStreamCommand`가 나와요.
 
-```ts
+```ts twoslash
 import { defineEventStream, struct } from '@defjs/core'
 
 const ticks = defineEventStream({
+  maxBufferSize: 64 * 1024,
+  maxQueueSize: 100,
   path: '/ticks',
   events: { message: struct.object({ text: struct.string() }) },
 })

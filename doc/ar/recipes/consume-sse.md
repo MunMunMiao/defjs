@@ -9,7 +9,7 @@ description: افتح تدفق أحداث مُنوَّعًا، كرّر مرة �
 
 انظر [SSE](../core/sse.md) للتفاصيل.
 
-```ts notifications.ts
+```ts twoslash notifications.ts
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
@@ -45,4 +45,4 @@ if (error) {
 hello from the server
 ```
 
-SSE يعيد محاولة أعطال الشبكة/القراءة العابرة افتراضيًا. قيّدها بـ `withSSEReconnect({ attempts: N })`، أو عطّلها بـ `attempts: 0`.
+لا تعيد SSE المحاولة عند فشل الشبكة أو القراءة افتراضيًا. فعّل ذلك صراحةً باستخدام `withSSEReconnect(...)`. عند ضبط reconnect تكون القيمة الافتراضية لـ `attempts` هي `3`؛ وتعطّل `attempts: 0` إعادة المحاولة.

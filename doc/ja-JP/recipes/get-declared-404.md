@@ -9,7 +9,7 @@ description: GET を 1 回実行し、型付き 200 と宣言済み 404 で分�
 
 詳細は [HTTP](../core/http.md) と [Errors](../core/errors.md) を見てください。
 
-```ts get-user.ts
+```ts twoslash get-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

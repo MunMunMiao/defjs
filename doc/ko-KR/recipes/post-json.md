@@ -9,7 +9,7 @@ body를 `struct.json(...)`으로 감싸요. 논리 필드 이름은 TypeScript�
 
 자세한 내용은 [명령](../core/commands.md)과 [HTTP](../core/http.md)를 보세요.
 
-```ts create-user.ts
+```ts twoslash create-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com/v1'))

@@ -16,6 +16,13 @@ Install `@defjs/core`、`@defjs/vue` 同 Vue 3+。ESM；喺 Node run 時要 Node
 Create client，install plugin，之後用 abort-on-change fetch：
 
 ```typescript twoslash
+// @filename: App.vue.d.ts
+import type { DefineComponent } from 'vue'
+declare const App: DefineComponent
+export default App
+
+// @filename: main.ts
+// ---cut---
 import { createClient, withEndpoint } from '@defjs/core'
 import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
@@ -126,7 +133,7 @@ const notifications = defineEventStream({
 
 const controller = new AbortController()
 let disposed = false
-let stream: EventStreamHandle<string> | undefined
+let stream: EventStreamHandle<unknown> | undefined
 
 const stop = () => {
   disposed = true

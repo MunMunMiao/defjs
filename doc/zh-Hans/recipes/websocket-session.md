@@ -9,7 +9,7 @@ JSON 信封用非空字符串 `type`。退订、`close`、`await session.closed`
 
 细节见 [WebSocket](../core/web-socket.md)。
 
-```ts chat.ts
+```ts twoslash chat.ts
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://chat.example.com'))

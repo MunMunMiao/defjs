@@ -9,7 +9,7 @@ description: نفّذ GET واحدًا وفرّع على 200 مُنوَّع مق
 
 انظر [HTTP](../core/http.md) و[الأخطاء](../core/errors.md) للتفاصيل.
 
-```ts get-user.ts
+```ts twoslash get-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

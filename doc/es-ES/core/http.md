@@ -121,7 +121,7 @@ Orden de operaciones:
 
 `HttpResponse` tiene `url`, `status`, `statusText`, `headers`, `body`, `error` y `ok`. `ok` significa solo `200 <= status < 300`. Es un valor Defjs, no un `Response` nativo. Sin `output`, `responseType` no está permitido.
 
-## Cancel the work
+## Cancel the work {#cancel-the-work}
 
 Las opciones de ejecución toman `signal` más `abort` o `timeout`. **`abort` y `timeout` son mutuamente excluyentes.** `signal` puede combinarse con cualquiera de los dos.
 

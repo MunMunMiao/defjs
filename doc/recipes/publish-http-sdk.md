@@ -9,8 +9,9 @@ A method SDK that swallows `client.execute` usually collapses declared `404` int
 
 See [Commands](../core/commands.md), [Client](../core/client.md), and [Design Decisions](../guide/design-decisions.md).
 
-```ts users-sdk.ts
-import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle, type Client, type ClientOption } from '@defjs/core'
+```ts twoslash
+// @filename: users-sdk.ts
+import { createClient, defineRequest, struct, withEndpoint, type Client, type ClientOption } from '@defjs/core'
 
 export const getUser = defineRequest({
   method: 'GET',
@@ -36,10 +37,8 @@ export async function loadUserName(client: Client, id: number): Promise<string> 
   if (error) throw error
   return user.name
 }
-```
-
-```ts app.ts
-import { createUsersClient, getUser, loadUserName } from './users-sdk.ts'
+// @filename: app.ts
+import { createUsersClient, getUser, loadUserName } from './users-sdk'
 import { withHTTPHandle } from '@defjs/core'
 
 const handle: typeof fetch = async () => Response.json({ id: 7, name: 'Ada' }, { status: 200 })

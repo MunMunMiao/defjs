@@ -121,7 +121,7 @@ else console.log(user.id)
 
 У `HttpResponse` есть `url`, `status`, `statusText`, `headers`, `body`, `error` и `ok`. `ok` значит только `200 <= status < 300`. Это значение Defjs, не native `Response`. Без `output` `responseType` не разрешён.
 
-## Отмени работу
+## Отмени работу {#cancel-the-work}
 
 Опции execute принимают `signal` плюс либо `abort`, либо `timeout`. **`abort` и `timeout` взаимоисключающие.** `signal` можно комбинировать с любым из них.
 

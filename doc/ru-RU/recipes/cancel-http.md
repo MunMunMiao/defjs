@@ -9,7 +9,7 @@ description: Abort или timeout execute и читай ABORTED / TIMEOUT.
 
 Подробности — в [HTTP](../core/http.md#cancel-the-work).
 
-```ts cancel-report.ts
+```ts twoslash cancel-report.ts
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

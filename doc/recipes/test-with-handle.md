@@ -9,7 +9,7 @@ description: Swap Fetch for one client with withHTTPHandle and keep the command 
 
 See [Client](../core/client.md) for details.
 
-```ts get-user.test.ts
+```ts twoslash get-user.test.ts
 import { createClient, defineRequest, struct, withEndpoint, withHTTPHandle } from '@defjs/core'
 
 const getUser = defineRequest({

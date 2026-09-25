@@ -9,7 +9,7 @@ JSON エンベロープは空でない文字列の `type` を使います。購�
 
 詳細は [WebSocket](../core/web-socket.md) を見てください。
 
-```ts chat.ts
+```ts twoslash chat.ts
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://chat.example.com'))

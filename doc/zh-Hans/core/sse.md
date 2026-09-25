@@ -39,7 +39,7 @@ if (error) {
 
 请求输入可以有 `path`、`query`、`headers` 和 `body`。自定义 `build` 拿到和 HTTP 一样的 request helper，包括 body setter。你没设 `Accept` 时，Defjs 会发 `Accept: text/event-stream`。
 
-一条逻辑流可以跨多次物理 Fetch。即使没配 reconnect options，SSE 默认也会重试瞬时网络和流读取失败；没有 `attempts` 上限时这些重试无界。你仍只拿到一个 handle 和一个 async iterator。
+SSE 默认不重试网络或读取失败；必须用 `withSSEReconnect(...)` 显式启用。提供 reconnect 配置后，`attempts` 默认是 `3`；`attempts: 0` 禁用重试。
 
 ## 打开并查看
 
@@ -121,7 +121,7 @@ Observer 跑在 transform 边界。除非当前尝试的 signal 已 abort，它�
 
 ## 重连
 
-Reconnect 设置是定制默认重试路径——不是开启重试的前提。正常 EOF 不重试。网络和流读取失败可以重试。状态/content-type 校验、parser 上限、消息 transform 失败、队列溢出、正常 EOF 对逻辑流是终端。
+SSE 默认不重试网络或读取失败；必须用 `withSSEReconnect(...)` 显式启用。提供 reconnect 配置后，`attempts` 默认是 `3`；`attempts: 0` 禁用重试。 正常 EOF 不重试。网络和流读取失败可以重试。状态/content-type 校验、parser 上限、消息 transform 失败、队列溢出、正常 EOF 对逻辑流是终端。
 
 ```ts
 import { createClient, withEndpoint, withSSEReconnect } from '@defjs/core'
@@ -141,9 +141,9 @@ const client = createClient(
 )
 ```
 
-`attempts` 计的是首次之后的重试；`attempts: 0` 关掉重试。没有 attempt 上限 → 内置重试无界。`delayMs` 是初始间隔；`factor` 放大；`maxDelayMs` 封顶基数。SSE 的 `jitter` 是与 WebSocket 相同的 **0–1 乘性因子**。流上的 `retry:` 字段会更新当前间隔。政策回调返回 false / 抛错 / reject 会结束逻辑流。
+SSE 默认不重试网络或读取失败；必须用 `withSSEReconnect(...)` 显式启用。提供 reconnect 配置后，`attempts` 默认是 `3`；`attempts: 0` 禁用重试。 `delayMs` 是初始间隔；`factor` 放大；`maxDelayMs` 封顶基数。SSE 的 `jitter` 是与 WebSocket 相同的 **0–1 乘性因子**。流上的 `retry:` 字段会更新当前间隔。政策回调返回 false / 抛错 / reject 会结束逻辑流。
 
-最近解析到的事件 ID 会在后续尝试变成 `Last-Event-ID`。无界重连前先搞清服务端重放语义。
+最近解析到的事件 ID 会在后续尝试变成 `Last-Event-ID`。重连前先搞清服务端重放语义。
 
 ## Buffer 与队列上限
 

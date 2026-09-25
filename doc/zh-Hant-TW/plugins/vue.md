@@ -16,6 +16,13 @@ description: 安裝 plugin、提供 client、抓使用者，並在響應式變�
 建立 client、安裝 plugin，然後用變更時 abort 的方式抓資料：
 
 ```typescript twoslash
+// @filename: App.vue.d.ts
+import type { DefineComponent } from 'vue'
+declare const App: DefineComponent
+export default App
+
+// @filename: main.ts
+// ---cut---
 import { createClient, withEndpoint } from '@defjs/core'
 import { createClientPlugin } from '@defjs/vue'
 import { createApp } from 'vue'
@@ -126,7 +133,7 @@ const notifications = defineEventStream({
 
 const controller = new AbortController()
 let disposed = false
-let stream: EventStreamHandle<string> | undefined
+let stream: EventStreamHandle<unknown> | undefined
 
 const stop = () => {
   disposed = true

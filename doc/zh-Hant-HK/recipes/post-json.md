@@ -9,7 +9,7 @@ description: 用 struct.json 送 JSON body，再 decode declared 201。
 
 詳情睇 [Commands](../core/commands.md) 同 [HTTP](../core/http.md)。
 
-```ts create-user.ts
+```ts twoslash create-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com/v1'))

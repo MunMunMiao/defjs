@@ -9,7 +9,7 @@ description: Treat 304 as a declared HTTP outcome; keep the cache Map outside ex
 
 See [HTTP](../core/http.md).
 
-```ts etag-cache.ts
+```ts twoslash etag-cache.ts
 import { createClient, defineRequest, struct, type Infer, withEndpoint, withHTTPHandle } from '@defjs/core'
 
 const Product = struct.object({
@@ -55,8 +55,8 @@ function createReader(client: ReturnType<typeof createClient>) {
 }
 
 const etag = '"v7"'
-const handle: typeof fetch = async (_input, init) => {
-  if (new Headers(init?.headers).get('if-none-match') === etag) {
+const handle: typeof fetch = async (input, init) => {
+  if (new Request(input, init).headers.get('if-none-match') === etag) {
     return new Response(null, { status: 304, headers: { etag } })
   }
   return Response.json({ sku: 'SKU-1', name: 'Flask', priceCents: 3200 }, { status: 200, headers: { etag } })

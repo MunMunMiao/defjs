@@ -9,7 +9,7 @@ description: أرسل جسم JSON عبر struct.json وافكك 201 معلَنً
 
 انظر [الأوامر](../core/commands.md) و[HTTP](../core/http.md) للتفاصيل.
 
-```ts create-user.ts
+```ts twoslash create-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com/v1'))

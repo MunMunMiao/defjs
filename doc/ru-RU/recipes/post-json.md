@@ -9,7 +9,7 @@ description: Отправь JSON-тело через struct.json и декоди
 
 Подробности — в [Команды](../core/commands.md) и [HTTP](../core/http.md).
 
-```ts create-user.ts
+```ts twoslash create-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com/v1'))

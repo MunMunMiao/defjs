@@ -9,7 +9,7 @@ description: اتصل، أرسل غلافًا مُنوَّعًا واحدًا، 
 
 انظر [WebSocket](../core/web-socket.md) للتفاصيل.
 
-```ts chat.ts
+```ts twoslash chat.ts
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://chat.example.com'))

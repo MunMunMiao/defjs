@@ -9,7 +9,7 @@ description: Execute 一次 GET，按 typed 200 vs declared 404 分支。
 
 詳情睇 [HTTP](../core/http.md) 同 [Errors](../core/errors.md)。
 
-```ts get-user.ts
+```ts twoslash get-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

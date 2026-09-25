@@ -97,18 +97,20 @@ Formatting, linting, and TypeScript checking are repository-wide gates. Workspac
 
 Tests and builds are intentionally different. Their environments, configurations, and outputs belong to specific workspaces, so the root commands aggregate the relevant workspace lifecycle scripts.
 
+Documentation builds typecheck code fences marked `twoslash`, including the SSE/WebSocket API quick starts and executable recipes, and fail on unexpected TypeScript errors. API signature sketches and incomplete fragments are not standalone programs. The documentation workspace tests execute the ETag and Bearer recipes and assert their actual status transitions. After rendering, its build checks local page links and anchors, including generated navigation and locale links. Missing translations display an explicit notice and include the English source so fixes stay synchronized.
+
 ## Release workflow
 
 Package versions live in their own manifests and advance independently. The repository does not use generated changeset files or coordinated workspace version bumps.
 
-Push one package-specific tag after its manifest version is merged to `main`:
+Push one package-specific tag on the commit you want to publish. The tag version must match that package's manifest:
 
 - `release-core-vX.Y.Z`
 - `release-opentelemetry-server-vX.Y.Z`
 - `release-react-vX.Y.Z`
 - `release-vue-vX.Y.Z`
 
-CI runs the full Bun verification gate on pull requests and `main`. The release workflow runs `bun ci`, validates the tag and selected manifest through `release-target.ts`, runs `bun --bun run build` only for that package, and publishes from its `dist` directory. It relies on successful `main` CI plus protected release tags and the `npm` environment. A Core patch within the adapters' `^0.4.0` peer range, such as `0.4.0` to `0.4.3`, does not require another adapter release; publish an adapter only when its own artifact, implementation, public metadata, or peer range changes.
+CI runs the full Bun verification gate on pull requests and `main`. Pushing a matching tag automatically starts the release workflow: it runs `bun ci`, validates the tag and selected manifest through `release-target.ts`, runs `bun --bun run build` only for that package, and publishes from its `dist` directory using the repository's `NPM_TOKEN` secret. Creating a local tag alone does not publish. The release workflow does not require a `main` commit or wait for CI; run `bun run verify` on the intended release commit before pushing its tag. A Core patch within the adapters' `^0.4.0` peer range, such as `0.4.0` to `0.4.3`, does not require another adapter release; publish an adapter only when its own artifact, implementation, public metadata, or peer range changes.
 
 ### Dependency ownership
 

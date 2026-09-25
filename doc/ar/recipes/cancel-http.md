@@ -9,7 +9,7 @@ description: أجهض أو حدّد مهلة لتنفيذ execute واقرأ ABO
 
 انظر [HTTP](../core/http.md#cancel-the-work) للتفاصيل.
 
-```ts cancel-report.ts
+```ts twoslash cancel-report.ts
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

@@ -9,7 +9,7 @@ Un iterador async por stream. Pon `close` + `await stream.closed` en `finally` p
 
 Ver detalles en [SSE](../core/sse.md).
 
-```ts notifications.ts
+```ts twoslash notifications.ts
 import { createClient, defineEventStream, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))
@@ -45,4 +45,4 @@ if (error) {
 hello from the server
 ```
 
-SSE reintenta por defecto fallos transitorios de red/lectura. Limítalos con `withSSEReconnect({ attempts: N })`, o desactívalos con `attempts: 0`.
+SSE no reintenta fallos de red o lectura por defecto. Activa los reintentos explícitamente con `withSSEReconnect(...)`. Al configurar reconnect, `attempts` vale `3` por defecto; `attempts: 0` desactiva los reintentos.

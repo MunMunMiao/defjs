@@ -9,7 +9,7 @@ description: execute を abort またはタイムアウトさせ、ABORTED / TIM
 
 詳細は [HTTP](../core/http.md#cancel-the-work) を見てください。
 
-```ts cancel-report.ts
+```ts twoslash cancel-report.ts
 import { createClient, defineRequest, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com'))

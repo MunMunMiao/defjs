@@ -9,7 +9,7 @@ Wrap the body in `struct.json(...)`. Logical field names stay in TypeScript; wir
 
 See [Commands](../core/commands.md) and [HTTP](../core/http.md) for details.
 
-```ts create-user.ts
+```ts twoslash create-user.ts
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://api.example.com/v1'))

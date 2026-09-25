@@ -9,7 +9,7 @@ JSON envelope는 비어 있지 않은 문자열 `type`을 써요. unsubscribe, `
 
 자세한 내용은 [WebSocket](../core/web-socket.md)을 보세요.
 
-```ts chat.ts
+```ts twoslash chat.ts
 import { createClient, defineWebSocket, struct, withEndpoint } from '@defjs/core'
 
 const client = createClient(withEndpoint('https://chat.example.com'))
