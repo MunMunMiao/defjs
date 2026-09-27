@@ -1,4 +1,3 @@
-import { ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
 import { describe, expect, test, vi } from 'vitest'
 import { makeHttpRequest, makeHttpResponse } from '../test-utils'
 import {
@@ -84,13 +83,9 @@ describe('metrics helpers', () => {
     })
   })
 
-  test.each([
-    { error: new TypeError('fetch failed'), errorType: 'NETWORK_ERROR' },
-    { error: ERR_TIMEOUT, errorType: 'TIMEOUT' },
-    { error: ERR_ABORTED, errorType: undefined },
-  ])('createHttpMetricAttributes omits response status for status-0 $errorType result', ({ error, errorType }) => {
-    expect(createHttpMetricAttributes(makeHttpRequest(), { ...makeHttpResponse(), error, status: 0 })).toEqual({
-      ...(errorType ? { 'error.type': errorType } : {}),
+  test('createHttpMetricAttributes omits both status and error type for a status-0 response', () => {
+    // Transport failures are faults now, so status 0 carries no failure to report.
+    expect(createHttpMetricAttributes(makeHttpRequest(), { ...makeHttpResponse(), status: 0 })).toEqual({
       'http.request.method': 'GET',
       'server.address': 'api.example.com',
     })

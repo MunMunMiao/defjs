@@ -13,7 +13,7 @@ description: defineRequest, опции execute и типы HTTP request/response
 function defineRequest(definition: RequestDefinition): RequestCommandBuilder
 ```
 
-- **definition** — `method`, `path`, опциональный `input` struct, `output` по статусу, опциональные `operation` и `build`.
+- **definition** — `method`, `path`, необязательный `input` struct, необязательные `output` и `error` structs, необязательные `operation` и `build`.
 - **Возвращает** builder. Вызови с input — получишь `HttpCommand`.
 
 ```ts
@@ -25,13 +25,12 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 ```
 
-`output` может быть и списком групп `{ status, body }` (один body struct на несколько кодов).
+`output` — один struct для тела 2xx; `error` — один struct для любого non-2xx тела. Ни один из них не индексируется по статусу. Пропустить один значит, что это тело не прочитают — см. [Объявление — это утверждение](/ru-RU/guide/design-decisions#объявление-—-это-утверждение).
 
 ## executeHttpCommand() {#executeHttpCommand}
 
@@ -41,7 +40,9 @@ function executeHttpCommand(clientConfig: ClientConfig, command: HttpCommand, op
 
 Это то, чем пользуется `client.execute`. В приложении зови `client.execute(command, options)`.
 
-- **Возвращает** `[null, body, response]` или `[error, undefined, response?]`.
+- **Возвращает** `[null, data, response]` или `[fault, undefined, undefined]`.
+
+Non-2xx статус — всегда `HTTP_STATUS`. Его `data` — декодированное `error`-тело, если `error` был объявлен, иначе `undefined`. При провале третий слот кортежа — `undefined`; метаданные response несёт fault.
 
 ## fetchHandler() {#fetchHandler}
 
@@ -49,7 +50,7 @@ function executeHttpCommand(clientConfig: ClientConfig, command: HttpCommand, op
 function fetchHandler(httpRequest: HttpRequest, fetchImpl?: typeof fetch): Promise<HttpResponse<unknown>>
 ```
 
-HTTP-транспорт по умолчанию. Работает, пока `withHTTPHandle` его не подменит.
+HTTP-транспорт по умолчанию. Работает, пока `withHTTPHandle` его не подменит. Он реджектит — а не резолвит синтетическим response — когда до клиента не дошёл ни один response.
 
 ## makeResponse() {#makeResponse}
 
@@ -57,7 +58,7 @@ HTTP-транспорт по умолчанию. Работает, пока `wit
 function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R>
 ```
 
-Собери `HttpResponse` без сети (interceptors, тесты). Статус по умолчанию — `0`. `ok` true на 2xx.
+Собери `HttpResponse` без сети (interceptors, тесты). Статус по умолчанию — `0`. `ok` true на 2xx. Возвращённое значение проходит ту же проверку media type и тот же объявленный struct, что и response из сети; никакого доверительного short-circuit нет.
 
 ## Опции execute
 
@@ -79,25 +80,51 @@ type HttpExecuteOptions = {
 
 ### RequestDefinition {#RequestDefinition}
 
-`method`, `path`, опциональные `input`, `output`, `responseType` (`'json' | 'text' | 'blob' | 'arraybuffer'`), `operation`, опциональный `build` (своя сборка запроса; нужен `input`).
+`method`, `path`, необязательные `input`, `output`, `error`, `responseType` (`'json' | 'text' | 'blob' | 'arraybuffer'`), `operation`, необязательный `build` (собираешь запрос сам; нужен `input`).
 
-### RequestOutputShape {#RequestOutputShape}
+### ResponseDeclaration {#ResponseDeclaration}
 
 ```ts
-type RequestOutputShape = { [status: number]: AnyStruct } | readonly { status: number | readonly number[]; body: AnyStruct }[]
+type ResponseDeclaration<TOutput, TError> = { output?: TOutput; error?: TError }
 ```
+
+Половина `output` / `error` у `RequestDefinition`. Если нет обоих, `responseType` тоже отклоняется: ничего не декодируется, значит и выбирать нечего.
 
 ### HttpAwaitResult {#HttpAwaitResult}
 
 ```ts
-type HttpAwaitResult<TSuccess, TErrorData> =
-  | [error: null, result: TSuccess, response: HttpResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: HttpResponse<unknown> | undefined]
+type HttpAwaitResult<TData = undefined, TErrorData = undefined> =
+  | [error: null, result: TData, response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>]
+  | [error: FaultOf<TErrorData>, result: undefined, response: undefined]
 ```
+
+При успехе третий слот несёт `body` только если был объявлен `output`. При провале он `undefined` — fault уже держит те метаданные response, которые были.
 
 ### HttpRequest {#HttpRequest}
 
 Готовый исходящий запрос: `method`, `endpoint`, `headers`, `body`, `abort`, `operation`, progress hooks, `baseEndpoint`, query metadata.
+
+### HttpMeta {#HttpMeta}
+
+```ts
+type HttpMeta = {
+  readonly headers: Headers
+  readonly ok: boolean
+  readonly status: number
+  readonly statusText: string
+  readonly url: string
+}
+```
+
+Метаданные response, доступные всегда, когда response дошёл до клиента. Они **не** несут `body`: тело появляется только после того, как объявленный struct его декодировал.
+
+### DecodedResponse {#DecodedResponse}
+
+```ts
+type DecodedResponse<TBody> = HttpMeta & { readonly body: TBody }
+```
+
+Response, чьё тело декодировалось по объявленному struct. Держать этот тип в руках — само доказательство того, что декодирование произошло, поэтому decode-провал сообщает только `HttpMeta`.
 
 ### HttpResponse {#HttpResponse}
 
@@ -108,10 +135,11 @@ type HttpResponse<R> = {
   readonly statusText: string
   readonly headers: Headers
   readonly body: R | null
-  readonly error?: unknown
   readonly ok: boolean
 }
 ```
+
+Сетевая форма, которую производят transports и видят interceptor’ы: `body` — это текст или уже распарсенный JSON, а не декодированное значение. До вызывающего доходит `DecodedResponse`.
 
 ### HttpProgressEvent {#HttpProgressEvent}
 
@@ -119,11 +147,7 @@ type HttpResponse<R> = {
 
 `loaded`, `total`, `lengthComputable`. Колбэки могут быть async.
 
-Подробности — в [гайде HTTP](../core/http.md) и [Командах](../core/commands.md).
-
-## ResponseGroupItem {#ResponseGroupItem}
-
-Строка `{ status, body }` в списковой форме `RequestOutputShape`. `status` — один код или несколько с общим body struct.
+Подробности — в [гайде HTTP](../core/http.md) и [Командах](../core/commands.md). Callback, который throwит, — это `EXT_OBSERVER_FAILED`.
 
 ## RequestCommandBuilder {#RequestCommandBuilder}
 
@@ -139,11 +163,11 @@ type HttpResponse<R> = {
 
 ## RequestSuccessData {#RequestSuccessData}
 
-Успешный body, выведенный из объявленных 2xx `output`.
+Успешное тело, выведенное из объявленного `output` struct, или `undefined`, если он не объявлен.
 
 ## RequestErrorData {#RequestErrorData}
 
-Ошибочный body, выведенный из объявленных не-2xx `output`.
+Тело ошибки, выведенное из объявленного `error` struct, или `undefined`, если он не объявлен.
 
 ## HttpResponseType {#HttpResponseType}
 
@@ -151,4 +175,4 @@ type HttpResponse<R> = {
 
 ## MakeResponseOptions {#MakeResponseOptions}
 
-Поля для `makeResponse`: `status`, `statusText`, `url`, `headers`, `body`, `error`.
+Поля для `makeResponse`: `status`, `statusText`, `url`, `headers`, `body`, `request`.

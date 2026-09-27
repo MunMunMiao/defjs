@@ -17,14 +17,12 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (!error) {
   console.log(data.name, response.status)
@@ -77,9 +75,7 @@ const updateUser = defineRequest({
       }),
     ),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
-  },
+  output: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
 })
 
 const [error, user] = await client.execute(
@@ -106,20 +102,22 @@ else console.log(user.id)
 
 カスタム `build` も同じ location/codec の setter を公開します。最後のボディ書き込みが勝ちます（値 + content-type メタデータ）。高レベルコマンドは任意オブジェクトをボディに変えません — ラッパーを宣言するか、対応する setter を使ってください。
 
-## status で振り分ける
+## ボディの読み方
 
-`output` は status → Struct のマップ、または `{ status, body }[]` です。`output` があり `responseType` がないとき、表現のデフォルトは `json` です。明示タイプは `json`、`text`、`blob`、`arraybuffer`。
+`output` は 2xx ボディ用の単一の Struct、`error` はそれ以外すべて用の単一の Struct です。どちらかを宣言して `responseType` を書かなければ、表現は `json` が既定になります。明示する型は `json`、`text`、`blob`、`arraybuffer`。どちらも宣言しなければ `responseType` は許されず、ボディも読まれません。
 
-処理順:
+順序:
 
-1. status `0` → トランスポートエラー。
-2. `output` なし → 2xx は `data === undefined` で成功。non-2xx → `error.data === undefined` の `HTTP_STATUS`。ボディはデコードされない。
-3. `output` ありなら、厳密に宣言された status がその Struct を選ぶ。配列形では、後の一致が先のグループ一致を上書き。
-4. 未宣言 status → ボディデコードの**前**に `UNDECLARED_STATUS`。
-5. 表現失敗 → `RESPONSE_VALIDATION_FAILED`。部分データなし。
-6. デコード済みの宣言 2xx → 結果。デコード済みの宣言 non-2xx → `HTTP_STATUS` 上の型付き `error.data`。
+1. `ok` が側を選びます。2xx は `output`、それ以外は `error`。両方ということはありません。
+2. その側に宣言がない → ボディは読まれません。2xx は `data === undefined` で成功し、non-2xx は `data === undefined` の `HTTP_STATUS` になります。宣言しなかった側のボディが読めなかったことは、その事実ごと丸ごと無視されます。
+3. メディアタイプはボディを読む**前**に確認します。不一致は `RES_MEDIA_TYPE_INVALID` で、パースもデコードもしません。
+4. 表現を読みます。失敗は `RES_DECODE_FAILED`。
+5. Struct が値をパースします。失敗は `RES_STRUCT_MISMATCH`。
+6. 2xx → 結果と型付きの `response.body`。non-2xx → `HTTP_STATUS` 上の型付き `data`。
 
-`HttpResponse` は `url`、`status`、`statusText`、`headers`、`body`、`error`、`ok` を持ちます。`ok` は `200 <= status < 300` だけを意味します。Defjs の値であり、ネイティブ `Response` ではありません。`output` なしでは `responseType` は使えません。
+デコードは一度だけ、インターセプターチェーンの後に起きます。だからインターセプターが `makeResponse(...)` で作ったレスポンスも、回線から来たものとまったく同じに読まれます。
+
+成功したレスポンスは `DecodedResponse<T>` です。`url`、`status`、`statusText`、`headers`、`ok`、それに型付きの `body`。何もデコードしていない場所では `HttpMeta` が返ります — 同じフィールドで `body` だけがありません。`ok` は `200 <= status < 300` だけを意味します。どちらもネイティブの `Response` ではありません。トランスポート失敗は fault なので、その代わりを務める status 0 のレスポンスは存在しません。
 
 ## 作業をキャンセルする {#cancel-the-work}
 
@@ -135,12 +133,12 @@ const pending = client.execute(command, { signal: controller.signal, timeout: 5_
 
 controller.abort('screen closed')
 const [error] = await pending
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancellation')
 }
 ```
 
-`timeout` は `1..2_147_483_647` の正の安全な整数である必要があります。認識されたキャンセル → `ABORTED`。実行タイムアウト → `TIMEOUT`。その他の Fetch/インターセプター失敗 → `NETWORK_ERROR`。サーバーが書き込みを受け付けたあとのキャンセルは、書き込みがロールバックされたことの**証明にはなりません**。
+`timeout` は `1..2_147_483_647` の正の安全な整数である必要があります。認識されたキャンセル → `NET_ABORTED`。実行タイムアウト → `NET_TIMEOUT`。その他の Fetch/インターセプター失敗 → `NET_UNREACHABLE`。サーバーが書き込みを受け付けたあとのキャンセルは、書き込みがロールバックされたことの**証明にはなりません**。
 
 ## 資格情報と XSRF
 

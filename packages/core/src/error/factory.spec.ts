@@ -1,151 +1,207 @@
 import { describe, expect, test } from 'vitest'
-import { makeResponse } from '../internal/http_response'
-import { createDefinitionError, createHttpStatusError, createTransportError, ERR_ABORTED, ERR_TIMEOUT } from './index'
+import type { DecodedResponse, HttpMeta } from '../internal/http_response'
+import { ERR_ABORTED, ERR_TIMEOUT } from './cause'
+import {
+  createDecodeFault,
+  createHttpStatusFault,
+  createNetworkFault,
+  createPreflightFault,
+  createUndecodedHttpStatusFault,
+} from './factory'
 
-describe('error factory helpers', () => {
-  function expectNativeError(error: Error, name: string, expectedKeys: string[], cause?: unknown): void {
-    expect(error).toBeInstanceOf(Error)
-    expect(error.name).toBe(name)
-    expect(String(error)).toBe(`${name}: ${error.message}`)
-    expect(Object.getOwnPropertyDescriptor(error, 'name')).toEqual({
-      configurable: true,
-      enumerable: false,
-      value: name,
-      writable: true,
-    })
-    expect(Object.getOwnPropertyDescriptor(error, 'cause')).toEqual({
-      configurable: true,
-      enumerable: false,
-      value: cause,
-      writable: true,
-    })
-    expect(Object.keys(JSON.parse(JSON.stringify(error)))).toEqual(expectedKeys)
-    expect(JSON.parse(JSON.stringify(error))).not.toHaveProperty('cause')
-    expect(JSON.parse(JSON.stringify(error))).not.toHaveProperty('name')
+function meta(overrides: Partial<HttpMeta> = {}): HttpMeta {
+  return {
+    headers: new Headers({ 'content-type': 'application/json' }),
+    ok: false,
+    status: 404,
+    statusText: 'Not Found',
+    url: 'https://api.example.test/users/1',
+    ...overrides,
   }
+}
 
-  test('should normalize transport errors', () => {
-    const aborted = createTransportError(ERR_ABORTED)
-    expect(aborted).toBeInstanceOf(Error)
-    expect(aborted).toMatchObject({
-      code: 'ABORTED',
-      kind: 'transport',
-      message: ERR_ABORTED.message,
-    })
-    const timedOut = createTransportError(ERR_TIMEOUT)
-    expect(timedOut).toBeInstanceOf(Error)
-    expect(timedOut).toMatchObject({
-      code: 'TIMEOUT',
-      kind: 'transport',
-      message: ERR_TIMEOUT.message,
-    })
-    expect(createTransportError(new Error(ERR_TIMEOUT.message))).toMatchObject({
-      code: 'NETWORK_ERROR',
-      kind: 'transport',
-      message: ERR_TIMEOUT.message,
-    })
-    const timeoutError = new Error('timed out')
-    timeoutError.name = 'TimeoutError'
-    expect(createTransportError(timeoutError)).toMatchObject({
-      code: 'TIMEOUT',
-      kind: 'transport',
-      message: 'timed out',
-    })
-    expect(createTransportError(new DOMException('', 'TimeoutError'))).toMatchObject({
-      code: 'TIMEOUT',
-      kind: 'transport',
-      message: ERR_TIMEOUT.message,
-    })
-    const offlineCause = new Error('offline')
-    const offline = createTransportError(offlineCause)
-    expect(offline).toBeInstanceOf(Error)
-    expect(offline).toMatchObject({
-      code: 'NETWORK_ERROR',
-      kind: 'transport',
-      message: 'offline',
+function decoded<TBody>(body: TBody, overrides: Partial<HttpMeta> = {}): DecodedResponse<TBody> {
+  return { ...meta(overrides), body }
+}
+
+function expectNativeFault(fault: Error, expectedKeys: string[], cause?: unknown): void {
+  expect(fault).toBeInstanceOf(Error)
+  expect(fault.name).toBe('DefjsFault')
+  expect(String(fault)).toBe(`DefjsFault: ${fault.message}`)
+  expect(Object.getOwnPropertyDescriptor(fault, 'name')).toEqual({
+    configurable: true,
+    enumerable: false,
+    value: 'DefjsFault',
+    writable: true,
+  })
+  expect(Object.getOwnPropertyDescriptor(fault, 'cause')).toEqual({
+    configurable: true,
+    enumerable: false,
+    value: cause,
+    writable: true,
+  })
+  expect(Object.keys(JSON.parse(JSON.stringify(fault)))).toEqual(expectedKeys)
+  expect(JSON.parse(JSON.stringify(fault))).not.toHaveProperty('cause')
+  expect(JSON.parse(JSON.stringify(fault))).not.toHaveProperty('name')
+}
+
+describe('fault factories', () => {
+  describe('createHttpStatusFault', () => {
+    test('should expose the decoded body when an error struct was declared', () => {
+      const response = decoded({ code: 'not_found', message: 'missing' })
+      const fault = createHttpStatusFault(response)
+
+      expect(fault).toMatchObject({
+        code: 'HTTP_STATUS',
+        data: { code: 'not_found', message: 'missing' },
+        status: 404,
+      })
+      expect(fault.response).toBe(response)
+      expect(fault.response.body).toEqual({ code: 'not_found', message: 'missing' })
+      expect(fault.message).toBe('Http failure response: 404 - Not Found')
+      expectNativeFault(fault, ['code', 'data', 'response', 'status'])
     })
 
-    expectNativeError(aborted, 'TransportError', ['code', 'kind'], ERR_ABORTED)
-    expectNativeError(timedOut, 'TransportError', ['code', 'kind'], ERR_TIMEOUT)
-    expectNativeError(offline, 'TransportError', ['code', 'kind'], offlineCause)
-    expect(Object.prototype.propertyIsEnumerable.call(offline, 'code')).toBe(true)
+    test('should leave data undefined when no error struct was declared', () => {
+      const response = meta()
+      const fault = createUndecodedHttpStatusFault(response)
 
-    const nonErrorCause = createTransportError('offline')
-    expect(nonErrorCause.message).toBe('Network error')
+      expect(fault.code).toBe('HTTP_STATUS')
+      expect(fault.data).toBeUndefined()
+      expect(fault.response).toBe(response)
+      expect(fault.response).not.toHaveProperty('body')
+      // `data` stays an own property so the field is always present; JSON simply omits undefined.
+      expect(Object.hasOwn(fault, 'data')).toBe(true)
+      expectNativeFault(fault, ['code', 'response', 'status'])
+    })
+
+    test('should omit the status text from the message when the peer sent none', () => {
+      const fault = createUndecodedHttpStatusFault(meta({ status: 503, statusText: '' }))
+
+      expect(fault.message).toBe('Http failure response: 503')
+      expect(fault.status).toBe(503)
+    })
   })
 
-  test('should create definition errors', () => {
-    const undeclaredResponse = makeResponse({ status: 418, statusText: "I'm a teapot" })
-    const undeclaredCause = new Error('missing status')
-    const manualDefinitionError = createDefinitionError('UNDECLARED_STATUS', undeclaredCause, undeclaredResponse)
-    expect(manualDefinitionError).toBeInstanceOf(Error)
-    expect(manualDefinitionError).toMatchObject({
-      code: 'UNDECLARED_STATUS',
-      kind: 'definition',
-      message: 'missing status',
-      status: 418,
+  describe('createDecodeFault', () => {
+    test.each([['RES_DECODE_FAILED'], ['RES_MEDIA_TYPE_INVALID'], ['RES_STRUCT_MISMATCH']] as const)(
+      'should report %s with metadata but no body',
+      (code) => {
+        const cause = new Error('boom')
+        const response = meta()
+        const fault = createDecodeFault(code, cause, response)
+
+        expect(fault).toMatchObject({ code, status: 404 })
+        expect(fault.response).toBe(response)
+        expect(fault.response).not.toHaveProperty('body')
+        expect(fault.cause).toBe(cause)
+        expect(fault.message).toBe('boom')
+        expectNativeFault(fault, ['code', 'response', 'status'], cause)
+      },
+    )
+
+    test('should stringify a non-error cause', () => {
+      const fault = createDecodeFault('RES_DECODE_FAILED', 'unexpected token <', meta())
+
+      expect(fault.message).toBe('unexpected token <')
+      expect(fault.cause).toBe('unexpected token <')
     })
-    expect(manualDefinitionError.response).toBe(undeclaredResponse)
-
-    const interceptorFailed = createDefinitionError('INTERCEPTOR_FAILED', new Error('interceptor boom'))
-    expect(interceptorFailed).toBeInstanceOf(Error)
-    expect(interceptorFailed).toMatchObject({
-      code: 'INTERCEPTOR_FAILED',
-      kind: 'definition',
-      message: 'interceptor boom',
-    })
-
-    const nonErrorDefinitionCause = 'plain string cause'
-    const nonErrorDefinition = createDefinitionError('REQUEST_VALIDATION_FAILED', nonErrorDefinitionCause)
-    expect(nonErrorDefinition).toBeInstanceOf(Error)
-    expect(nonErrorDefinition.message).toBe('plain string cause')
-    expectNativeError(nonErrorDefinition, 'DefinitionError', ['code', 'kind'], nonErrorDefinitionCause)
-
-    const definitionResponse = makeResponse({ body: { detail: 'response metadata' }, status: 400 })
-    for (const code of ['REQUEST_VALIDATION_FAILED', 'RESPONSE_VALIDATION_FAILED', 'INTERCEPTOR_FAILED'] as const) {
-      const cause = new Error(`${code} cause`)
-      const error = createDefinitionError(code, cause, definitionResponse)
-      expectNativeError(error, 'DefinitionError', ['code', 'kind', 'response'], cause)
-      expect(Object.prototype.propertyIsEnumerable.call(error, 'code')).toBe(true)
-    }
-    expectNativeError(manualDefinitionError, 'DefinitionError', ['code', 'kind', 'response', 'status'], undeclaredCause)
   })
 
-  test('should reject UNDECLARED_STATUS without a response', () => {
-    expect(() => createDefinitionError('UNDECLARED_STATUS', new Error('missing'), undefined as never)).toThrow(TypeError)
+  describe('createPreflightFault', () => {
+    test('should report a caller fault without a response', () => {
+      const cause = new Error('input invalid')
+      const fault = createPreflightFault('REQ_INPUT_INVALID', cause)
+
+      expect(fault.code).toBe('REQ_INPUT_INVALID')
+      expect(fault.response).toBeUndefined()
+      expect(fault.message).toBe('input invalid')
+      expectNativeFault(fault, ['code'], cause)
+    })
+
+    test('should attach response metadata when the transport had some', () => {
+      const response = meta({ ok: true, status: 200, statusText: 'OK' })
+      const fault = createPreflightFault('NET_BODY_INCOMPLETE', new Error('terminated'), response)
+
+      expect(fault.code).toBe('NET_BODY_INCOMPLETE')
+      expect(fault.response).toBe(response)
+      expectNativeFault(fault, ['code', 'response'], fault.cause)
+    })
+
+    test('should fall back to the code as the message when there is no cause', () => {
+      const fault = createPreflightFault('ENV_UNSUPPORTED')
+
+      expect(fault.message).toBe('ENV_UNSUPPORTED')
+      expect(fault.cause).toBeUndefined()
+      expectNativeFault(fault, ['code'])
+    })
+
+    test('should stringify a non-error cause', () => {
+      const fault = createPreflightFault('REQ_OPTIONS_INVALID', 'abort and timeout are exclusive')
+
+      expect(fault.message).toBe('abort and timeout are exclusive')
+    })
   })
 
-  test('should coerce non-Error UNDECLARED_STATUS causes', () => {
-    const response = makeResponse({ status: 418, statusText: "I'm a teapot" })
-    const error = createDefinitionError('UNDECLARED_STATUS', 'teapot', response)
-    expect(error.message).toBe('teapot')
-    expect(error.status).toBe(418)
-  })
+  describe('createNetworkFault', () => {
+    test('should recognize the shared abort sentinel', () => {
+      const fault = createNetworkFault(ERR_ABORTED)
 
-  test('should create http status errors as Error instances', () => {
-    const response = makeResponse({ status: 404, statusText: 'Not Found' })
-    const error = createHttpStatusError(404, 'Not found', response, { message: 'missing' })
-    expect(error).toBeInstanceOf(Error)
-    expect(error).toMatchObject({
-      code: 'HTTP_STATUS',
-      data: { message: 'missing' },
-      kind: 'http',
-      message: 'Not found',
-      status: 404,
+      expect(fault.code).toBe('NET_ABORTED')
+      expect(fault.message).toBe(ERR_ABORTED.message)
     })
-    expect(error.response).toBe(response)
-    expect(error.name).toBe('HttpStatusError')
-    expect(String(error)).toBe('HttpStatusError: Not found')
-    expect(Object.getOwnPropertyDescriptor(error, 'name')).toEqual({
-      configurable: true,
-      enumerable: false,
-      value: 'HttpStatusError',
-      writable: true,
+
+    test('should recognize a DOMException abort', () => {
+      const cause = new DOMException('stop', 'AbortError')
+      const fault = createNetworkFault(cause)
+
+      expect(fault.code).toBe('NET_ABORTED')
+      expect(fault.message).toBe(ERR_ABORTED.message)
+      expect(fault.cause).toBe(cause)
     })
-    expect(Object.prototype.propertyIsEnumerable.call(error, 'code')).toBe(true)
-    expect(Object.prototype.propertyIsEnumerable.call(error, 'cause')).toBe(false)
-    expect(Object.keys(JSON.parse(JSON.stringify(error)))).toEqual(['code', 'data', 'kind', 'response', 'status'])
-    expect(JSON.parse(JSON.stringify(error))).not.toHaveProperty('cause')
-    expect(JSON.parse(JSON.stringify(error))).not.toHaveProperty('name')
+
+    test('should recognize the shared timeout sentinel', () => {
+      const fault = createNetworkFault(ERR_TIMEOUT)
+
+      expect(fault.code).toBe('NET_TIMEOUT')
+      expect(fault.message).toBe(ERR_TIMEOUT.message)
+    })
+
+    test('should keep a timeout cause message when it has one', () => {
+      const fault = createNetworkFault(new DOMException('took too long', 'TimeoutError'))
+
+      expect(fault.code).toBe('NET_TIMEOUT')
+      expect(fault.message).toBe('took too long')
+    })
+
+    test('should fall back to the shared timeout message when the cause has none', () => {
+      const cause = new DOMException('', 'TimeoutError')
+      const fault = createNetworkFault(cause)
+
+      expect(fault.code).toBe('NET_TIMEOUT')
+      expect(fault.message).toBe(ERR_TIMEOUT.message)
+    })
+
+    test('should treat anything else as unreachable', () => {
+      const fault = createNetworkFault(new TypeError('fetch failed'))
+
+      expect(fault.code).toBe('NET_UNREACHABLE')
+      expect(fault.message).toBe('fetch failed')
+    })
+
+    test('should stringify a non-error cause', () => {
+      const fault = createNetworkFault('offline')
+
+      expect(fault.code).toBe('NET_UNREACHABLE')
+      expect(fault.message).toBe('offline')
+    })
+
+    test('should attach response metadata when given', () => {
+      const response = meta({ ok: true, status: 200, statusText: 'OK' })
+      const fault = createNetworkFault(new Error('terminated'), response)
+
+      expect(fault.code).toBe('NET_UNREACHABLE')
+      expect(fault.response).toBe(response)
+    })
   })
 })

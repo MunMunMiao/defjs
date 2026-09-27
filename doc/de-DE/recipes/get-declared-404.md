@@ -5,7 +5,7 @@ description: Ein GET ausführen und zwischen typisiertem 200 und deklariertem 40
 
 # GET mit deklariertem 404
 
-Deklariere sowohl Success- als auch 404-Bodies. Branche auf `error.kind` und `error.status` — du bekommst typisiertes `error.data` für den deklarierten Miss.
+Deklariere sowohl Success- als auch 404-Bodies. Branche auf `error.code` und `error.status` — du bekommst typisiertes `error.data` für den deklarierten Miss.
 
 Details siehe [HTTP](../core/http.md) und [Fehler](../core/errors.md).
 
@@ -20,18 +20,16 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }))
 
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (error) {
-  console.error(error.kind, error.code)
+  console.error(error.code)
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
 }
@@ -41,4 +39,4 @@ if (error?.kind === 'http' && error.status === 404) {
 Loaded Ada from 200
 ```
 
-Ein undeclared Status wird zu `UNDECLARED_STATUS` vor Body-Decoding — deklariere jeden Status, der dich interessiert.
+Jeder Non-2xx-Status ist `HTTP_STATUS`. `error` zu deklarieren gibt dessen Body einen Typ; lässt du `error` weg, bleibt `err.data` `undefined` und der Body ungelesen. Ein einzelner `error`-Struct deckt jeden Non-2xx-Status ab — nutze also `struct.or(...)` oder eine Discriminated Union, wenn die Shapes abweichen.

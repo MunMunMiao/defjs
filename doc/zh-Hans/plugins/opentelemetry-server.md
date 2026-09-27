@@ -27,7 +27,7 @@ const readOrders = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
 
 const [error] = await client.execute(readOrders())
-if (error) console.error(error.kind, error.code)
+if (error) console.error(error.code)
 ```
 
 `tracer` 必填。`meter` 可选——不传就关掉包指标。没有 `propagator` → adapter 建一个组合的 W3C Trace Context + W3C Baggage propagator。它不会替你读或初始化全局 SDK 配置。
@@ -147,7 +147,7 @@ const client = createClient(
 
 Adapter 量的是传输寿命，不是 command 解释的每一阶段。
 
-- **HTTP** — span 在 HTTP interceptor 里开始，拿到 Defjs `HttpResponse` 就结束。状态分派、表示检查、Struct 解码在之后。后续的 `RESPONSE_VALIDATION_FAILED` 或 `UNDECLARED_STATUS` 改不了已结束的传输 span。
+- **HTTP** — span 在 HTTP interceptor 里开始，拿到 Defjs `HttpResponse` 就结束。媒体类型检查、表示读取和 Struct 解码都在之后，所以后续的 `RES_*` fault 改不了已结束的传输 span。又因为 span 活在链内，传输层的 reject 会按 OTel 惯例记成异常类，而不是执行阶段随后判定的 fault code。
 - **SSE** — span 开到 `stream.closed` settle。记 `sse.connected`，再记 `sse.closed` / `sse.aborted` / `sse.error`。一条逻辑流（含重连）→ 一个 span。没有按事件的 span。
 - **WebSocket** — span 开到 `session.closed` settle。事件：`websocket.connected`、`websocket.closed`、`websocket.error`。重连的物理 socket 仍属逻辑会话。没有按消息的 span。
 
@@ -197,7 +197,7 @@ void outcome
 
 活跃 SSE/WebSocket 仪器计的是逻辑资源（含重连空隙），不是物理 socket 或单次 HTTP 尝试。
 
-HTTP span 记 method、解析后的 `url.full`、可用时的 server address/port，以及收到时的响应状态。默认 `url.full` 把 `request.endpoint` 相对可选 `request.baseEndpoint` 解析，不会追加独立的 `request.queryString`。这是构造边界，不是脱敏。需要完整或脱敏后的应用自有 URL 时，请用 `startSpanHook` 构造。状态 `400+` → span status `ERROR`，状态字符串作 `error.type`。状态 `100..399` 不设 span status。状态零的传输结果没有响应状态；取消不设 status；超时/其他传输失败用 `TIMEOUT` 或 `NETWORK_ERROR`。Metrics 用稳定维度：method、静态 operation、server address/port、响应状态、低基数错误类型。
+HTTP span 记 method、解析后的 `url.full`、可用时的 server address/port，以及收到时的响应状态。默认 `url.full` 把 `request.endpoint` 相对可选 `request.baseEndpoint` 解析，不会追加独立的 `request.queryString`。这是构造边界，不是脱敏。需要完整或脱敏后的应用自有 URL 时，请用 `startSpanHook` 构造。状态 `400+` → span status `ERROR`，状态字符串作 `error.type`。状态 `100..399` 不设 span status。状态零的传输结果没有响应状态；取消不设 status；超时/其他传输失败用 `NET_TIMEOUT` 或 `NET_UNREACHABLE`。Metrics 用稳定维度：method、静态 operation、server address/port、响应状态、低基数错误类型。
 
 SSE/WebSocket 连接 metrics 记连接时间、逻辑连接时长、活跃资源数、`defjs.result`、operation、server address/port、低基数失败类型。默认没有请求/响应 body、消息 payload、队列长度或按消息 span。
 

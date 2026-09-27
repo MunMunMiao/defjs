@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,14 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## Формы status output
+## Формы `output` и `error`
 
-`output` может быть map статус → Struct или `{ status, body }[]`. Точный статус выигрывает. В массиве: более поздний match перекрывает более ранний grouped match. Нет matching объявления → `UNDECLARED_STATUS` до decode тела.
+`output` — один Struct для тела 2xx; `error` — один Struct для всего остального. `ok` — единственная развилка, и декодирует всегда одна сторона. Пропустить сторону значит, что это тело не прочитают: fault несёт status, а `data` остаётся `undefined`.
 
 ## Связанные рецепты
 

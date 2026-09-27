@@ -22,7 +22,7 @@ const room = defineWebSocket({
 
 const [error, session, startupConnection] = await client.execute(room())
 if (error) {
-  console.error(error.kind, error.code, startupConnection?.generation)
+  console.error(error.code, startupConnection?.generation)
 } else {
   await using ownedSession = session
   const unsubscribe = ownedSession.onRuntimeError((cause) => console.error('runtime', cause))
@@ -77,11 +77,11 @@ Message map контролирует payload, не envelope discriminator. `inco
 Ошибка старта → `[error, undefined, connection?]`. Pre-open сбой конструктора может быть без connection; timeout/close во время startup всё ещё может дать снимок. После возврата session runtime errors идут через observers, `receive` и `closed` — не через второй execute кортеж.
 
 ```typescript twoslash
-import type { RequestError, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
+import type { Fault, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
 
 type SocketResult<TIncoming, TOutgoing> =
   | [error: null, session: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [error: Fault, session: undefined, connection: WebSocketConnectionInfo | undefined]
 
 const result: SocketResult<unknown, never> | undefined = undefined
 void result

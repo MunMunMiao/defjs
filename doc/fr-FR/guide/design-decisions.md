@@ -7,6 +7,38 @@ description: Pourquoi Defjs garde explicites les contrats, commandes, résultats
 
 Defjs fait quelques compromis volontaires. Les API de confort masquent souvent qui possède une requête, un flux ou une session. Defjs garde cette frontière visible pour que tu réutilises le même contrat d’endpoint sans ramasser en silence un cache, un planificateur de retry ou un gestionnaire de ressources.
 
+## Déclarer, c’est affirmer
+
+Ces six règles tranchent toute question sur la façon dont une réponse est lue. Elles sont numérotées pour qu’une discussion ultérieure puisse en citer une au lieu de la redériver.
+
+### 1. Ce que tu déclares est ce que tu affirmes
+
+`output` veut dire « quand `ok` est true, le corps **est** cette forme ». `error` veut dire « quand `ok` est false, le corps **est** cette forme ». Une déclaration n’est pas un indice ni un espoir au mieux : c’est une affirmation sur ce qui va arriver.
+
+### 2. `ok` est le seul embranchement, et un seul côté décode
+
+Une réponse 2xx est lue avec `output`. Tout le reste avec `error`. Jamais les deux, jamais l’autre en fallback.
+
+### 3. Une réalité qui diffère de l’affirmation est un échec, signalé haut et fort
+
+Pas de devinette de format, pas de repli sur quelque chose de plus faible, pas de silence. Que le backend ait changé, qu’une gateway soit intervenue ou que quelqu’un ait trafiqué la réponse **ne change pas la conclusion** : la bibliothèque ne peut pas les distinguer et ne devrait pas prétendre le faire.
+
+C’est la règle qu’on demande le plus souvent d’assouplir, donc autant poser le cas clairement. Suppose qu’un attaquant puisse réécrire le `200` que ta page allait lire avec `output`, et qu’à la place tu reçoives un `3xx`, `4xx` ou `5xx`. Échouer n’est pas un désagrément : c’est le seul résultat sûr. Te remettre le corps brut « au cas où » donnerait à quiconque peut injecter une réponse un moyen de contourner la validation que tu as demandée.
+
+### 4. Un décodage échoué n’a pas de corps
+
+Un corps **est** une valeur décodée. Si le décodage a échoué, il n’y a pas de valeur — pas de corps à moitié décodé à inspecter. Le détail fautif vit sur `cause` ; la réponse garde ses métadonnées et rien de plus.
+
+Celle-ci est imposée par le système de types, pas par convention : le `response` d’un fault de décodage est `HttpMeta`, qui n’a aucun champ `body`, donc aller le chercher est une erreur de compilation.
+
+### 5. Si tu ne veux pas de l’affirmation, ne déclare pas
+
+Omettre `output` veut dire « le corps 2xx ne m’intéresse pas » — il n’est jamais lu. Omettre `error` dit la même chose pour tout le reste. C’est un opt-out explicite, pas un oubli, et il va jusqu’au bout : un corps illisible du côté que tu as écarté n’est pas ton affaire, pas même le fait qu’il n’ait pas pu être lu.
+
+### 6. 3xx n’est pas une plage de codes d’erreur
+
+Si tu sais qu’un endpoint répond avec un statut de redirection, ne donne pas à `output` un schema pour ça, ou déclares-en un qui accepte une valeur vide. Sinon, signaler un échec est le résultat attendu, pas une lacune.
+
 ## Clients explicites
 
 `createClient(...)` fait de la config d’endpoint une valeur explicite. Des environnements ou portées de requête différents obtiennent des endpoints, credentials, intercepteurs, sérialiseurs et handles de transport différents.
@@ -28,10 +60,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -53,7 +83,19 @@ La troisième valeur est un instantané, pas une promesse que de futurs reconnec
 
 L’inférence TypeScript décrit ce que tu attends ; elle ne peut pas vérifier une réponse serveur à l’exécution. Le parsing Struct est la seconde moitié du contrat. Defjs valide l’entrée de la commande avant la construction de la requête, décode la représentation choisie, puis parse le Struct correspondant.
 
-Cet ordre garde statut et body comme des faits séparés. La sélection exacte du statut déclaré a lieu **avant** le décodage du body. Non-2xx déclaré → `error.data` typé. Body déclaré malformé → `RESPONSE_VALIDATION_FAILED`. Statut non déclaré → `UNDECLARED_STATUS` (pas un succès/échec non typé). Plus strict que « n’importe quel JSON arrivé », mais tu peux décider en sécurité.
+Le décodage a lieu **une seule fois, après la chaîne d’intercepteurs**. Une réponse qu’un intercepteur a construite avec `makeResponse(...)` est interprétée exactement comme une réponse venue du réseau : l’origine d’une réponse ne change pas la façon dont elle est lue, donc il n’y a aucun chemin « faire confiance à l’intercepteur » à examiner.
+
+L’ordre est : media type, puis représentation, puis Struct.
+
+| Ce qui n’a pas tenu                                               | Fault                                                            |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Le media type n’est pas celui qu’exige la représentation déclarée | `RES_MEDIA_TYPE_INVALID` — signalé **avant** la lecture du corps |
+| Les octets ne sont pas cette représentation                       | `RES_DECODE_FAILED`                                              |
+| La valeur n’est pas ce Struct                                     | `RES_STRUCT_MISMATCH`                                            |
+| Non-2xx, et `error` a décodé                                      | `HTTP_STATUS` avec `data` typé                                   |
+| Non-2xx, et `error` n’était pas déclaré                           | `HTTP_STATUS` avec `data: undefined`                             |
+
+Vérifier le media type d’abord, c’est ce qui transforme « j’ai demandé du JSON et reçu du HTML » en un fault précis plutôt qu’en une erreur de parser, et cela saute entièrement la lecture, le parsing et le Struct.
 
 ## Les limites de `build`
 
@@ -83,7 +125,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: { 202: struct.object({ accepted: struct.number() }) },
+  output: struct.object({ accepted: struct.number() }),
 })
 
 const command = createBatch({

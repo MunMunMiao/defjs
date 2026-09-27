@@ -13,7 +13,7 @@ Déclare une requête typée, construis une commande depuis l’input, exécute-
 function defineRequest(definition: RequestDefinition): RequestCommandBuilder
 ```
 
-- **definition** — `method`, `path`, struct `input` optionnel, `output` indexé par statut, `operation` et `build` optionnels.
+- **definition** — `method`, `path`, struct `input` optionnel, structs `output` et `error` optionnels, `operation` et `build` optionnels.
 - **Renvoie** un builder. Appelle-le avec l’input pour obtenir un `HttpCommand`.
 
 ```ts
@@ -25,13 +25,12 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 ```
 
-`output` peut aussi être une liste de groupes `{ status, body }` (un struct body pour plusieurs codes).
+`output` est un struct pour le corps 2xx ; `error` est un struct pour tout corps non-2xx. Aucun des deux n’est indexé par statut. Omettre l’un veut dire que ce corps n’est jamais lu — voir [Déclarer, c’est affirmer](/fr-FR/guide/design-decisions#déclarer-c-est-affirmer).
 
 ## executeHttpCommand() {#executeHttpCommand}
 
@@ -41,7 +40,9 @@ function executeHttpCommand(clientConfig: ClientConfig, command: HttpCommand, op
 
 Entrée bas niveau utilisée par `client.execute`. Dans le code d’application, appelle `client.execute(command, options)`.
 
-- **Renvoie** `[null, body, response]` ou `[error, undefined, response?]`.
+- **Retourne** `[null, data, response]` ou `[fault, undefined, undefined]`.
+
+Un statut non-2xx est toujours `HTTP_STATUS`. Son `data` est le corps `error` décodé quand un `error` était déclaré, et `undefined` sinon. En cas d’échec, le troisième emplacement du tuple vaut `undefined` ; les métadonnées de la réponse sont portées par le fault.
 
 ## fetchHandler() {#fetchHandler}
 
@@ -49,7 +50,7 @@ Entrée bas niveau utilisée par `client.execute`. Dans le code d’application,
 function fetchHandler(httpRequest: HttpRequest, fetchImpl?: typeof fetch): Promise<HttpResponse<unknown>>
 ```
 
-Transport HTTP par défaut. Utilisé sauf si `withHTTPHandle` le remplace.
+Transport HTTP par défaut. Utilisé sauf si `withHTTPHandle` le remplace. Il reject — au lieu de resolve avec une réponse synthétique — quand aucune réponse n’a atteint le client.
 
 ## makeResponse() {#makeResponse}
 
@@ -57,7 +58,7 @@ Transport HTTP par défaut. Utilisé sauf si `withHTTPHandle` le remplace.
 function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R>
 ```
 
-Construis un `HttpResponse` sans appel réseau (intercepteurs, tests). Le statut par défaut est `0`. `ok` est true pour du 2xx.
+Construis un `HttpResponse` sans appel réseau (intercepteurs, tests). Le statut par défaut est `0`. `ok` est true pour du 2xx. La valeur retournée passe par la même vérification de media type et le même struct déclaré qu’une réponse venue du réseau ; il n’y a aucun court-circuit de confiance.
 
 ## Options d’execute
 
@@ -79,25 +80,51 @@ L’annulation c’est `abort` **ou** `timeout`, pas les deux. `signal` se combi
 
 ### RequestDefinition {#RequestDefinition}
 
-`method`, `path`, `input` optionnel, `output`, `responseType` (`'json' | 'text' | 'blob' | 'arraybuffer'`), `operation`, `build` optionnel (assemblage custom de requête ; exige `input`).
+`method`, `path`, `input` optionnel, `output`, `error`, `responseType` (`'json' | 'text' | 'blob' | 'arraybuffer'`), `operation`, `build` optionnel (tu assembles la requête toi-même ; nécessite `input`).
 
-### RequestOutputShape {#RequestOutputShape}
+### ResponseDeclaration {#ResponseDeclaration}
 
 ```ts
-type RequestOutputShape = { [status: number]: AnyStruct } | readonly { status: number | readonly number[]; body: AnyStruct }[]
+type ResponseDeclaration<TOutput, TError> = { output?: TOutput; error?: TError }
 ```
+
+La moitié `output` / `error` d’une `RequestDefinition`. Si les deux manquent, `responseType` est aussi refusé : rien n’est décodé, donc il n’y a rien à sélectionner.
 
 ### HttpAwaitResult {#HttpAwaitResult}
 
 ```ts
-type HttpAwaitResult<TSuccess, TErrorData> =
-  | [error: null, result: TSuccess, response: HttpResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: HttpResponse<unknown> | undefined]
+type HttpAwaitResult<TData = undefined, TErrorData = undefined> =
+  | [error: null, result: TData, response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>]
+  | [error: FaultOf<TErrorData>, result: undefined, response: undefined]
 ```
+
+En cas de succès, le troisième emplacement ne porte `body` que si `output` était déclaré. En cas d’échec il vaut `undefined` — le fault détient déjà les métadonnées de réponse qui existaient.
 
 ### HttpRequest {#HttpRequest}
 
 Requête sortante normalisée : `method`, `endpoint`, `headers`, `body`, `abort`, `operation`, hooks de progress, `baseEndpoint`, métadonnées de query.
+
+### HttpMeta {#HttpMeta}
+
+```ts
+type HttpMeta = {
+  readonly headers: Headers
+  readonly ok: boolean
+  readonly status: number
+  readonly statusText: string
+  readonly url: string
+}
+```
+
+Métadonnées de la réponse, disponibles dès qu’une réponse a atteint le client. Elles ne portent **pas** de `body` : un corps n’existe qu’une fois qu’un struct déclaré en a décodé un.
+
+### DecodedResponse {#DecodedResponse}
+
+```ts
+type DecodedResponse<TBody> = HttpMeta & { readonly body: TBody }
+```
+
+Une réponse dont le corps a été décodé contre le struct déclaré. Tenir ce type est la preuve que le décodage a eu lieu — c’est pourquoi un échec de décodage ne rapporte que `HttpMeta`.
 
 ### HttpResponse {#HttpResponse}
 
@@ -108,10 +135,11 @@ type HttpResponse<R> = {
   readonly statusText: string
   readonly headers: Headers
   readonly body: R | null
-  readonly error?: unknown
   readonly ok: boolean
 }
 ```
+
+La forme réseau que produisent les transports et que voient les intercepteurs : `body` est du texte ou du JSON déjà parsé, pas une valeur décodée. Ce qui atteint l’appelant, c’est `DecodedResponse`.
 
 ### HttpProgressEvent {#HttpProgressEvent}
 
@@ -119,11 +147,7 @@ type HttpResponse<R> = {
 
 `loaded`, `total`, `lengthComputable`. Les callbacks peuvent être async.
 
-Voir [le guide HTTP](../core/http.md) et [Commandes](../core/commands.md).
-
-## ResponseGroupItem {#ResponseGroupItem}
-
-Une ligne `{ status, body }` dans la forme liste de `RequestOutputShape`. `status` peut être un code, ou plusieurs qui partagent le même body struct.
+Voir [le guide HTTP](../core/http.md) et [Commandes](../core/commands.md). Un callback qui throw, c’est `EXT_OBSERVER_FAILED`.
 
 ## RequestCommandBuilder {#RequestCommandBuilder}
 
@@ -139,11 +163,11 @@ Progression, annulation. `HttpExecuteOptions` ajoute `signal`.
 
 ## RequestSuccessData {#RequestSuccessData}
 
-Body de succès inféré des `output` 2xx déclarés.
+Corps de succès inféré du struct `output` déclaré, ou `undefined` si aucun n’est déclaré.
 
 ## RequestErrorData {#RequestErrorData}
 
-Body d’erreur inféré des `output` non-2xx déclarés.
+Corps d’erreur inféré du struct `error` déclaré, ou `undefined` si aucun n’est déclaré.
 
 ## HttpResponseType {#HttpResponseType}
 
@@ -151,4 +175,4 @@ Body d’erreur inféré des `output` non-2xx déclarés.
 
 ## MakeResponseOptions {#MakeResponseOptions}
 
-Champs pour `makeResponse` : `status`, `statusText`, `url`, `headers`, `body`, `error`.
+Champs pour `makeResponse` : `status`, `statusText`, `url`, `headers`, `body`, `request`.

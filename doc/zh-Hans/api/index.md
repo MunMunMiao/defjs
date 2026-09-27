@@ -23,7 +23,7 @@ description: 手写的工作区包查阅页——你 import 的函数、options 
 | [Client](./client.md)             | `createClient`, `with*` options, `Client`                        |
 | [HTTP](./http.md)                 | `defineRequest`, execute options, `HttpRequest` / `HttpResponse` |
 | [Struct](./struct.md)             | `struct.*`, `Infer`, `StructError`                               |
-| [Errors](./errors.md)             | `RequestError` 几种和工厂                                        |
+| [Errors](./errors.md)             | `Fault` 几种和工厂                                               |
 | [Interceptors](./interceptors.md) | HTTP / SSE / WebSocket 的 interceptor helpers                    |
 | [SSE](./sse.md)                   | `defineEventStream`, stream handle                               |
 | [WebSocket](./web-socket.md)      | `defineWebSocket`, session                                       |

@@ -4,20 +4,6 @@ import type { RequestBuildHandler } from '../internal/request_builder'
 import { createBaseTransportRequest } from '../internal/transport_request'
 import type { AnyStruct } from '../struct'
 
-/**
- * One status-to-body mapping used in the array form of `RequestOutputShape`.
- * `status` may be a single code or a list of codes that share the same body struct.
- */
-export type ResponseGroupItem<S extends number = number, B extends AnyStruct = AnyStruct> = {
-  body: B
-  status: S | readonly S[]
-}
-
-/**
- * Declared HTTP response shapes keyed by status code, as a map or a list of `ResponseGroupItem`s.
- */
-export type RequestOutputShape = { [key: number]: AnyStruct } | readonly ResponseGroupItem[]
-
 export function createHttpRequest<TInput extends AnyStruct | undefined>(
   method: string,
   path: string,
@@ -63,36 +49,20 @@ export function createHttpRequest<TInput extends AnyStruct | undefined>(
   }
 }
 
-export function resolveDefaultResponseType(
-  output: RequestOutputShape | undefined,
-  responseType?: HttpResponseType,
-): HttpResponseType | undefined {
+/**
+ * Pick the representation the transport should read the body as.
+ *
+ * Declaring either `output` or `error` means something will be decoded, and JSON is the
+ * default representation. Declaring neither leaves the body unread.
+ *
+ * @param hasDeclaration - Whether the endpoint declared `output` or `error`.
+ * @param responseType - Explicit representation from the definition, when given.
+ * @returns The representation to read, or `undefined` to skip the body entirely.
+ */
+export function resolveDefaultResponseType(hasDeclaration: boolean, responseType?: HttpResponseType): HttpResponseType | undefined {
   if (responseType) {
     return responseType
   }
 
-  if (!output) {
-    return undefined
-  }
-
-  return 'json'
-}
-
-export function resolveOutputStruct(output: RequestOutputShape, status: number): AnyStruct | undefined {
-  if (isResponseOutputMap(output)) {
-    return output[status]
-  }
-
-  for (const item of [...output].reverse()) {
-    const statuses = Array.isArray(item.status) ? item.status : [item.status]
-    if (statuses.includes(status)) {
-      return item.body
-    }
-  }
-
-  return undefined
-}
-
-function isResponseOutputMap(output: RequestOutputShape): output is { [key: number]: AnyStruct } {
-  return !Array.isArray(output)
+  return hasDeclaration ? 'json' : undefined
 }

@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,14 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## Formas de output por estado
+## Formas de `output` y `error`
 
-`output` puede ser un mapa estado → Struct o un `{ status, body }[]`. Gana el estado exacto. Entradas de array: un match posterior anula un match agrupado anterior. Sin declaración coincidente → `UNDECLARED_STATUS` antes de decodificar el cuerpo.
+`output` es un Struct para el cuerpo 2xx; `error` es un Struct para todo lo demás. `ok` es la única bifurcación, y solo un lado decodifica. Omitir un lado significa que ese cuerpo nunca se lee: el fault lleva el estado y `data` se queda en `undefined`.
 
 ## Recetas relacionadas
 

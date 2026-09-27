@@ -66,10 +66,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -100,10 +98,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const handle: typeof fetch = async (input, init) => {
@@ -124,10 +120,10 @@ const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }
 })
 
 if (error) {
-  if (error.kind === 'http' && error.status === 404) {
+  if (error.code === 'HTTP_STATUS' && error.status === 404) {
     console.log(error.data.message)
   } else {
-    console.error(error.kind, error.code)
+    console.error(error.code)
   }
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
@@ -179,7 +175,7 @@ Loaded Ada from 200
 User not found
 ```
 
-عند النجاح: `error` هو `null`، و`user` هو مخرج Struct لـ `200`، و`response` هو `HttpResponse`. عند `404` معلَن: `error.kind` هو `'http'`، و`error.status` هو `404`، و`error.data` مُنوَّع كـ `NotFound`. العنصر الثاني في الـ tuple هو `undefined` عند الفشل.
+عند النجاح: `error` هو `null`، و`user` هو مخرج Struct لـ `200`، و`response` هو `HttpResponse`. عند `404` معلَن: `error.code` هو `'http'`، و`error.status` هو `404`، و`error.data` مُنوَّع كـ `NotFound`. العنصر الثاني في الـ tuple هو `undefined` عند الفشل.
 
 ## الخطوة 4 — وجّه إلى API حقيقي
 
@@ -209,11 +205,11 @@ void realClient
 
 ## عندما تختلف النتيجة
 
-- مدخل سيئ / بناء غير صالح / خيارات إلغاء متعارضة → `REQUEST_VALIDATION_FAILED`
-- غير-2xx معلَن → `HTTP_STATUS` مع `error.data` مُنوَّع
-- جسم معلَن لا يُفكّ → `RESPONSE_VALIDATION_FAILED`
-- حالة بلا إعلان → `UNDECLARED_STATUS` (قبل فك الجسم)
-- فشل Fetch / إلغاء / مهلة → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+- مدخل سيئ → `REQ_INPUT_INVALID`؛ خيارات إلغاء متعارضة → `REQ_OPTIONS_INVALID`؛ فشل `build` → `REQ_BUILD_FAILED`
+- أي غير-2xx → `HTTP_STATUS`، مع `err.data` مُنوَّع عند إعلان `error`
+- نوع وسائط خاطئ → `RES_MEDIA_TYPE_INVALID`، يُبلَّغ قبل قراءة الجسم
+- جسم معلَن لا يُفكّ → `RES_DECODE_FAILED` أو `RES_STRUCT_MISMATCH`
+- فشل Fetch / إلغاء / مهلة → `NET_UNREACHABLE` / `NET_ABORTED` / `NET_TIMEOUT`
 
 يجب أن يكون `timeout` عددًا صحيحًا آمنًا موجبًا في `1..2_147_483_647`. لا تمرّر `abort` و`timeout` معًا؛ يمكن لـ `signal` أن يجتمع مع أي منهما. الإلغاء يخبرك بما رآه المستدعي — لا ما إذا كانت كتابة الخادم قد اكتملت.
 

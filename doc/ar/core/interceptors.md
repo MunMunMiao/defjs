@@ -170,7 +170,11 @@ const retrySafeReads = createHttpInterceptor(async (request, next) => {
 })
 ```
 
-أخطاء المعترض/Fetch المرمية لا تُعاد بهذا الحلقة. الحالة `0` هي استجابة فشل النقل عند حد Fetch. إعادة محاولة `POST` / `PUT` / `PATCH` / `DELETE` تحتاج بايتات قابلة لإعادة التشغيل، ودعم الخادم، وعقد تكرار آمن، وسياسة حالة مراجعة.
+لا تعيد هذه الحلقة محاولة أخطاء المعترض/Fetch المرمية — فشل النقل يرفض الوعد بدلًا من أن ينتج حالة تستطيع هذه الحلقة مطابقتها. إعادة محاولة `POST` / `PUT` / `PATCH` / `DELETE` تحتاج بايتات قابلة لإعادة التشغيل، ودعم الخادم، وعقد تكرار آمن، وسياسة حالة مراجعة. إعادة المحاولة مسؤوليتك — النواة لا تصدّر `retryAfter()`.
+
+المعترض الذي يرمي (أو يرفض) خارج هذا المثال يعود إلى المستدعي بصفة `EXT_INTERCEPTOR_FAILED`، والقيمة المرمية على `cause` — راجع [الأخطاء](./errors.md). رمي `ERR_ABORTED` أو `ERR_TIMEOUT` هو الطريقة التي يعبّر بها المعترض عن الإلغاء بدلًا من ذلك.
+
+`next(request)` قد يرفض. فشل النقل خطأ (fault) وليس استجابة بحالة صفر، لذا المعترض الذي يريد ملاحظته يستخدم `try` / `catch` حول `next`. ومع ذلك يبقى إسناد Defjs صحيحًا: الرفض القادم من النقل يظل خطأ `NET_*` ولا يُحمَّل على معترضك.
 
 ## غلّف جلسات WebSocket
 
@@ -219,7 +223,7 @@ const preserveSession = createWebSocketInterceptor(async (request, next) => {
 
 المصانع تُرجع قيم نقل موسومة:
 
-- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createHttpInterceptor(fn)` → `{ fn }`
 - `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
 - `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
 - `basicAuthHttpInterceptor(provider, options?)` — بيانات اعتماد Basic على HTTP

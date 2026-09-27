@@ -36,7 +36,7 @@ describe('sse browser runtime', () => {
     }
 
     expect(events).toEqual(['first', 'second line 1\nsecond line 2'])
-    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should return the fixed error tuple for non-2xx open responses in real browsers', async () => {
@@ -51,11 +51,9 @@ describe('sse browser runtime', () => {
 
     const [error, stream, open] = await baseClient.execute(useFailedStream())
 
-    expect(error?.kind).toBe('http')
     expect(error?.code).toBe('HTTP_STATUS')
     expect(stream).toBeUndefined()
     expect(open?.response?.status).toBe(500)
-    expect(open?.response?.error).toBeUndefined()
   })
 
   test('should close an open stream when browser iteration stops early', async () => {
@@ -77,7 +75,7 @@ describe('sse browser runtime', () => {
       break
     }
 
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted', reason: 'iterator-return' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted', reason: 'iterator-return' })
   })
 
   test('should skip unexpected events in real browsers', async () => {

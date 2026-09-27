@@ -23,7 +23,7 @@ description: ワークスペースパッケージの手書き参照 — import �
 | [Client](./client.md)             | `createClient`, `with*` options, `Client`                        |
 | [HTTP](./http.md)                 | `defineRequest`, execute options, `HttpRequest` / `HttpResponse` |
 | [Struct](./struct.md)             | `struct.*`, `Infer`, `StructError`                               |
-| [Errors](./errors.md)             | `RequestError` の種類とファクトリ                                |
+| [Errors](./errors.md)             | `Fault` の種類とファクトリ                                       |
 | [Interceptors](./interceptors.md) | HTTP / SSE / WebSocket の interceptor ヘルパー                   |
 | [SSE](./sse.md)                   | `defineEventStream`, stream handle                               |
 | [WebSocket](./web-socket.md)      | `defineWebSocket`, session                                       |

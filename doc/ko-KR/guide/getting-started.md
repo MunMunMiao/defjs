@@ -66,10 +66,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -100,10 +98,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const handle: typeof fetch = async (input, init) => {
@@ -124,10 +120,10 @@ const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }
 })
 
 if (error) {
-  if (error.kind === 'http' && error.status === 404) {
+  if (error.code === 'HTTP_STATUS' && error.status === 404) {
     console.log(error.data.message)
   } else {
-    console.error(error.kind, error.code)
+    console.error(error.code)
   }
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
@@ -179,7 +175,7 @@ Loaded Ada from 200
 User not found
 ```
 
-성공 시: `error`는 `null`, `user`는 `200` Struct 출력, `response`는 `HttpResponse`예요. 선언된 `404`에서는 `error.kind`가 `'http'`, `error.status`가 `404`, `error.data`는 타입이 잡힌 `NotFound`예요. 실패 시 튜플 두 번째 항목은 `undefined`예요.
+성공 시: `error`는 `null`, `user`는 `200` Struct 출력, `response`는 `HttpResponse`예요. 선언된 `404`에서는 `error.code`가 `'http'`, `error.status`가 `404`, `error.data`는 타입이 잡힌 `NotFound`예요. 실패 시 튜플 두 번째 항목은 `undefined`예요.
 
 ## Step 4 — 실제 API로 연결하기
 
@@ -209,11 +205,11 @@ void realClient
 
 ## 결과가 달라질 때
 
-- 잘못된 입력 / 잘못된 빌드 / 충돌하는 취소 옵션 → `REQUEST_VALIDATION_FAILED`
-- 선언된 non-2xx → 타입이 잡힌 `error.data`와 함께 `HTTP_STATUS`
-- 선언된 body가 디코딩되지 않음 → `RESPONSE_VALIDATION_FAILED`
-- 선언이 없는 status → `UNDECLARED_STATUS` (body 디코딩 전)
-- Fetch 실패 / 취소 / 타임아웃 → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+- 잘못된 입력 → `REQ_INPUT_INVALID` / 충돌하는 취소 옵션 → `REQ_OPTIONS_INVALID` / 실패하는 `build` → `REQ_BUILD_FAILED`
+- 모든 non-2xx → `HTTP_STATUS`, `error`를 선언했다면 `err.data`에 타입이 잡혀요
+- 미디어 타입이 다름 → `RES_MEDIA_TYPE_INVALID`, body를 읽기 전에 보고돼요
+- 선언된 body가 디코딩되지 않음 → `RES_DECODE_FAILED` 또는 `RES_STRUCT_MISMATCH`
+- Fetch 실패 / 취소 / 타임아웃 → `NET_UNREACHABLE` / `NET_ABORTED` / `NET_TIMEOUT`
 
 `timeout`은 `1..2_147_483_647` 범위의 양의 안전 정수여야 해요. `abort`와 `timeout`을 함께 넘기지 마세요. `signal`은 둘 중 하나와 조합할 수 있어요. 취소는 호출자가 본 결과를 알려 줄 뿐, 서버 쓰기가 커밋됐는지는 증명하지 않아요.
 

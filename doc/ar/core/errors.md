@@ -1,11 +1,13 @@
 ---
-title: الأخطاء
-description: فرّع على kind وcode لـ 404 والمهلات والحالات غير المعلَنة وأعطال النقل.
+title: Errors
+description: تفرّع على مجموعة مغلقة من رموز الأخطاء لحالات 404 والمهل والأجسام غير المقروءة وفشل النقل.
 ---
 
-# الأخطاء
+# Errors
 
-عالج 404 معلَنًا أو مهلة أو حالة غير معلَنة بقراءة الـ tuple الذي يضع الخطأ أولاً — لا بالتقاط throws. يبقى `RequestError` اتحاد `kind` / `code`، وكل قيمة منه `Error` أصلي (`instanceof Error` صحيح). ابدأ بـ `kind`، ثم `code`.
+تعامَل مع 404 أو مهلة أو جسم غير مقروء بقراءة الصفيف الذي يضع الخطأ أولًا، لا بالتقاط ما يُرمى. `Fault` هو `Error` أصلي (`instanceof Error` صحيح) ويُميَّز بحقل واحد: `code`.
+
+لا يوجد `kind`. فصنف الفشل هو المقطع الذي يسبق أول `_` في رمزه، فـ `NET_TIMEOUT` فشلٌ من صنف `NET` و`RES_STRUCT_MISMATCH` فشلٌ من صنف `RES`. اقرأ البادئة للفرز التقريبي، والرمز كاملًا للحالة الدقيقة.
 
 ## الإعداد الأساسي
 
@@ -17,150 +19,256 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
-const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
-  console.log(error.data.message)
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+const [err, user, response] = await client.execute(getUser({ path: { id: 7 } }))
+if (err?.code === 'HTTP_STATUS' && err.status === 404) {
+  console.log(err.data.message)
+} else if (err?.code === 'NET_TIMEOUT') {
   console.log('timed out')
-} else if (error?.kind === 'definition' && error.code === 'UNDECLARED_STATUS') {
-  console.log('status not in output map', error.response?.status)
-} else if (!error) {
+} else if (err?.code === 'RES_STRUCT_MISMATCH') {
+  console.log('the response did not match what we declared', err.response.status)
+} else if (!err) {
   console.log(user.name, response.status)
 }
 ```
 
-```typescript twoslash
-import { createTransportError, ERR_ABORTED, type RequestError } from '@defjs/core'
+ولأن المجموعة مغلقة، فإن `switch` على `code` يستنفد كل الحالات:
 
-function classify(error: RequestError): string {
-  if (error.kind === 'http') return `status:${error.status}`
-  if (error.kind === 'transport') return `transport:${error.code}`
-  return `definition:${error.code}`
+```typescript twoslash
+import { createNetworkFault, ERR_ABORTED, type Fault } from '@defjs/core'
+
+function triage(fault: Fault): string {
+  switch (fault.code) {
+    case 'HTTP_STATUS':
+      return `status ${fault.status}`
+    case 'RES_MEDIA_TYPE_INVALID':
+    case 'RES_DECODE_FAILED':
+    case 'RES_STRUCT_MISMATCH':
+      return 'the contract did not hold'
+    case 'NET_TIMEOUT':
+    case 'NET_ABORTED':
+    case 'NET_UNREACHABLE':
+    case 'NET_BODY_INCOMPLETE':
+      return 'retryable'
+    case 'REQ_INPUT_INVALID':
+    case 'REQ_OPTIONS_INVALID':
+    case 'REQ_BUILD_FAILED':
+      return 'fix the call'
+    case 'EXT_INTERCEPTOR_FAILED':
+    case 'EXT_HOOK_FAILED':
+    case 'EXT_OBSERVER_FAILED':
+      return 'fix the code you attached'
+    case 'CAP_BUFFER_EXCEEDED':
+    case 'CAP_QUEUE_OVERFLOW':
+      return 'raise a declared limit or read faster'
+    case 'ENV_UNSUPPORTED':
+      return 'the host runtime is missing something'
+  }
 }
 
-const example = createTransportError(ERR_ABORTED)
-console.log(classify(example))
+const example: Fault = createNetworkFault(ERR_ABORTED)
+console.log(triage(example))
 ```
 
-## الرموز المستقرة
+## رموز مستقرة
 
-| `kind`       | الرموز                                                                                               | المعنى                                                                             |
-| ------------ | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `http`       | `HTTP_STATUS`                                                                                        | غير-2xx وصل حد HTTP. يحتفظ بـ `status` و`response` وأي `data` مفكوك خاص بالحالة.   |
-| `transport`  | `ABORTED`، `TIMEOUT`، `NETWORK_ERROR`                                                                | إلغاء أو مهلة أو فشل Fetch/نقل منع نتيجة عادية.                                    |
-| `definition` | `REQUEST_VALIDATION_FAILED`، `RESPONSE_VALIDATION_FAILED`، `UNDECLARED_STATUS`، `INTERCEPTOR_FAILED` | مدخل أو بناء طلب أو تمثيل استجابة أو فك Struct أو فشل عقد الحالة أو معترض رمى/رفض. |
+| الصنف  | الرموز                                                                 | من الذي يجب أن يتغيّر                             |
+| ------ | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| `HTTP` | `HTTP_STATUS`                                                          | الطرف المقابل أجاب بغير 2xx؛ تعامَل معه كمنطق عمل |
+| `REQ`  | `REQ_INPUT_INVALID`، `REQ_OPTIONS_INVALID`، `REQ_BUILD_FAILED`         | الاستدعاء أو إعلان نقطة النهاية                   |
+| `NET`  | `NET_ABORTED`، `NET_TIMEOUT`، `NET_UNREACHABLE`، `NET_BODY_INCOMPLETE` | لا أحد، أو إعادة المحاولة                         |
+| `RES`  | `RES_MEDIA_TYPE_INVALID`، `RES_DECODE_FAILED`، `RES_STRUCT_MISMATCH`   | يجب التوفيق بين الإعلان والطرف المقابل            |
+| `EXT`  | `EXT_INTERCEPTOR_FAILED`، `EXT_HOOK_FAILED`، `EXT_OBSERVER_FAILED`     | الشيفرة التي وصلتها بخط المعالجة                  |
+| `CAP`  | `CAP_BUFFER_EXCEEDED`، `CAP_QUEUE_OVERFLOW`                            | حدٌّ معلَن، أو وتيرة المستهلك                     |
+| `ENV`  | `ENV_UNSUPPORTED`                                                      | بيئة التشغيل المضيفة                              |
 
-`cause` اختياري على أخطاء النقل والتعريف. `response` دائمًا على أخطاء حالة HTTP؛ قد يظهر على أخطاء التعريف عندما وُجدت استجابة بالفعل.
+المجموعة مغلقة عن قصد: وهذا بالضبط ما يُبقي `switch` مستنفدًا. والإضافات تُبلِّغ عن تفصيلها الخاص عبر `cause`، لا عبر رمز جديد.
 
-## أشكال الـ tuple حسب وسيلة النقل
+### الحقول بحسب الشكل
+
+| الرمز         | `status` | `response`                                                | `data`                              |
+| ------------- | -------- | --------------------------------------------------------- | ----------------------------------- |
+| `HTTP_STATUS` | دائمًا   | دائمًا؛ ولا يحمل `body` إلا إذا أُعلن `error` وفُكّ بنجاح | جسم `error` المفكوك، أو `undefined` |
+| `RES_*`       | دائمًا   | دائمًا، بيانات وصفية فقط — **بلا `body`**                 | غائب                                |
+| كل ما عدا ذلك | غائب     | فقط حيث كانت لدى طبقة النقل بيانات وصفية بالفعل           | غائب                                |
+
+`cause` يحمل القيمة الأساسية: `StructError` عند عدم مطابقة struct، وفشل المحلِّل عند تمثيل غير مقروء، وأيّ شيء رمته إضافة.
+
+## أشكال الصفيف بحسب النقل
 
 ```typescript twoslash
 import type {
+  DecodedResponse,
   EventStreamHandle,
   EventStreamOpenInfo,
-  HttpResponse,
-  RequestError,
+  Fault,
+  HttpMeta,
   WebSocketConnectionInfo,
   WebSocketSession,
 } from '@defjs/core'
 
 type HttpResult =
-  | [error: null, data: unknown, response: HttpResponse<unknown>]
-  | [error: RequestError, data: undefined, response: HttpResponse<unknown> | undefined]
+  [err: null, data: unknown, response: DecodedResponse<unknown> | HttpMeta] | [err: Fault, data: undefined, response: undefined]
 type SseResult =
-  | [error: null, stream: EventStreamHandle<unknown>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [err: null, stream: EventStreamHandle<unknown>, open: EventStreamOpenInfo]
+  | [err: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 type SocketResult =
-  | [error: null, session: WebSocketSession<unknown>, connection: WebSocketConnectionInfo]
-  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [err: null, session: WebSocketSession<unknown>, connection: WebSocketConnectionInfo]
+  | [err: Fault, session: undefined, connection: WebSocketConnectionInfo | undefined]
 
 const results: [HttpResult, SseResult, SocketResult] | undefined = undefined
 void results
 ```
 
-فشل البدء → العنصر الثاني `undefined`. العنصر الثالث فقط عندما أنتجت وسيلة النقل استجابة/لقطة أولاً. بعد إرجاع معالج SSE أو جلسة WebSocket، الأعطال اللاحقة تعيش على دورة حياة ذلك المعالج — لا تعيد كتابة tuple البدء المستقر.
+عند فشل HTTP يكون العنصر الثالث `undefined`: فالخطأ يحمل أصلًا ما وُجد من بيانات الاستجابة الوصفية. وهذا مهم لأن الخطأ هو ما تمرّره إلى معالِج، أو تسجّله، أو ترميه من جديد، فوجب أن تسافر البيانات الوصفية _معه_ لا بجانبه.
 
-## حالة HTTP والبيانات
+في SSE و WebSocket يكون العنصر الثالث لقطةَ بدءٍ قد تكون موجودة حتى عند فشل البدء. وبعد أن يعود المِقبض أو الجلسة، تعيش حالات الفشل اللاحقة على دورة حياته — ولا تُعيد كتابة صفيف البدء الذي استقرّ.
 
-الحالة الدقيقة أولاً. مع `output`، Defjs تختار Struct المطابق قبل فك الجسم، فتبقى `error.status` و`error.data` مرتبطتين.
+## كيف يُقرأ الجسم
 
-| الموقف                       | نتيجة الـ tuple                   | سلوك الجسم                                                   |
-| ---------------------------- | --------------------------------- | ------------------------------------------------------------ |
-| 2xx بحالة معلَنة مطابقة      | نجاح                              | Struct المختار → `data`                                      |
-| غير-2xx بحالة معلَنة مطابقة  | `HTTP_STATUS`                     | Struct المختار → `error.data` مُنوَّع                        |
-| أي حالة بلا إعلان مطابق      | `UNDECLARED_STATUS`               | الحالة تفوز **قبل** فك الجسم                                 |
-| حالة مطابقة، فشل تمثيل الجسم | `RESPONSE_VALIDATION_FAILED`      | بلا قيمة مُنوَّعة جزئية                                      |
-| `output` محذوف               | 2xx ينجح؛ غير-2xx → `HTTP_STATUS` | الجسم لا يُفك؛ `data` هو `undefined`                         |
-| حالة الاستجابة `0`           | خطأ نقل                           | `response.error` → `NETWORK_ERROR` أو `ABORTED` أو `TIMEOUT` |
+`ok` هو نقطة التفرّع الوحيدة، ولا يُفكّ إلا طرف واحد. `output` يقرأ جسم 2xx؛ و`error` يقرأ كل ما عداه. وحذف أحدهما يعني أن ذلك الجسم لا يُقرأ أبدًا.
 
-`HttpResponse.ok` يعني فقط `200 <= status < 300`. غير-2xx العادي لا يضبط `HttpResponse.error` — تلك الخاصية لفشل النقل عند حد Fetch أو فشل تمثيل الجسم.
+| الحالة                                    | النتيجة                                                |
+| ----------------------------------------- | ------------------------------------------------------ |
+| 2xx، و`output` معلَن، والجسم يُفكّ        | نجاح؛ `data` و`response.body` مُنوَّعان                |
+| 2xx، و`output` محذوف                      | نجاح؛ `data` هو `undefined`، والاستجابة بلا `body`     |
+| غير-2xx، و`error` معلَن، والجسم يُفكّ     | `HTTP_STATUS` مع `data` مُنوَّع                        |
+| غير-2xx، و`error` محذوف                   | `HTTP_STATUS` مع `data: undefined`                     |
+| نوع الوسائط ليس ما يحتاجه التمثيل         | `RES_MEDIA_TYPE_INVALID`، ويُبلَّغ **قبل** قراءة الجسم |
+| البايتات ليست ذلك التمثيل                 | `RES_DECODE_FAILED`                                    |
+| القيمة ليست ذلك الـ struct                | `RES_STRUCT_MISMATCH`                                  |
+| جسم غير مقروء في الطرف الذي **لم** تُعلنه | يُهمَل كليًّا — انظر أدناه                             |
+
+السطر الأخير هو ما يستحق التذكّر. فإن أعلنت `output` ولم تُعلن `error`، فإن استجابة 500 بجسم JSON تالف تُبلَّغ كـ `HTTP_STATUS` مع `status: 500`. لقد قلت إن أجسام الأخطاء لا تهمّك، وهذا يشمل ألّا يهمّك أن أحدها لم يكن قابلًا للقراءة.
+
+الفكّ يحدث مرة واحدة، بعد سلسلة المعترضات. والاستجابة التي بناها معترض بـ `makeResponse(...)` تمرّ بنفس فحص نوع الوسائط ونفس الـ struct كأي استجابة من الشبكة.
+
+`HttpResponse.ok` يعني فقط `200 <= status < 300`. وفشل النقل خطأ لا استجابة أبدًا — فلا توجد استجابة بحالة صفر تنوب عنه.
+
+## تضييق اتحاد أجسام الأخطاء
+
+`error` واحد يغطي كل الحالات غير-2xx، فعندما تختلف الأشكال تُعلن اتحادًا. وما تستطيع فعله بـ `fault.data` بعد ذلك يتوقف كليًّا على كيفية إعلانك لذلك الاتحاد — فالمكتبة تُعيد لك بالضبط النوع الذي طلبته.
+
+`struct.or(...)` ينتج اتحادًا عاديًا لا يستطيع TypeScript تضييقه وحده. فاختبر الحقل الذي تحتاجه:
+
+```typescript twoslash
+import { struct, type Fault } from '@defjs/core'
+
+const ApiError = struct.or(struct.object({ message: struct.string() }), struct.object({ retryAfter: struct.number() }))
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS' && 'retryAfter' in fault.data) {
+  console.log(fault.data.retryAfter)
+}
+```
+
+`struct.discriminatedUnion(...)` يُضيّق عبر حقل يحمله الجسم فعلًا، وهي الصورة المريحة حين تكون الـ API قد وسمت أخطاءها أصلًا:
+
+```typescript twoslash
+import { struct, type Fault } from '@defjs/core'
+
+const ApiError = struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('validation'), fields: struct.array(struct.string()) }),
+  struct.object({ kind: struct.literal('rateLimit'), retryAfter: struct.number() }),
+])
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS') {
+  switch (fault.data.kind) {
+    case 'validation':
+      console.log(fault.data.fields.length)
+      break
+    case 'rateLimit':
+      console.log(fault.data.retryAfter)
+      break
+  }
+}
+```
+
+وحين تضع الـ API الحالة **داخل** الجسم، مَيِّز عبرها بدل `fault.status`:
+
+```typescript twoslash
+import { struct, type Fault } from '@defjs/core'
+
+const ApiError = struct.discriminatedUnion('status', [
+  struct.object({ status: struct.literal(404), resource: struct.string() }),
+  struct.object({ status: struct.literal(429), retryAfter: struct.number() }),
+])
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS' && fault.data.status === 429) {
+  console.log(fault.data.retryAfter)
+}
+```
+
+تستحق هذه الصورة الأخيرة التفضيل حيث تدعمها الـ API. فـ `fault.status` رقمٌ في طبقة HTTP يستطيع وكيل أو بوابة أو CDN إعادة كتابته؛ أما `data.status` فقد فُكّ من الجسم الذي أكّده `error` الخاص بك، فالوصول إليه دليلٌ على أن الخادم هو من أنتجه.
+
+والاتحاد غير المُميَّز الذي لا يمكن تضييقه صفةٌ في الإعلان لا في المكتبة — فهي تعطيك النوع الذي أعلنته. أضِف حقلًا مميِّزًا إلى الـ struct إن أردت تضييقًا.
 
 ## البدء مقابل ما بعد الفتح
 
-SSE تتحقق من الحالة و`text/event-stream` والجسم قبل حل المعالج. حالة فاشلة → `HTTP_STATUS`. نوع محتوى سيئ أو جسم مفقود → `RESPONSE_VALIDATION_FAILED`. لقطة الفتح يمكن أن تبقى في الخانة الثالثة من الـ tuple.
+يتحقّق SSE من الحالة ومن `text/event-stream` ومن وجود جسم قبل أن يستقرّ المِقبض. غير-2xx → `HTTP_STATUS`. نوع وسائط خاطئ → `RES_MEDIA_TYPE_INVALID`. جسم مفقود → `RES_DECODE_FAILED`. ومع ذلك قد تحلّ لقطة الفتح في العنصر الثالث من الصفيف.
 
-بدء WebSocket يغطي المصافحة + أول فتح مادي. فشل المُنشئ أو إغلاق قبل الفتح أو مهلة أو إلغاء → tuple البدء. لقطة اتصال قد توجد حتى لو لم يصل المقبس إلى `open`.
+بدء WebSocket يغطي المصافحة مع أول فتح فيزيائي. وفشل الباني، أو الإغلاق قبل الفتح، أو المهلة، أو الإلغاء، تنتج كلها صفيف بدء. وقد توجد لقطة اتصال حتى لو لم يصل المقبس إلى `open` أبدًا.
 
-| وسيلة النقل | بعد البدء                                                                                                                                                   |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SSE         | المكرّر يرفض عند خطأ قاتل؛ `stream.closed` يُحل بـ `code: 'error'` و`EventStreamErrorCode`                                                                  |
-| WebSocket   | `onRuntimeError` لأعطال الرسالة/الطابور/نبض القلب/وقت التشغيل؛ `receive` يفشل عند أخطاء نهائية؛ `session.closed` → `kind: 'error' \| 'aborted' \| 'closed'` |
-| HTTP        | وعد التنفيذ يستقر مرة. كود المعترض/الاستدعاء يمكن أن يرمي خارج تطبيع الـ tuple                                                                              |
+| النقل     | بعد البدء                                                                                                                                       |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| SSE       | يرفض المُكرِّر عند خطأ قاتل؛ ويستقرّ `stream.closed` بـ `kind: 'error'` ورمز الخطأ                                                              |
+| WebSocket | `onRuntimeError` لفشل الرسائل/الطابور/النبض؛ ويفشل `receive` عند الأخطاء النهائية؛ و`session.closed` → `kind: 'closed' \| 'aborted' \| 'error'` |
+| HTTP      | وعد execute يستقرّ مرة واحدة. وشيفرة المعترضات وردود النداء قد ترمي مع ذلك خارج تطبيع الصفيف                                                    |
 
-`ABORTED` / `TIMEOUT` يصفان نتيجة البدء التي يراها المستدعي. ما زلت تغلق تدفقًا/جلسة مُرجَعة وتنتظر وعدها النهائي.
+`NET_ABORTED` / `NET_TIMEOUT` تصف ما رآه المستدعي عند البدء. ومع ذلك تُغلق أي مجرى أو جلسة عادت إليك وتنتظر وعدها النهائي.
 
-## التسجيل وسبب Struct
+## تسجيل Error الأصلي و cause
 
-كل `RequestError` هو `Error` أصلي. استخدم `String(error)` للسلسلة المستقرة `<name>: <message>`، واستخدم `kind` و`code` و`status` و`response` و`data` القابلة للتعداد للسجلات المهيكلة. `cause` هو رابط سلسلة الأسباب الأصلي وغير قابل للتعداد؛ لا تنسخ مساعدين منه إلى الخطأ الخارجي.
+الأخطاء هنا نسخ من `Error` الأصلي، فلا حاجة إلى مُهايئ تشخيص. و`String(fault)` يعطي الصورة الأصلية المستقرّة `DefjsFault: <message>`. و`code` وحقول كل صيغة — `status` و`response` و`data` — تبقى قابلة للتعداد من أجل التسجيل المهيكل؛ أما `name` وسلسلة `cause` الأصلية فغير قابلة للتعداد.
 
 ```typescript twoslash
-import { StructError, type RequestError } from '@defjs/core'
+import { StructError, type Fault } from '@defjs/core'
 
-export function logRequestError(error: RequestError): void {
-  console.error(String(error), { code: error.code, kind: error.kind })
-  if (error.cause instanceof StructError) {
-    console.error(error.cause.format(), error.cause.flatten(), error.cause.prettify())
+export function logFault(fault: Fault): void {
+  console.error(String(fault), { code: fault.code })
+  if (fault.cause instanceof StructError) {
+    console.error(fault.cause.prettify())
   }
 }
 ```
 
-استدعِ `format()` و`flatten()` و`prettify()` فقط بعد التحقق من `error.cause instanceof StructError`. يبقى الـ tuple الموحّد كما هو؛ تحسين التسجيل لا يحوّل الأعطال المعلنة إلى throw.
+ضيِّق `fault.cause instanceof StructError` قبل استدعاء `format()` أو `flatten()` أو `prettify()`. فهذه الدوال تعيش على cause الخاص بـ Struct ولا تُنسخ إلى الخطأ. ولا تجعل مسار التحكم يحلّل `message` أو `String(fault)` — فالعقد هو `code` و`status` مُراجَع.
 
-## المرجع
+## مرجع
 
-| الفرع               | فحص تدفق التحكم                              | حقول مستقرة مفيدة                        | عادة غائبة / حسّاسة               |
-| ------------------- | -------------------------------------------- | ---------------------------------------- | --------------------------------- |
-| سياسة حالة HTTP     | `error.kind === 'http'`                      | `error.status`، `error.data` مراجع       | الجسم، الرؤوس، URL، `cause`       |
-| إلغاء المستدعي      | `kind === 'transport' && code === 'ABORTED'` | `kind`، `code`                           | سبب الإلغاء والمكدس               |
-| المهلة              | `kind === 'transport' && code === 'TIMEOUT'` | `kind`، `code`                           | URL الطلب والسبب الأساسي          |
-| فشل العقد           | `error.kind === 'definition'`                | `kind`، `code`، `response?.status` مراجع | مشاكل Struct، الجسم، قيم المدخل   |
-| وقت تشغيل تدفق/جلسة | `stream.closed` / `session.closed`           | رمز/نوع نهائي، حالة إغلاق مراجعة         | حمولات الأحداث، الإطارات، الأسباب |
+| الفرع                   | فحص مسار التحكم                    | حقول مستقرّة مفيدة                         | غالبًا غائب / حسّاس                |
+| ----------------------- | ---------------------------------- | ------------------------------------------ | ---------------------------------- |
+| سياسة حالة HTTP         | `fault.code === 'HTTP_STATUS'`     | `fault.status`، و`fault.data` مُراجَعًا    | الجسم، الترويسات، الـ URL، `cause` |
+| إلغاء من المستدعي       | `fault.code === 'NET_ABORTED'`     | `code`                                     | سبب الإلغاء والمكدّس               |
+| مهلة                    | `fault.code === 'NET_TIMEOUT'`     | `code`                                     | عنوان الطلب والسبب الأساسي         |
+| انكسر العقد             | `fault.code.startsWith('RES_')`    | `code`، و`fault.response.status` مُراجَعًا | مشكلات Struct، الجسم، قيم الدخل    |
+| شيفرتك أنت رمت          | `fault.code.startsWith('EXT_')`    | `code`، `cause`                            | أيّ شيء أرفقته الإضافة             |
+| زمن تشغيل المجرى/الجلسة | `stream.closed` / `session.closed` | `kind` و`code` النهائيان                   | حمولات الأحداث، الأُطُر، الأسباب   |
 
-لا تستنتج CORS من الحالة `0` — فرّع على `kind` و`code`.
-
-عامل `cause` و`data` ورؤوس/أجسام الاستجابة وعناوين URL ومشاكل Struct وقيم المدخل والمكدسات كحسّاسة. ملخص محافظ:
+اعتبر `cause` و`data` وترويسات الاستجابة وأجسامها وعناوين URL ومشكلات Struct وقيم الدخل والمكادس معلوماتٍ حسّاسة. وهذا ملخّص محافظ:
 
 ```typescript twoslash
-import type { RequestError } from '@defjs/core'
+import type { Fault } from '@defjs/core'
 
-export function summarize(error: RequestError): { kind: RequestError['kind']; code: RequestError['code']; status?: number } {
+export function summarize(fault: Fault): { code: Fault['code']; status?: number } {
   return {
-    kind: error.kind,
-    code: error.code,
-    status: error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined,
+    code: fault.code,
+    status: 'status' in fault ? fault.status : undefined,
   }
 }
 ```
 
-`createTransportError` و`createDefinitionError` و`createHttpStatusError` تبني وتعيد نسخ `Error` أصلية. أعطال الطلب العادية تبقى في الـ tuple الموحّد؛ هوية `Error` الأصلية لا تحوّلها بحد ذاتها إلى throw. `ERR_ABORTED` و`ERR_TIMEOUT` أسباب مشتركة يتعرّف عليها مُطبّع النقل.
+`createNetworkFault` و`createPreflightFault` و`createDecodeFault` و`createHttpStatusFault` و`createUndecodedHttpStatusFault` تبني قيم Error الأصلية هذه. وحالات فشل الطلب العادية تُعاد كما هي في الصفيف؛ ولا تُرمى لمجرد أنها ترث سلوك Error الأصلي. و`ERR_ABORTED` و`ERR_TIMEOUT` هما السببان المشتركان الذي يتعرّف عليهما مُطبِّع النقل.
 
 ## وصفات ذات صلة
 
 - [GET مع 404 معلَن](../recipes/get-declared-404.md)
-- [إلغاء استدعاء HTTP](../recipes/cancel-http.md)
+- [إلغاء نداء HTTP](../recipes/cancel-http.md)

@@ -15,10 +15,8 @@ import { createClient, createHttpInterceptor, defineRequest, struct, withEndpoin
 const getInvoice = defineRequest({
   method: 'GET',
   path: '/v1/invoice',
-  output: [
-    { status: 200, body: struct.object({ total: struct.number() }) },
-    { status: 401, body: struct.object({ code: struct.literal('expired_token') }) },
-  ],
+  output: struct.object({ total: struct.number() }),
+  error: struct.object({ code: struct.literal('expired_token') }),
 })
 
 type Credential = { accessToken: string }

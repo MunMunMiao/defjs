@@ -1,4 +1,3 @@
-import { ERR_ABORTED, ERR_TIMEOUT } from '@defjs/core'
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode } from '@opentelemetry/api'
 import { describe, expect, test, vi } from 'vitest'
 import { createMockTracer, makeHttpRequest } from '../test-utils'
@@ -126,36 +125,16 @@ describe('trace helpers', () => {
     expect(spans[0]?.ended).toBe(true)
   })
 
-  test('setSpanHttpResponse treats status 0 as a response-less transport error', () => {
+  test('setSpanHttpResponse leaves a status-0 response unattributed', () => {
+    // A real transport failure is a fault and never arrives as a response; status 0 can only come
+    // from a synthetic interceptor response, which carries nothing to report.
     const { tracer, spans } = createMockTracer()
     const span = tracer.startSpan('test')
-    setSpanHttpResponse(span, 0, new TypeError('fetch failed'))
-
-    expect(spans[0]?.attributes['http.response.status_code']).toBeUndefined()
-    expect(spans[0]?.attributes['error.type']).toBe('NETWORK_ERROR')
-    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
-    expect(spans[0]?.ended).toBe(true)
-  })
-
-  test('setSpanHttpResponse leaves intentional cancellation unset', () => {
-    const { tracer, spans } = createMockTracer()
-    const span = tracer.startSpan('test')
-    setSpanHttpResponse(span, 0, ERR_ABORTED)
+    setSpanHttpResponse(span, 0)
 
     expect(spans[0]?.attributes['http.response.status_code']).toBeUndefined()
     expect(spans[0]?.attributes['error.type']).toBeUndefined()
     expect(spans[0]?.status).toBeUndefined()
-    expect(spans[0]?.ended).toBe(true)
-  })
-
-  test('setSpanHttpResponse records a timeout transport error', () => {
-    const { tracer, spans } = createMockTracer()
-    const span = tracer.startSpan('test')
-    setSpanHttpResponse(span, 0, ERR_TIMEOUT)
-
-    expect(spans[0]?.attributes['http.response.status_code']).toBeUndefined()
-    expect(spans[0]?.attributes['error.type']).toBe('TIMEOUT')
-    expect(spans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
     expect(spans[0]?.ended).toBe(true)
   })
 

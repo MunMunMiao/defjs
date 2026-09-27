@@ -13,7 +13,7 @@ Declare a typed request, build a command from input, execute it.
 function defineRequest(definition: RequestDefinition): RequestCommandBuilder
 ```
 
-- **definition** — `method`, `path`, optional `input` struct, `output` keyed by status, optional `operation` and `build`.
+- **definition** — `method`, `path`, optional `input` struct, optional `output` and `error` structs, optional `operation` and `build`.
 - **Returns** a builder. Call it with input to get an `HttpCommand`.
 
 ```ts
@@ -25,13 +25,14 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 ```
 
-`output` may also be a list of `{ status, body }` groups (one body struct for several codes).
+`output` is one struct for the 2xx body; `error` is one struct for every non-2xx body. Neither is
+keyed by status. Omitting one means that body is never read — see
+[Declaration is an assertion](/guide/design-decisions#declaration-is-an-assertion).
 
 ## executeHttpCommand() {#executeHttpCommand}
 
@@ -41,9 +42,11 @@ function executeHttpCommand(clientConfig: ClientConfig, command: HttpCommand, op
 
 Low-level entry used by `client.execute`. Application code should call `client.execute(command, options)`.
 
-- **Returns** `[null, body, response]` or `[error, undefined, response?]`.
+- **Returns** `[null, data, response]` or `[fault, undefined, undefined]`.
 
-Undeclared `output` status is `kind: 'definition'` / `UNDECLARED_STATUS`. The response may still be present; the body is not decoded as success.
+A non-2xx status is always `HTTP_STATUS`. Its `data` is the decoded `error` body when one was
+declared, and `undefined` otherwise. On failure the tuple's third slot is `undefined`; the fault
+carries the response metadata.
 
 ## fetchHandler() {#fetchHandler}
 
@@ -51,7 +54,8 @@ Undeclared `output` status is `kind: 'definition'` / `UNDECLARED_STATUS`. The re
 function fetchHandler(httpRequest: HttpRequest, fetchImpl?: typeof fetch): Promise<HttpResponse<unknown>>
 ```
 
-Default HTTP transport. Used unless `withHTTPHandle` replaces it.
+Default HTTP transport. Used unless `withHTTPHandle` replaces it. It rejects — rather than resolving
+with a synthetic response — when no response reached the client.
 
 ## makeResponse() {#makeResponse}
 
@@ -59,7 +63,9 @@ Default HTTP transport. Used unless `withHTTPHandle` replaces it.
 function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R>
 ```
 
-Build an `HttpResponse` without a network call (interceptors, tests). Default status is `0`. `ok` is true for 2xx.
+Build an `HttpResponse` without a network call (interceptors, tests). Default status is `0`. `ok` is
+true for 2xx. The value it returns goes through the same media-type check and the same declared
+struct as one off the wire; there is no trusted short-circuit.
 
 ## Execute options
 
@@ -81,25 +87,55 @@ Cancellation is `abort` **or** `timeout`, not both. `signal` combines with eithe
 
 ### RequestDefinition {#RequestDefinition}
 
-`method`, `path`, optional `input`, `output`, `responseType` (`'json' | 'text' | 'blob' | 'arraybuffer'`), `operation`, optional `build` (custom request assembly; requires `input`).
+`method`, `path`, optional `input`, `output`, `error`, `responseType` (`'json' | 'text' | 'blob' | 'arraybuffer'`), `operation`, optional `build` (custom request assembly; requires `input`).
 
-### RequestOutputShape {#RequestOutputShape}
+### ResponseDeclaration {#ResponseDeclaration}
 
 ```ts
-type RequestOutputShape = { [status: number]: AnyStruct } | readonly { status: number | readonly number[]; body: AnyStruct }[]
+type ResponseDeclaration<TOutput, TError> = { output?: TOutput; error?: TError }
 ```
+
+The `output` / `error` half of a `RequestDefinition`. When both are absent, `responseType` is also
+rejected: nothing is decoded, so there is nothing for it to select.
 
 ### HttpAwaitResult {#HttpAwaitResult}
 
 ```ts
-type HttpAwaitResult<TSuccess, TErrorData> =
-  | [error: null, result: TSuccess, response: HttpResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: HttpResponse<unknown> | undefined]
+type HttpAwaitResult<TData = undefined, TErrorData = undefined> =
+  | [error: null, result: TData, response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>]
+  | [error: FaultOf<TErrorData>, result: undefined, response: undefined]
 ```
+
+On success the third slot carries `body` only when `output` was declared. On failure it is
+`undefined` — the fault already holds whatever response metadata existed.
 
 ### HttpRequest {#HttpRequest}
 
 Normalized outgoing request: `method`, `endpoint`, `headers`, `body`, `abort`, `operation`, progress hooks, `baseEndpoint`, query metadata.
+
+### HttpMeta {#HttpMeta}
+
+```ts
+type HttpMeta = {
+  readonly headers: Headers
+  readonly ok: boolean
+  readonly status: number
+  readonly statusText: string
+  readonly url: string
+}
+```
+
+Response metadata, available whenever a response reached the client. It carries **no** `body`: a body
+only exists once a declared struct decoded one.
+
+### DecodedResponse {#DecodedResponse}
+
+```ts
+type DecodedResponse<TBody> = HttpMeta & { readonly body: TBody }
+```
+
+A response whose body decoded against the declared struct. Holding this type is the proof that
+decoding happened, which is why a decode failure reports `HttpMeta` alone.
 
 ### HttpResponse {#HttpResponse}
 
@@ -110,22 +146,21 @@ type HttpResponse<R> = {
   readonly statusText: string
   readonly headers: Headers
   readonly body: R | null
-  readonly error?: unknown
   readonly ok: boolean
 }
 ```
+
+The wire shape transports produce and interceptors see: `body` is text or already-parsed JSON, not a
+decoded value. `DecodedResponse` is what reaches the caller.
 
 ### HttpProgressEvent {#HttpProgressEvent}
 
 ### HttpProgressFn {#HttpProgressFn}
 
-`loaded`, `total`, `lengthComputable`. Callbacks may be async.
+`loaded`, `total`, `lengthComputable`. Callbacks may be async. A callback that throws is
+`EXT_OBSERVER_FAILED`.
 
 See [HTTP guide](/core/http) and [Commands](/core/commands).
-
-## ResponseGroupItem {#ResponseGroupItem}
-
-`{ status, body }` row in the list form of `RequestOutputShape`. `status` may be one code or several sharing a body struct.
 
 ## RequestCommandBuilder {#RequestCommandBuilder}
 
@@ -141,11 +176,11 @@ Progress and cancellation fields. `HttpExecuteOptions` adds `signal`.
 
 ## RequestSuccessData {#RequestSuccessData}
 
-Inferred success body from declared 2xx `output` entries.
+Inferred success body from the declared `output` struct, or `undefined` when none is declared.
 
 ## RequestErrorData {#RequestErrorData}
 
-Inferred error body from declared non-2xx `output` entries.
+Inferred error body from the declared `error` struct, or `undefined` when none is declared.
 
 ## HttpResponseType {#HttpResponseType}
 
@@ -153,4 +188,4 @@ Inferred error body from declared non-2xx `output` entries.
 
 ## MakeResponseOptions {#MakeResponseOptions}
 
-Fields for `makeResponse`: `status`, `statusText`, `url`, `headers`, `body`, `error`.
+Fields for `makeResponse`: `status`, `statusText`, `url`, `headers`, `body`, `request`.

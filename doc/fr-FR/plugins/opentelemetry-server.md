@@ -27,7 +27,7 @@ const readOrders = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
 
 const [error] = await client.execute(readOrders())
-if (error) console.error(error.kind, error.code)
+if (error) console.error(error.code)
 ```
 
 `tracer` est requis. `meter` est optionnel — omets-le pour désactiver les métriques du package. Pas de `propagator` → l’adapter construit un propagator composite W3C Trace Context + W3C Baggage. Il ne lit ni n’initialise la config SDK globale pour toi.
@@ -147,7 +147,7 @@ Avec `queryPropagation`, les champs du propagator s’appendent à la query stri
 
 L’adapter mesure les durées de vie de transport, pas chaque étape d’interprétation de commande.
 
-- **HTTP** — le span commence dans l’intercepteur HTTP et se termine quand il obtient le `HttpResponse` Defjs. Dispatch par statut, checks de représentation et décodage Struct arrivent après. Un `RESPONSE_VALIDATION_FAILED` ou `UNDECLARED_STATUS` ultérieur ne peut pas mettre à jour le span de transport déjà terminé.
+- **HTTP** — le span commence dans l’intercepteur HTTP et se termine quand il obtient le `HttpResponse` Defjs. La vérification du media type, la lecture de la représentation et le décodage du Struct arrivent tous après : un fault `RES_*` ultérieur ne peut donc pas mettre à jour le span de transport déjà terminé. Et comme le span vit à l’intérieur de la chaîne, un reject de transport est enregistré avec la classe d’exception selon la convention OTel, et non avec le code de fault que l’exécution attribue ensuite.
 - **SSE** — le span reste ouvert jusqu’à ce que `stream.closed` se settle. Enregistre `sse.connected`, puis `sse.closed` / `sse.aborted` / `sse.error`. Un flux logique (reconnects inclus) → un span. Pas de spans par événement.
 - **WebSocket** — le span reste ouvert jusqu’à ce que `session.closed` se settle. Événements : `websocket.connected`, `websocket.closed`, `websocket.error`. Les sockets physiques en reconnect restent partie de la session logique. Pas de spans par message.
 
@@ -197,7 +197,7 @@ Quand `meter` est fourni :
 
 Les instruments SSE/WebSocket actifs comptent les ressources logiques (gaps de reconnect inclus), pas les sockets physiques ni les tentatives HTTP individuelles.
 
-Les spans HTTP enregistrent méthode, `url.full` résolu, adresse/port serveur quand disponibles, et statut de réponse quand reçu. Par défaut, `url.full` résout seulement `request.endpoint` contre l’éventuel `request.baseEndpoint` et n’ajoute pas un `request.queryString` indépendant. C’est une frontière de construction, pas une redaction ; crée une URL applicative complète ou masquée dans `startSpanHook`. Statut `400+` → statut de span `ERROR` avec la chaîne de statut comme `error.type`. Statut `100..399` laisse le statut de span non posé. Un outcome de transport statut-zéro n’a pas de statut de réponse ; l’annulation laisse le statut non posé ; timeout/autres échecs de transport utilisent `TIMEOUT` ou `NETWORK_ERROR`. Les métriques utilisent des dimensions stables : méthode, opération statique, adresse/port serveur, statut de réponse, type d’erreur à faible cardinalité.
+Les spans HTTP enregistrent méthode, `url.full` résolu, adresse/port serveur quand disponibles, et statut de réponse quand reçu. Par défaut, `url.full` résout seulement `request.endpoint` contre l’éventuel `request.baseEndpoint` et n’ajoute pas un `request.queryString` indépendant. C’est une frontière de construction, pas une redaction ; crée une URL applicative complète ou masquée dans `startSpanHook`. Statut `400+` → statut de span `ERROR` avec la chaîne de statut comme `error.type`. Statut `100..399` laisse le statut de span non posé. Un outcome de transport statut-zéro n’a pas de statut de réponse ; l’annulation laisse le statut non posé ; timeout/autres échecs de transport utilisent `NET_TIMEOUT` ou `NET_UNREACHABLE`. Les métriques utilisent des dimensions stables : méthode, opération statique, adresse/port serveur, statut de réponse, type d’erreur à faible cardinalité.
 
 Les métriques de connexion SSE/WebSocket enregistrent le temps de connect, la durée de connexion logique, le compte de ressources actives, `defjs.result`, l’opération, l’adresse/port serveur, et les types d’échec à faible cardinalité. Pas de bodies requête/réponse, payloads de messages, longueurs de queue ou spans par message par défaut.
 

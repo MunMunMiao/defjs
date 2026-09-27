@@ -7,6 +7,38 @@ description: 为什么 Defjs 把契约、command、传输结果、解码和所�
 
 Defjs 做了几处有意的取舍。方便型 API 常常把「谁拥有请求、流、会话」藏起来。Defjs 把这条边界留在明处，这样你可以复用同一份端点契约，而不会悄悄带上缓存、重试调度器或资源管理器。
 
+## 声明即断言
+
+这六条规则决定了「响应怎么读」的所有问题。编上号，方便以后讨论时直接引用，不必重新推导。
+
+### 1. 你声明的就是你断言的
+
+`output` 的含义是「`ok` 为 true 时，body **就是**这个形状」。`error` 的含义是「`ok` 为 false 时，body **就是**这个形状」。声明不是提示，也不是尽力而为的期望，而是对「会收到什么」的断言。
+
+### 2. `ok` 是唯一分流点，且只走一边
+
+2xx 用 `output` 读。其他一律用 `error` 读。永不两者都试，也不会拿另一边兜底。
+
+### 3. 现实与断言不符就是失败，明确报错
+
+不猜格式、不降级、不沉默。是后端改了、网关插手了，还是有人篡改了响应，**不影响结论**——库分辨不出来，也不该装作能分辨。
+
+这条最常被人希望放宽，所以值得把情况讲明白。假设有个坏蛋能改写你页面本应按 `output` 解析的 `200`，你收到的却是 `3xx`、`4xx` 或 `5xx`。报错不是麻烦，而是唯一安全的结果。「以防万一」把原始 body 交给你，等于给任何能注入响应的人一条绕过你所要求的校验的路。
+
+### 4. 解码失败就没有 body
+
+body **就是**解码后的值。解码失败，就没有值——不存在半成品 body 供你检查。出错细节在 `cause` 上；响应只保留元数据，别的没有。
+
+这一条由类型系统强制，不靠约定：解码 fault 的 `response` 是 `HttpMeta`，根本没有 `body` 字段，去取它就是编译错误。
+
+### 5. 不想被断言约束，就不要声明
+
+省略 `output` 意思是「我不关心 2xx 的 body」——它根本不会被读。省略 `error` 对其余状态同理。这是显式 opt-out，不是遗漏，而且彻底：你 opt out 的那一侧 body 读不出来，不是你的事，连「它读不出来」这个事实本身都不是。
+
+### 6. 3xx 不是错误码区间
+
+如果你知道某个端点会返回重定向状态，就不要给 `output` 传对应的 schema，或者声明一个能接受空值的 schema。否则报错是预期结果，不是缺陷。
+
 ## 显式 Client
 
 `createClient(...)` 把 endpoint 配置做成一个明确的值。不同环境或请求作用域，可以有不同的 endpoint、凭证、interceptor、serializer 和 transport handle。
@@ -28,10 +60,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -53,7 +83,19 @@ const command = getUser({ path: { id: 7 } })
 
 TypeScript 推断只描述你期望什么，拦不住服务端真返回什么。Struct 解析是契约的另一半。Defjs 在构造请求前校验 command 输入，解码选中的表示，再按匹配的 Struct 解析。
 
-这个顺序让状态和 body 保持两件独立事实。精确声明状态的选择发生在 body 解码**之前**。声明过的非 2xx → 类型化 `error.data`。声明过的 body 坏了 → `RESPONSE_VALIDATION_FAILED`。未声明状态 → `UNDECLARED_STATUS`（不是无类型的成功/失败）。比「来啥 JSON 信啥」更严，但你能据此做安全判断。
+解码**只发生一次，且在拦截器链之后**。拦截器用 `makeResponse(...)` 造出来的响应，和线上真实来的响应被完全一样地解释：响应从哪来，不影响它怎么被读，所以不存在「信任拦截器」这条需要推敲的岔路。
+
+顺序是：媒体类型，然后表示，然后 Struct。
+
+| 没守住的是                       | Fault                                            |
+| -------------------------------- | ------------------------------------------------ |
+| 媒体类型不是所声明表示需要的那个 | `RES_MEDIA_TYPE_INVALID`——在读 body **之前**就报 |
+| 字节不是那个表示                 | `RES_DECODE_FAILED`                              |
+| 值不符合那个 Struct              | `RES_STRUCT_MISMATCH`                            |
+| 非 2xx，且 `error` 解出来了      | `HTTP_STATUS`，`data` 带类型                     |
+| 非 2xx，且没声明 `error`         | `HTTP_STATUS`，`data: undefined`                 |
+
+先查媒体类型，就是把「我要的是 JSON，收到的是 HTML」变成一个精确的 fault 而不是一个解析器错误，并且整个跳过读取、解析和 Struct。
 
 ## `build` 的边界
 
@@ -83,7 +125,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: { 202: struct.object({ accepted: struct.number() }) },
+  output: struct.object({ accepted: struct.number() }),
 })
 
 const command = createBatch({

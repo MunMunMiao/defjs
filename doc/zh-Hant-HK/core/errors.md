@@ -1,13 +1,15 @@
 ---
 title: Errors
-description: 按 kind 同 code 分支處理 404s、timeouts、undeclared statuses 同 transport failures。
+description: 按一個封閉嘅 fault code 集合分流處理 404、timeout、讀唔出嘅 body 同 transport failure。
 ---
 
 # Errors
 
-處理 declared 404、timeout 或者 undeclared status，靠讀 error-first tuple — 唔係 catch throws。`RequestError` 仍然係按 `kind` / `code` 區分嘅 union，同時亦係 native `Error`（`instanceof Error` 係 true）。先睇 `kind`，再睇 `code`。
+處理 404、timeout 或者讀唔出嘅 body，靠嘅係讀 error-first tuple，而唔係 catch 拋出嘅錯誤。`Fault` 係原生 `Error`（`instanceof Error` 為真），由一個 field 判別：`code`。
 
-## Basic Setup
+冇 `kind`。失敗嘅類別就係 code 裡面第一個 `_` 之前嗰一段，所以 `NET_TIMEOUT` 係 `NET` 類失敗，`RES_STRUCT_MISMATCH` 係 `RES` 類失敗。粗分睇 prefix，精確判斷睇成個 code。
+
+## 基本用法
 
 ```typescript twoslash
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
@@ -17,150 +19,256 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
-const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
-  console.log(error.data.message)
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+const [err, user, response] = await client.execute(getUser({ path: { id: 7 } }))
+if (err?.code === 'HTTP_STATUS' && err.status === 404) {
+  console.log(err.data.message)
+} else if (err?.code === 'NET_TIMEOUT') {
   console.log('timed out')
-} else if (error?.kind === 'definition' && error.code === 'UNDECLARED_STATUS') {
-  console.log('status not in output map', error.response?.status)
-} else if (!error) {
+} else if (err?.code === 'RES_STRUCT_MISMATCH') {
+  console.log('the response did not match what we declared', err.response.status)
+} else if (!err) {
   console.log(user.name, response.status)
 }
 ```
 
-```typescript twoslash
-import { createTransportError, ERR_ABORTED, type RequestError } from '@defjs/core'
+因為呢個集合係封閉嘅，對 `code` 做 `switch` 可以真正窮盡：
 
-function classify(error: RequestError): string {
-  if (error.kind === 'http') return `status:${error.status}`
-  if (error.kind === 'transport') return `transport:${error.code}`
-  return `definition:${error.code}`
+```typescript twoslash
+import { createNetworkFault, ERR_ABORTED, type Fault } from '@defjs/core'
+
+function triage(fault: Fault): string {
+  switch (fault.code) {
+    case 'HTTP_STATUS':
+      return `status ${fault.status}`
+    case 'RES_MEDIA_TYPE_INVALID':
+    case 'RES_DECODE_FAILED':
+    case 'RES_STRUCT_MISMATCH':
+      return 'the contract did not hold'
+    case 'NET_TIMEOUT':
+    case 'NET_ABORTED':
+    case 'NET_UNREACHABLE':
+    case 'NET_BODY_INCOMPLETE':
+      return 'retryable'
+    case 'REQ_INPUT_INVALID':
+    case 'REQ_OPTIONS_INVALID':
+    case 'REQ_BUILD_FAILED':
+      return 'fix the call'
+    case 'EXT_INTERCEPTOR_FAILED':
+    case 'EXT_HOOK_FAILED':
+    case 'EXT_OBSERVER_FAILED':
+      return 'fix the code you attached'
+    case 'CAP_BUFFER_EXCEEDED':
+    case 'CAP_QUEUE_OVERFLOW':
+      return 'raise a declared limit or read faster'
+    case 'ENV_UNSUPPORTED':
+      return 'the host runtime is missing something'
+  }
 }
 
-const example: RequestError = createTransportError(ERR_ABORTED)
-console.log(classify(example))
+const example: Fault = createNetworkFault(ERR_ABORTED)
+console.log(triage(example))
 ```
 
-## Stable codes
+## 穩定嘅 code
 
-| `kind`       | Codes                                                                                                | Meaning                                                                                                                         |
-| ------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `http`       | `HTTP_STATUS`                                                                                        | Non-2xx 到達 HTTP boundary。保留 `status`、`response`，同任何 decoded status-specific `data`。                                  |
-| `transport`  | `ABORTED`, `TIMEOUT`, `NETWORK_ERROR`                                                                | Cancel、timeout，或者 Fetch/transport failure 擋住咗正常 result。                                                               |
-| `definition` | `REQUEST_VALIDATION_FAILED`, `RESPONSE_VALIDATION_FAILED`, `UNDECLARED_STATUS`, `INTERCEPTOR_FAILED` | Input、request construction、response representation、Struct decode、status-contract failure，或者 interceptor 入面嘅 `throw`。 |
+| 類別   | Code                                                                   | 邊個要改                       |
+| ------ | ---------------------------------------------------------------------- | ------------------------------ |
+| `HTTP` | `HTTP_STATUS`                                                          | 對端回咗非 2xx；當業務邏輯處理 |
+| `REQ`  | `REQ_INPUT_INVALID`、`REQ_OPTIONS_INVALID`、`REQ_BUILD_FAILED`         | Caller，或者 endpoint 聲明     |
+| `NET`  | `NET_ABORTED`、`NET_TIMEOUT`、`NET_UNREACHABLE`、`NET_BODY_INCOMPLETE` | 冇人，或者 retry               |
+| `RES`  | `RES_MEDIA_TYPE_INVALID`、`RES_DECODE_FAILED`、`RES_STRUCT_MISMATCH`   | 聲明同對端要對得上             |
+| `EXT`  | `EXT_INTERCEPTOR_FAILED`、`EXT_HOOK_FAILED`、`EXT_OBSERVER_FAILED`     | 你掛上 pipeline 嘅 code        |
+| `CAP`  | `CAP_BUFFER_EXCEEDED`、`CAP_QUEUE_OVERFLOW`                            | 聲明嘅上限，或者消費方嘅節奏   |
+| `ENV`  | `ENV_UNSUPPORTED`                                                      | Host runtime                   |
 
-`cause` 喺 transport 同 definition errors 上面係 optional。`response` 永遠喺 HTTP status errors 上面；當已經有 response 時，definition errors 都可能出現。
+集合係故意封閉嘅：呢個正係 `switch` 可以窮盡嘅原因。Extension 要報自己嘅細節就走 `cause`，唔係加新 code。
 
-## 按 transport 嘅 tuple 形狀
+### 各形狀帶咩 field
+
+| Code          | `status` | `response`                                         | `data`                                |
+| ------------- | -------- | -------------------------------------------------- | ------------------------------------- |
+| `HTTP_STATUS` | 一直有   | 一直有；只有聲明過 `error` 而又解碼成功才帶 `body` | 解碼後嘅 `error` body，或 `undefined` |
+| `RES_*`       | 一直有   | 一直有，只有 metadata——**冇 `body`**               | 冇                                    |
+| 其餘一切      | 冇       | 只有 transport 當時已經拿到 metadata 才有          | 冇                                    |
+
+`cause` 帶住底層嘅值：struct 唔匹配就係 `StructError`，representation 讀唔出就係 parser 嘅失敗，extension 拋咩就係咩。
+
+## 各 transport 嘅 tuple 形狀
 
 ```typescript twoslash
 import type {
+  DecodedResponse,
   EventStreamHandle,
   EventStreamOpenInfo,
-  HttpResponse,
-  RequestError,
+  Fault,
+  HttpMeta,
   WebSocketConnectionInfo,
   WebSocketSession,
 } from '@defjs/core'
 
 type HttpResult =
-  | [error: null, data: unknown, response: HttpResponse<unknown>]
-  | [error: RequestError, data: undefined, response: HttpResponse<unknown> | undefined]
+  [err: null, data: unknown, response: DecodedResponse<unknown> | HttpMeta] | [err: Fault, data: undefined, response: undefined]
 type SseResult =
-  | [error: null, stream: EventStreamHandle<unknown>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [err: null, stream: EventStreamHandle<unknown>, open: EventStreamOpenInfo]
+  | [err: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 type SocketResult =
-  | [error: null, session: WebSocketSession<unknown>, connection: WebSocketConnectionInfo]
-  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [err: null, session: WebSocketSession<unknown>, connection: WebSocketConnectionInfo]
+  | [err: Fault, session: undefined, connection: WebSocketConnectionInfo | undefined]
 
 const results: [HttpResult, SseResult, SocketResult] | undefined = undefined
 void results
 ```
 
-Startup failure → 第二項 `undefined`。第三項只會喺嗰個 transport 已經產出 response/snapshot 時出現。SSE handle 或者 WebSocket session return 之後，之後嘅 failures 住喺嗰個 handle 嘅 lifecycle — 唔會改寫已經 settle 嘅 startup tuple。
+HTTP 失敗時第三項係 `undefined`：當時存在嘅 response metadata 已經由 fault 帶住。呢點重要，因為你傳俾 handler、寫 log、重新拋出嘅就係 fault，所以 metadata 要跟住佢走，而唔係擺喺佢隔籬。
 
-## HTTP status 同 data
+SSE 同 WebSocket 嘅第三項係啟動快照，就算啟動失敗都可能有。Handle 或 session 返嚟之後，後續嘅失敗活喺佢自己嘅生命週期上——佢哋絕對唔會改寫已經定咗嘅啟動 tuple。
 
-Exact-status 優先。有 `output` 時，Defjs 會喺 decode body 之前揀 matching Struct，等 `error.status` 同 `error.data` 保持 correlated。
+## body 點讀
 
-| Situation                                 | Tuple outcome                         | Body behavior                                                |
-| ----------------------------------------- | ------------------------------------- | ------------------------------------------------------------ |
-| 2xx 配 matching declared status           | Success                               | Selected Struct → `data`                                     |
-| Non-2xx 配 matching declared status       | `HTTP_STATUS`                         | Selected Struct → typed `error.data`                         |
-| 任何 status 冇 matching declaration       | `UNDECLARED_STATUS`                   | Status 喺 body decode **之前**贏                             |
-| Matching status，body representation fail | `RESPONSE_VALIDATION_FAILED`          | 冇 partial typed value                                       |
-| 省略 `output`                             | 2xx succeeds；non-2xx → `HTTP_STATUS` | Body 唔 decode；`data` 係 `undefined`                        |
-| Response status `0`                       | Transport error                       | `response.error` → `NETWORK_ERROR`、`ABORTED` 或者 `TIMEOUT` |
+`ok` 係唯一分流點，而且只有一邊會解碼。`output` 讀 2xx body；`error` 讀其餘一切。唔寫邊個，嗰個 body 就根本唔會被讀。
 
-`HttpResponse.ok` 淨係指 `200 <= status < 300`。正常 non-2xx 唔會 set `HttpResponse.error` — 嗰個 property 用嚟表示 Fetch-boundary transport 或者 body-representation failure。
+| 情況                                    | 結果                                            |
+| --------------------------------------- | ----------------------------------------------- |
+| 2xx，聲明過 `output`，body 解碼成功     | 成功；`data` 同 `response.body` 都有 type       |
+| 2xx，冇寫 `output`                      | 成功；`data` 係 `undefined`，response 冇 `body` |
+| 非 2xx，聲明過 `error`，body 解碼成功   | `HTTP_STATUS`，`data` 有 type                   |
+| 非 2xx，冇寫 `error`                    | `HTTP_STATUS`，`data: undefined`                |
+| Media type 唔係嗰個 representation 要嘅 | `RES_MEDIA_TYPE_INVALID`，讀 body **之前**就報  |
+| Bytes 唔係嗰個 representation           | `RES_DECODE_FAILED`                             |
+| 值唔符合嗰個 struct                     | `RES_STRUCT_MISMATCH`                           |
+| 你**冇**聲明嗰一邊嘅 body 讀唔出        | 完全忽略——睇下面                                |
 
-## Startup vs post-open
+最後一行值得記住。如果你聲明咗 `output` 而冇聲明 `error`，咁一個 body 係壞 JSON 嘅 500，報出嚟就係 `HTTP_STATUS` 加 `status: 500`。你講過你唔關心 error body，呢個亦包括唔關心佢讀唔出呢件事。
 
-SSE 會喺 resolve handle 之前 validate status、`text/event-stream` 同 body。Failed status → `HTTP_STATUS`。Bad content type 或者 missing body → `RESPONSE_VALIDATION_FAILED`。Opening snapshot 仍然可以落喺 tuple 第三格。
+解碼只發生一次，而且喺 interceptor chain 之後。Interceptor 用 `makeResponse(...)` 造嘅 response，同線上嚟嘅走同一套 media type 檢查、同一個 struct。
 
-WebSocket startup 覆蓋 handshake + 第一次 physical open。Constructor failure、pre-open close、timeout 或者 cancel → startup tuple。即使 socket 從未到 `open`，connection snapshot 都可能存在。
+`HttpResponse.ok` 只表示 `200 <= status < 300`。Transport failure 係 fault，絕對唔係 response——唔存在代表佢嘅 status-0 response。
 
-| Transport | After startup                                                                                                                                                |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| SSE       | Fatal error 時 iterator reject；`stream.closed` resolve 時帶 `code: 'error'` 同 `EventStreamErrorCode`                                                       |
-| WebSocket | Message/queue/heartbeat/runtime failures 用 `onRuntimeError`；terminal errors 令 `receive` fail；`session.closed` → `kind: 'error' \| 'aborted' \| 'closed'` |
-| HTTP      | Execute promise settle 一次。Interceptor/callback code 仍然可以喺 tuple normalization 之外 throw                                                             |
+## 窄化 error body 嘅 union
 
-`ABORTED` / `TIMEOUT` 描述嘅係 caller-facing startup result。你仍然要 close return 出嚟嘅 stream/session，再 await 佢嘅 terminal promise。
+一個 `error` struct 覆蓋所有非 2xx status，所以形狀唔同嘅時候你會聲明一個 union。之後你可以拿 `fault.data` 做咩，完全取決於你點聲明呢個 union——library 交返俾你嘅，正係你要求嘅嗰個 type。
 
-## Native Error logging 同 cause
-
-所有 `RequestError` variants 都係 native `Error` instances，所以唔再需要 diagnostic adapter。`String(error)` 會用穩定嘅 native form `<name>: <message>`。`kind`、`code`，以及 `status`、`response`、`data` 呢類 variant fields 會保持 enumerable，方便 structured logging；`name` 同 native `cause` chain 就係 non-enumerable。
+`struct.or(...)` 產出一個普通 union，TypeScript 自己窄化唔到。去測你要嘅嗰個 field：
 
 ```typescript twoslash
-import { StructError, type RequestError } from '@defjs/core'
+import { struct, type Fault } from '@defjs/core'
 
-export function logRequestError(error: RequestError): void {
-  console.error(String(error), { code: error.code, kind: error.kind })
-  if (error.cause instanceof StructError) {
-    console.error(error.cause.prettify())
+const ApiError = struct.or(struct.object({ message: struct.string() }), struct.object({ retryAfter: struct.number() }))
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS' && 'retryAfter' in fault.data) {
+  console.log(fault.data.retryAfter)
+}
+```
+
+`struct.discriminatedUnion(...)` 按 body 真正帶住嘅 field 窄化。API 本身已經俾 errors 打咗 tag 嘅時候，呢個係最舒服嘅寫法：
+
+```typescript twoslash
+import { struct, type Fault } from '@defjs/core'
+
+const ApiError = struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('validation'), fields: struct.array(struct.string()) }),
+  struct.object({ kind: struct.literal('rateLimit'), retryAfter: struct.number() }),
+])
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS') {
+  switch (fault.data.kind) {
+    case 'validation':
+      console.log(fault.data.fields.length)
+      break
+    case 'rateLimit':
+      console.log(fault.data.retryAfter)
+      break
   }
 }
 ```
 
-Call `format()`、`flatten()` 或 `prettify()` 之前，要先用 `error.cause instanceof StructError` 收窄 type。呢啲 helpers 留喺 Struct cause，唔會 copy 去外層 `DefinitionError`。唔好叫 control flow parse `message` 或 `String(error)` — `kind`、`code` 同 reviewed status 仍然係 contract。
-
-## Reference
-
-| Branch                 | Control-flow check                           | Useful stable fields                        | Usually absent / sensitive        |
-| ---------------------- | -------------------------------------------- | ------------------------------------------- | --------------------------------- |
-| HTTP status policy     | `error.kind === 'http'`                      | `error.status`、reviewed `error.data`       | Body、headers、URL、`cause`       |
-| Caller cancellation    | `kind === 'transport' && code === 'ABORTED'` | `kind`、`code`                              | Abort reason 同 stack             |
-| Timeout                | `kind === 'transport' && code === 'TIMEOUT'` | `kind`、`code`                              | Request URL 同 underlying cause   |
-| Contract failure       | `error.kind === 'definition'`                | `kind`、`code`、reviewed `response?.status` | Struct issues、body、input values |
-| Stream/session runtime | `stream.closed` / `session.closed`           | Terminal code/kind、reviewed close status   | Event payloads、frames、causes    |
-
-唔好由 status `0` 推 CORS — 用 `kind` 同 `code` 分支。
-
-將 `cause`、`data`、response headers/bodies、URLs、Struct issues、input values 同 stacks 當 sensitive。一個保守 summary：
+當 API 將 status 放喺 body **裡面**嘅時候，就按佢窄化，而唔係按 `fault.status`：
 
 ```typescript twoslash
-import type { RequestError } from '@defjs/core'
+import { struct, type Fault } from '@defjs/core'
 
-export function summarize(error: RequestError): { kind: RequestError['kind']; code: RequestError['code']; status?: number } {
+const ApiError = struct.discriminatedUnion('status', [
+  struct.object({ status: struct.literal(404), resource: struct.string() }),
+  struct.object({ status: struct.literal(429), retryAfter: struct.number() }),
+])
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS' && fault.data.status === 429) {
+  console.log(fault.data.retryAfter)
+}
+```
+
+只要 API 支援，最後呢種寫法值得優先。`fault.status` 係 HTTP 層嘅數字，proxy、gateway 或者 CDN 都改得到；而 `data.status` 係由你 `error` struct 斷言過嘅 body 裡面解碼出嚟，拿得到佢就係後端真係產出過佢嘅證明。
+
+一個冇判別 field、因此窄化唔到嘅 union，係聲明本身嘅性質，唔係 library 嘅——library 交俾你嘅就係你聲明嘅 type。想窄化，就俾 struct 加一個判別 field。
+
+## 啟動期同開啟之後
+
+SSE 喺 resolve handle 之前會驗 status、`text/event-stream` 同 body 存唔存在。非 2xx → `HTTP_STATUS`。Media type 唔對 → `RES_MEDIA_TYPE_INVALID`。冇 body → `RES_DECODE_FAILED`。開啟快照照樣可能落喺 tuple 第三項。
+
+WebSocket 嘅啟動期覆蓋 handshake 加第一次物理 open。Constructor 失敗、open 之前就 close、timeout 或者取消，全部都會產出一個啟動 tuple。就算 socket 從來冇到過 `open`，connection 快照都可能存在。
+
+| Transport | 啟動之後                                                                                                                                 |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| SSE       | 致命錯誤時 iterator reject；`stream.closed` 以 `kind: 'error'` 同對應嘅 fault `code` resolve                                             |
+| WebSocket | 訊息／queue／heartbeat 失敗走 `onRuntimeError`；終止性錯誤令 `receive` 失敗；`session.closed` → `kind: 'closed' \| 'aborted' \| 'error'` |
+| HTTP      | Execute 個 promise 只 settle 一次。Interceptor 同 callback 裡面嘅 code 仍然可能喺 tuple 正規化之外拋錯                                   |
+
+`NET_ABORTED` / `NET_TIMEOUT` 描述嘅係 caller 喺啟動期睇到咩。回俾你嘅 stream 或 session，你照樣要關掉並 await 佢嘅終態 promise。
+
+## 原生 Error 嘅 log 同 cause
+
+Fault 係原生 `Error` instance，所以唔需要診斷 adapter。`String(fault)` 會俾出穩定嘅原生形式 `DefjsFault: <message>`。`code` 同各變體 field——`status`、`response`、`data`——保持可枚舉，方便做結構化 log；`name` 同原生 `cause` chain 係唔可枚舉嘅。
+
+```typescript twoslash
+import { StructError, type Fault } from '@defjs/core'
+
+export function logFault(fault: Fault): void {
+  console.error(String(fault), { code: fault.code })
+  if (fault.cause instanceof StructError) {
+    console.error(fault.cause.prettify())
+  }
+}
+```
+
+Call `format()`、`flatten()` 或者 `prettify()` 之前，先將 `fault.cause` 窄化到 `StructError`。呢啲 helper 長喺 Struct 個 cause 上面，唔會被複製到 fault 上面。唔好叫 control flow 去 parse `message` 或者 `String(fault)`——contract 係 `code` 同一個審過嘅 `status`。
+
+## 參考
+
+| 分支                   | Control-flow 判斷                  | 好用嘅穩定 field                       | 通常冇／敏感                |
+| ---------------------- | ---------------------------------- | -------------------------------------- | --------------------------- |
+| HTTP status 政策       | `fault.code === 'HTTP_STATUS'`     | `fault.status`、審過嘅 `fault.data`    | Body、headers、URL、`cause` |
+| Caller 取消            | `fault.code === 'NET_ABORTED'`     | `code`                                 | 取消原因同 stack            |
+| Timeout                | `fault.code === 'NET_TIMEOUT'`     | `code`                                 | Request URL 同底層 cause    |
+| Contract 爆咗          | `fault.code.startsWith('RES_')`    | `code`、審過嘅 `fault.response.status` | Struct issue、body、輸入值  |
+| 你自己嘅 code 拋咗     | `fault.code.startsWith('EXT_')`    | `code`、`cause`                        | Extension 掛上嚟嘅任何嘢    |
+| Stream／session 執行期 | `stream.closed` / `session.closed` | 終態 `kind` 同 `code`                  | 事件 payload、frame、cause  |
+
+將 `cause`、`data`、response headers 同 body、URL、Struct issue、輸入值同 stack 全部當敏感資訊。一個保守嘅 summary：
+
+```typescript twoslash
+import type { Fault } from '@defjs/core'
+
+export function summarize(fault: Fault): { code: Fault['code']; status?: number } {
   return {
-    kind: error.kind,
-    code: error.code,
-    status: error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined,
+    code: fault.code,
+    status: 'status' in fault ? fault.status : undefined,
   }
 }
 ```
 
-`createTransportError`、`createDefinitionError` 同 `createHttpStatusError` 會 build 呢啲 native Error values。普通 request failures 仍然由 tuple return；inherit native Error 唔代表會自動 throw。`ERR_ABORTED` 同 `ERR_TIMEOUT` 係 transport normalizer 認得嘅 shared causes。
+`createNetworkFault`、`createPreflightFault`、`createDecodeFault`、`createHttpStatusFault` 同 `createUndecodedHttpStatusFault` 構造呢啲原生 Error 值。普通嘅 request 失敗照樣喺 tuple 裡面回傳佢哋；唔會因為佢哋繼承咗原生 Error 行為就被拋出。`ERR_ABORTED` 同 `ERR_TIMEOUT` 係 transport normalizer 認得出嘅共享 cause。
 
-## Related recipes
+## 相關配方
 
-- [GET with a declared 404](../recipes/get-declared-404.md)
-- [Cancel an HTTP call](../recipes/cancel-http.md)
+- [聲明咗 404 嘅 GET](../recipes/get-declared-404.md)
+- [取消一次 HTTP call](../recipes/cancel-http.md)

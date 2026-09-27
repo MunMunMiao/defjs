@@ -1,5 +1,5 @@
-import type { DefinitionError, TransportError } from '../error'
-import { createDefinitionError, createTransportError, ERR_ABORTED, ERR_TIMEOUT } from '../error'
+import type { PreflightFault } from '../error'
+import { createNetworkFault, createPreflightFault, ERR_ABORTED, ERR_TIMEOUT } from '../error'
 
 export const ABORT_TIMEOUT_CONFLICT_MESSAGE = 'abort and timeout cannot be used together'
 const MAX_TIMER_DELAY_MS = 2_147_483_647
@@ -38,23 +38,40 @@ export function hasAbortTimeoutConflict(config: CancellationConfigLike | undefin
   return config !== undefined && config.abort !== undefined && config.timeout !== undefined
 }
 
-export function createAbortTimeoutConflictError(): DefinitionError {
-  return createDefinitionError('REQUEST_VALIDATION_FAILED', new Error(ABORT_TIMEOUT_CONFLICT_MESSAGE))
-}
-
-export function resolveAbortTransportError(signal: AbortSignal): TransportError | undefined {
+/** The cancellation cause for an already-aborted signal, or `undefined` while it is still live. */
+export function resolveAbortCause(signal: AbortSignal): Error | undefined {
   if (!signal.aborted) {
     return undefined
   }
 
-  return resolveAbortedTransportError(signal)
+  return resolveAbortedCause(signal)
 }
 
-export function resolveAbortedTransportError(signal: AbortSignal): TransportError {
+/** `ERR_TIMEOUT` or `ERR_ABORTED`, chosen from the signal's abort reason. */
+export function resolveAbortedCause(signal: AbortSignal): Error {
   const reason = signal.reason
   const timedOut = reason === ERR_TIMEOUT || (reason instanceof Error && reason.name === 'TimeoutError')
 
-  return createTransportError(timedOut ? ERR_TIMEOUT : ERR_ABORTED)
+  return timedOut ? ERR_TIMEOUT : ERR_ABORTED
+}
+
+/** `REQ_OPTIONS_INVALID` for execute options that pass both `abort` and `timeout`. */
+export function createAbortTimeoutConflictFault(): PreflightFault {
+  return createPreflightFault('REQ_OPTIONS_INVALID', new Error(ABORT_TIMEOUT_CONFLICT_MESSAGE))
+}
+
+/** The cancellation fault for an already-aborted signal, or `undefined` while it is still live. */
+export function resolveAbortFault(signal: AbortSignal): PreflightFault | undefined {
+  if (!signal.aborted) {
+    return undefined
+  }
+
+  return resolveAbortedFault(signal)
+}
+
+/** `NET_ABORTED` or `NET_TIMEOUT`, chosen from the signal's abort reason. */
+export function resolveAbortedFault(signal: AbortSignal): PreflightFault {
+  return createNetworkFault(resolveAbortedCause(signal))
 }
 
 export function validateTransportTimeout(timeout: number | undefined): void {

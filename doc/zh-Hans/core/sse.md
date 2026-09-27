@@ -58,7 +58,7 @@ const notifications = defineEventStream({
 
 const [error, stream, startupOpen] = await client.execute(notifications())
 if (error) {
-  console.error(error.kind, error.code, startupOpen?.response.status)
+  console.error(error.code, startupOpen?.response.status)
 } else {
   console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
   stream.close('example-finished')
@@ -66,16 +66,16 @@ if (error) {
 }
 ```
 
-响应必须成功，媒体类型本质是 `text/event-stream`，且有 body。启动非 2xx → `HTTP_STATUS`。坏 content type 或缺 body → `RESPONSE_VALIDATION_FAILED`。响应到达后校验失败时，第三项仍可能有响应快照。
+响应必须成功，媒体类型本质是 `text/event-stream`，且有 body。启动非 2xx → `HTTP_STATUS`。坏 content type 或缺 body → `RES_STRUCT_MISMATCH`。响应到达后校验失败时，第三项仍可能有响应快照。
 
 `startupOpen` 是初始快照。`stream.open` 是活的，后续物理打开会变。第一次响应重要时，留着 tuple 里的值。
 
 ```typescript twoslash
-import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+import type { EventStreamHandle, EventStreamOpenInfo, Fault } from '@defjs/core'
 
 type StreamResult<T> =
   | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [error: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 
 const result: StreamResult<string> | undefined = undefined
 void result
@@ -149,10 +149,10 @@ SSE 默认不重试网络或读取失败；必须用 `withSSEReconnect(...)` 显
 
 两者都必须是正 safe integer。溢出是致命的——不会悄悄丢掉旧事件。
 
-| 上限            | 保护什么                        | 终端 code               |
-| --------------- | ------------------------------- | ----------------------- |
-| `maxBufferSize` | 解析时不完整/过大的 SSE 行/事件 | `PARSER_LIMIT_EXCEEDED` |
-| `maxQueueSize`  | 生产快于唯一消费者读取的事件    | `QUEUE_OVERFLOW`        |
+| 上限            | 保护什么                        | 终端 code             |
+| --------------- | ------------------------------- | --------------------- |
+| `maxBufferSize` | 解析时不完整/过大的 SSE 行/事件 | `CAP_BUFFER_EXCEEDED` |
+| `maxQueueSize`  | 生产快于唯一消费者读取的事件    | `CAP_QUEUE_OVERFLOW`  |
 
 致命流还会清空缓冲事件、取消活动 body、reject iterator，并以 `code: 'error'` resolve `stream.closed`。
 
@@ -175,7 +175,7 @@ const api: StreamApi<string> = handle
 void api
 ```
 
-终端 code：`eof`、`aborted` 或 `error`。`error` 结果还会带 `EventStreamErrorCode`：`INVALID_RESPONSE`、`MESSAGE_PROCESSING_FAILED`、`PARSER_LIMIT_EXCEEDED`、`QUEUE_OVERFLOW`、`TIMEOUT` 或 `TRANSPORT_ERROR`。
+终端 code：`eof`、`aborted` 或 `error`。`error` 结果还会带 `EventStreamFaultCode`：`RES_MEDIA_TYPE_INVALID`、`EXT_OBSERVER_FAILED`、`CAP_BUFFER_EXCEEDED`、`CAP_QUEUE_OVERFLOW`、`NET_TIMEOUT` 或 `TRANSPORT_ERROR`。
 
 `close(reason)` 中止当前尝试、关闭队列，以 `aborted` settle。循环 `break` / `return` / throw 会触发 iterator return，并以 `iterator-return` 关闭。执行 command 的代码拥有关闭权。
 

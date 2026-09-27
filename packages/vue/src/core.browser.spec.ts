@@ -12,9 +12,7 @@ const UserStruct = struct.object({
 
 const getUsers = defineRequest({
   method: 'GET',
-  output: {
-    200: struct.array(UserStruct),
-  },
+  output: struct.array(UserStruct),
   path: '/api/users',
 })
 

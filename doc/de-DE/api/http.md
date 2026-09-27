@@ -13,7 +13,7 @@ Deklariere einen typisierten Request, baue aus dem Input einen Command, führe i
 function defineRequest(definition: RequestDefinition): RequestCommandBuilder
 ```
 
-- **definition** — `method`, `path`, optionales `input`-Struct, `output` nach Status, optionales `operation` und `build`.
+- **definition** — `method`, `path`, optionaler `input`-Struct, optionale `output`- und `error`-Structs, optional `operation` und `build`.
 - **Returns** einen Builder. Ruf ihn mit Input auf und du bekommst einen `HttpCommand`.
 
 ```ts
@@ -25,13 +25,12 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 ```
 
-`output` darf auch eine Liste von `{ status, body }`-Groups sein (ein Body-Struct für mehrere Codes).
+`output` ist ein Struct für den 2xx-Body; `error` ist ein Struct für jeden Non-2xx-Body. Keines von beiden wird nach Status gekeyt. Lässt du eines weg, wird dieser Body nie gelesen — siehe [Deklaration ist eine Zusicherung](/de-DE/guide/design-decisions#deklaration-ist-eine-zusicherung).
 
 ## executeHttpCommand() {#executeHttpCommand}
 
@@ -41,7 +40,9 @@ function executeHttpCommand(clientConfig: ClientConfig, command: HttpCommand, op
 
 Low-Level-Einstieg, den `client.execute` nutzt. Im Application-Code ruf `client.execute(command, options)` auf.
 
-- **Returns** `[null, body, response]` oder `[error, undefined, response?]`.
+- **Returns** `[null, data, response]` oder `[fault, undefined, undefined]`.
+
+Ein Non-2xx-Status ist immer `HTTP_STATUS`. Sein `data` ist der dekodierte `error`-Body, wenn einer deklariert war, sonst `undefined`. Bei einem Failure ist der dritte Tuple-Slot `undefined`; die Response-Metadaten trägt der Fault.
 
 ## fetchHandler() {#fetchHandler}
 
@@ -49,7 +50,7 @@ Low-Level-Einstieg, den `client.execute` nutzt. Im Application-Code ruf `client.
 function fetchHandler(httpRequest: HttpRequest, fetchImpl?: typeof fetch): Promise<HttpResponse<unknown>>
 ```
 
-Default-HTTP-Transport. Wird genutzt, bis `withHTTPHandle` ihn ersetzt.
+Default-HTTP-Transport. Wird genutzt, bis `withHTTPHandle` ihn ersetzt. Er rejectet — statt mit einer synthetischen Response zu resolven —, wenn keine Response den Client erreicht hat.
 
 ## makeResponse() {#makeResponse}
 
@@ -57,7 +58,7 @@ Default-HTTP-Transport. Wird genutzt, bis `withHTTPHandle` ihn ersetzt.
 function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R>
 ```
 
-Baue eine `HttpResponse` ohne Network-Call (Interceptors, Tests). Default-Status ist `0`. `ok` ist true für 2xx.
+Baue eine `HttpResponse` ohne Network-Call (Interceptors, Tests). Default-Status ist `0`. `ok` ist true für 2xx. Der zurückgegebene Wert geht durch dieselbe Media-Type-Prüfung und denselben deklarierten Struct wie eine Response von der Leitung; es gibt keinen vertrauten Short-Circuit.
 
 ## Execute-Optionen
 
@@ -79,25 +80,51 @@ Cancellation ist `abort` **oder** `timeout`, nicht beides. `signal` kombiniert m
 
 ### RequestDefinition {#RequestDefinition}
 
-`method`, `path`, optionales `input`, `output`, `responseType` (`'json' | 'text' | 'blob' | 'arraybuffer'`), `operation`, optionales `build` (custom Request-Assembly; braucht `input`).
+`method`, `path`, optional `input`, `output`, `error`, `responseType` (`'json' | 'text' | 'blob' | 'arraybuffer'`), `operation`, optional `build` (Request selbst zusammenbauen; braucht `input`).
 
-### RequestOutputShape {#RequestOutputShape}
+### ResponseDeclaration {#ResponseDeclaration}
 
 ```ts
-type RequestOutputShape = { [status: number]: AnyStruct } | readonly { status: number | readonly number[]; body: AnyStruct }[]
+type ResponseDeclaration<TOutput, TError> = { output?: TOutput; error?: TError }
 ```
+
+Die `output`-/`error`-Hälfte einer `RequestDefinition`. Fehlen beide, ist auch `responseType` abgelehnt: es wird nichts dekodiert, also gibt es nichts auszuwählen.
 
 ### HttpAwaitResult {#HttpAwaitResult}
 
 ```ts
-type HttpAwaitResult<TSuccess, TErrorData> =
-  | [error: null, result: TSuccess, response: HttpResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: HttpResponse<unknown> | undefined]
+type HttpAwaitResult<TData = undefined, TErrorData = undefined> =
+  | [error: null, result: TData, response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>]
+  | [error: FaultOf<TErrorData>, result: undefined, response: undefined]
 ```
+
+Im Erfolgsfall trägt der dritte Slot nur dann `body`, wenn `output` deklariert war. Im Fehlerfall ist er `undefined` — der Fault hält schon alle Response-Metadaten, die es gab.
 
 ### HttpRequest {#HttpRequest}
 
 Normalisierter Outgoing-Request: `method`, `endpoint`, `headers`, `body`, `abort`, `operation`, Progress-Hooks, `baseEndpoint`, Query-Metadata.
+
+### HttpMeta {#HttpMeta}
+
+```ts
+type HttpMeta = {
+  readonly headers: Headers
+  readonly ok: boolean
+  readonly status: number
+  readonly statusText: string
+  readonly url: string
+}
+```
+
+Response-Metadaten, verfügbar sobald eine Response den Client erreicht hat. Sie tragen **kein** `body`: einen Body gibt es erst, wenn ein deklarierter Struct einen dekodiert hat.
+
+### DecodedResponse {#DecodedResponse}
+
+```ts
+type DecodedResponse<TBody> = HttpMeta & { readonly body: TBody }
+```
+
+Eine Response, deren Body gegen den deklarierten Struct dekodiert wurde. Diesen Typ in der Hand zu haben ist der Beweis, dass dekodiert wurde — deshalb meldet ein Decode-Failure `HttpMeta` allein.
 
 ### HttpResponse {#HttpResponse}
 
@@ -108,10 +135,11 @@ type HttpResponse<R> = {
   readonly statusText: string
   readonly headers: Headers
   readonly body: R | null
-  readonly error?: unknown
   readonly ok: boolean
 }
 ```
+
+Die Wire-Shape, die Transports produzieren und Interceptors sehen: `body` ist Text oder bereits geparstes JSON, kein dekodierter Wert. Beim Caller landet `DecodedResponse`.
 
 ### HttpProgressEvent {#HttpProgressEvent}
 
@@ -119,11 +147,7 @@ type HttpResponse<R> = {
 
 `loaded`, `total`, `lengthComputable`. Callbacks dürfen async sein.
 
-Siehe [HTTP-Guide](../core/http.md) und [Commands](../core/commands.md).
-
-## ResponseGroupItem {#ResponseGroupItem}
-
-Eine `{ status, body }`-Zeile in der Listenform von `RequestOutputShape`. `status` darf ein Code sein oder mehrere, die sich ein Body-Struct teilen.
+Siehe [HTTP-Guide](../core/http.md) und [Commands](../core/commands.md). Ein Callback, der throwt, ist `EXT_OBSERVER_FAILED`.
 
 ## RequestCommandBuilder {#RequestCommandBuilder}
 
@@ -139,11 +163,11 @@ Progress, Cancel. `HttpExecuteOptions` legt `signal` drauf.
 
 ## RequestSuccessData {#RequestSuccessData}
 
-Erfolgreicher Body, inferiert aus deklarierten 2xx-`output`-Einträgen.
+Aus dem deklarierten `output`-Struct inferierter Success-Body, oder `undefined`, wenn keiner deklariert ist.
 
 ## RequestErrorData {#RequestErrorData}
 
-Fehler-Body, inferiert aus deklarierten Nicht-2xx-`output`-Einträgen.
+Aus dem deklarierten `error`-Struct inferierter Error-Body, oder `undefined`, wenn keiner deklariert ist.
 
 ## HttpResponseType {#HttpResponseType}
 
@@ -151,4 +175,4 @@ Fehler-Body, inferiert aus deklarierten Nicht-2xx-`output`-Einträgen.
 
 ## MakeResponseOptions {#MakeResponseOptions}
 
-Felder für `makeResponse`: `status`, `statusText`, `url`, `headers`, `body`, `error`.
+Felder für `makeResponse`: `status`, `statusText`, `url`, `headers`, `body`, `request`.

@@ -24,7 +24,7 @@ test('should settle public HTTP cancellation when an interceptor hangs after a r
   controller.abort('caller stopped')
 
   const [error, result, response] = await pending
-  expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+  expect(error).toMatchObject({ code: 'NET_ABORTED' })
   expect(result).toBeUndefined()
   expect(response).toBeUndefined()
 }, 2_000)

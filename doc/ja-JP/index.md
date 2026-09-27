@@ -14,7 +14,7 @@ const client = createClient(withEndpoint('https://api.example.com'))
 const getHealth = defineRequest({
   method: 'GET',
   path: '/health',
-  output: { 200: struct.object({ ok: struct.boolean() }) },
+  output: struct.object({ ok: struct.boolean() }),
 })
 
 const [error, result, response] = await client.execute(getHealth())

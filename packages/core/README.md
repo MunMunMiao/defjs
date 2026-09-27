@@ -25,29 +25,27 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
 
 if (error) {
-  console.error(String(error), error.kind, error.code)
+  console.error(String(error), error.code)
 } else {
   console.log(user.id, user.name)
 }
 ```
 
-`defineRequest(...)` preserves inline output status literals through a const generic, so the array does not need `as const`.
+`output` is one Struct for the 2xx body; `error` is one Struct for everything else. `ok` is the only fork, and only one side ever decodes. Omit a side and that body is never read.
 
 ## Core Boundaries
 
 - Commands are typed values created by `defineRequest`, `defineEventStream`, and `defineWebSocket`.
 - Structs validate request input and response data at runtime. `struct.request({ path, query, headers, body })` maps each request part explicitly.
-- Expected HTTP, transport, and definition failures are returned as native `RequestError` instances in an error-first tuple; custom interceptors and application callbacks can still throw. `String(error)` is directly loggable, while `kind`, `code`, and variant metadata remain enumerable for structured logs.
-- Transport and definition errors use the native `Error` cause chain. Narrow `error.cause instanceof StructError` before calling Struct-only helpers such as `format()`, `flatten()`, or `prettify()`.
+- Expected failures are returned as native `Fault` instances in an error-first tuple; custom interceptors and application callbacks can still throw. A `Fault` is discriminated by one closed set of `code` values whose prefix is the class — `HTTP_STATUS`, `REQ_*`, `NET_*`, `RES_*`, `EXT_*`, `CAP_*`, `ENV_UNSUPPORTED`. `String(error)` is directly loggable, while `code` and the variant metadata remain enumerable for structured logs.
+- Faults carry their underlying value on the native `Error` cause chain. Narrow `error.cause instanceof StructError` before calling Struct-only helpers such as `format()`, `flatten()`, or `prettify()`.
 - Server clients that capture cookies, authorization, tenant data, or user data must be created inside the owning request scope.
 - Ordinary HTTP work is request-scoped and is bounded with its execute-time timeout or `AbortSignal`; `Client` is not `AsyncDisposable` and has no global `dispose()` lifecycle.
 - Returned SSE and WebSocket handles are `AsyncDisposable`, so `await using` waits for Defjs-owned teardown. SSE disposal stops Defjs reading/reconnect work and releases its reader lock, but does not wait forever for a provider-controlled `cancel()` promise.

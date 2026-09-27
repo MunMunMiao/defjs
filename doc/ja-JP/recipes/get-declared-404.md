@@ -5,7 +5,7 @@ description: GET を 1 回実行し、型付き 200 と宣言済み 404 で分�
 
 # 宣言済み 404 付きの GET
 
-成功と 404 のボディの両方を宣言します。`error.kind` と `error.status` で分岐すると、宣言済みの miss に対して型付きの `error.data` が得られます。
+成功と 404 のボディの両方を宣言します。`error.code` と `error.status` で分岐すると、宣言済みの miss に対して型付きの `error.data` が得られます。
 
 詳細は [HTTP](../core/http.md) と [Errors](../core/errors.md) を見てください。
 
@@ -20,18 +20,16 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }))
 
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (error) {
-  console.error(error.kind, error.code)
+  console.error(error.code)
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
 }
@@ -41,4 +39,4 @@ if (error?.kind === 'http' && error.status === 404) {
 Loaded Ada from 200
 ```
 
-未宣言の status はボディデコードの前に `UNDECLARED_STATUS` になります — 気にする status はすべて宣言してください。
+2xx 以外の status はすべて `HTTP_STATUS` です。`error` を宣言すればそのボディに型が付き、省けば `err.data` は `undefined` になってボディも読まれません。ひとつの `error` Struct が 2xx 以外のすべての status を受け持つので、形が異なるときは `struct.or(...)` か判別可能な union を使ってください。

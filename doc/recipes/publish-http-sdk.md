@@ -19,10 +19,8 @@ export const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 export function createUsersClient(...options: ClientOption[]): Client {
@@ -31,7 +29,7 @@ export function createUsersClient(...options: ClientOption[]): Client {
 
 export async function loadUserName(client: Client, id: number): Promise<string> {
   const [error, user] = await client.execute(getUser({ path: { id } }))
-  if (error?.kind === 'http' && error.status === 404) {
+  if (error?.code === 'HTTP_STATUS' && error.status === 404) {
     throw new Error(error.data.message)
   }
   if (error) throw error

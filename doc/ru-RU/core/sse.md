@@ -58,7 +58,7 @@ const notifications = defineEventStream({
 
 const [error, stream, startupOpen] = await client.execute(notifications())
 if (error) {
-  console.error(error.kind, error.code, startupOpen?.response.status)
+  console.error(error.code, startupOpen?.response.status)
 } else {
   console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
   stream.close('example-finished')
@@ -66,16 +66,16 @@ if (error) {
 }
 ```
 
-Response должен быть successful, media type essence `text/event-stream`, и иметь body. Non-2xx startup → `HTTP_STATUS`. Плохой content type или нет body → `RESPONSE_VALIDATION_FAILED`. Снимок response всё ещё может сидеть в третьем слоте кортежа, когда валидация падает после прихода response.
+Response должен быть successful, media type essence `text/event-stream`, и иметь body. Non-2xx startup → `HTTP_STATUS`. Плохой content type или нет body → `RES_STRUCT_MISMATCH`. Снимок response всё ещё может сидеть в третьем слоте кортежа, когда валидация падает после прихода response.
 
 `startupOpen` — начальный снимок. `stream.open` live и меняется на более поздних физических opens. Держи значение кортежа, когда важен первый response.
 
 ```typescript twoslash
-import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+import type { EventStreamHandle, EventStreamOpenInfo, Fault } from '@defjs/core'
 
 type StreamResult<T> =
   | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [error: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 
 const result: StreamResult<string> | undefined = undefined
 void result
@@ -149,10 +149,10 @@ const client = createClient(
 
 Оба — положительные safe integers. Overflow fatal — без silent discard старых событий.
 
-| Limit           | Защищает                                               | Terminal code           |
-| --------------- | ------------------------------------------------------ | ----------------------- |
-| `maxBufferSize` | Incomplete/oversized SSE line/event при парсинге       | `PARSER_LIMIT_EXCEEDED` |
-| `maxQueueSize`  | События производятся быстрее, чем читает один consumer | `QUEUE_OVERFLOW`        |
+| Limit           | Защищает                                               | Terminal code         |
+| --------------- | ------------------------------------------------------ | --------------------- |
+| `maxBufferSize` | Incomplete/oversized SSE line/event при парсинге       | `CAP_BUFFER_EXCEEDED` |
+| `maxQueueSize`  | События производятся быстрее, чем читает один consumer | `CAP_QUEUE_OVERFLOW`  |
 
 Fatal stream также чистит buffered events, отменяет active body, reject’ит iterator и resolves `stream.closed` с `code: 'error'`.
 
@@ -175,7 +175,7 @@ const api: StreamApi<string> = handle
 void api
 ```
 
-Terminal codes: `eof`, `aborted` или `error`. Результат `error` также несёт `EventStreamErrorCode`: `INVALID_RESPONSE`, `MESSAGE_PROCESSING_FAILED`, `PARSER_LIMIT_EXCEEDED`, `QUEUE_OVERFLOW`, `TIMEOUT` или `TRANSPORT_ERROR`.
+Terminal codes: `eof`, `aborted` или `error`. Результат `error` также несёт `EventStreamFaultCode`: `RES_MEDIA_TYPE_INVALID`, `EXT_OBSERVER_FAILED`, `CAP_BUFFER_EXCEEDED`, `CAP_QUEUE_OVERFLOW`, `NET_TIMEOUT` или `TRANSPORT_ERROR`.
 
 `close(reason)` abort’ит active attempt, закрывает очередь, settles как `aborted`. Loop `break` / `return` / throw вызывает iterator return и закрывает с `iterator-return`. Код, который execute’ит команду, владеет closure.
 

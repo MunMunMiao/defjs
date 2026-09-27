@@ -27,7 +27,7 @@ const readOrders = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
 
 const [error] = await client.execute(readOrders())
-if (error) console.error(error.kind, error.code)
+if (error) console.error(error.code)
 ```
 
 `tracer`는 필수예요. `meter`는 선택이에요 — 패키지 메트릭을 끄려면 생략하세요. `propagator`가 없으면 어댑터가 W3C Trace Context + W3C Baggage 복합 propagator를 만들어요. 전역 SDK 설정을 읽거나 초기화하지는 않아요.
@@ -147,7 +147,7 @@ const client = createClient(
 
 어댑터는 명령 해석의 모든 단계가 아니라 전송 수명을 측정해요.
 
-- **HTTP** — span은 HTTP 인터셉터에서 시작해 Defjs `HttpResponse`를 받을 때 끝나요. status 디스패치, representation 검사, Struct 디코딩은 그 후에 일어나요. 이후 `RESPONSE_VALIDATION_FAILED`나 `UNDECLARED_STATUS`는 이미 끝난 전송 span을 갱신할 수 없어요.
+- **HTTP** — span은 HTTP 인터셉터에서 시작해 Defjs `HttpResponse`를 받는 시점에 끝나요. 미디어 타입 확인, 표현 읽기, Struct 디코딩은 모두 그 뒤라서, 나중에 생긴 `RES_*` fault는 이미 끝난 전송 span을 고칠 수 없어요. 또 span이 체인 안에서 살기 때문에, 전송 계층의 reject는 OTel 관례대로 예외 클래스로 기록되고, 실행이 나중에 배정하는 fault 코드로 기록되지 않아요.
 - **SSE** — span은 `stream.closed`가 settle할 때까지 열려 있어요. `sse.connected`, 그다음 `sse.closed` / `sse.aborted` / `sse.error`를 기록해요. 재연결을 포함한 논리 스트림 하나 → span 하나. 이벤트별 span은 없어요.
 - **WebSocket** — span은 `session.closed`가 settle할 때까지 열려 있어요. 이벤트: `websocket.connected`, `websocket.closed`, `websocket.error`. 재연결하는 물리 소켓도 논리 세션의 일부예요. 메시지별 span은 없어요.
 
@@ -197,7 +197,7 @@ void outcome
 
 활성 SSE/WebSocket 계측은 물리 소켓이나 개별 HTTP 시도가 아니라 논리 리소스(재연결 공백 포함)를 세요.
 
-HTTP span은 메서드, 해석된 `url.full`, 가능하면 서버 주소/포트, 받은 응답 status를 기록해요. 기본 `url.full`은 `request.endpoint`를 선택적 `request.baseEndpoint`에 대해 resolve하며, 독립된 `request.queryString`은 붙이지 않아요. 이건 구성 경계이지 sanitization이 아니에요. 완전하거나 마스킹된 애플리케이션 소유 URL이 필요하면 `startSpanHook`으로 구성하세요. status `400+` → span status `ERROR`, status 문자열을 `error.type`으로. status `100..399`는 span status를 비워 둬요. status-zero 전송 결과는 응답 status가 없고, 취소는 status를 비워 두며, 타임아웃/기타 전송 실패는 `TIMEOUT` 또는 `NETWORK_ERROR`를 써요. 메트릭은 안정적인 차원만 써요. 메서드, 정적 operation, 서버 주소/포트, 응답 status, 저카디널리티 오류 타입이요.
+HTTP span은 메서드, 해석된 `url.full`, 가능하면 서버 주소/포트, 받은 응답 status를 기록해요. 기본 `url.full`은 `request.endpoint`를 선택적 `request.baseEndpoint`에 대해 resolve하며, 독립된 `request.queryString`은 붙이지 않아요. 이건 구성 경계이지 sanitization이 아니에요. 완전하거나 마스킹된 애플리케이션 소유 URL이 필요하면 `startSpanHook`으로 구성하세요. status `400+` → span status `ERROR`, status 문자열을 `error.type`으로. status `100..399`는 span status를 비워 둬요. status-zero 전송 결과는 응답 status가 없고, 취소는 status를 비워 두며, 타임아웃/기타 전송 실패는 `NET_TIMEOUT` 또는 `NET_UNREACHABLE`를 써요. 메트릭은 안정적인 차원만 써요. 메서드, 정적 operation, 서버 주소/포트, 응답 status, 저카디널리티 오류 타입이요.
 
 SSE/WebSocket 연결 메트릭은 연결 시간, 논리 연결 기간, 활성 리소스 수, `defjs.result`, operation, 서버 주소/포트, 저카디널리티 실패 타입을 기록해요. 기본적으로 요청/응답 body, 메시지 페이로드, 큐 길이, 메시지별 span은 없어요.
 

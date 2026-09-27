@@ -23,7 +23,7 @@ description: مرجع مكتوب يدويًا لحزم مساحة العمل —
 | [Client](./client.md)             | `createClient`, `with*` options, `Client`                        |
 | [HTTP](./http.md)                 | `defineRequest`, execute options, `HttpRequest` / `HttpResponse` |
 | [Struct](./struct.md)             | `struct.*`, `Infer`, `StructError`                               |
-| [Errors](./errors.md)             | تنويعات `RequestError` ومصانعها                                  |
+| [Errors](./errors.md)             | تنويعات `Fault` ومصانعها                                         |
 | [Interceptors](./interceptors.md) | مساعدات interceptor لـ HTTP / SSE / WebSocket                    |
 | [SSE](./sse.md)                   | `defineEventStream`, stream handle                               |
 | [WebSocket](./web-socket.md)      | `defineWebSocket`, session                                       |

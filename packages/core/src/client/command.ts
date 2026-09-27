@@ -1,4 +1,3 @@
-import type { RequestOutputShape } from '../http/request'
 import type { HttpCommand } from '../http/http'
 import type { EventStructs, EventStreamCommand } from '../sse/sse'
 import type { AnyStruct } from '../struct'
@@ -16,7 +15,7 @@ export interface BaseCommand<TCommandType extends CommandType> {
 }
 
 export type Command =
-  | HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined>
+  | HttpCommand<AnyStruct | undefined, AnyStruct | undefined, AnyStruct | undefined>
   | EventStreamCommand<AnyStruct | undefined, EventStructs>
   | WebSocketCommand<AnyStruct | undefined, SocketStructs, SocketStructs | undefined>
 
@@ -28,7 +27,7 @@ function commandTypeOf(value: unknown): unknown {
   return value[COMMAND_TYPE]
 }
 
-export function isHttpCommand(value: unknown): value is HttpCommand<AnyStruct | undefined, RequestOutputShape | undefined> {
+export function isHttpCommand(value: unknown): value is HttpCommand<AnyStruct | undefined, AnyStruct | undefined, AnyStruct | undefined> {
   return commandTypeOf(value) === HTTP_COMMAND
 }
 

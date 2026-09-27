@@ -22,7 +22,7 @@ const room = defineWebSocket({
 
 const [error, session, startupConnection] = await client.execute(room())
 if (error) {
-  console.error(error.kind, error.code, startupConnection?.generation)
+  console.error(error.code, startupConnection?.generation)
 } else {
   await using ownedSession = session
   const unsubscribe = ownedSession.onRuntimeError((cause) => console.error('runtime', cause))
@@ -77,11 +77,11 @@ if (error) {
 启动失败 → `[error, undefined, connection?]`。打开前构造失败可能没有 connection；启动期间超时/关闭仍可能有快照。Session 返回后，运行时错误走 observer、`receive`、`closed`——不是第二次 execute tuple。
 
 ```typescript twoslash
-import type { RequestError, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
+import type { Fault, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
 
 type SocketResult<TIncoming, TOutgoing> =
   | [error: null, session: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [error: Fault, session: undefined, connection: WebSocketConnectionInfo | undefined]
 
 const result: SocketResult<unknown, never> | undefined = undefined
 void result

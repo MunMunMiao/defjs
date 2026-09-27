@@ -66,10 +66,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -100,10 +98,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const handle: typeof fetch = async (input, init) => {
@@ -124,10 +120,10 @@ const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }
 })
 
 if (error) {
-  if (error.kind === 'http' && error.status === 404) {
+  if (error.code === 'HTTP_STATUS' && error.status === 404) {
     console.log(error.data.message)
   } else {
-    console.error(error.kind, error.code)
+    console.error(error.code)
   }
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
@@ -179,7 +175,7 @@ Loaded Ada from 200
 User not found
 ```
 
-При успехе: `error` — `null`, `user` — Struct-output для `200`, `response` — `HttpResponse`. При объявленном `404`: `error.kind` — `'http'`, `error.status` — `404`, а `error.data` типизирован как `NotFound`. Второй элемент кортежа при ошибке — `undefined`.
+При успехе: `error` — `null`, `user` — Struct-output для `200`, `response` — `HttpResponse`. При объявленном `404`: `error.code` — `'http'`, `error.status` — `404`, а `error.data` типизирован как `NotFound`. Второй элемент кортежа при ошибке — `undefined`.
 
 ## Шаг 4 — Укажи на реальный API
 
@@ -209,11 +205,11 @@ void realClient
 
 ## Когда результат другой
 
-- Плохой input / невалидная сборка / конфликтующие cancel-опции → `REQUEST_VALIDATION_FAILED`
-- Объявленный non-2xx → `HTTP_STATUS` с типизированным `error.data`
-- Объявленное тело не декодируется → `RESPONSE_VALIDATION_FAILED`
-- Статус без объявления → `UNDECLARED_STATUS` (до decode тела)
-- Падение Fetch / отмена / таймаут → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+- Плохой input → `REQ_INPUT_INVALID`; конфликтующие cancel-опции → `REQ_OPTIONS_INVALID`; падающий `build` → `REQ_BUILD_FAILED`
+- Любой non-2xx → `HTTP_STATUS`, с типизированным `err.data`, если объявлен `error`
+- Неверный media type → `RES_MEDIA_TYPE_INVALID`, сообщается до чтения тела
+- Объявленное тело не декодируется → `RES_DECODE_FAILED` или `RES_STRUCT_MISMATCH`
+- Падение Fetch / отмена / таймаут → `NET_UNREACHABLE` / `NET_ABORTED` / `NET_TIMEOUT`
 
 `timeout` — положительное safe integer в `1..2_147_483_647`. Не передавай `abort` и `timeout` вместе; `signal` можно комбинировать с любым из них. Отмена говорит, что увидел вызывающий — не то, закоммитил ли сервер запись.
 

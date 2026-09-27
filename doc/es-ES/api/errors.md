@@ -1,109 +1,147 @@
 ---
 title: Errores
-description: Variantes de RequestError y helpers factory.
+description: Variantes de fault y helpers de fábrica.
 ---
 
-# Errores
+# Errors
 
-El execute HTTP devuelve un `RequestError` discriminado en el primer hueco de la tupla — no una excepción lanzada para fallos declarados. Cada variante es un `Error` nativo: puedes registrar `String(error)` directamente, los metadatos de Defjs siguen siendo enumerables y `cause` usa la cadena causal nativa no enumerable.
+Execute devuelve un `Fault` discriminado en el primer hueco de la tupla, no una excepción lanzada para los fallos declarados.
 
-## RequestError {#RequestError}
+## FaultCode {#FaultCode}
 
 ```ts
-type RequestError<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type FaultCode =
+  | 'CAP_BUFFER_EXCEEDED'
+  | 'CAP_QUEUE_OVERFLOW'
+  | 'ENV_UNSUPPORTED'
+  | 'EXT_HOOK_FAILED'
+  | 'EXT_INTERCEPTOR_FAILED'
+  | 'EXT_OBSERVER_FAILED'
+  | 'HTTP_STATUS'
+  | 'NET_ABORTED'
+  | 'NET_BODY_INCOMPLETE'
+  | 'NET_TIMEOUT'
+  | 'NET_UNREACHABLE'
+  | 'REQ_BUILD_FAILED'
+  | 'REQ_INPUT_INVALID'
+  | 'REQ_OPTIONS_INVALID'
+  | 'RES_DECODE_FAILED'
+  | 'RES_MEDIA_TYPE_INVALID'
+  | 'RES_STRUCT_MISMATCH'
 ```
 
-Ramifica con `error.kind`: `'http' | 'transport' | 'definition'`.
+Un conjunto cerrado. El segmento antes del primer `_` es la clase; no hay un campo `kind` aparte. El conjunto se mantiene cerrado para que `switch (fault.code)` sea exhaustivo: las extensiones reportan su propio detalle por `cause`, no con un código nuevo.
 
-### HttpStatusError {#HttpStatusError}
+## FaultClass {#FaultClass}
 
 ```ts
-interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> extends Error {
-  kind: 'http'
-  code: 'HTTP_STATUS'
-  status: TStatus
-  message: string
-  data: TErrorData
-  response: HttpResponse<unknown>
-}
+type FaultClass<C extends string> = C extends `${infer TClass}_${string}` ? TClass : never
 ```
 
-Estado no 2xx declarado. Un estado no declarado no es esta variante, sino `kind: 'definition'` / `UNDECLARED_STATUS`.
+`FaultClass<FaultCode>` es `'CAP' | 'ENV' | 'EXT' | 'HTTP' | 'NET' | 'REQ' | 'RES'`.
 
-### TransportError {#TransportError}
+## Fault {#Fault}
 
 ```ts
-interface TransportError extends Error {
-  kind: 'transport'
-  code: 'ABORTED' | 'TIMEOUT' | 'NETWORK_ERROR'
-  message: string
-  cause?: unknown
-}
+type Fault<TErr extends AnyStruct | undefined = undefined> = DecodeFault | HttpStatusFault<TErr> | PreflightFault
 ```
 
-### DefinitionError {#DefinitionError}
+Haz switch sobre `fault.code`.
+
+Cada variante es un `Error` nativo llamado `DefjsFault`, así que `String(fault)` produce un `DefjsFault: <message>` directamente logueable. `code` y los metadatos de la variante — `status`, `response`, `data` — son propiedades propias enumerables. La cadena nativa `cause` no es enumerable.
 
 ```ts
-type DefinitionError =
-  | (Error & {
-      cause?: unknown
-      code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'INTERCEPTOR_FAILED'
-      kind: 'definition'
-      response?: HttpResponse<unknown>
-    })
-  | (Error & {
-      cause?: unknown
-      code: 'UNDECLARED_STATUS'
-      kind: 'definition'
-      response: HttpResponse<unknown>
-      status: number
-    })
-```
+import { StructError, type Fault } from '@defjs/core'
 
-`UNDECLARED_STATUS` es esta variante, no `HttpStatusError`. `INTERCEPTOR_FAILED` indica que un interceptor lanzó un error, no que se desconectó el socket.
-
-Los helpers `format()`, `flatten()` y `prettify()` solo pertenecen al `StructError` después de estrechar `cause`; no se copian al `DefinitionError` exterior:
-
-```ts
-import { StructError, type DefinitionError } from '@defjs/core'
-
-function describeDefinitionCause(error: DefinitionError): string | undefined {
-  if (error.cause instanceof StructError) {
-    return error.cause.prettify()
+function logFault(fault: Fault): void {
+  console.error(String(fault), { code: fault.code })
+  if (fault.cause instanceof StructError) {
+    console.error(fault.cause.prettify())
   }
-  return undefined
 }
 ```
 
-## Factorías
+Llama a `format()`, `flatten()` o `prettify()` solo después de estrechar `fault.cause` a `StructError`; esos helpers no se copian al fault.
 
-## createHttpStatusError() {#createHttpStatusError}
-
-## createTransportError() {#createTransportError}
-
-## createDefinitionError() {#createDefinitionError}
+### HttpStatusFault {#HttpStatusFault}
 
 ```ts
-declare function createHttpStatusError(status: number, message: string, response: HttpResponse<unknown>, data?: unknown): HttpStatusError
+type HttpStatusFaultOf<TData> = Error & {
+  code: 'HTTP_STATUS'
+  data: TData
+  response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>
+  status: number
+}
 
-declare function createTransportError(cause: unknown): TransportError
-
-declare function createDefinitionError(
-  code: 'UNDECLARED_STATUS',
-  cause: unknown,
-  response: HttpResponse<unknown>,
-): Extract<DefinitionError, { code: 'UNDECLARED_STATUS' }>
-
-declare function createDefinitionError(
-  code: Exclude<DefinitionError['code'], 'UNDECLARED_STATUS'>,
-  cause: unknown,
-  response?: HttpResponse<unknown>,
-): Extract<DefinitionError, { code: Exclude<DefinitionError['code'], 'UNDECLARED_STATUS'> }>
+type HttpStatusFault<TErr extends AnyStruct | undefined = undefined> = HttpStatusFaultOf<
+  [TErr] extends [undefined] ? undefined : Infer<TErr>
+>
 ```
 
-`createTransportError` mapea los sentinels de abort/timeout a `ABORTED` / `TIMEOUT`; todo lo demás a `NETWORK_ERROR`.
+Cualquier estado no-2xx. Si el endpoint declaró `error` y el cuerpo decodificó, `data` es ese cuerpo y `response` lo lleva. Si `error` se omitió, el cuerpo nunca se lee, lo que deja `data` en `undefined` y `response` como metadatos a secas.
 
-`UNDECLARED_STATUS` necesita `response`; una llamada a la factory sin ella lanza `TypeError`.
+### DecodeFault {#DecodeFault}
+
+```ts
+type DecodeFault = Error & {
+  cause: unknown
+  code: 'RES_DECODE_FAILED' | 'RES_MEDIA_TYPE_INVALID' | 'RES_STRUCT_MISMATCH'
+  response: HttpMeta
+  status: number
+}
+```
+
+Llegó una respuesta, pero no se pudo leer como se declaró. `response` son solo metadatos: un cuerpo **es** un valor decodificado, y la decodificación es justo lo que falló, así que no hay campo `body` al que acudir. El detalle culpable vive en `cause`: un `StructError` para un desajuste de struct, el fallo del parser para una representación ilegible.
+
+### PreflightFault {#PreflightFault}
+
+```ts
+type PreflightFault = Error & {
+  cause?: unknown
+  code: PreflightFaultCode
+  response?: HttpMeta
+}
+```
+
+Todo lo que pudo fallar antes de que existiera una respuesta: `REQ_*`, `NET_*`, `EXT_*`, `CAP_*`, `ENV_UNSUPPORTED`. `response` está presente solo donde el transporte ya tenía metadatos que reportar, como un cuerpo que se truncó a mitad de la descarga.
+
+### AnyFault {#AnyFault}
+
+```ts
+type AnyFault = DecodeFault | HttpStatusFaultOf<undefined> | HttpStatusFaultOf<unknown> | PreflightFault
+```
+
+Cualquier fault, sea cual sea el tipo de su cuerpo de error decodificado. Úsalo para handlers que clasifican faults sin importarles qué endpoint los produjo; prefiere `Fault<typeof yourErrorStruct>` donde el tipo del cuerpo importe.
+
+## Fábricas
+
+## createHttpStatusFault() {#createHttpStatusFault}
+
+## createUndecodedHttpStatusFault() {#createUndecodedHttpStatusFault}
+
+## createDecodeFault() {#createDecodeFault}
+
+## createNetworkFault() {#createNetworkFault}
+
+## createPreflightFault() {#createPreflightFault}
+
+```ts
+declare function createHttpStatusFault<TData>(response: DecodedResponse<TData>): HttpStatusFaultOf<TData>
+
+declare function createUndecodedHttpStatusFault(response: HttpMeta): HttpStatusFaultOf<undefined>
+
+declare function createDecodeFault(code: DecodeFaultCode, cause: unknown, response: HttpMeta): DecodeFault
+
+declare function createNetworkFault(cause: unknown, response?: HttpMeta): PreflightFault
+
+declare function createPreflightFault(code: PreflightFaultCode, cause?: unknown, response?: HttpMeta): PreflightFault
+```
+
+`createHttpStatusFault` toma una respuesta que ya lleva el cuerpo decodificado; `createUndecodedHttpStatusFault` toma solo metadatos, para un endpoint que no declaró `error`.
+
+`createNetworkFault` mapea los centinelas de abort y timeout a `NET_ABORTED` / `NET_TIMEOUT` y todo lo demás a `NET_UNREACHABLE`. `createPreflightFault` toma el código directamente; sin `cause`, el código pasa a ser el mensaje.
+
+Todas las fábricas devuelven instancias de `Error` nativo con los campos estructurados de arriba; no crean errores de objeto plano y no necesitan adaptador para `String(fault)`.
 
 ## Centinelas
 
@@ -116,6 +154,6 @@ const ERR_ABORTED: Error // message: 'Request was aborted'
 const ERR_TIMEOUT: Error // message: 'Request timed out'
 ```
 
-Valores compartidos de `cause` / message para abort y timeout.
+Valores compartidos de `cause` / mensaje para abort y timeout. Lanzar uno desde un interceptor es la forma en que un interceptor expresa la cancelación.
 
-Ver [guía de Errores](../core/errors.md).
+Mira la [guía de Errors](/es-ES/core/errors).

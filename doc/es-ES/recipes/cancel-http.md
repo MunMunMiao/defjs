@@ -1,6 +1,6 @@
 ---
 title: Cancelar una llamada HTTP
-description: Aborta o aplica timeout a un execute y lee ABORTED / TIMEOUT.
+description: Aborta o aplica timeout a un execute y lee NET_ABORTED / NET_TIMEOUT.
 ---
 
 # Cancelar una llamada HTTP
@@ -24,9 +24,9 @@ const pending = client.execute(getReport(), {
 controller.abort('screen closed')
 const [error] = await pending
 
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancelled')
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+} else if (error?.code === 'NET_TIMEOUT') {
   console.log('timed out')
 } else if (error) {
   console.error(error.code)

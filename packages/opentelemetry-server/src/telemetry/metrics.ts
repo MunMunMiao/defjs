@@ -79,7 +79,7 @@ export function createHttpMetricAttributes(req: HttpRequest, response?: HttpResp
     'http.request.method': req.method,
   }
 
-  const errorType = response ? getHttpResponseErrorType(response.status, response.error) : createErrorMetricAttributes(error)['error.type']
+  const errorType = response ? getHttpResponseErrorType(response.status) : createErrorMetricAttributes(error)['error.type']
   if (errorType) {
     attributes['error.type'] = errorType
   }

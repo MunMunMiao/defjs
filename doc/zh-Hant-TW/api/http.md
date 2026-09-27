@@ -13,7 +13,7 @@ description: defineRequest、execute options，以及 HTTP request／response �
 function defineRequest(definition: RequestDefinition): RequestCommandBuilder
 ```
 
-- **definition** — `method`、`path`、選填 `input` struct、依 status 對應的 `output`、選填 `operation` 與 `build`。
+- **definition** — `method`、`path`，可選 `input` struct，可選 `output` 與 `error` struct，可選 `operation` 與 `build`。
 - **回傳** builder。帶 input 呼叫就得到 `HttpCommand`。
 
 ```ts
@@ -25,13 +25,12 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 ```
 
-`output` 也可以是 `{ status, body }` 群組清單（多個 status 共用一個 body struct）。
+`output` 是 2xx body 的單一 struct；`error` 是每個非 2xx body 的單一 struct。兩者都不按狀態碼分鍵。省略哪個，那個 body 就根本不會被讀——見 [宣告即斷言](/zh-Hant-TW/guide/design-decisions#宣告即斷言)。
 
 ## executeHttpCommand() {#executeHttpCommand}
 
@@ -41,7 +40,9 @@ function executeHttpCommand(clientConfig: ClientConfig, command: HttpCommand, op
 
 `client.execute` 走的低階入口。寫功能時請呼叫 `client.execute(command, options)`。
 
-- **回傳** `[null, body, response]` 或 `[error, undefined, response?]`。
+- **回傳** `[null, data, response]` 或 `[fault, undefined, undefined]`。
+
+非 2xx 狀態一律是 `HTTP_STATUS`。宣告過 `error` 時它的 `data` 是解碼後的錯誤 body，否則是 `undefined`。失敗時 tuple 第三項是 `undefined`；回應 metadata 由 fault 攜帶。
 
 ## fetchHandler() {#fetchHandler}
 
@@ -49,7 +50,7 @@ function executeHttpCommand(clientConfig: ClientConfig, command: HttpCommand, op
 function fetchHandler(httpRequest: HttpRequest, fetchImpl?: typeof fetch): Promise<HttpResponse<unknown>>
 ```
 
-預設 HTTP 傳輸。除非被 `withHTTPHandle` 換掉。
+預設 HTTP 傳輸。除非被 `withHTTPHandle` 換掉。 它在沒有回應到達 client 時會 reject，而不是回傳一個合成回應。
 
 ## makeResponse() {#makeResponse}
 
@@ -57,7 +58,7 @@ function fetchHandler(httpRequest: HttpRequest, fetchImpl?: typeof fetch): Promi
 function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R>
 ```
 
-不打網路也能組出 `HttpResponse`（interceptors、測試）。預設 status 是 `0`。2xx 時 `ok` 為 true。
+不打網路也能組出 `HttpResponse`（interceptors、測試）。預設 status 是 `0`。2xx 時 `ok` 為 true。 它回傳的值會走和線上回應完全一樣的媒體類型檢查與宣告 struct；不存在受信任的短路。
 
 ## 執行 options
 
@@ -79,25 +80,51 @@ type HttpExecuteOptions = {
 
 ### RequestDefinition {#RequestDefinition}
 
-`method`、`path`、選填 `input`、`output`、`responseType`（`'json' | 'text' | 'blob' | 'arraybuffer'`）、`operation`、選填 `build`（自訂組裝 request；需要 `input`）。
+`method`、`path`，可選 `input`、`output`、`error`、`responseType`（`'json' | 'text' | 'blob' | 'arraybuffer'`）、`operation`，可選 `build`（自己組請求；需要 `input`）。
 
-### RequestOutputShape {#RequestOutputShape}
+### ResponseDeclaration {#ResponseDeclaration}
 
 ```ts
-type RequestOutputShape = { [status: number]: AnyStruct } | readonly { status: number | readonly number[]; body: AnyStruct }[]
+type ResponseDeclaration<TOutput, TError> = { output?: TOutput; error?: TError }
 ```
+
+`RequestDefinition` 裡 `output` / `error` 那一半。兩個都不寫時 `responseType` 也不允許：什麼都不解碼，它就沒什麼可選的。
 
 ### HttpAwaitResult {#HttpAwaitResult}
 
 ```ts
-type HttpAwaitResult<TSuccess, TErrorData> =
-  | [error: null, result: TSuccess, response: HttpResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: HttpResponse<unknown> | undefined]
+type HttpAwaitResult<TData = undefined, TErrorData = undefined> =
+  | [error: null, result: TData, response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>]
+  | [error: FaultOf<TErrorData>, result: undefined, response: undefined]
 ```
+
+成功時第三項只有在宣告過 `output` 時才帶 `body`。失敗時它是 `undefined`——fault 已經握著當時存在的回應 metadata。
 
 ### HttpRequest {#HttpRequest}
 
 正規化後的外送 request：`method`、`endpoint`、`headers`、`body`、`abort`、`operation`、progress hooks、`baseEndpoint`、query metadata。
+
+### HttpMeta {#HttpMeta}
+
+```ts
+type HttpMeta = {
+  readonly headers: Headers
+  readonly ok: boolean
+  readonly status: number
+  readonly statusText: string
+  readonly url: string
+}
+```
+
+回應 metadata，只要有回應到達 client 就有。它**不**帶 `body`：body 只有在宣告過的 struct 解出來之後才存在。
+
+### DecodedResponse {#DecodedResponse}
+
+```ts
+type DecodedResponse<TBody> = HttpMeta & { readonly body: TBody }
+```
+
+body 已按宣告的 struct 解碼成功的回應。拿到這個型別就是解碼確實發生過的證明——這也正是解碼失敗時只報 `HttpMeta` 的原因。
 
 ### HttpResponse {#HttpResponse}
 
@@ -108,10 +135,11 @@ type HttpResponse<R> = {
   readonly statusText: string
   readonly headers: Headers
   readonly body: R | null
-  readonly error?: unknown
   readonly ok: boolean
 }
 ```
+
+傳輸產出、interceptor 看到的線上形狀：`body` 是文字或已解析的 JSON，不是解碼後的值。到達呼叫方的是 `DecodedResponse`。
 
 ### HttpProgressEvent {#HttpProgressEvent}
 
@@ -119,11 +147,7 @@ type HttpResponse<R> = {
 
 `loaded`、`total`、`lengthComputable`。Callbacks 可以是 async。
 
-見 [HTTP 指南](../core/http.md) 與 [Commands](../core/commands.md)。
-
-## ResponseGroupItem {#ResponseGroupItem}
-
-`RequestOutputShape` 列表形態裡的一列 `{ status, body }`。`status` 可以是一個碼，也可以多個碼共用一個 body struct。
+見 [HTTP 指南](../core/http.md) 與 [Commands](../core/commands.md)。 回呼丟出錯誤就是 `EXT_OBSERVER_FAILED`。
 
 ## RequestCommandBuilder {#RequestCommandBuilder}
 
@@ -139,11 +163,11 @@ type HttpResponse<R> = {
 
 ## RequestSuccessData {#RequestSuccessData}
 
-從宣告過的 2xx `output` 推出的成功 body。
+從宣告的 `output` struct 推出來的成功 body；沒宣告時是 `undefined`。
 
 ## RequestErrorData {#RequestErrorData}
 
-從宣告過的非 2xx `output` 推出的錯誤 body。
+從宣告的 `error` struct 推出來的錯誤 body；沒宣告時是 `undefined`。
 
 ## HttpResponseType {#HttpResponseType}
 
@@ -151,4 +175,4 @@ type HttpResponse<R> = {
 
 ## MakeResponseOptions {#MakeResponseOptions}
 
-給 `makeResponse` 的欄位：`status`、`statusText`、`url`、`headers`、`body`、`error`。
+給 `makeResponse` 的欄位：`status`、`statusText`、`url`、`headers`、`body`、`request`。

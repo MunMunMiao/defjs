@@ -58,7 +58,7 @@ const notifications = defineEventStream({
 
 const [error, stream, startupOpen] = await client.execute(notifications())
 if (error) {
-  console.error(error.kind, error.code, startupOpen?.response.status)
+  console.error(error.code, startupOpen?.response.status)
 } else {
   console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
   stream.close('example-finished')
@@ -66,16 +66,16 @@ if (error) {
 }
 ```
 
-Response 一定要 successful，media type essence `text/event-stream`，同埋有 body。Non-2xx startup → `HTTP_STATUS`。Bad content type 或者 missing body → `RESPONSE_VALIDATION_FAILED`。Validation 喺 response 到咗之後先 fail 時，response snapshot 仍然可以坐喺 tuple 第三格。
+Response 一定要 successful，media type essence `text/event-stream`，同埋有 body。Non-2xx startup → `HTTP_STATUS`。Bad content type 或者 missing body → `RES_STRUCT_MISMATCH`。Validation 喺 response 到咗之後先 fail 時，response snapshot 仍然可以坐喺 tuple 第三格。
 
 `startupOpen` 係 initial snapshot。`stream.open` 係 live，之後嘅 physical opens 會變。第一次 response 重要時，keep 住 tuple value。
 
 ```typescript twoslash
-import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+import type { EventStreamHandle, EventStreamOpenInfo, Fault } from '@defjs/core'
 
 type StreamResult<T> =
   | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [error: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 
 const result: StreamResult<string> | undefined = undefined
 void result
@@ -149,10 +149,10 @@ Latest parsed event ID 會喺之後嘅 attempt 變成 `Last-Event-ID`。Unbounde
 
 兩個都一定要係 positive safe integers。Overflow 係 fatal — 唔會 silent discard 舊 events。
 
-| Limit           | Protects                                       | Terminal code           |
-| --------------- | ---------------------------------------------- | ----------------------- |
-| `maxBufferSize` | Parsing 時 incomplete/oversized SSE line/event | `PARSER_LIMIT_EXCEEDED` |
-| `maxQueueSize`  | Events 產出快過唯一個 consumer 讀              | `QUEUE_OVERFLOW`        |
+| Limit           | Protects                                       | Terminal code         |
+| --------------- | ---------------------------------------------- | --------------------- |
+| `maxBufferSize` | Parsing 時 incomplete/oversized SSE line/event | `CAP_BUFFER_EXCEEDED` |
+| `maxQueueSize`  | Events 產出快過唯一個 consumer 讀              | `CAP_QUEUE_OVERFLOW`  |
 
 Fatal stream 亦會清 buffered events、cancel active body、reject iterator，再用 `code: 'error'` resolve `stream.closed`。
 
@@ -175,7 +175,7 @@ const api: StreamApi<string> = handle
 void api
 ```
 
-Terminal codes：`eof`、`aborted` 或者 `error`。`error` result 亦會帶 `EventStreamErrorCode`：`INVALID_RESPONSE`、`MESSAGE_PROCESSING_FAILED`、`PARSER_LIMIT_EXCEEDED`、`QUEUE_OVERFLOW`、`TIMEOUT` 或者 `TRANSPORT_ERROR`。
+Terminal codes：`eof`、`aborted` 或者 `error`。`error` result 亦會帶 `EventStreamFaultCode`：`RES_MEDIA_TYPE_INVALID`、`EXT_OBSERVER_FAILED`、`CAP_BUFFER_EXCEEDED`、`CAP_QUEUE_OVERFLOW`、`NET_TIMEOUT` 或者 `TRANSPORT_ERROR`。
 
 `close(reason)` 會 abort active attempt、close queue、settle 成 `aborted`。Loop `break` / `return` / throw 會 invoke iterator return，再用 `iterator-return` close。Execute command 嘅 code own closure。
 

@@ -36,20 +36,16 @@ describe('request http response type declarations', () => {
 
     const useJsonResponse = defineRequest({
       method: 'GET',
-      output: {
-        200: struct.object({
-          id: struct.number(),
-        }),
-      },
+      output: struct.object({
+        id: struct.number(),
+      }),
       responseType: 'json',
       path: '/json-text',
     })
 
     const useTextResponse = defineRequest({
       method: 'GET',
-      output: {
-        200: struct.string(),
-      },
+      output: struct.string(),
       responseType: 'text',
       path: '/plain-text',
     })
@@ -84,19 +80,15 @@ describe('request http response type declarations', () => {
     )
     const useMissing = defineRequest({
       method: 'GET',
-      output: {
-        200: responseType === 'blob' ? struct.blob() : struct.arrayBuffer(),
-        404: struct.object({ message: struct.string() }),
-      },
+      output: responseType === 'blob' ? struct.blob() : struct.arrayBuffer(),
+      error: struct.object({ message: struct.string() }),
       path: '/missing',
       responseType,
     })
     const useOk = defineRequest({
       method: 'GET',
-      output: {
-        200: responseType === 'blob' ? struct.blob() : struct.arrayBuffer(),
-        404: struct.object({ message: struct.string() }),
-      },
+      output: responseType === 'blob' ? struct.blob() : struct.arrayBuffer(),
+      error: struct.object({ message: struct.string() }),
       path: '/ok',
       responseType,
     })
@@ -105,9 +97,9 @@ describe('request http response type declarations', () => {
     const [okError, okResult] = await client.execute(useOk())
 
     expect(result).toBeUndefined()
-    expect(error?.kind).toBe('http')
-    if (error?.kind !== 'http') {
-      throw new Error('Expected http error')
+    expect(error?.code).toBe('HTTP_STATUS')
+    if (error?.code !== 'HTTP_STATUS') {
+      throw new Error('Expected an http status fault')
     }
     expect(typeof error.data.message).toBe('string')
     expect(error.data.message).toBe('gone')
@@ -144,10 +136,8 @@ describe('request http response type declarations', () => {
     )
     const useRequest = defineRequest({
       method: 'GET',
-      output: {
-        200: struct.arrayBuffer(),
-        404: struct.object({ message: struct.string() }),
-      },
+      output: struct.arrayBuffer(),
+      error: struct.object({ message: struct.string() }),
       path: '/missing',
       responseType: 'arraybuffer',
     })
@@ -155,9 +145,9 @@ describe('request http response type declarations', () => {
     const messages = []
     for (let i = 0; i < payloads.length; i += 1) {
       const [error] = await client.execute(useRequest())
-      expect(error?.kind).toBe('http')
-      if (error?.kind !== 'http') {
-        throw new Error('Expected http error')
+      expect(error?.code).toBe('HTTP_STATUS')
+      if (error?.code !== 'HTTP_STATUS') {
+        throw new Error('Expected an http status fault')
       }
       messages.push(error.data.message)
     }
@@ -172,18 +162,16 @@ describe('request http response type declarations', () => {
     )
     const useRequest = defineRequest({
       method: 'GET',
-      output: {
-        200: struct.arrayBuffer(),
-        404: struct.string(),
-      },
+      output: struct.arrayBuffer(),
+      error: struct.string(),
       path: '/missing',
       responseType: 'arraybuffer',
     })
 
     const [error] = await client.execute(useRequest())
-    expect(error?.kind).toBe('http')
-    if (error?.kind !== 'http') {
-      throw new Error('Expected http error')
+    expect(error?.code).toBe('HTTP_STATUS')
+    if (error?.code !== 'HTTP_STATUS') {
+      throw new Error('Expected an http status fault')
     }
     expect(error.data).toBe('missing')
   })
@@ -195,13 +183,15 @@ describe('request http response type declarations', () => {
     )
     const useBlob = defineRequest({
       method: 'GET',
-      output: { 200: struct.arrayBuffer(), 404: struct.blob() },
+      output: struct.arrayBuffer(),
+      error: struct.blob(),
       path: '/missing-blob',
       responseType: 'arraybuffer',
     })
     const useFile = defineRequest({
       method: 'GET',
-      output: { 200: struct.arrayBuffer(), 404: struct.file() },
+      output: struct.arrayBuffer(),
+      error: struct.file(),
       path: '/missing-file',
       responseType: 'arraybuffer',
     })
@@ -209,8 +199,8 @@ describe('request http response type declarations', () => {
     const [blobError] = await client.execute(useBlob())
     const [fileError] = await client.execute(useFile())
 
-    expect(blobError?.kind).toBe('definition')
-    expect(fileError?.kind).toBe('definition')
+    expect(blobError?.code).toBe('RES_STRUCT_MISMATCH')
+    expect(fileError?.code).toBe('RES_STRUCT_MISMATCH')
   })
 
   test('should keep a declared arraybuffer error body off the JSON decode path', async () => {
@@ -220,13 +210,14 @@ describe('request http response type declarations', () => {
     )
     const useRequest = defineRequest({
       method: 'GET',
-      output: { 200: struct.object({ ok: struct.boolean() }), 404: struct.arrayBuffer() },
+      output: struct.object({ ok: struct.boolean() }),
+      error: struct.arrayBuffer(),
       path: '/missing-bytes',
       responseType: 'json',
     })
 
     const [error] = await client.execute(useRequest())
-    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('RES_STRUCT_MISMATCH')
   })
 
   test('should parse a declared text error from a non-binary interceptor body', async () => {
@@ -236,15 +227,13 @@ describe('request http response type declarations', () => {
     )
     const useRequest = defineRequest({
       method: 'GET',
-      output: {
-        200: struct.arrayBuffer(),
-        404: struct.string(),
-      },
+      output: struct.arrayBuffer(),
+      error: struct.string(),
       path: '/missing',
       responseType: 'arraybuffer',
     })
 
     const [error] = await client.execute(useRequest())
-    expect(error?.kind).toBe('definition')
+    expect(error?.code).toBe('RES_STRUCT_MISMATCH')
   })
 })

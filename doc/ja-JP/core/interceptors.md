@@ -170,7 +170,16 @@ const retrySafeReads = createHttpInterceptor(async (request, next) => {
 })
 ```
 
-投げられたインターセプター/Fetch エラーは、このループではリトライしません。status `0` は Fetch 境界のトランスポート失敗レスポンスです。`POST` / `PUT` / `PATCH` / `DELETE` のリトライには、再生可能なバイト、サーバー側の支持、冪等性の契約、レビュー済み status 方針が要ります。
+投げられたインターセプター/Fetch エラーは、このループではリトライしません。トランスポート失敗は reject するので、このループが照合できる status がそもそも出てきません。`POST` / `PUT` / `PATCH` / `DELETE` のリトライには、再生可能なバイト、サーバー側の支持、冪等性の契約、レビュー済み status 方針が要ります。リトライはあなたの責任です — Core は `retryAfter()` を公開しません。
+
+このサンプルの外で throw（または reject）したインターセプターは、`EXT_INTERCEPTOR_FAILED` として
+呼び出し側に返り、投げた値は `cause` に載ります — [エラー](./errors.md) を参照してください。
+キャンセルを表したいときは、代わりに `ERR_ABORTED` か `ERR_TIMEOUT` を throw します。
+
+`next(request)` は reject しえます。トランスポート失敗は fault であって status 0 のレスポンスでは
+ないので、観測したいインターセプターは `next` を `try` / `catch` で囲みます。それでも Defjs の帰属は
+正しいままです。トランスポート由来の reject は `NET_*` fault のままで、あなたのインターセプターの
+せいにはなりません。
 
 ## WebSocket セッションを包む
 
@@ -219,7 +228,7 @@ const preserveSession = createWebSocketInterceptor(async (request, next) => {
 
 ファクトリはタグ付きトランスポート値を返します。
 
-- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createHttpInterceptor(fn)` → `{ fn }`
 - `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
 - `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
 - `basicAuthHttpInterceptor(provider, options?)` — HTTP の Basic 資格情報

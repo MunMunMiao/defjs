@@ -170,9 +170,16 @@ const retrySafeReads = createHttpInterceptor(async (request, next) => {
 })
 ```
 
-Thrown interceptor/Fetch errors этот loop не ретраит. Status `0` — Fetch-boundary transport-failure response. Ретрай `POST` / `PUT` / `PATCH` / `DELETE` нуждается в replayable bytes, поддержке сервера, контракте идемпотентности и проверенной status policy.
+Thrown interceptor/Fetch errors этот loop не ретраит — transport failure реджектит, а не выдаёт status, на который этот loop мог бы сматчиться. Ретрай `POST` / `PUT` / `PATCH` / `DELETE` нуждается в replayable bytes, поддержке сервера, контракте идемпотентности и проверенной status policy. Ретрай — на тебе: Core не экспортирует `retryAfter()`.
 
-Если interceptor бросает или rejects вне этого примера, вызывающий получает `kind: 'definition'` / `INTERCEPTOR_FAILED` — см. [Ошибки](./errors.md).
+Interceptor, который throwит (или реджектит) вне этого примера, возвращается вызывающему как
+`EXT_INTERCEPTOR_FAILED`, а брошенное значение лежит на `cause` — см. [Ошибки](./errors.md). Чтобы
+выразить отмену, вместо этого throwят `ERR_ABORTED` или `ERR_TIMEOUT`.
+
+`next(request)` может зареджектить. Transport failure — это fault, а не response со status 0,
+поэтому interceptor, который хочет его увидеть, оборачивает `next` в `try` / `catch`. Атрибуция у
+Defjs при этом остаётся правильной: reject, пришедший из транспорта, остаётся `NET_*` fault, а не
+виной твоего interceptor’а.
 
 ## Оберни WebSocket-сессии
 
@@ -221,7 +228,7 @@ Spread session снимает snapshot `state` / `connection` / `bufferedAmount`
 
 Factories возвращают tagged transport values:
 
-- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createHttpInterceptor(fn)` → `{ fn }`
 - `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
 - `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
 - `basicAuthHttpInterceptor(provider, options?)` — Basic credentials на HTTP

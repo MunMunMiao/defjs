@@ -170,9 +170,16 @@ const retrySafeReads = createHttpInterceptor(async (request, next) => {
 })
 ```
 
-Thrown interceptor/Fetch errors aren’t retried by this loop. Status `0` is the Fetch-boundary transport-failure response. Retrying `POST` / `PUT` / `PATCH` / `DELETE` needs replayable bytes, server support, an idempotency contract, and a reviewed status policy. You own retry — Core does not export `retryAfter()`.
+Thrown interceptor/Fetch errors aren’t retried by this loop — a transport failure rejects instead of producing a status this loop could match on. Retrying `POST` / `PUT` / `PATCH` / `DELETE` needs replayable bytes, server support, an idempotency contract, and a reviewed status policy. You own retry — Core does not export `retryAfter()`.
 
-An interceptor that throws (or rejects) outside this sample is returned to the caller as `kind: 'definition'` / `INTERCEPTOR_FAILED` — see [Errors](./errors.md).
+An interceptor that throws (or rejects) outside this sample is returned to the caller as
+`EXT_INTERCEPTOR_FAILED`, with the thrown value on `cause` — see [Errors](./errors.md). Throwing
+`ERR_ABORTED` or `ERR_TIMEOUT` is how an interceptor expresses cancellation instead.
+
+`next(request)` can reject. A transport failure is a fault, not a status-0 response, so an
+interceptor that wants to observe one uses `try` / `catch` around `next`. Defjs still attributes it
+correctly: a rejection that came from the transport stays a `NET_*` fault rather than being blamed
+on your interceptor.
 
 ## Wrap WebSocket sessions
 
@@ -221,7 +228,7 @@ Spreading a session snapshots `state` / `connection` / `bufferedAmount` once. Pr
 
 Factories return tagged transport values:
 
-- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createHttpInterceptor(fn)` → `{ fn }`
 - `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
 - `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
 - `basicAuthHttpInterceptor(provider, options?)` — Basic credentials on HTTP

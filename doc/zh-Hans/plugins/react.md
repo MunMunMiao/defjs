@@ -38,7 +38,7 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: { 200: struct.object({ name: struct.string() }) },
+  output: struct.object({ name: struct.string() }),
 })
 
 export function UserName({ id }: { id: number }) {
@@ -75,7 +75,7 @@ import { useClient } from '@defjs/react'
 const health = defineRequest({
   method: 'GET',
   path: '/health',
-  output: { 200: struct.object({ ok: struct.boolean() }) },
+  output: struct.object({ ok: struct.boolean() }),
 })
 
 export function HealthCheck() {
@@ -84,7 +84,7 @@ export function HealthCheck() {
   const check = async () => {
     const [error, result] = await client.execute(health())
     if (error) {
-      console.error(error.kind, error.code)
+      console.error(error.code)
       return
     }
     console.log(result.ok)
@@ -115,7 +115,7 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: { 200: struct.object({ name: struct.string() }) },
+  output: struct.object({ name: struct.string() }),
 })
 
 export function useUserQueryFn(id: number) {

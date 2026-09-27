@@ -1,7 +1,6 @@
 import type { HttpRequest } from '@defjs/core'
 import type { Attributes, Context } from '@opentelemetry/api'
 import type { Span, Tracer } from '@opentelemetry/api'
-import { createTransportError } from '@defjs/core'
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api'
 
 const spanStatusSet = new WeakMap<Span, boolean>()
@@ -74,12 +73,12 @@ export function createWebSocketSpan(
   )
 }
 
-export function setSpanHttpResponse(span: Span, status: number, error?: unknown): void {
+export function setSpanHttpResponse(span: Span, status: number): void {
   if (status !== 0) {
     span.setAttribute('http.response.status_code', status)
   }
 
-  const errorType = getHttpResponseErrorType(status, error)
+  const errorType = getHttpResponseErrorType(status)
   if (errorType) {
     span.setAttribute('error.type', errorType)
     span.setStatus({ code: SpanStatusCode.ERROR })
@@ -144,11 +143,9 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-export function getHttpResponseErrorType(status: number, error?: unknown): string | undefined {
-  if (status === 0) {
-    const errorCode = createTransportError(error).code
-    return errorCode === 'ABORTED' ? undefined : errorCode
-  }
+export function getHttpResponseErrorType(status: number): string | undefined {
+  // Status 0 only reaches here from a synthetic interceptor response; a real transport failure is
+  // a fault and never arrives as a response at all.
   if (status >= 400) {
     return String(status)
   }

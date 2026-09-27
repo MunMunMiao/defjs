@@ -36,15 +36,13 @@ const createUser = defineRequest({
       }),
     ),
   }),
-  output: [
-    { status: 201, body: User },
-    { status: [400, 409], body: ApiError },
-  ],
+  output: User,
+  error: ApiError,
 })
 
 const [error, user, response] = await client.execute(createUser({ body: { name: 'Ada', email: 'ada@example.com' } }))
 
-if (error?.kind === 'http') {
+if (error?.code === 'HTTP_STATUS') {
   console.error(error.status, error.data.message)
 } else if (error) {
   console.error(error.code)

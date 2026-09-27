@@ -170,7 +170,16 @@ const retrySafeReads = createHttpInterceptor(async (request, next) => {
 })
 ```
 
-Thrown Interceptor-/Fetch-Errors werden von diesem Loop nicht retried. Status `0` ist die Fetch-Boundary-Transport-Failure-Response. `POST` / `PUT` / `PATCH` / `DELETE` zu retryen braucht replayable Bytes, Server-Support, einen Idempotency-Vertrag und eine reviewed Status-Policy.
+Thrown Interceptor-/Fetch-Errors werden von diesem Loop nicht retried — ein Transport-Failure rejectet, statt einen Status zu produzieren, auf den dieser Loop matchen könnte. `POST` / `PUT` / `PATCH` / `DELETE` zu retryen braucht replayable Bytes, Server-Support, einen Idempotency-Vertrag und eine reviewed Status-Policy. Retry gehört dir — Core exportiert kein `retryAfter()`.
+
+Ein Interceptor, der außerhalb dieses Samples throwt (oder rejectet), kommt beim Caller als
+`EXT_INTERCEPTOR_FAILED` an, mit dem geworfenen Wert auf `cause` — siehe [Errors](./errors.md).
+`ERR_ABORTED` oder `ERR_TIMEOUT` zu throwen ist stattdessen die Art, wie ein Interceptor Cancellation ausdrückt.
+
+`next(request)` kann rejecten. Ein Transport-Failure ist ein Fault, keine Status-0-Response — ein
+Interceptor, der einen beobachten will, legt also `try` / `catch` um `next`. Defjs ordnet ihn trotzdem
+korrekt zu: ein Rejection, das vom Transport kam, bleibt ein `NET_*`-Fault und wird nicht deinem
+Interceptor angelastet.
 
 ## WebSocket-Sessions wrappen
 
@@ -219,7 +228,7 @@ Spread einer Session snapshotet `state` / `connection` / `bufferedAmount` einmal
 
 Factories geben tagged Transport-Values zurück:
 
-- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createHttpInterceptor(fn)` → `{ fn }`
 - `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
 - `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
 - `basicAuthHttpInterceptor(provider, options?)` — Basic Credentials auf HTTP

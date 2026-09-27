@@ -51,7 +51,7 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: { 200: struct.object({ name: struct.string() }) },
+  output: struct.object({ name: struct.string() }),
 })
 
 watch(

@@ -5,7 +5,7 @@ description: Выполни один GET и ветвись по типизиро
 
 # GET с объявленным 404
 
-Объяви и success, и 404 тела. Ветвись по `error.kind` и `error.status` — для объявленного miss получишь типизированный `error.data`.
+Объяви и success, и 404 тела. Ветвись по `error.code` и `error.status` — для объявленного miss получишь типизированный `error.data`.
 
 Подробности — в [HTTP](../core/http.md) и [Ошибки](../core/errors.md).
 
@@ -20,18 +20,16 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }))
 
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (error) {
-  console.error(error.kind, error.code)
+  console.error(error.code)
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
 }
@@ -41,4 +39,4 @@ if (error?.kind === 'http' && error.status === 404) {
 Loaded Ada from 200
 ```
 
-Необъявленный статус становится `UNDECLARED_STATUS` до decode тела — объявляй каждый статус, который тебе важен.
+Любой non-2xx статус — это `HTTP_STATUS`. Объявленный `error` даёт его телу тип; без `error` `err.data` остаётся `undefined`, а тело не читают. Один Struct `error` покрывает все non-2xx статусы, поэтому при разных формах используй `struct.or(...)` или размеченное объединение.

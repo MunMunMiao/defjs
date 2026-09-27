@@ -1,121 +1,113 @@
-import type { HttpResponse } from '../internal/http_response'
-import type { DefinitionError, HttpStatusError, TransportError } from './types'
+import type { DecodedResponse, HttpMeta } from '../internal/http_response'
+import { getHttpErrorMessage } from '../internal/http_response'
+import { describeCause, ERR_ABORTED, ERR_TIMEOUT, isAbortCause, isTimeoutCause } from './cause'
 
-/** Shared cause/message sentinel for aborted requests. */
-export const ERR_ABORTED = new Error('Request was aborted')
+export { ERR_ABORTED, ERR_TIMEOUT } from './cause'
+import type { DecodeFault, DecodeFaultCode, HttpStatusFaultOf, PreflightFault, PreflightFaultCode } from './types'
 
-/** Shared cause/message sentinel for timed-out requests. */
-export const ERR_TIMEOUT = new Error('Request timed out')
+const FAULT_NAME = 'DefjsFault'
+
+function createFault<TFault extends Error>(message: string, cause?: unknown): TFault {
+  const fault = (cause === undefined ? new Error(message) : new Error(message, { cause })) as TFault
+  Object.defineProperty(fault, 'name', { configurable: true, enumerable: false, value: FAULT_NAME, writable: true })
+  if (cause === undefined) {
+    Object.defineProperty(fault, 'cause', { configurable: true, enumerable: false, value: undefined, writable: true })
+  }
+  return fault
+}
+
+function buildHttpStatusFault<TData>(response: HttpMeta, data: TData): HttpStatusFaultOf<TData> {
+  const fault = createFault<HttpStatusFaultOf<TData>>(getHttpErrorMessage(response))
+  fault.code = 'HTTP_STATUS'
+  fault.data = data
+  fault.response = response as HttpStatusFaultOf<TData>['response']
+  fault.status = response.status
+  return fault
+}
 
 /**
- * Build a `TransportError` from an abort, timeout, or other network cause.
+ * Build the fault for a non-2xx response whose body decoded against the declared `error` struct.
  *
- * @param cause - Underlying abort/timeout/error value.
- * @returns A normalized `TransportError`.
+ * @param response - The response, carrying the decoded body.
+ * @returns An `HTTP_STATUS` fault whose `data` is that body.
  */
-export function createTransportError(cause: unknown): TransportError {
+export function createHttpStatusFault<TData>(response: DecodedResponse<TData>): HttpStatusFaultOf<TData> {
+  return buildHttpStatusFault(response, response.body)
+}
+
+/**
+ * Build the fault for a non-2xx response that was never decoded, because the endpoint
+ * declared no `error` struct.
+ *
+ * @param response - Metadata of the response; no body was read.
+ * @returns An `HTTP_STATUS` fault whose `data` is `undefined`.
+ */
+export function createUndecodedHttpStatusFault(response: HttpMeta): HttpStatusFaultOf<undefined> {
+  return buildHttpStatusFault(response, undefined)
+}
+
+/**
+ * Build the fault for a response that arrived but could not be read as declared.
+ *
+ * Carries metadata only: a body is a decoded value, and decoding is what failed.
+ *
+ * @param code - Which read step failed.
+ * @param cause - Underlying parser or struct failure.
+ * @param response - Metadata of the response that could not be read.
+ * @returns A decode fault with no body.
+ */
+export function createDecodeFault(code: DecodeFaultCode, cause: unknown, response: HttpMeta): DecodeFault {
+  const fault = createFault<DecodeFault>(describeCause(cause), cause)
+  fault.code = code
+  fault.response = response
+  fault.status = response.status
+  return fault
+}
+
+/**
+ * Build a fault for a failure that may have happened before any response existed.
+ *
+ * @param code - The specific failure.
+ * @param cause - Underlying value, when there is one; the code becomes the message otherwise.
+ * @param response - Metadata, only where the transport already had some to report.
+ * @returns A preflight fault.
+ */
+export function createPreflightFault(code: PreflightFaultCode, cause?: unknown, response?: HttpMeta): PreflightFault {
+  const fault = createFault<PreflightFault>(cause === undefined ? code : describeCause(cause), cause)
+  fault.code = code
+  if (response !== undefined) {
+    fault.response = response
+  }
+  return fault
+}
+
+/**
+ * Build a `NET_*` fault, choosing the code from the shape of `cause`.
+ *
+ * Recognizes the shared abort/timeout sentinels and the platform's `AbortError`/`TimeoutError`;
+ * anything else is reported as unreachable.
+ *
+ * @param cause - Underlying cancellation, timeout, or transport failure.
+ * @param response - Metadata, only where the transport already had some to report.
+ * @returns A `NET_ABORTED`, `NET_TIMEOUT`, or `NET_UNREACHABLE` fault.
+ */
+export function createNetworkFault(cause: unknown, response?: HttpMeta): PreflightFault {
   if (isAbortCause(cause)) {
-    const error = new Error(ERR_ABORTED.message, { cause }) as TransportError
-    Object.defineProperty(error, 'name', { configurable: true, enumerable: false, value: 'TransportError', writable: true })
-    error.code = 'ABORTED'
-    error.kind = 'transport'
-    return error
+    return withResponse(createFault<PreflightFault>(ERR_ABORTED.message, cause), 'NET_ABORTED', response)
   }
 
   if (isTimeoutCause(cause)) {
-    const error = new Error(cause instanceof Error && cause.message ? cause.message : ERR_TIMEOUT.message, { cause }) as TransportError
-    Object.defineProperty(error, 'name', { configurable: true, enumerable: false, value: 'TransportError', writable: true })
-    error.code = 'TIMEOUT'
-    error.kind = 'transport'
-    return error
+    const message = cause instanceof Error && cause.message ? cause.message : ERR_TIMEOUT.message
+    return withResponse(createFault<PreflightFault>(message, cause), 'NET_TIMEOUT', response)
   }
 
-  const error = new Error(cause instanceof Error ? cause.message : 'Network error', { cause }) as TransportError
-  Object.defineProperty(error, 'name', { configurable: true, enumerable: false, value: 'TransportError', writable: true })
-  error.code = 'NETWORK_ERROR'
-  error.kind = 'transport'
-  return error
+  return withResponse(createFault<PreflightFault>(describeCause(cause), cause), 'NET_UNREACHABLE', response)
 }
 
-/**
- * Build a `DefinitionError` for request/response validation or undeclared status.
- *
- * @param code - Definition error code.
- * @param cause - Underlying validation or status failure.
- * @param response - HTTP response; required for `UNDECLARED_STATUS` (status is taken from it).
- * @returns A normalized `DefinitionError`.
- */
-export function createDefinitionError(
-  code: 'UNDECLARED_STATUS',
-  cause: unknown,
-  response: HttpResponse<unknown>,
-): Extract<DefinitionError, { code: 'UNDECLARED_STATUS' }>
-export function createDefinitionError(
-  code: Exclude<DefinitionError['code'], 'UNDECLARED_STATUS'>,
-  cause: unknown,
-  response?: HttpResponse<unknown>,
-): Extract<DefinitionError, { code: Exclude<DefinitionError['code'], 'UNDECLARED_STATUS'> }>
-export function createDefinitionError(code: DefinitionError['code'], cause: unknown, response?: HttpResponse<unknown>): DefinitionError {
-  if (code === 'UNDECLARED_STATUS') {
-    if (!response) {
-      throw new TypeError('UNDECLARED_STATUS requires a response')
-    }
-    const error = new Error(cause instanceof Error ? cause.message : String(cause), { cause }) as Extract<
-      DefinitionError,
-      { code: 'UNDECLARED_STATUS' }
-    >
-    Object.defineProperty(error, 'name', { configurable: true, enumerable: false, value: 'DefinitionError', writable: true })
-    error.code = code
-    error.kind = 'definition'
-    error.response = response
-    error.status = response.status
-    return error
+function withResponse(fault: PreflightFault, code: PreflightFaultCode, response?: HttpMeta): PreflightFault {
+  fault.code = code
+  if (response !== undefined) {
+    fault.response = response
   }
-
-  const error = new Error(cause instanceof Error ? cause.message : String(cause), { cause }) as Extract<
-    DefinitionError,
-    { code: Exclude<DefinitionError['code'], 'UNDECLARED_STATUS'> }
-  >
-  Object.defineProperty(error, 'name', { configurable: true, enumerable: false, value: 'DefinitionError', writable: true })
-  error.code = code
-  error.kind = 'definition'
-  error.response = response
-  return error
-}
-
-/**
- * Build an `HttpStatusError` for a non-success HTTP status.
- *
- * @param status - HTTP status code.
- * @param message - Human-readable error message.
- * @param response - Full HTTP response.
- * @param data - Optional parsed error body.
- * @returns A normalized `HttpStatusError`.
- */
-export function createHttpStatusError<TErrorData = unknown, TStatus extends number = number>(
-  status: TStatus,
-  message: string,
-  response: HttpResponse<unknown>,
-  data?: TErrorData,
-): HttpStatusError<TErrorData, TStatus> {
-  const error = new Error(message) as HttpStatusError<TErrorData, TStatus>
-  Object.defineProperty(error, 'name', { configurable: true, enumerable: false, value: 'HttpStatusError', writable: true })
-  error.code = 'HTTP_STATUS'
-  error.data = data as TErrorData
-  error.kind = 'http'
-  error.response = response
-  error.status = status
-  return error
-}
-
-function isAbortCause(cause: unknown): boolean {
-  return cause === ERR_ABORTED || (cause instanceof DOMException && cause.name === 'AbortError')
-}
-
-function isTimeoutCause(cause: unknown): boolean {
-  return (
-    cause === ERR_TIMEOUT ||
-    (cause instanceof DOMException && cause.name === 'TimeoutError') ||
-    (cause instanceof Error && cause.name === 'TimeoutError')
-  )
+  return fault
 }

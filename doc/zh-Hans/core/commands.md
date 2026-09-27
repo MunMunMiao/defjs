@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,14 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## 状态 output 形状
+## `output` 和 `error` 的形状
 
-`output` 可以是 status → Struct 映射，也可以是 `{ status, body }[]`。精确状态优先。数组形式：后面的匹配会覆盖前面的分组匹配。没有匹配声明 → body 解码前就是 `UNDECLARED_STATUS`。
+`output` 是 2xx body 的单一 Struct；`error` 是其余一切的单一 Struct。`ok` 是唯一分流点，且只有一边会解码。省略一边意味着那个 body 根本不会被读：fault 带着状态，`data` 保持 `undefined`。
 
 ## 相关配方
 

@@ -121,7 +121,7 @@ describe('web socket runtime reconnect', () => {
 
     expect(socket).toBeUndefined()
     expect(connection?.url).toBe('ws://127.0.0.1:1/ws/reconnect')
-    expect(error?.kind).toBe('transport')
+    expect(error?.code.startsWith('NET_')).toBe(true)
     expect(attempts).toEqual([1, 2])
   })
 

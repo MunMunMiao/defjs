@@ -5,7 +5,6 @@ import { createClientConfig } from './config'
 import type { ClientOption } from './option'
 import type { HttpCommand, HttpExecuteOptions } from '../http/http'
 import { executeHttpCommand } from '../http/http'
-import type { RequestOutputShape } from '../http/request'
 import type { EventStructs, EventStreamCommand, EventStreamData, EventStreamExecuteOptions, StreamAwaitResult } from '../sse/sse'
 import { executeEventStreamCommand } from '../sse/sse'
 import type { AnyStruct } from '../struct'
@@ -40,10 +39,10 @@ export type Client = {
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
 
   /** Run an HTTP command and return an await-result tuple. */
-  execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
-    command: HttpCommand<TInput, TOutput>,
+  execute<TInput extends AnyStruct | undefined, TOutput extends AnyStruct | undefined, TError extends AnyStruct | undefined>(
+    command: HttpCommand<TInput, TOutput, TError>,
     options?: HttpExecuteOptions,
-  ): ReturnType<typeof executeHttpCommand<TInput, TOutput>>
+  ): ReturnType<typeof executeHttpCommand<TInput, TOutput, TError>>
 }
 
 /**
@@ -74,10 +73,10 @@ export function createClient(...options: ClientOption[]): Client {
     command: WebSocketCommand<TInput, TIncoming, TOutgoing>,
     options?: WebSocketExecuteOptions<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>,
   ): Promise<SocketAwaitResult<WebSocketIncomingData<TIncoming>, WebSocketOutgoingData<TOutgoing>>>
-  function execute<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
-    command: HttpCommand<TInput, TOutput>,
+  function execute<TInput extends AnyStruct | undefined, TOutput extends AnyStruct | undefined, TError extends AnyStruct | undefined>(
+    command: HttpCommand<TInput, TOutput, TError>,
     options?: HttpExecuteOptions,
-  ): ReturnType<typeof executeHttpCommand<TInput, TOutput>>
+  ): ReturnType<typeof executeHttpCommand<TInput, TOutput, TError>>
   function execute(command: Command, options?: unknown): Promise<unknown> {
     if (isHttpCommand(command)) {
       return executeHttpCommand(conf, command, options as HttpExecuteOptions | undefined)

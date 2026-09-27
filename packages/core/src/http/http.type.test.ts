@@ -2,16 +2,19 @@ import { expectTypeOf } from 'vitest'
 import type { HTTP_COMMAND } from '../client/command'
 import { COMMAND_TYPE } from '../client/command'
 import { createClient } from '../client'
-import type { HttpResponse } from './index'
+import type { DecodedResponse, HttpMeta } from '../internal/http_response'
 import type { HttpAwaitResult, HttpExecuteOptions } from './http'
 import { defineRequest } from './http'
 import { struct } from '../struct'
+
+const User = struct.object({ id: struct.number(), name: struct.string() })
+const ApiError = struct.object({ code: struct.string(), message: struct.string() })
 
 const useGetUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.object({ id: struct.number() }),
-  output: { 200: struct.object({ name: struct.string() }) },
+  output: User,
 })
 
 const command = useGetUser({ id: 1 })
@@ -33,82 +36,117 @@ void assertStructuralExecuteOptions
 createClient().execute(command, { abort: new AbortController().signal, timeout: 1 })
 
 // Optional input builder should allow no argument
-const useList = defineRequest({ method: 'GET', path: '/users', output: { 200: struct.object({ items: struct.object({}) }) } })
+const useList = defineRequest({ method: 'GET', path: '/users', output: struct.object({ items: struct.object({}) }) })
 expectTypeOf(useList).toBeCallableWith()
 
-const useInferredArrayOutput = defineRequest({
-  method: 'GET',
-  path: '/array-output',
-  output: [
-    { body: struct.object({ ok: struct.literal(true) }), status: 200 },
-    { body: struct.object({ missing: struct.string() }), status: 404 },
-    { body: struct.object({ conflict: struct.string() }), status: [409, 422] },
-  ],
-})
+// ---------------------------------------------------------------------------
+// Philosophy 1: `output` types the 2xx body, `error` types the non-2xx body.
+// ---------------------------------------------------------------------------
+const useBoth = defineRequest({ method: 'GET', path: '/both', error: ApiError, output: User })
 
-async function assertInferredArrayOutput(): Promise<void> {
-  const [requestError, result] = await createClient().execute(useInferredArrayOutput())
+async function assertBothDeclared(): Promise<void> {
+  const [fault, data, response] = await createClient().execute(useBoth())
 
-  if (!requestError) {
-    expectTypeOf(result).toEqualTypeOf<{ ok: true }>()
+  if (!fault) {
+    expectTypeOf(data).toEqualTypeOf<{ id: number; name: string }>()
+    expectTypeOf(response).toEqualTypeOf<DecodedResponse<{ id: number; name: string }>>()
+    expectTypeOf(response.body).toEqualTypeOf<{ id: number; name: string }>()
     return
   }
 
-  expectTypeOf(result).toEqualTypeOf<undefined>()
-  if (requestError.kind !== 'http') {
-    // @ts-expect-error transport and definition errors do not carry response data.
-    void requestError.data
+  expectTypeOf(data).toEqualTypeOf<undefined>()
+  expectTypeOf(response).toEqualTypeOf<undefined>()
+
+  if (fault.code === 'HTTP_STATUS') {
+    expectTypeOf(fault.data).toEqualTypeOf<{ code: string; message: string }>()
+    expectTypeOf(fault.response.body).toEqualTypeOf<{ code: string; message: string }>()
+    expectTypeOf(fault.status).toEqualTypeOf<number>()
     return
   }
 
-  // @ts-expect-error only declared non-2xx statuses are represented.
-  const impossibleStatus: 500 = requestError.status
-  void impossibleStatus
-
-  if (requestError.status === 404) {
-    expectTypeOf(requestError.data).toEqualTypeOf<{ missing: string }>()
-  } else {
-    expectTypeOf(requestError.status).toEqualTypeOf<409 | 422>()
-    expectTypeOf(requestError.data).toEqualTypeOf<{ conflict: string }>()
+  if (fault.code === 'RES_STRUCT_MISMATCH') {
+    expectTypeOf(fault.response).toEqualTypeOf<HttpMeta>()
+    // @ts-expect-error Philosophy 4: a failed decode produced no body.
+    void fault.response.body
+    // @ts-expect-error A failed decode produced no value, so there is no `data`.
+    void fault.data
   }
 }
 
-void assertInferredArrayOutput
+void assertBothDeclared
 
-const useMappedOutput = defineRequest({
-  method: 'GET',
-  path: '/mapped-output',
-  output: {
-    200: struct.object({ ok: struct.literal(true) }),
-    400: struct.object({ field: struct.string() }),
-    409: struct.object({ conflict: struct.string() }),
-  },
-})
+// ---------------------------------------------------------------------------
+// Philosophy 5: omitting a declaration skips that decode entirely.
+// ---------------------------------------------------------------------------
+const useOutputOnly = defineRequest({ method: 'GET', path: '/output-only', output: User })
 
-async function assertMappedOutput(): Promise<void> {
-  const [requestError, result] = await createClient().execute(useMappedOutput())
+async function assertOutputOnly(): Promise<void> {
+  const [fault, data] = await createClient().execute(useOutputOnly())
 
-  if (!requestError) {
-    expectTypeOf(result).toEqualTypeOf<{ ok: true }>()
-  } else if (requestError.kind === 'http') {
-    if (requestError.status === 400) {
-      expectTypeOf(requestError.data).toEqualTypeOf<{ field: string }>()
-    } else {
-      expectTypeOf(requestError.status).toEqualTypeOf<409>()
-      expectTypeOf(requestError.data).toEqualTypeOf<{ conflict: string }>()
-    }
+  if (!fault) {
+    expectTypeOf(data).toEqualTypeOf<{ id: number; name: string }>()
+    return
+  }
+
+  if (fault.code === 'HTTP_STATUS') {
+    expectTypeOf(fault.data).toEqualTypeOf<undefined>()
+    expectTypeOf(fault.response).toEqualTypeOf<HttpMeta>()
+    // @ts-expect-error Philosophy 5: no `error` struct was declared, so no body was read.
+    void fault.response.body
   }
 }
 
-void assertMappedOutput
+void assertOutputOnly
 
-// @ts-expect-error responseType requires an output declaration.
+const useErrorOnly = defineRequest({ method: 'POST', path: '/error-only', error: ApiError })
+
+async function assertErrorOnly(): Promise<void> {
+  const [fault, data, response] = await createClient().execute(useErrorOnly())
+
+  if (!fault) {
+    expectTypeOf(data).toEqualTypeOf<undefined>()
+    expectTypeOf(response).toEqualTypeOf<HttpMeta>()
+    // @ts-expect-error Philosophy 5: no `output` struct was declared, so no body was read.
+    void response.body
+    return
+  }
+
+  if (fault.code === 'HTTP_STATUS') {
+    expectTypeOf(fault.data).toEqualTypeOf<{ code: string; message: string }>()
+  }
+}
+
+void assertErrorOnly
+
+const useNeither = defineRequest({ method: 'DELETE', path: '/neither' })
+
+async function assertNeitherDeclared(): Promise<void> {
+  const [fault, data, response] = await createClient().execute(useNeither())
+
+  if (!fault) {
+    expectTypeOf(data).toEqualTypeOf<undefined>()
+    expectTypeOf(response).toEqualTypeOf<HttpMeta>()
+    return
+  }
+
+  if (fault.code === 'HTTP_STATUS') {
+    expectTypeOf(fault.data).toEqualTypeOf<undefined>()
+  }
+}
+
+void assertNeitherDeclared
+
+// ---------------------------------------------------------------------------
+// `responseType` only means something when something gets decoded.
+// ---------------------------------------------------------------------------
+// @ts-expect-error responseType requires an output or error declaration.
 defineRequest({ method: 'GET', path: '/discarded', responseType: 'json' })
 
-defineRequest({ method: 'GET', output: { 200: struct.string() }, path: '/json', responseType: 'json' })
-defineRequest({ method: 'GET', output: { 200: struct.string() }, path: '/text', responseType: 'text' })
-defineRequest({ method: 'GET', output: { 200: struct.blob() }, path: '/blob', responseType: 'blob' })
-defineRequest({ method: 'GET', output: { 200: struct.arrayBuffer() }, path: '/bytes', responseType: 'arraybuffer' })
+defineRequest({ method: 'GET', output: struct.string(), path: '/json', responseType: 'json' })
+defineRequest({ method: 'GET', output: struct.string(), path: '/text', responseType: 'text' })
+defineRequest({ method: 'GET', output: struct.blob(), path: '/blob', responseType: 'blob' })
+defineRequest({ method: 'GET', output: struct.arrayBuffer(), path: '/bytes', responseType: 'arraybuffer' })
+defineRequest({ error: ApiError, method: 'GET', path: '/error-response-type', responseType: 'json' })
 
 const useEmptyObject = defineRequest({ method: 'POST', path: '/empty', input: struct.object({}) })
 // @ts-expect-error a required root Struct still requires an input argument even when {} is a valid value.
@@ -169,10 +207,10 @@ const [error, data, response] = result
 
 if (error) {
   expectTypeOf(data).toEqualTypeOf<undefined>()
-  expectTypeOf(response).toEqualTypeOf<HttpResponse<unknown> | undefined>()
+  expectTypeOf(response).toEqualTypeOf<undefined>()
 } else {
   expectTypeOf(data).toEqualTypeOf<{ name: string }>()
-  expectTypeOf(response).toEqualTypeOf<HttpResponse<{ name: string }>>()
+  expectTypeOf(response).toEqualTypeOf<DecodedResponse<{ name: string }>>()
   expectTypeOf(response.ok).toEqualTypeOf<boolean>()
 }
 

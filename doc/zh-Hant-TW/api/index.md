@@ -23,7 +23,7 @@ description: 手寫的工作區套件查表 — 你會 import 的函式、option
 | [Client](./client.md)             | `createClient`, `with*` options, `Client`                        |
 | [HTTP](./http.md)                 | `defineRequest`, execute options, `HttpRequest` / `HttpResponse` |
 | [Struct](./struct.md)             | `struct.*`, `Infer`, `StructError`                               |
-| [Errors](./errors.md)             | `RequestError` 幾種和工廠函式                                    |
+| [Errors](./errors.md)             | `Fault` 幾種和工廠函式                                           |
 | [Interceptors](./interceptors.md) | HTTP／SSE／WebSocket 的 interceptor helpers                      |
 | [SSE](./sse.md)                   | `defineEventStream`, stream handle                               |
 | [WebSocket](./web-socket.md)      | `defineWebSocket`, session                                       |

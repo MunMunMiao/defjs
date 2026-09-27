@@ -2,17 +2,17 @@ import { COMMAND_TYPE, WEB_SOCKET_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
 import type { ClientConfig, ClientWebSocketOptions, WebSocketHandle } from '../client/config'
 
-import type { RequestError } from '../error'
-import { createDefinitionError, createTransportError, ERR_ABORTED } from '../error'
+import type { AnyFault, Fault } from '../error'
+import { createNetworkFault, createPreflightFault, ERR_ABORTED } from '../error'
 import type { WebSocketSessionLike } from '../interceptor/interceptor'
 import { makeChain, resolveWebSocketInterceptors } from '../interceptor/interceptor'
 import type { UseCancellationConfig } from '../internal/abort'
 import {
   awaitWithSignal,
-  createAbortTimeoutConflictError,
+  createAbortTimeoutConflictFault,
   hasAbortTimeoutConflict,
   mergeAbortSignals,
-  resolveAbortTransportError,
+  resolveAbortFault,
   snapshotCancellationConfig,
   validateTransportTimeout,
 } from '../internal/abort'
@@ -173,7 +173,7 @@ export interface WebSocketSession<TIncoming = unknown, TOutgoing = never> extend
 /** Await-result tuple from opening a WebSocket via `client.execute`. */
 export type SocketAwaitResult<TIncoming, TOutgoing = never> =
   | [error: null, socket: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError<unknown>, socket: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [error: Fault<undefined>, socket: undefined, connection: WebSocketConnectionInfo | undefined]
 
 interface UseWebSocketBaseConfig<TIncoming = unknown, TOutgoing = unknown> {
   beforeConnect?: ClientWebSocketOptions['beforeConnect']
@@ -216,7 +216,7 @@ type WebSocketEndpoint<
 
 type SocketRefState = {
   connection?: WebSocketConnectionInfo
-  error?: RequestError<unknown>
+  error?: AnyFault
   listeners: {
     runtimeError: Set<(error: unknown) => void>
     stateChange: Set<(state: WebSocketState) => void>
@@ -314,14 +314,14 @@ async function runWebSocketCommand<
   try {
     cancellationConfig = snapshotCancellationConfig(config)
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
+    const definitionError = createPreflightFault('REQ_OPTIONS_INVALID', error)
     state.error = definitionError
     setSocketState(state, 'error')
     return [definitionError, undefined, undefined]
   }
 
   if (hasAbortTimeoutConflict(cancellationConfig)) {
-    const definitionError = createAbortTimeoutConflictError()
+    const definitionError = createAbortTimeoutConflictFault()
     state.error = definitionError
     setSocketState(state, 'error')
     return [definitionError, undefined, undefined]
@@ -330,7 +330,7 @@ async function runWebSocketCommand<
   try {
     validateTransportTimeout(cancellationConfig.timeout)
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
+    const definitionError = createPreflightFault('REQ_OPTIONS_INVALID', error)
     state.error = definitionError
     setSocketState(state, 'error')
     return [definitionError, undefined, undefined]
@@ -339,7 +339,7 @@ async function runWebSocketCommand<
   try {
     validateWebSocketQueueLimits(endpoint.maxIncomingQueueSize, endpoint.maxOutgoingQueueSize)
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
+    const definitionError = createPreflightFault('REQ_OPTIONS_INVALID', error)
     state.error = definitionError
     setSocketState(state, 'error')
     return [definitionError, undefined, undefined]
@@ -368,7 +368,7 @@ async function runWebSocketCommand<
     validateHeartbeatConfig(heartbeatConfig)
     reconnect = normalizeReconnectConfig(reconnectOption)
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
+    const definitionError = createPreflightFault('REQ_OPTIONS_INVALID', error)
     state.error = definitionError
     setSocketState(state, 'error')
     return [definitionError, undefined, undefined]
@@ -378,7 +378,7 @@ async function runWebSocketCommand<
   try {
     parsedInput = castParsedWebSocketInput<TInput>(await parseEndpointInput(endpoint.input, input))
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
+    const definitionError = createPreflightFault('REQ_INPUT_INVALID', error)
     state.error = definitionError
     setSocketState(state, 'error')
     return [definitionError, undefined, undefined]
@@ -391,7 +391,7 @@ async function runWebSocketCommand<
       transport: 'webSocket',
     })
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
+    const definitionError = createPreflightFault('REQ_BUILD_FAILED', error)
     state.error = definitionError
     setSocketState(state, 'error')
     return [definitionError, undefined, undefined]
@@ -404,10 +404,10 @@ async function runWebSocketCommand<
     cancellationConfig.timeout,
   )
   const signal = mergeAbortSignals(controller.signal, [chainSignal])
-  const abortedBeforeStart = resolveAbortTransportError(signal)
+  const abortedBeforeStart = resolveAbortFault(signal)
   if (abortedBeforeStart) {
     state.error = abortedBeforeStart
-    const nextStatus = abortedBeforeStart.code === 'ABORTED' ? 'aborted' : 'error'
+    const nextStatus = abortedBeforeStart.code === 'NET_ABORTED' ? 'aborted' : 'error'
     setSocketState(state, nextStatus)
     return [abortedBeforeStart, undefined, undefined]
   }
@@ -424,7 +424,7 @@ async function runWebSocketCommand<
 
   const WebSocketCtor = clientConfig.webSocket.handle ?? globalThis.WebSocket
   if (typeof WebSocketCtor !== 'function') {
-    const transportError = createTransportError(new Error('WebSocket is not supported in current runtime'))
+    const transportError = createPreflightFault('ENV_UNSUPPORTED', new Error('WebSocket is not supported in current runtime'))
     state.error = transportError
     setSocketState(state, 'error')
     return [transportError, undefined, undefined]
@@ -599,7 +599,7 @@ async function runWebSocketCommand<
 
           if (!startupSettled) {
             const cause = outcome.cause ?? new Error('WebSocket closed before open')
-            const startupError = createTransportError(cause)
+            const startupError = createNetworkFault(cause)
             finish(toErrorInfo(outcome.closeInfo, cause), { startupError })
             return
           }
@@ -619,7 +619,7 @@ async function runWebSocketCommand<
       }
 
       async function prepareAttempt(): Promise<
-        | { aborted: false; error: RequestError<unknown>; ok: false }
+        | { aborted: false; error: AnyFault; ok: false }
         | { aborted: true; ok: false }
         | { ok: true; protocols: readonly string[]; url: string }
       > {
@@ -629,7 +629,7 @@ async function runWebSocketCommand<
         } catch (error) {
           return {
             aborted: false,
-            error: createDefinitionError('REQUEST_VALIDATION_FAILED', error),
+            error: createPreflightFault('REQ_BUILD_FAILED', error),
             ok: false,
           }
         }
@@ -644,7 +644,7 @@ async function runWebSocketCommand<
             }
             return {
               aborted: false,
-              error: createTransportError(error),
+              error: createPreflightFault('EXT_HOOK_FAILED', error),
               ok: false,
             }
           }
@@ -978,7 +978,7 @@ async function runWebSocketCommand<
         } else {
           const terminalCause = final.cause ?? new DOMException('Aborted', 'AbortError')
           incomingQueue.fail(terminalCause)
-          state.error = options.startupError ?? requestErrorFromCloseInfo(final)
+          state.error = options.startupError ?? faultFromCloseInfo(final)
           if (final.kind === 'error') {
             emitRuntimeError(state, final.cause)
           }
@@ -995,7 +995,7 @@ async function runWebSocketCommand<
 
         closedDeferred.resolve(final)
         if (!startupSettled) {
-          const startupError = options.startupError ?? requestErrorFromCloseInfo(final)
+          const startupError = options.startupError ?? faultFromCloseInfo(final)
           state.error = startupError
           rejectSession(startupError)
         }
@@ -1003,8 +1003,8 @@ async function runWebSocketCommand<
 
       function finishFromSignal(snapshot: WebSocketCloseSnapshot = {}): void {
         /* istanbul ignore next -- @preserve invariant: finishFromSignal is called only after the merged signal aborts */
-        const transportError = resolveAbortTransportError(signal) ?? createTransportError(ERR_ABORTED)
-        if (transportError.code === 'TIMEOUT') {
+        const transportError = resolveAbortFault(signal) ?? createNetworkFault(ERR_ABORTED)
+        if (transportError.code === 'NET_TIMEOUT') {
           finish(toErrorInfo(snapshot, signal.reason), { startupError: transportError })
           return
         }
@@ -1126,11 +1126,14 @@ async function runWebSocketCommand<
     return [null, typedSession, startupConnection ?? typedSession.connection]
   } catch (error) {
     chainSettled = true
-    const signalError = resolveAbortTransportError(chainSignal)
-    const requestError = signalError ?? (error as RequestError<unknown>)
+    const signalError = resolveAbortFault(chainSignal)
+    // The startup catch funnels every failure: a value that is already a fault (a refused
+    // connection, a bad URL, a rejected hook) crosses unchanged, and only an unclassified throw
+    // is attributed to the extension that produced it.
+    const requestError = signalError ?? (isFault(error) ? error : createPreflightFault('EXT_INTERCEPTOR_FAILED', error))
     if (signalError) {
       state.error = signalError
-      setSocketState(state, signalError.code === 'ABORTED' ? 'aborted' : 'error')
+      setSocketState(state, signalError.code === 'NET_ABORTED' ? 'aborted' : 'error')
     }
     const pendingSessionSnapshot = [...pendingSessions]
     if (undeliveredSessions.size > 0 || pendingSessionSnapshot.length > 0) {
@@ -1142,8 +1145,7 @@ async function runWebSocketCommand<
       pendingSessions.clear()
       undeliveredSessions.clear()
     }
-    // Type boundary: non-cancellation interceptor errors cross the public RequestError boundary unchanged.
-    return [requestError, undefined, state.connection]
+    return [requestError as Fault<undefined>, undefined, state.connection]
   }
 }
 
@@ -1197,7 +1199,7 @@ type ActiveSocketAttempt = {
 type FinishOptions = {
   keepPhysicalCleanup?: boolean
   skipNativeClose?: boolean
-  startupError?: RequestError<unknown>
+  startupError?: AnyFault
 }
 
 const SOCKET_CLOSE_GRACE_MS = 1_000
@@ -1462,25 +1464,28 @@ function toErrorInfo(snapshot: WebSocketCloseSnapshot, cause: unknown): WebSocke
   }
 }
 
-function requestErrorFromCloseInfo(closeInfo: WebSocketCloseInfo): RequestError<unknown> {
-  if (closeInfo.kind !== 'closed' && isRequestError(closeInfo.cause)) {
+function faultFromCloseInfo(closeInfo: WebSocketCloseInfo): AnyFault {
+  if (closeInfo.kind !== 'closed' && isFault(closeInfo.cause)) {
     return closeInfo.cause
   }
   /* istanbul ignore if -- @preserve invariant: internal abort terminal paths always supply startupError directly */
   if (closeInfo.kind === 'aborted') {
-    return createTransportError(ERR_ABORTED)
+    return createNetworkFault(ERR_ABORTED)
   }
   /* istanbul ignore else -- @preserve invariant: pre-open closed paths supply startupError before this helper is reached */
   if (closeInfo.kind === 'error') {
-    return createTransportError(closeInfo.cause)
+    return createNetworkFault(closeInfo.cause)
   }
   /* istanbul ignore next -- @preserve invariant: pre-open closed paths supply startupError before this helper is reached */
-  return createTransportError(new Error('WebSocket closed before open'))
+  return createNetworkFault(new Error('WebSocket closed before open'))
 }
 
-function isRequestError(value: unknown): value is RequestError<unknown> {
-  if (typeof value !== 'object' || value === null || !('kind' in value)) {
-    return false
-  }
-  return value.kind === 'definition' || value.kind === 'http' || value.kind === 'transport'
+function isFault(value: unknown): value is AnyFault {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'code' in value &&
+    typeof (value as { code: unknown }).code === 'string' &&
+    value instanceof Error
+  )
 }

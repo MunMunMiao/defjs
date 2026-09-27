@@ -22,9 +22,7 @@ describe('Client.execute', () => {
   test('client.execute dispatches http command', async () => {
     const useGet = defineRequest({
       method: 'GET',
-      output: {
-        200: struct.object({ ok: struct.boolean() }),
-      },
+      output: struct.object({ ok: struct.boolean() }),
       path: '/ok',
     })
 

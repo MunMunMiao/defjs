@@ -4,8 +4,8 @@ import { resolveRequestUrl } from './url'
 const HTTP_RESPONSE: unique symbol = Symbol('HttpResponse')
 
 /**
- * Parsed HTTP response wrapper returned by handlers and `executeHttpCommand`.
- * `ok` is true for status codes in the 2xx range; `error` may hold transport or parse failures.
+ * Wire-shape HTTP response returned by transports and accepted by interceptors.
+ * `ok` is true for status codes in the 2xx range. A transport failure is a fault, never a response.
  */
 export type HttpResponse<R> = {
   readonly [HTTP_RESPONSE]: true
@@ -14,9 +14,29 @@ export type HttpResponse<R> = {
   readonly statusText: string
   readonly headers: Headers
   readonly body: R | null
-  readonly error?: unknown
   readonly ok: boolean
 }
+
+/**
+ * Response metadata, available whenever a response reached the client.
+ *
+ * Carries no body: a body only exists once a declared struct decoded it.
+ */
+export type HttpMeta = {
+  readonly headers: Headers
+  readonly ok: boolean
+  readonly status: number
+  readonly statusText: string
+  readonly url: string
+}
+
+/**
+ * Response whose body decoded successfully against a declared struct.
+ *
+ * Reaching this type is the proof that decoding happened; a failed decode is reported
+ * as a fault carrying `HttpMeta` alone.
+ */
+export type DecodedResponse<TBody> = HttpMeta & { readonly body: TBody }
 
 /**
  * Fields accepted by `makeResponse` when building a synthetic `HttpResponse` (for example in interceptors).
@@ -27,7 +47,6 @@ export type MakeResponseOptions<R> = {
   url?: string
   headers?: Headers
   body?: R | null
-  error?: unknown
   request?: HttpRequest
 }
 
@@ -35,7 +54,7 @@ export type MakeResponseOptions<R> = {
  * Build an `HttpResponse` value without performing a network call.
  * Useful in interceptors that short-circuit `next`, and in tests.
  *
- * @param options - Status, headers, body, optional request to copy headers/url from, and optional error; defaults yield status `0`.
+ * @param options - Status, headers, body, and an optional request to copy headers/url from; defaults yield status `0`.
  * @returns An `HttpResponse` with `ok` derived from the status code.
  */
 export function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R> {
@@ -45,11 +64,6 @@ export function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<
   const url = options?.url ?? requestUrl(options?.request)
   const headers = options?.headers ?? new Headers(options?.request?.headers)
   const body = options?.body ?? null
-  let error = options?.error
-
-  if (error === undefined && status === 0) {
-    error = new Error(getHttpErrorMessage({ status, statusText, url }))
-  }
 
   return {
     [HTTP_RESPONSE]: true,
@@ -58,7 +72,6 @@ export function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<
     url,
     headers,
     body,
-    error,
     ok,
   }
 }

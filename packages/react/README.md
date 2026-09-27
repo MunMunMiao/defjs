@@ -32,12 +32,7 @@ export const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    {
-      status: 200,
-      body: struct.object({ id: struct.number(), name: struct.string() }),
-    },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 ```
 

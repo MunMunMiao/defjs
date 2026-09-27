@@ -1,109 +1,147 @@
 ---
 title: Errors
-description: RequestError のバリアントとファクトリヘルパーです。
+description: Fault のバリアントとファクトリー helper。
 ---
 
 # Errors
 
-HTTP の execute は、タプルの先頭に判別可能な `RequestError` を返します。宣言済みの失敗を throw しません。各バリアントはネイティブ `Error` です。`String(error)` を直接ログでき、Defjs の metadata は enumerable のまま、`cause` は non-enumerable なネイティブ cause chain を使います。
+Execute は判別可能な `Fault` をタプルの第一要素に返します。宣言済みの失敗で例外を throw することはありません。
 
-## RequestError {#RequestError}
+## FaultCode {#FaultCode}
 
 ```ts
-type RequestError<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type FaultCode =
+  | 'CAP_BUFFER_EXCEEDED'
+  | 'CAP_QUEUE_OVERFLOW'
+  | 'ENV_UNSUPPORTED'
+  | 'EXT_HOOK_FAILED'
+  | 'EXT_INTERCEPTOR_FAILED'
+  | 'EXT_OBSERVER_FAILED'
+  | 'HTTP_STATUS'
+  | 'NET_ABORTED'
+  | 'NET_BODY_INCOMPLETE'
+  | 'NET_TIMEOUT'
+  | 'NET_UNREACHABLE'
+  | 'REQ_BUILD_FAILED'
+  | 'REQ_INPUT_INVALID'
+  | 'REQ_OPTIONS_INVALID'
+  | 'RES_DECODE_FAILED'
+  | 'RES_MEDIA_TYPE_INVALID'
+  | 'RES_STRUCT_MISMATCH'
 ```
 
-`error.kind` で分岐します。`'http' | 'transport' | 'definition'` です。
+閉じた集合ひとつです。最初の `_` より前の部分が類別で、独立した `kind` field はありません。集合を閉じたままにするのは `switch (fault.code)` を網羅的に保つためで、拡張は自分の詳細を新しい code ではなく `cause` で報告します。
 
-### HttpStatusError {#HttpStatusError}
+## FaultClass {#FaultClass}
 
 ```ts
-interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> extends Error {
-  kind: 'http'
-  code: 'HTTP_STATUS'
-  status: TStatus
-  message: string
-  data: TErrorData
-  response: HttpResponse<unknown>
-}
+type FaultClass<C extends string> = C extends `${infer TClass}_${string}` ? TClass : never
 ```
 
-宣言済みの non-2xx status です。未宣言 status はこのバリアントではなく、`kind: 'definition'` / `UNDECLARED_STATUS` です。
+`FaultClass<FaultCode>` は `'CAP' | 'ENV' | 'EXT' | 'HTTP' | 'NET' | 'REQ' | 'RES'` です。
 
-### TransportError {#TransportError}
+## Fault {#Fault}
 
 ```ts
-interface TransportError extends Error {
-  kind: 'transport'
-  code: 'ABORTED' | 'TIMEOUT' | 'NETWORK_ERROR'
-  message: string
-  cause?: unknown
-}
+type Fault<TErr extends AnyStruct | undefined = undefined> = DecodeFault | HttpStatusFault<TErr> | PreflightFault
 ```
 
-### DefinitionError {#DefinitionError}
+`fault.code` で switch してください。
+
+どのバリアントも `DefjsFault` という名前のネイティブ `Error` なので、`String(fault)` はそのままログに出せる `DefjsFault: <message>` を返します。`code` と各バリアントのメタデータ — `status`、`response`、`data` — は列挙可能な自前プロパティです。ネイティブの `cause` チェーンは列挙されません。
 
 ```ts
-type DefinitionError =
-  | (Error & {
-      cause?: unknown
-      code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'INTERCEPTOR_FAILED'
-      kind: 'definition'
-      response?: HttpResponse<unknown>
-    })
-  | (Error & {
-      cause?: unknown
-      code: 'UNDECLARED_STATUS'
-      kind: 'definition'
-      response: HttpResponse<unknown>
-      status: number
-    })
-```
+import { StructError, type Fault } from '@defjs/core'
 
-`UNDECLARED_STATUS` は `HttpStatusError` ではなく、このバリアントです。`INTERCEPTOR_FAILED` はインターセプターの throw であり、socket 切断ではありません。
-
-`format()`、`flatten()`、`prettify()` helper は `cause` を narrow した後の `StructError` だけに属し、外側の `DefinitionError` へはコピーされません。
-
-```ts
-import { StructError, type DefinitionError } from '@defjs/core'
-
-function describeDefinitionCause(error: DefinitionError): string | undefined {
-  if (error.cause instanceof StructError) {
-    return error.cause.prettify()
+function logFault(fault: Fault): void {
+  console.error(String(fault), { code: fault.code })
+  if (fault.cause instanceof StructError) {
+    console.error(fault.cause.prettify())
   }
-  return undefined
 }
 ```
 
-## ファクトリ
+`format()`、`flatten()`、`prettify()` は `fault.cause` を `StructError` に絞り込んだあとでのみ呼んでください。これらの helper は fault にコピーされません。
 
-## createHttpStatusError() {#createHttpStatusError}
-
-## createTransportError() {#createTransportError}
-
-## createDefinitionError() {#createDefinitionError}
+### HttpStatusFault {#HttpStatusFault}
 
 ```ts
-declare function createHttpStatusError(status: number, message: string, response: HttpResponse<unknown>, data?: unknown): HttpStatusError
+type HttpStatusFaultOf<TData> = Error & {
+  code: 'HTTP_STATUS'
+  data: TData
+  response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>
+  status: number
+}
 
-declare function createTransportError(cause: unknown): TransportError
-
-declare function createDefinitionError(
-  code: 'UNDECLARED_STATUS',
-  cause: unknown,
-  response: HttpResponse<unknown>,
-): Extract<DefinitionError, { code: 'UNDECLARED_STATUS' }>
-
-declare function createDefinitionError(
-  code: Exclude<DefinitionError['code'], 'UNDECLARED_STATUS'>,
-  cause: unknown,
-  response?: HttpResponse<unknown>,
-): Extract<DefinitionError, { code: Exclude<DefinitionError['code'], 'UNDECLARED_STATUS'> }>
+type HttpStatusFault<TErr extends AnyStruct | undefined = undefined> = HttpStatusFaultOf<
+  [TErr] extends [undefined] ? undefined : Infer<TErr>
+>
 ```
 
-`createTransportError` は abort/timeout のセンチネルを `ABORTED` / `TIMEOUT` に対応づけ、それ以外は `NETWORK_ERROR` です。
+2xx 以外のあらゆる status です。エンドポイントが `error` を宣言していてボディがデコードできたなら、`data` はそのボディで、`response` もそれを持ちます。`error` を省いた場合ボディは読まれないので、`data` は `undefined`、`response` はメタデータだけになります。
 
-`UNDECLARED_STATUS` には `response` が必要です。これなしの factory 呼び出しは `TypeError` を throw します。
+### DecodeFault {#DecodeFault}
+
+```ts
+type DecodeFault = Error & {
+  cause: unknown
+  code: 'RES_DECODE_FAILED' | 'RES_MEDIA_TYPE_INVALID' | 'RES_STRUCT_MISMATCH'
+  response: HttpMeta
+  status: number
+}
+```
+
+レスポンスは届いたものの、宣言どおりには読めませんでした。`response` はメタデータだけです。ボディ**とは**デコード済みの値であり、そのデコードが失敗したのですから、手を伸ばす `body` field は存在しません。問題の詳細は `cause` にあります — struct 不一致なら `StructError`、表現が読めないならパーサーの失敗です。
+
+### PreflightFault {#PreflightFault}
+
+```ts
+type PreflightFault = Error & {
+  cause?: unknown
+  code: PreflightFaultCode
+  response?: HttpMeta
+}
+```
+
+レスポンスが存在する前に失敗しえたものすべてです。`REQ_*`、`NET_*`、`EXT_*`、`CAP_*`、`ENV_UNSUPPORTED`。`response` が付くのは、トランスポートが報告できるメタデータを既に持っていた場合だけ — たとえばダウンロード途中で切れたボディなどです。
+
+### AnyFault {#AnyFault}
+
+```ts
+type AnyFault = DecodeFault | HttpStatusFaultOf<undefined> | HttpStatusFaultOf<unknown> | PreflightFault
+```
+
+デコード済みエラーボディの型を問わない、あらゆる fault です。どのエンドポイントが出したかを気にせず fault を分類するハンドラーに使ってください。ボディの型が重要な場所では `Fault<typeof yourErrorStruct>` を選びます。
+
+## ファクトリー
+
+## createHttpStatusFault() {#createHttpStatusFault}
+
+## createUndecodedHttpStatusFault() {#createUndecodedHttpStatusFault}
+
+## createDecodeFault() {#createDecodeFault}
+
+## createNetworkFault() {#createNetworkFault}
+
+## createPreflightFault() {#createPreflightFault}
+
+```ts
+declare function createHttpStatusFault<TData>(response: DecodedResponse<TData>): HttpStatusFaultOf<TData>
+
+declare function createUndecodedHttpStatusFault(response: HttpMeta): HttpStatusFaultOf<undefined>
+
+declare function createDecodeFault(code: DecodeFaultCode, cause: unknown, response: HttpMeta): DecodeFault
+
+declare function createNetworkFault(cause: unknown, response?: HttpMeta): PreflightFault
+
+declare function createPreflightFault(code: PreflightFaultCode, cause?: unknown, response?: HttpMeta): PreflightFault
+```
+
+`createHttpStatusFault` はデコード済みのボディを既に持つレスポンスを受け取ります。`createUndecodedHttpStatusFault` はメタデータだけを受け取り、`error` を宣言していないエンドポイント向けです。
+
+`createNetworkFault` は abort と timeout のセンチネルを `NET_ABORTED` / `NET_TIMEOUT` に、それ以外をすべて `NET_UNREACHABLE` に対応づけます。`createPreflightFault` は code を直接受け取り、`cause` を渡さなければ code がそのまま message になります。
+
+どのファクトリーも、上記の構造化 field を備えたネイティブ `Error` インスタンスを返します。素のオブジェクトエラーは作らないので、`String(fault)` にアダプターは不要です。
 
 ## センチネル
 
@@ -116,6 +154,6 @@ const ERR_ABORTED: Error // message: 'Request was aborted'
 const ERR_TIMEOUT: Error // message: 'Request timed out'
 ```
 
-abort と timeout で共有する `cause` / メッセージです。
+abort と timeout で共有される `cause` / message の値です。インターセプターからどちらかを throw するのが、インターセプターがキャンセルを表す方法です。
 
-[Errors ガイド](../core/errors.md) を見てください。
+[Errors ガイド](/ja-JP/core/errors) を参照してください。

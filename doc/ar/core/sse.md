@@ -58,7 +58,7 @@ const notifications = defineEventStream({
 
 const [error, stream, startupOpen] = await client.execute(notifications())
 if (error) {
-  console.error(error.kind, error.code, startupOpen?.response.status)
+  console.error(error.code, startupOpen?.response.status)
 } else {
   console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
   stream.close('example-finished')
@@ -66,16 +66,16 @@ if (error) {
 }
 ```
 
-يجب أن تكون الاستجابة ناجحة، وجوهر نوع الوسائط `text/event-stream`، ولها جسم. بدء غير-2xx → `HTTP_STATUS`. نوع محتوى سيئ أو جسم مفقود → `RESPONSE_VALIDATION_FAILED`. لقطة استجابة يمكن أن تبقى في الخانة الثالثة من الـ tuple عندما يفشل التحقق بعد وصول الاستجابة.
+يجب أن تكون الاستجابة ناجحة، وجوهر نوع الوسائط `text/event-stream`، ولها جسم. بدء غير-2xx → `HTTP_STATUS`. نوع محتوى سيئ أو جسم مفقود → `RES_STRUCT_MISMATCH`. لقطة استجابة يمكن أن تبقى في الخانة الثالثة من الـ tuple عندما يفشل التحقق بعد وصول الاستجابة.
 
 `startupOpen` هي اللقطة الأولية. `stream.open` حي ويتغيّر عند الفتحات المادية اللاحقة. احتفظ بقيمة الـ tuple عندما تهم الاستجابة الأولى.
 
 ```typescript twoslash
-import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+import type { EventStreamHandle, EventStreamOpenInfo, Fault } from '@defjs/core'
 
 type StreamResult<T> =
   | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [error: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 
 const result: StreamResult<string> | undefined = undefined
 void result
@@ -149,10 +149,10 @@ const client = createClient(
 
 كلاهما يجب أن يكونا أعدادًا صحيحة آمنة موجبة. الفيضان قاتل — بلا إسقاط صامت لأحداث أقدم.
 
-| الحد            | يحمي                                      | الرمز النهائي           |
-| --------------- | ----------------------------------------- | ----------------------- |
-| `maxBufferSize` | سطر/حدث SSE غير مكتمل/مفرط أثناء التحليل  | `PARSER_LIMIT_EXCEEDED` |
-| `maxQueueSize`  | أحداث تُنتج أسرع مما يقرأ المستهلك الواحد | `QUEUE_OVERFLOW`        |
+| الحد            | يحمي                                      | الرمز النهائي         |
+| --------------- | ----------------------------------------- | --------------------- |
+| `maxBufferSize` | سطر/حدث SSE غير مكتمل/مفرط أثناء التحليل  | `CAP_BUFFER_EXCEEDED` |
+| `maxQueueSize`  | أحداث تُنتج أسرع مما يقرأ المستهلك الواحد | `CAP_QUEUE_OVERFLOW`  |
 
 التدفق القاتل أيضًا يمسح الأحداث المخزّنة، ويلغي الجسم النشط، ويرفض المكرّر، ويحل `stream.closed` بـ `code: 'error'`.
 
@@ -176,7 +176,7 @@ const api: StreamApi<string> = handle
 void api
 ```
 
-الرموز النهائية: `eof` أو `aborted` أو `error`. نتيجة `error` تحمل أيضًا `EventStreamErrorCode`: `INVALID_RESPONSE` أو `MESSAGE_PROCESSING_FAILED` أو `PARSER_LIMIT_EXCEEDED` أو `QUEUE_OVERFLOW` أو `TIMEOUT` أو `TRANSPORT_ERROR`.
+الرموز النهائية: `eof` أو `aborted` أو `error`. نتيجة `error` تحمل أيضًا `EventStreamFaultCode`: `RES_MEDIA_TYPE_INVALID` أو `EXT_OBSERVER_FAILED` أو `CAP_BUFFER_EXCEEDED` أو `CAP_QUEUE_OVERFLOW` أو `NET_TIMEOUT` أو `TRANSPORT_ERROR`.
 
 `close(reason)` يجهض المحاولة النشطة، ويغلق الطابور، ويستقر كـ `aborted`. `break` / `return` / رمي في الحلقة يستدعي إرجاع المكرّر ويغلق بـ `iterator-return`. الكود الذي ينفّذ الأمر يملك الإغلاق.
 

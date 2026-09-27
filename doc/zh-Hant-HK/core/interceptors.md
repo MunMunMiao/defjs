@@ -170,9 +170,14 @@ const retrySafeReads = createHttpInterceptor(async (request, next) => {
 })
 ```
 
-呢個 loop 唔會 retry thrown interceptor/Fetch errors。Status `0` 係 Fetch-boundary transport-failure response。Retry `POST` / `PUT` / `PATCH` / `DELETE` 要 replayable bytes、server support、idempotency contract，同 reviewed status policy。
+呢個 loop 唔會 retry interceptor/Fetch 拋出嘅 errors——transport failure 係 reject，根本唔會生出一個俾呢個 loop 去 match 嘅 status。Retry `POST` / `PUT` / `PATCH` / `DELETE` 要 replayable bytes、server support、idempotency contract，同 reviewed status policy。Retry 由你自己管——Core 唔會 export `retryAfter()`。
 
-Interceptor 喺呢個 sample 之外 throw 或 reject，會用 `kind: 'definition'` / `INTERCEPTOR_FAILED` return 畀 caller——睇 [Errors](./errors.md)。
+喺呢個例子之外 throw（或者 reject）嘅 interceptor，會以 `EXT_INTERCEPTOR_FAILED` 返到 caller，拋出嘅值
+掛喺 `cause` 上面——睇 [Errors](./errors.md)。想表達取消，就改為 throw `ERR_ABORTED` 或者 `ERR_TIMEOUT`。
+
+`next(request)` 可能 reject。Transport failure 係 fault，唔係 status 0 嘅 response，所以想睇到佢嘅
+interceptor 要喺 `next` 外面包 `try` / `catch`。Defjs 嘅歸因照樣正確：由 transport 嚟嘅 reject 依然係
+`NET_*` fault，唔會賴落你個 interceptor 身上。
 
 ## Wrap WebSocket sessions
 
@@ -221,7 +226,7 @@ Spread session 會將 `state` / `connection` / `bufferedAmount` snapshot 一次�
 
 Factories return tagged transport values：
 
-- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createHttpInterceptor(fn)` → `{ fn }`
 - `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
 - `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
 - `basicAuthHttpInterceptor(provider, options?)` — HTTP 上嘅 Basic credentials

@@ -17,14 +17,12 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (!error) {
   console.log(data.name, response.status)
@@ -77,9 +75,7 @@ const updateUser = defineRequest({
       }),
     ),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
-  },
+  output: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
 })
 
 const [error, user] = await client.execute(
@@ -106,20 +102,22 @@ Los alias reescriben solo las claves de cable salientes. Los valores parseados y
 
 Un `build` personalizado expone los mismos setters de ubicación/codec. Gana la escritura final del cuerpo (valor + metadatos de content-type). Los comandos de alto nivel no convierten un objeto arbitrario en cuerpo — declara un wrapper o usa el setter correspondiente.
 
-## Despachar por estado
+## Cómo se lee un cuerpo
 
-`output` es un mapa estado → Struct o `{ status, body }[]`. Con `output` y sin `responseType`, la representación por defecto es `json`. Tipos explícitos: `json`, `text`, `blob`, `arraybuffer`.
+`output` es un Struct para el cuerpo 2xx; `error` es un Struct para todo lo demás. Con cualquiera de los dos declarado y sin `responseType`, la representación es `json` por defecto. Tipos explícitos: `json`, `text`, `blob`, `arraybuffer`. Sin ninguno declarado, `responseType` no se permite y el cuerpo nunca se lee.
 
 Orden de operaciones:
 
-1. Estado `0` → error de transporte.
-2. Sin `output` → 2xx tiene éxito con `data === undefined`; no-2xx → `HTTP_STATUS` con `error.data === undefined`. Cuerpo no decodificado.
-3. Con `output`, el estado declarado exacto selecciona su Struct. Forma array: un match posterior anula un match agrupado anterior.
-4. Estado no declarado → `UNDECLARED_STATUS` **antes** de decodificar el cuerpo.
-5. Fallo de representación → `RESPONSE_VALIDATION_FAILED`, sin data parcial.
-6. 2xx declarado decodificado → resultado; no-2xx declarado decodificado → `error.data` tipado en `HTTP_STATUS`.
+1. `ok` elige el lado: `output` para 2xx, `error` para todo lo demás. Nunca ambos.
+2. Nada declarado para ese lado → el cuerpo nunca se lee. 2xx tiene éxito con `data === undefined`; no-2xx es `HTTP_STATUS` con `data === undefined`. Un cuerpo ilegible en un lado que no declaraste se ignora, incluido el hecho de que no se pudo leer.
+3. El media type se comprueba **antes** de leer el cuerpo. Una discrepancia es `RES_MEDIA_TYPE_INVALID` y no se parsea ni se decodifica nada.
+4. Se lee la representación. Un fallo es `RES_DECODE_FAILED`.
+5. El Struct parsea el valor. Un fallo es `RES_STRUCT_MISMATCH`.
+6. 2xx → resultado y un `response.body` tipado; no-2xx → `data` tipado en `HTTP_STATUS`.
 
-`HttpResponse` tiene `url`, `status`, `statusText`, `headers`, `body`, `error` y `ok`. `ok` significa solo `200 <= status < 300`. Es un valor Defjs, no un `Response` nativo. Sin `output`, `responseType` no está permitido.
+La decodificación ocurre una sola vez, después de la cadena de interceptores, así que una respuesta que un interceptor construyó con `makeResponse(...)` se lee exactamente igual que una que llegó por el cable.
+
+Una respuesta exitosa es un `DecodedResponse<T>`: `url`, `status`, `statusText`, `headers`, `ok` y un `body` tipado. Donde no se decodificó nada obtienes `HttpMeta`: los mismos campos sin `body`. `ok` solo significa `200 <= status < 300`. Ninguno de los dos es una `Response` nativa. Un fallo de transporte es un fault, así que no hay ninguna respuesta con estado 0 que haga sus veces.
 
 ## Cancel the work {#cancel-the-work}
 
@@ -135,12 +133,12 @@ const pending = client.execute(command, { signal: controller.signal, timeout: 5_
 
 controller.abort('screen closed')
 const [error] = await pending
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancellation')
 }
 ```
 
-`timeout` debe ser un entero seguro positivo en `1..2_147_483_647`. Cancel reconocido → `ABORTED`; timeout de ejecución → `TIMEOUT`; otros fallos de Fetch/interceptor → `NETWORK_ERROR`. Cancelar después de que el servidor aceptó una escritura **no** demuestra que la escritura se revirtió.
+`timeout` debe ser un entero seguro positivo en `1..2_147_483_647`. Cancel reconocido → `NET_ABORTED`; timeout de ejecución → `NET_TIMEOUT`; otros fallos de Fetch/interceptor → `NET_UNREACHABLE`. Cancelar después de que el servidor aceptó una escritura **no** demuestra que la escritura se revirtió.
 
 ## Credenciales y XSRF
 

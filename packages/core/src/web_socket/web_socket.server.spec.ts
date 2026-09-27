@@ -8,9 +8,8 @@ import {
   withWebSocketReconnect,
   type Client,
 } from '../client'
-import { createDefinitionError, createHttpStatusError, createTransportError, ERR_ABORTED } from '../error'
+import { createNetworkFault, createPreflightFault, createUndecodedHttpStatusFault, ERR_ABORTED } from '../error'
 import { createWebSocketInterceptor, type WebSocketSessionLike } from '../interceptor'
-import { makeResponse } from '../internal/http_response'
 import { struct } from '../struct'
 import { defineWebSocket, type SocketAwaitResult } from './index'
 
@@ -201,7 +200,7 @@ describe('web socket runtime environment edge cases', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('transport')
+    expect(error?.code.startsWith('NET_')).toBe(true)
   })
 
   test('should observe missing-struct for unknown types without tearing down the session', async () => {
@@ -264,8 +263,8 @@ describe('web socket runtime environment edge cases', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('transport')
-    expect(error?.message).toBe('Network error')
+    expect(error?.code).toBe('NET_UNREACHABLE')
+    expect(error?.message).toBe('connection refused')
   })
 
   test('should finish startup with aborted transport error when aborted before open', async () => {
@@ -287,8 +286,8 @@ describe('web socket runtime environment edge cases', () => {
 
     expect(socket).toBeUndefined()
     expect(connection?.url).toBe('ws://localhost/ws/test')
-    expect(error?.kind).toBe('transport')
-    expect(error?.code).toBe('ABORTED')
+    expect(error?.code.startsWith('NET_')).toBe(true)
+    expect(error?.code).toBe('NET_ABORTED')
   })
 
   test('should preserve a pre-aborted timeout without constructing a physical socket', async () => {
@@ -301,7 +300,7 @@ describe('web socket runtime environment edge cases', () => {
       signal: controller.signal,
     })
 
-    expect(error).toMatchObject({ code: 'TIMEOUT', kind: 'transport', message: 'Request timed out' })
+    expect(error).toMatchObject({ code: 'NET_TIMEOUT', message: 'Request timed out' })
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(mockInstances).toHaveLength(0)
@@ -318,7 +317,7 @@ describe('web socket runtime environment edge cases', () => {
       timeout: 0,
     })
 
-    expect(error).toMatchObject({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+    expect(error).toMatchObject({ code: 'REQ_OPTIONS_INVALID' })
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(mockInstances).toHaveLength(0)
@@ -334,7 +333,7 @@ describe('web socket runtime environment edge cases', () => {
       signal: controller.signal,
     })
 
-    expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_ABORTED' })
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(mockInstances).toHaveLength(0)
@@ -372,11 +371,7 @@ describe('web socket runtime environment edge cases', () => {
 
     const result = await run(createClient(withEndpoint('http://localhost')), useSocket(), options)
 
-    expect(result).toEqual([
-      expect.objectContaining({ cause: getterFailure, code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' }),
-      undefined,
-      undefined,
-    ])
+    expect(result).toEqual([expect.objectContaining({ cause: getterFailure, code: 'REQ_OPTIONS_INVALID' }), undefined, undefined])
     expect(mockInstances).toHaveLength(0)
   })
 
@@ -394,7 +389,7 @@ describe('web socket runtime environment edge cases', () => {
 
       const [error, socket, connection] = await run(createClient(withEndpoint('http://localhost')), useSocket(), options)
 
-      expect(error).toMatchObject({ cause: getterFailure, code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+      expect(error).toMatchObject({ cause: getterFailure, code: 'REQ_OPTIONS_INVALID' })
       expect(socket).toBeUndefined()
       expect(connection).toBeUndefined()
       expect(mockInstances).toHaveLength(0)
@@ -427,7 +422,7 @@ describe('web socket runtime environment edge cases', () => {
 
       const result = await run(createClient(withEndpoint('http://localhost')), useSocket(), { timeout })
 
-      expect(result).toEqual([expect.objectContaining({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' }), undefined, undefined])
+      expect(result).toEqual([expect.objectContaining({ code: 'REQ_OPTIONS_INVALID' }), undefined, undefined])
       expect(mockInstances).toHaveLength(0)
     },
   )
@@ -447,7 +442,7 @@ describe('web socket runtime environment edge cases', () => {
       { signal: controller.signal },
     )
 
-    expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_ABORTED' })
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(mockInstances).toHaveLength(0)
@@ -475,7 +470,7 @@ describe('web socket runtime environment edge cases', () => {
       throw new Error('Expected abort to settle the interceptor chain')
     }
     const [error, socket, connection] = result
-    expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_ABORTED' })
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(mockInstances).toHaveLength(0)
@@ -501,7 +496,7 @@ describe('web socket runtime environment edge cases', () => {
       throw new Error('Expected timeout to settle the interceptor chain')
     }
     const [error, socket, connection] = result
-    expect(error).toMatchObject({ code: 'TIMEOUT', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_TIMEOUT' })
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(mockInstances).toHaveLength(0)
@@ -523,7 +518,7 @@ describe('web socket runtime environment edge cases', () => {
       { signal: controller.signal },
     )
 
-    expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_ABORTED' })
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(mockInstances).toHaveLength(0)
@@ -540,7 +535,7 @@ describe('web socket runtime environment edge cases', () => {
     controller.abort(ERR_ABORTED)
 
     const [error, socket, connection] = await executePromise
-    expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_ABORTED' })
     expect(socket).toBeUndefined()
     expect(connection).toMatchObject({ generation: 0 })
   })
@@ -554,7 +549,7 @@ describe('web socket runtime environment edge cases', () => {
     lastMockInstance?.triggerClose({ code: 1006, reason: 'early close', wasClean: false })
 
     const [error, socket, connection] = await executePromise
-    expect(error).toMatchObject({ code: 'NETWORK_ERROR', kind: 'transport', message: 'WebSocket closed before open' })
+    expect(error).toMatchObject({ code: 'NET_UNREACHABLE', message: 'WebSocket closed before open' })
     expect(socket).toBeUndefined()
     expect(connection).toMatchObject({ generation: 0 })
   })
@@ -565,12 +560,12 @@ describe('web socket runtime environment edge cases', () => {
 
     const [error, socket, connection] = await run(createClient(withEndpoint('http://localhost')), useSocket(), { timeout: 10 })
 
-    expect(error).toMatchObject({ code: 'TIMEOUT', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_TIMEOUT' })
     expect(socket).toBeUndefined()
     expect(connection).toMatchObject({ generation: 0 })
   })
 
-  test('should return transport error when WebSocket is not supported', async () => {
+  test('should report a missing WebSocket constructor as an environment fault', async () => {
     const originalWebSocket = globalThis.WebSocket
     vi.stubGlobal('WebSocket', undefined)
 
@@ -585,7 +580,7 @@ describe('web socket runtime environment edge cases', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('transport')
+    expect(error?.code).toBe('ENV_UNSUPPORTED')
 
     vi.stubGlobal('WebSocket', originalWebSocket)
   })
@@ -949,7 +944,7 @@ describe('web socket runtime environment edge cases', () => {
     })
 
     expect(abortedDuringRegistration).toBe(true)
-    expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_ABORTED' })
     expect(socket).toBeUndefined()
     expect(connection).toMatchObject({ generation: 0 })
     expect(lastMockInstance?.close).toHaveBeenCalledTimes(1)
@@ -968,7 +963,7 @@ describe('web socket runtime environment edge cases', () => {
 
     const [error, socket, connection] = await run(createClient(withEndpoint('http://localhost')), useSocket(), { heartbeat })
 
-    expect(error).toMatchObject({ cause: snapshotFailure, code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+    expect(error).toMatchObject({ cause: snapshotFailure, code: 'REQ_OPTIONS_INVALID' })
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(lastMockInstance).toBeUndefined()
@@ -1121,7 +1116,7 @@ describe('web socket runtime environment edge cases', () => {
     const [error, socket] = await run(createClient(withEndpoint('http://localhost')), useSocket())
 
     expect(socket).toBeUndefined()
-    expect(error).toMatchObject({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+    expect(error).toMatchObject({ code: 'REQ_OPTIONS_INVALID' })
     expect(lastMockInstance).toBeUndefined()
   })
 
@@ -1195,7 +1190,7 @@ describe('web socket runtime environment edge cases', () => {
       await socket.closed
     }
 
-    expect(error).toMatchObject({ cause: getterFailure, code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+    expect(error).toMatchObject({ cause: getterFailure, code: 'REQ_OPTIONS_INVALID' })
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(mockInstances).toHaveLength(0)
@@ -1286,7 +1281,7 @@ describe('web socket runtime environment edge cases', () => {
 
     const [error, socket] = await run(createClient(withEndpoint('http://localhost'), withInterceptors(interceptor)), useSocket())
 
-    expect(error).toBe(interceptorFailure)
+    expect(error).toMatchObject({ cause: interceptorFailure, code: 'EXT_INTERCEPTOR_FAILED' })
     expect(socket).toBeUndefined()
     expect(lastMockInstance?.close).toHaveBeenCalledTimes(1)
   })
@@ -2026,7 +2021,7 @@ describe('web socket runtime environment edge cases', () => {
     if (result === 'pending') {
       throw new Error('beforeConnect cancellation did not settle')
     }
-    expect(result[0]).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(result[0]).toMatchObject({ code: 'NET_ABORTED' })
 
     rejectHook?.(new Error('late hook rejection'))
     await Promise.resolve()
@@ -2452,7 +2447,7 @@ describe('web socket runtime environment edge cases', () => {
     lastMockInstance.triggerClose({ code: 1012, reason: 'restart', wasClean: true })
 
     await expect(socket.closed).resolves.toMatchObject({ kind: 'error' })
-    await expect(pending).rejects.toMatchObject({ kind: 'transport' })
+    await expect(pending).rejects.toMatchObject({ code: 'EXT_HOOK_FAILED' })
     expect(socket.state).toBe('error')
     expect(attempts).toEqual([0, 1])
     expect(mockInstances).toHaveLength(1)
@@ -2498,7 +2493,7 @@ describe('web socket runtime environment edge cases', () => {
     lastMockInstance?.triggerClose({ code: 1006, reason: 'closed before open', wasClean: false })
 
     const [error, socket, connection] = await executePromise
-    expect(error).toMatchObject({ cause: policyFailure, code: 'NETWORK_ERROR', kind: 'transport' })
+    expect(error).toMatchObject({ cause: policyFailure, code: 'NET_UNREACHABLE' })
     expect(socket).toBeUndefined()
     expect(connection).toMatchObject({ generation: 0 })
     expect(predicate).toHaveBeenCalledTimes(1)
@@ -2538,10 +2533,16 @@ describe('web socket runtime environment edge cases', () => {
   })
 
   test.each([
-    createDefinitionError('REQUEST_VALIDATION_FAILED', new Error('invalid reconnect policy')),
-    createHttpStatusError(503, 'reconnect policy unavailable', makeResponse({ status: 503 })),
-    createTransportError(new Error('reconnect policy offline')),
-  ])('should preserve a $kind RequestError thrown by the reconnect policy', async (policyFailure) => {
+    createPreflightFault('REQ_OPTIONS_INVALID', new Error('invalid reconnect policy')),
+    createUndecodedHttpStatusFault({
+      headers: new Headers(),
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      url: 'http://localhost/ws/test',
+    }),
+    createNetworkFault(new Error('reconnect policy offline')),
+  ])('should preserve a $code fault thrown by the reconnect policy', async (policyFailure) => {
     vi.stubGlobal('WebSocket', createMockWebSocketClass())
     const useSocket = defineWebSocket({ maxIncomingQueueSize: 1, incoming: {}, path: '/ws/test' })
     const [, socket] = await run(createClient(withEndpoint('http://localhost')), useSocket(), {

@@ -41,7 +41,7 @@ describe('fetchEventStream', () => {
       { id: '2', event: 'message', data: 'second line 1\nsecond line 2' },
     ])
 
-    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should retry with last-event-id and update open info', async () => {
@@ -93,7 +93,7 @@ describe('fetchEventStream', () => {
 
     expect(messages.map((event) => event.data)).toEqual(['first', 'second'])
     expect(stream.open.response.headers.get('x-request-id')).toBe('attempt-2')
-    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should close stream manually', async () => {
@@ -113,7 +113,7 @@ describe('fetchEventStream', () => {
     stream.close('stop')
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
     await expect(stream.closed).resolves.toEqual({
-      code: 'aborted',
+      kind: 'aborted',
       reason: 'stop',
       cause: 'stop',
     })
@@ -153,7 +153,6 @@ describe('fetchEventStream', () => {
     const open = getErrorOpenInfo(thrown)
     expect(thrown).toBeInstanceOf(Error)
     expect(open?.response.ok).toBe(false)
-    expect(open?.response.error).toBeUndefined()
   })
 
   test('should reject with aborted error when aborted before open', async () => {

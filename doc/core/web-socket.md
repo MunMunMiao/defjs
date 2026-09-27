@@ -22,7 +22,7 @@ const room = defineWebSocket({
 
 const [error, session, startupConnection] = await client.execute(room())
 if (error) {
-  console.error(error.kind, error.code, startupConnection?.generation)
+  console.error(error.code, startupConnection?.generation)
 } else {
   await using ownedSession = session
   const unsubscribe = ownedSession.onRuntimeError((cause) => console.error('runtime', cause))
@@ -77,11 +77,11 @@ If an object payload has a field named `data`, it stays beside `type` after enco
 Startup failure → `[error, undefined, connection?]`. Pre-open constructor failure may have no connection; timeout/close during startup may still provide a snapshot. After the session returns, runtime errors travel through observers, `receive`, and `closed` — not a second execute tuple.
 
 ```typescript twoslash
-import type { RequestError, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
+import type { Fault, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
 
 type SocketResult<TIncoming, TOutgoing> =
   | [error: null, session: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [error: Fault, session: undefined, connection: WebSocketConnectionInfo | undefined]
 
 const result: SocketResult<unknown, never> | undefined = undefined
 void result

@@ -187,7 +187,7 @@ describe('Fetch handler streaming', () => {
     const cancel = vi.fn(() => new Promise<void>(() => undefined))
     const stream = new ReadableStream<Uint8Array>({ cancel })
     const fetchMock = vi.fn<typeof fetch>()
-    const response = await settleWithin(
+    const failure = await settleWithin(
       fetchHandler(
         {
           baseEndpoint: 'https://example.com',
@@ -197,12 +197,12 @@ describe('Fetch handler streaming', () => {
           uploadProgress: vi.fn(),
         },
         fetchMock,
-      ),
+      ).catch((cause: unknown) => cause),
     )
 
-    expect(response.error).toBeInstanceOf(TypeError)
+    expect(failure).toBeInstanceOf(TypeError)
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(cancel).toHaveBeenCalledExactlyOnceWith(response.error)
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(failure)
     expect(stream.locked).toBe(false)
   })
 
@@ -217,7 +217,7 @@ describe('Fetch handler streaming', () => {
     const fetchMock = vi.fn(async () => {
       throw networkError
     })
-    const response = await settleWithin(
+    const failure = await settleWithin(
       fetchHandler(
         {
           baseEndpoint: 'https://example.com',
@@ -227,10 +227,10 @@ describe('Fetch handler streaming', () => {
           uploadProgress: vi.fn(),
         },
         fetchMock,
-      ),
+      ).catch((cause: unknown) => cause),
     )
 
-    expect(response.error).toBe(networkError)
+    expect(failure).toBe(networkError)
     expect(fetchMock).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledExactlyOnceWith(networkError)
     expect(stream.locked).toBe(false)
@@ -246,7 +246,7 @@ describe('Fetch handler streaming', () => {
     const cancel = vi.fn(() => new Promise<void>(() => undefined))
     const stream = new ReadableStream<Uint8Array>({ cancel })
     const fetchMock = vi.fn<typeof fetch>()
-    const response = await settleWithin(
+    const failure = await settleWithin(
       fetchHandler(
         {
           abort: controller.signal,
@@ -257,10 +257,10 @@ describe('Fetch handler streaming', () => {
           uploadProgress: vi.fn(),
         },
         fetchMock,
-      ),
+      ).catch((cause: unknown) => cause),
     )
 
-    expect(response.error).toBe(ERR_ABORTED)
+    expect(failure).toBe(ERR_ABORTED)
     expect(fetchMock).not.toHaveBeenCalled()
     expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
     expect(stream.locked).toBe(false)
@@ -290,7 +290,7 @@ describe('Fetch handler streaming', () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
     controller.abort()
 
-    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    await expect(settleWithin(pending)).rejects.toBe(ERR_ABORTED)
     expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
     expect(stream.locked).toBe(false)
   })
@@ -342,7 +342,7 @@ describe('Fetch handler streaming', () => {
     await pullStarted
     controller.abort()
 
-    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    await expect(settleWithin(pending)).rejects.toBe(ERR_ABORTED)
     expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
     expect(stream.locked).toBe(false)
   })
@@ -393,7 +393,7 @@ describe('Fetch handler streaming', () => {
       reader = request.body?.getReader()
       throw networkError
     })
-    const response = await fetchHandler(
+    const failure = await fetchHandler(
       {
         baseEndpoint: 'https://example.com',
         body: stream,
@@ -402,9 +402,9 @@ describe('Fetch handler streaming', () => {
         uploadProgress: vi.fn(),
       },
       fetchMock as unknown as typeof fetch,
-    )
+    ).catch((cause: unknown) => cause)
 
-    expect(response.error).toBe(networkError)
+    expect(failure).toBe(networkError)
     expect(cancel).not.toHaveBeenCalled()
     await expect(reader?.cancel(networkError)).resolves.toBeUndefined()
     expect(cancel).toHaveBeenCalledExactlyOnceWith(networkError)
@@ -547,7 +547,7 @@ describe('Fetch handler streaming', () => {
     }
 
     const observerError = new Error('start failed')
-    const response = await fetchHandler(
+    const failure = await fetchHandler(
       {
         baseEndpoint: 'https://example.com',
         body: new Blob(['hello']),
@@ -559,9 +559,9 @@ describe('Fetch handler streaming', () => {
         },
       },
       vi.fn(async () => new Response('ok')) as unknown as typeof fetch,
-    )
+    ).catch((cause: unknown) => cause)
 
-    expect(response.error).toBe(observerError)
+    expect(failure).toBe(observerError)
   })
 })
 

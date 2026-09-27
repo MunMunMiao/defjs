@@ -7,6 +7,38 @@ description: Defjs가 계약, 명령, 전송 결과, 디코딩, 소유권을 왜
 
 Defjs는 몇 가지를 의도적으로 바꿔요. 편의 API는 요청·스트림·세션의 소유자를 자주 가려요. Defjs는 그 경계를 드러내서, 같은 엔드포인트 계약을 재사용하면서도 캐시·재시도 스케줄러·리소스 관리자를 조용히 끌어들이지 않게 해요.
 
+## 선언은 곧 단언이에요
+
+이 여섯 가지 규칙이 응답을 어떻게 읽을지에 대한 모든 질문을 결정해요. 나중에 논의할 때 다시 유도하지 않고 바로 인용할 수 있도록 번호를 붙였어요.
+
+### 1. 선언한 것이 곧 단언한 것
+
+`output`은 "`ok`가 true일 때 body는 **이 모양이다**"라는 뜻이에요. `error`는 "`ok`가 false일 때 body는 **이 모양이다**"예요. 선언은 힌트도, 잘 되면 좋겠다는 바람도 아니라, 무엇이 도착할지에 대한 주장이에요.
+
+### 2. `ok`가 유일한 분기점이고, 읽는 쪽은 항상 한쪽뿐
+
+2xx는 `output`으로 읽어요. 나머지는 모두 `error`로 읽어요. 둘 다 시도하는 일은 없고, 다른 쪽을 폴백으로 쓰지도 않아요.
+
+### 3. 단언과 다른 현실은 실패이고, 분명하게 보고해요
+
+형식을 추측하지 않고, 약한 쪽으로 낮추지 않고, 침묵하지 않아요. 백엔드가 바뀌었는지, 게이트웨이가 끼어들었는지, 누가 응답을 손댔는지는 **결론을 바꾸지 않아요**. 라이브러리는 그것들을 구분할 수 없고, 구분하는 척해서도 안 돼요.
+
+이 규칙은 사람들이 가장 자주 완화해 달라고 하는 것이라, 상황을 분명히 말해 둘 만해요. 공격자가 당신의 페이지가 `output`으로 읽으려던 `200`을 고칠 수 있고, 대신 `3xx`, `4xx`, `5xx`가 도착했다고 해 봐요. 실패하는 건 불편이 아니라 유일하게 안전한 결과예요. "혹시 모르니" 원본 body를 건네주는 건, 응답을 주입할 수 있는 사람에게 당신이 요구한 검증을 우회할 길을 주는 셈이에요.
+
+### 4. 디코딩이 실패했다면 body는 없어요
+
+body**란** 디코딩된 값이에요. 디코딩이 실패했다면 값이 없어요 — 들여다볼 반쯤 디코딩된 body 같은 건 없어요. 문제의 세부는 `cause`에 실리고, 응답은 메타데이터만 지녀요.
+
+이 규칙은 관례가 아니라 타입 시스템이 강제해요. 디코딩 fault의 `response`는 `HttpMeta`라서 `body` 필드가 아예 없고, 꺼내려 하면 컴파일 오류예요.
+
+### 5. 단언에 얽매이고 싶지 않다면 선언하지 마세요
+
+`output`을 빼면 "2xx body는 신경 쓰지 않는다"는 뜻이고, 그 body는 읽히지 않아요. `error`를 빼면 나머지에 대해서도 같아요. 이건 실수가 아니라 명시적인 opt-out이고, 끝까지 일관돼요. opt out한 쪽의 body를 읽을 수 없더라도 그건 당신 일이 아니에요. "읽을 수 없었다"는 사실조차요.
+
+### 6. 3xx는 오류 코드 구간이 아니에요
+
+어떤 엔드포인트가 리다이렉트 status를 준다는 걸 알고 있다면, `output`에 그 스키마를 넘기지 말거나 빈 값을 받아들이는 스키마를 선언하세요. 그러지 않으면 실패가 보고되는 게 예상된 결과이고, 빈틈이 아니에요.
+
 ## 명시적인 클라이언트
 
 `createClient(...)`는 엔드포인트 설정을 명시적인 값으로 만들어요. 환경이나 요청 범위마다 다른 엔드포인트, 자격 증명, 인터셉터, 직렬화기, 전송 핸들을 써요. `@defjs/core`의 `createClient(...)`도 HTTP 전용 소비자에게 같은 방식으로 동작해요.
@@ -28,10 +60,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -53,7 +83,19 @@ const command = getUser({ path: { id: 7 } })
 
 TypeScript 추론은 기대를 설명할 뿐, 서버 응답을 런타임에 검사하지는 못해요. Struct 파싱이 계약의 나머지 절반이에요. Defjs는 요청을 만들기 전에 명령 입력을 검증하고, 선택한 representation을 디코딩한 뒤, 맞는 Struct를 파싱해요.
 
-그 순서는 status와 body를 별개 사실로 유지해요. 정확히 선언된 status 선택은 body 디코딩 **전에** 일어나요. 선언된 non-2xx → 타입이 잡힌 `error.data`. 잘못된 선언 body → `RESPONSE_VALIDATION_FAILED`. 미선언 status → `UNDECLARED_STATUS` (타입이 없는 성공/실패가 아님). “도착한 JSON이면 뭐든”보다 엄격하지만, 안전한 결정을 내릴 수 있어요.
+디코딩은 **인터셉터 체인 뒤에서 딱 한 번** 일어나요. 인터셉터가 `makeResponse(...)`로 만든 응답은 실제 회선에서 온 것과 똑같이 해석돼요. 응답이 어디서 왔는지는 읽는 방식을 바꾸지 않으니, "인터셉터는 믿는다" 같은 따져 볼 경로가 아예 없어요.
+
+순서는 미디어 타입, 그다음 표현, 그다음 Struct예요.
+
+| 지켜지지 않은 것                               | Fault                                                |
+| ---------------------------------------------- | ---------------------------------------------------- |
+| 미디어 타입이 선언된 표현이 요구하는 것과 다름 | `RES_MEDIA_TYPE_INVALID` — body를 읽기 **전에** 보고 |
+| 바이트가 그 표현이 아님                        | `RES_DECODE_FAILED`                                  |
+| 값이 그 Struct에 맞지 않음                     | `RES_STRUCT_MISMATCH`                                |
+| non-2xx이고 `error`가 디코딩됨                 | 타입이 잡힌 `data`를 지닌 `HTTP_STATUS`              |
+| non-2xx이고 `error`를 선언하지 않음            | `data: undefined`인 `HTTP_STATUS`                    |
+
+미디어 타입을 먼저 확인하는 덕분에 "JSON을 요청했는데 HTML이 왔다"가 파서 오류가 아니라 하나의 정확한 fault가 돼요. 게다가 읽기, 파싱, Struct를 통째로 건너뛰어요.
 
 ## `build`의 한계
 
@@ -83,7 +125,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: { 202: struct.object({ accepted: struct.number() }) },
+  output: struct.object({ accepted: struct.number() }),
 })
 
 const command = createBatch({

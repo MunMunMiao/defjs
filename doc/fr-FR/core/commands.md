@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,14 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## Formes de sortie par statut
+## Formes de `output` et `error`
 
-`output` peut être une map statut → Struct ou un `{ status, body }[]`. Le statut exact gagne. Entrées tableau : un match plus tard override un match groupé plus tôt. Aucune déclaration correspondante → `UNDECLARED_STATUS` avant le décodage du body.
+`output` est un Struct pour le corps 2xx ; `error` est un Struct pour tout le reste. `ok` est le seul embranchement, et un seul côté décode. Omettre un côté veut dire que ce corps n’est jamais lu : le fault porte le statut et `data` reste `undefined`.
 
 ## Recettes liées
 

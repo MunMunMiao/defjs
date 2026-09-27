@@ -1,13 +1,15 @@
 ---
-title: 오류
-description: 404, 타임아웃, 미선언 status, 전송 실패를 kind와 code로 분기해요.
+title: Errors
+description: 404, 타임아웃, 읽을 수 없는 body, 전송 실패를 닫힌 fault 코드 집합으로 분기해요.
 ---
 
-# 오류
+# Errors
 
-선언된 404, 타임아웃, 미선언 status는 throw를 잡는 게 아니라 error-first 튜플을 읽어서 처리해요. `RequestError`는 여전히 `kind` / `code` 유니온이면서 네이티브 `Error`예요(`instanceof Error`가 true). `kind`부터 보고, 그다음 `code`를 봐요.
+404, 타임아웃, 읽을 수 없는 body는 throw를 catch하는 게 아니라 error-first 튜플을 읽어서 처리해요. `Fault`는 네이티브 `Error`이고(`instanceof Error`가 참), 판별에 쓰는 필드는 `code` 하나예요.
 
-## Basic Setup
+`kind`는 없어요. 실패의 분류는 code에서 첫 `_` 앞부분 그 자체라서, `NET_TIMEOUT`은 `NET` 실패이고 `RES_STRUCT_MISMATCH`는 `RES` 실패예요. 크게 나눌 때는 접두사를, 정확히 판단할 때는 code 전체를 보세요.
+
+## 기본 사용법
 
 ```typescript twoslash
 import { createClient, defineRequest, struct, withEndpoint } from '@defjs/core'
@@ -17,148 +19,254 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
-const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
-  console.log(error.data.message)
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+const [err, user, response] = await client.execute(getUser({ path: { id: 7 } }))
+if (err?.code === 'HTTP_STATUS' && err.status === 404) {
+  console.log(err.data.message)
+} else if (err?.code === 'NET_TIMEOUT') {
   console.log('timed out')
-} else if (error?.kind === 'definition' && error.code === 'UNDECLARED_STATUS') {
-  console.log('status not in output map', error.response?.status)
-} else if (!error) {
+} else if (err?.code === 'RES_STRUCT_MISMATCH') {
+  console.log('the response did not match what we declared', err.response.status)
+} else if (!err) {
   console.log(user.name, response.status)
 }
 ```
 
-```typescript twoslash
-import { createTransportError, ERR_ABORTED, type RequestError } from '@defjs/core'
+집합이 닫혀 있으니 `code`에 대한 `switch`는 빠짐없이 완전해요.
 
-function classify(error: RequestError): string {
-  if (error.kind === 'http') return `status:${error.status}`
-  if (error.kind === 'transport') return `transport:${error.code}`
-  return `definition:${error.code}`
+```typescript twoslash
+import { createNetworkFault, ERR_ABORTED, type Fault } from '@defjs/core'
+
+function triage(fault: Fault): string {
+  switch (fault.code) {
+    case 'HTTP_STATUS':
+      return `status ${fault.status}`
+    case 'RES_MEDIA_TYPE_INVALID':
+    case 'RES_DECODE_FAILED':
+    case 'RES_STRUCT_MISMATCH':
+      return 'the contract did not hold'
+    case 'NET_TIMEOUT':
+    case 'NET_ABORTED':
+    case 'NET_UNREACHABLE':
+    case 'NET_BODY_INCOMPLETE':
+      return 'retryable'
+    case 'REQ_INPUT_INVALID':
+    case 'REQ_OPTIONS_INVALID':
+    case 'REQ_BUILD_FAILED':
+      return 'fix the call'
+    case 'EXT_INTERCEPTOR_FAILED':
+    case 'EXT_HOOK_FAILED':
+    case 'EXT_OBSERVER_FAILED':
+      return 'fix the code you attached'
+    case 'CAP_BUFFER_EXCEEDED':
+    case 'CAP_QUEUE_OVERFLOW':
+      return 'raise a declared limit or read faster'
+    case 'ENV_UNSUPPORTED':
+      return 'the host runtime is missing something'
+  }
 }
 
-const example: RequestError = createTransportError(ERR_ABORTED)
-console.log(classify(example))
+const example: Fault = createNetworkFault(ERR_ABORTED)
+console.log(triage(example))
 ```
 
-## 안정적인 코드
+## 안정적인 code
 
-| `kind`       | Codes                                                                                                | Meaning                                                                                                       |
-| ------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `http`       | `HTTP_STATUS`                                                                                        | Non-2xx가 HTTP 경계에 도달했어요. `status`, `response`, 디코딩된 status별 `data`가 있으면 유지해요.           |
-| `transport`  | `ABORTED`, `TIMEOUT`, `NETWORK_ERROR`                                                                | 취소, 타임아웃, 또는 Fetch/전송 실패로 정상 결과가 막혔어요.                                                  |
-| `definition` | `REQUEST_VALIDATION_FAILED`, `RESPONSE_VALIDATION_FAILED`, `UNDECLARED_STATUS`, `INTERCEPTOR_FAILED` | 입력, 요청 구성, 응답 representation, Struct 디코딩, status 계약 실패, 또는 interceptor의 `throw`를 나타내요. |
+| 분류   | Code                                                                   | 누가 고쳐야 하나                                  |
+| ------ | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| `HTTP` | `HTTP_STATUS`                                                          | 상대가 2xx가 아닌 걸 줬어요. 업무 로직으로 다뤄요 |
+| `REQ`  | `REQ_INPUT_INVALID`, `REQ_OPTIONS_INVALID`, `REQ_BUILD_FAILED`         | 호출하는 쪽, 아니면 엔드포인트 선언               |
+| `NET`  | `NET_ABORTED`, `NET_TIMEOUT`, `NET_UNREACHABLE`, `NET_BODY_INCOMPLETE` | 아무도, 아니면 재시도                             |
+| `RES`  | `RES_MEDIA_TYPE_INVALID`, `RES_DECODE_FAILED`, `RES_STRUCT_MISMATCH`   | 선언과 상대를 맞춰야 해요                         |
+| `EXT`  | `EXT_INTERCEPTOR_FAILED`, `EXT_HOOK_FAILED`, `EXT_OBSERVER_FAILED`     | 당신이 파이프라인에 붙인 코드                     |
+| `CAP`  | `CAP_BUFFER_EXCEEDED`, `CAP_QUEUE_OVERFLOW`                            | 선언한 한계, 아니면 소비하는 쪽의 속도            |
+| `ENV`  | `ENV_UNSUPPORTED`                                                      | 호스트 런타임                                     |
 
-`cause`는 transport와 definition 오류에서 선택적이에요. `response`는 HTTP status 오류에 항상 있고, 응답이 이미 있을 때 definition 오류에도 나타날 수 있어요.
+집합을 닫아 둔 건 의도예요. 그게 `switch`의 완전성을 지켜요. 확장은 자기 세부를 새 code가 아니라 `cause`로 알려요.
 
-## 전송별 튜플 형태
+### 모양별 필드
+
+| Code          | `status` | `response`                                               | `data`                                  |
+| ------------- | -------- | -------------------------------------------------------- | --------------------------------------- |
+| `HTTP_STATUS` | 항상     | 항상. `error`를 선언하고 디코딩됐을 때만 `body`를 가져요 | 디코딩된 `error` body, 또는 `undefined` |
+| `RES_*`       | 항상     | 항상, 메타데이터만 — **`body` 없음**                     | 없음                                    |
+| 그 외 전부    | 없음     | 전송이 이미 메타데이터를 갖고 있던 경우에만              | 없음                                    |
+
+`cause`는 밑단의 값을 실어요. struct 불일치면 `StructError`, 표현을 읽을 수 없으면 파서의 실패, 확장이 던진 것이면 그것 그대로예요.
+
+## 전송별 튜플 모양
 
 ```typescript twoslash
 import type {
+  DecodedResponse,
   EventStreamHandle,
   EventStreamOpenInfo,
-  HttpResponse,
-  RequestError,
+  Fault,
+  HttpMeta,
   WebSocketConnectionInfo,
   WebSocketSession,
 } from '@defjs/core'
 
 type HttpResult =
-  | [error: null, data: unknown, response: HttpResponse<unknown>]
-  | [error: RequestError, data: undefined, response: HttpResponse<unknown> | undefined]
+  [err: null, data: unknown, response: DecodedResponse<unknown> | HttpMeta] | [err: Fault, data: undefined, response: undefined]
 type SseResult =
-  | [error: null, stream: EventStreamHandle<unknown>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [err: null, stream: EventStreamHandle<unknown>, open: EventStreamOpenInfo]
+  | [err: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 type SocketResult =
-  | [error: null, session: WebSocketSession<unknown>, connection: WebSocketConnectionInfo]
-  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [err: null, session: WebSocketSession<unknown>, connection: WebSocketConnectionInfo]
+  | [err: Fault, session: undefined, connection: WebSocketConnectionInfo | undefined]
 
 const results: [HttpResult, SseResult, SocketResult] | undefined = undefined
 void results
 ```
 
-시작 실패 → 두 번째 항목 `undefined`. 세 번째 항목은 그 전송이 먼저 응답/스냅샷을 만든 경우에만 있어요. SSE 핸들이나 WebSocket 세션이 반환된 뒤의 실패는 그 핸들 수명에 있고, 이미 확정된 시작 튜플을 다시 쓰지 않아요.
+HTTP 실패에서는 세 번째 자리가 `undefined`예요. 있었던 응답 메타데이터는 이미 fault가 들고 있어요. 이게 중요한 이유는, 핸들러에 넘기고 로그에 남기고 다시 던지는 대상이 바로 fault이기 때문이에요. 메타데이터는 fault _옆_ 이 아니라 fault와 _함께_ 움직여야 해요.
 
-## HTTP status와 data
+SSE와 WebSocket에서 세 번째 자리는 시작 시점 스냅샷이고, 시작이 실패했을 때도 있을 수 있어요. 핸들이나 세션이 돌아온 뒤의 실패는 그 생명주기에서 다뤄요. 이미 정해진 시작 튜플을 고쳐 쓰는 일은 절대 없어요.
 
-정확한 status가 먼저예요. `output`이 있으면 Defjs는 body를 디코딩하기 전에 맞는 Struct를 고르므로 `error.status`와 `error.data`가 맞춰져 있어요.
+## body를 읽는 방법
 
-| 상황                                     | 튜플 결과                         | body 동작                                                     |
-| ---------------------------------------- | --------------------------------- | ------------------------------------------------------------- |
-| 맞는 선언 status의 2xx                   | 성공                              | 선택된 Struct → `data`                                        |
-| 맞는 선언 status의 non-2xx               | `HTTP_STATUS`                     | 선택된 Struct → 타입이 잡힌 `error.data`                      |
-| 맞는 선언이 없는 아무 status             | `UNDECLARED_STATUS`               | status가 body 디코딩 **전에** 이겨요                          |
-| 맞는 status인데 body representation 실패 | `RESPONSE_VALIDATION_FAILED`      | 부분 타입 값 없음                                             |
-| `output` 생략                            | 2xx 성공; non-2xx → `HTTP_STATUS` | body를 디코딩하지 않아요; `data`는 `undefined`                |
-| 응답 status `0`                          | 전송 오류                         | `response.error` → `NETWORK_ERROR`, `ABORTED`, 또는 `TIMEOUT` |
+`ok`가 유일한 분기점이고, 디코딩하는 쪽은 항상 한쪽뿐이에요. `output`은 2xx body를 읽고, `error`는 그 밖의 모든 것을 읽어요. 한쪽을 빼면 그 body는 읽히지 않아요.
 
-`HttpResponse.ok`는 `200 <= status < 300`만 의미해요. 정상 non-2xx는 `HttpResponse.error`를 설정하지 않아요 — 그 속성은 Fetch 경계 전송 실패나 body representation 실패용이에요.
+| 상황                                       | 결과                                                  |
+| ------------------------------------------ | ----------------------------------------------------- |
+| 2xx, `output` 선언, body 디코딩 성공       | 성공. `data`와 `response.body`에 타입이 잡혀요        |
+| 2xx, `output` 생략                         | 성공. `data`는 `undefined`이고 응답에 `body`가 없어요 |
+| non-2xx, `error` 선언, body 디코딩 성공    | 타입이 잡힌 `data`를 지닌 `HTTP_STATUS`               |
+| non-2xx, `error` 생략                      | `data: undefined`인 `HTTP_STATUS`                     |
+| 미디어 타입이 그 표현이 요구하는 것과 다름 | `RES_MEDIA_TYPE_INVALID`, body를 읽기 **전에** 보고   |
+| 바이트가 그 표현이 아님                    | `RES_DECODE_FAILED`                                   |
+| 값이 그 struct가 아님                      | `RES_STRUCT_MISMATCH`                                 |
+| **선언하지 않은** 쪽의 body를 읽을 수 없음 | 완전히 무시 — 아래 참고                               |
 
-## 시작 vs open 이후
+기억해 둘 만한 건 마지막 줄이에요. `output`을 선언하고 `error`를 선언하지 않았다면, body가 깨진 JSON인 500은 `HTTP_STATUS`와 `status: 500`으로 보고돼요. 당신은 오류 body에 신경 쓰지 않는다고 말한 거고, 거기엔 "읽을 수 없었다는 사실에도 신경 쓰지 않는다"가 포함돼요.
 
-SSE는 핸들을 resolve하기 전에 status, `text/event-stream`, body를 검증해요. 실패한 status → `HTTP_STATUS`. 잘못된 content type이나 없는 body → `RESPONSE_VALIDATION_FAILED`. opening 스냅샷은 여전히 튜플 세 번째에 올 수 있어요.
+디코딩은 인터셉터 체인 뒤에서 딱 한 번 일어나요. 인터셉터가 `makeResponse(...)`로 만든 응답도 회선에서 온 것과 같은 미디어 타입 확인과 같은 struct를 지나요.
 
-WebSocket 시작은 handshake + 첫 물리 open을 덮어요. 생성자 실패, open 전 close, 타임아웃, 취소 → 시작 튜플. 소켓이 `open`에 도달하지 않아도 연결 스냅샷이 있을 수 있어요.
+`HttpResponse.ok`는 `200 <= status < 300`만 뜻해요. 전송 실패는 fault이고 응답이 아니에요. 그 자리를 대신하는 status 0 응답은 없어요.
 
-| Transport | After startup                                                                                                                                 |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| SSE       | 치명적 오류에서 iterator가 reject하고, `stream.closed`는 `code: 'error'`와 `EventStreamErrorCode`로 resolve해요                               |
-| WebSocket | 메시지/큐/heartbeat/런타임 실패는 `onRuntimeError`; 종료 오류에서 `receive` 실패; `session.closed` → `kind: 'error' \| 'aborted' \| 'closed'` |
-| HTTP      | execute 프로미스는 한 번 settle해요. 인터셉터/콜백 코드는 튜플 정규화 밖에서도 throw할 수 있어요                                              |
+## 오류 body union 좁히기
 
-`ABORTED` / `TIMEOUT`은 호출자가 보는 시작 결과를 설명해요. 반환된 스트림/세션은 여전히 닫고 종료 프로미스를 await 해야 해요.
+하나의 `error` struct가 2xx 아닌 모든 status를 담당하니, 모양이 다를 때는 union을 선언해요. 그다음 `fault.data`로 무엇을 할 수 있는지는 그 union을 어떻게 선언했는지에 전적으로 달려 있어요. 라이브러리는 당신이 요구한 타입을 그대로 돌려줘요.
+
+`struct.or(...)`는 평범한 union을 만들고, TypeScript는 그걸 혼자 좁히지 못해요. 필요한 필드를 검사하세요.
+
+```typescript twoslash
+import { struct, type Fault } from '@defjs/core'
+
+const ApiError = struct.or(struct.object({ message: struct.string() }), struct.object({ retryAfter: struct.number() }))
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS' && 'retryAfter' in fault.data) {
+  console.log(fault.data.retryAfter)
+}
+```
+
+`struct.discriminatedUnion(...)`은 body가 실제로 지닌 필드로 좁혀요. API가 이미 오류에 태그를 달아 뒀다면 이게 가장 편한 형태예요.
+
+```typescript twoslash
+import { struct, type Fault } from '@defjs/core'
+
+const ApiError = struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('validation'), fields: struct.array(struct.string()) }),
+  struct.object({ kind: struct.literal('rateLimit'), retryAfter: struct.number() }),
+])
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS') {
+  switch (fault.data.kind) {
+    case 'validation':
+      console.log(fault.data.fields.length)
+      break
+    case 'rateLimit':
+      console.log(fault.data.retryAfter)
+      break
+  }
+}
+```
+
+API가 status를 **body 안에** 넣어 두면, `fault.status` 대신 그걸로 판별하세요.
+
+```typescript twoslash
+import { struct, type Fault } from '@defjs/core'
+
+const ApiError = struct.discriminatedUnion('status', [
+  struct.object({ status: struct.literal(404), resource: struct.string() }),
+  struct.object({ status: struct.literal(429), retryAfter: struct.number() }),
+])
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS' && fault.data.status === 429) {
+  console.log(fault.data.retryAfter)
+}
+```
+
+API가 지원한다면 마지막 형태를 고를 만해요. `fault.status`는 HTTP 계층의 숫자라 프록시, 게이트웨이, CDN이 고쳐 쓸 수 있어요. 반면 `data.status`는 당신의 `error` struct가 단언한 body에서 디코딩된 값이라, 거기에 닿았다는 것 자체가 백엔드가 그걸 냈다는 증거예요.
+
+판별 필드가 없어서 좁혀지지 않는 union은 선언 쪽의 성질이고 라이브러리의 성질이 아니에요. 라이브러리는 당신이 선언한 타입을 건네줘요. 좁히고 싶다면 struct에 판별 필드를 더하세요.
+
+## 시작 시점과 열린 뒤
+
+SSE는 핸들을 resolve하기 전에 status, `text/event-stream`, body 존재 여부를 검증해요. non-2xx → `HTTP_STATUS`. 미디어 타입이 다름 → `RES_MEDIA_TYPE_INVALID`. body 없음 → `RES_DECODE_FAILED`. 시작 스냅샷은 그래도 튜플 세 번째 자리에 담길 수 있어요.
+
+WebSocket의 시작 시점은 핸드셰이크와 첫 물리 open까지예요. 생성자 실패, open 전 종료, 타임아웃, 취소는 모두 시작 튜플을 만들어요. 소켓이 `open`에 닿지 못했더라도 연결 스냅샷은 있을 수 있어요.
+
+| 전송      | 시작 이후                                                                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| SSE       | 치명적 오류에서 이터레이터가 reject. `stream.closed`는 `kind: 'error'`와 fault의 `code`로 resolve                                         |
+| WebSocket | 메시지／큐／하트비트 실패는 `onRuntimeError`. 종단 오류에서 `receive`가 실패. `session.closed` → `kind: 'closed' \| 'aborted' \| 'error'` |
+| HTTP      | execute의 promise는 한 번만 settle. 인터셉터와 콜백 코드는 튜플 정규화 밖에서 여전히 throw할 수 있어요                                    |
+
+`NET_ABORTED` / `NET_TIMEOUT`은 호출자가 시작 시점에 본 것을 설명해요. 돌려받은 stream이나 session은 그래도 닫고 종단 promise를 await 하세요.
 
 ## 네이티브 Error 로깅과 cause
 
-`RequestError`의 모든 variant는 네이티브 `Error` 인스턴스라서 diagnostic adapter가 필요 없어요. `String(error)`는 안정적인 네이티브 형식인 `<name>: <message>`를 사용해요. `kind`, `code`, 그리고 `status`, `response`, `data` 같은 variant 필드는 구조화 로깅을 위해 enumerable이고, `name`과 네이티브 `cause` 체인은 non-enumerable이에요.
+Fault는 네이티브 `Error` 인스턴스라서 진단 어댑터가 필요 없어요. `String(fault)`는 안정적인 네이티브 형태 `DefjsFault: <message>`를 줘요. `code`와 각 변형 필드 — `status`, `response`, `data` — 는 구조화 로깅을 위해 열거 가능하게 남고, `name`과 네이티브 `cause` 체인은 열거되지 않아요.
 
 ```typescript twoslash
-import { StructError, type RequestError } from '@defjs/core'
+import { StructError, type Fault } from '@defjs/core'
 
-export function logRequestError(error: RequestError): void {
-  console.error(String(error), { code: error.code, kind: error.kind })
-  if (error.cause instanceof StructError) {
-    console.error(error.cause.prettify())
+export function logFault(fault: Fault): void {
+  console.error(String(fault), { code: fault.code })
+  if (fault.cause instanceof StructError) {
+    console.error(fault.cause.prettify())
   }
 }
 ```
 
-`format()`, `flatten()`, `prettify()`를 호출하기 전에 `error.cause instanceof StructError`로 좁혀야 해요. 이 helper들은 Struct cause에 그대로 있고 바깥쪽 `DefinitionError`로 복사되지 않아요. 제어 흐름에서 `message`나 `String(error)`를 파싱하지 마세요 — `kind`, `code`, 검토된 status가 여전히 계약이에요.
+`format()`, `flatten()`, `prettify()`를 부르기 전에 `fault.cause`를 `StructError`로 좁히세요. 이 helper들은 Struct 쪽 cause에 붙어 있고 fault로 복사되지 않아요. 제어 흐름이 `message`나 `String(fault)`를 파싱하게 하지 마세요. 계약은 `code`와 검토된 `status`예요.
 
-## Reference
+## 참고
 
-| Branch | Control-flow check | Useful stable fields | Usually absent / sensitive |
-| --- | --- | --- |
-| HTTP status 정책 | `error.kind === 'http'` | `error.status`, 검토된 `error.data` | body, 헤더, URL, `cause` |
-| 호출자 취소 | `kind === 'transport' && code === 'ABORTED'` | `kind`, `code` | abort 이유와 스택 |
-| 타임아웃 | `kind === 'transport' && code === 'TIMEOUT'` | `kind`, `code` | 요청 URL과 하위 cause |
-| 계약 실패 | `error.kind === 'definition'` | `kind`, `code`, 검토된 `response?.status` | Struct 이슈, body, 입력 값 |
-| 스트림/세션 런타임 | `stream.closed` / `session.closed` | 종료 code/kind, 검토된 close status | 이벤트 페이로드, 프레임, cause |
+| 분기                | 제어 흐름 판정                     | 쓸 만한 안정 필드                      | 보통 없음／민감                |
+| ------------------- | ---------------------------------- | -------------------------------------- | ------------------------------ |
+| HTTP status 정책    | `fault.code === 'HTTP_STATUS'`     | `fault.status`, 검토된 `fault.data`    | body, headers, URL, `cause`    |
+| 호출자 취소         | `fault.code === 'NET_ABORTED'`     | `code`                                 | 취소 이유와 스택               |
+| 타임아웃            | `fault.code === 'NET_TIMEOUT'`     | `code`                                 | 요청 URL과 밑단 cause          |
+| 계약이 깨짐         | `fault.code.startsWith('RES_')`    | `code`, 검토된 `fault.response.status` | Struct issue, body, 입력값     |
+| 당신 코드가 던짐    | `fault.code.startsWith('EXT_')`    | `code`, `cause`                        | 확장이 붙인 무엇이든           |
+| 스트림／세션 런타임 | `stream.closed` / `session.closed` | 종단 `kind`와 `code`                   | 이벤트 페이로드, 프레임, cause |
 
-status `0`으로 CORS를 추론하지 마세요 — `kind`와 `code`로 분기해요.
-
-`cause`, `data`, 응답 헤더/body, URL, Struct 이슈, 입력 값, 스택은 민감하게 취급해요. 보수적인 요약:
+`cause`, `data`, 응답 headers와 body, URL, Struct issue, 입력값, 스택은 민감 정보로 다루세요. 보수적인 요약은 이래요.
 
 ```typescript twoslash
-import type { RequestError } from '@defjs/core'
+import type { Fault } from '@defjs/core'
 
-export function summarize(error: RequestError): { kind: RequestError['kind']; code: RequestError['code']; status?: number } {
+export function summarize(fault: Fault): { code: Fault['code']; status?: number } {
   return {
-    kind: error.kind,
-    code: error.code,
-    status: error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined,
+    code: fault.code,
+    status: 'status' in fault ? fault.status : undefined,
   }
 }
 ```
 
-`createTransportError`, `createDefinitionError`, `createHttpStatusError`는 이 네이티브 Error 값을 만들어요. 일반 요청 실패는 여전히 튜플로 반환되며, 네이티브 Error를 상속한다고 해서 자동으로 throw되지는 않아요. `ERR_ABORTED`와 `ERR_TIMEOUT`은 전송 정규화기가 인식하는 공유 cause예요.
+`createNetworkFault`, `createPreflightFault`, `createDecodeFault`, `createHttpStatusFault`, `createUndecodedHttpStatusFault`가 이 네이티브 Error 값들을 만들어요. 평범한 요청 실패는 여전히 튜플로 돌아오고, 네이티브 Error 동작을 물려받았다는 이유만으로 던져지지는 않아요. `ERR_ABORTED`와 `ERR_TIMEOUT`은 전송 정규화기가 알아보는 공유 cause예요.
 
 ## 관련 레시피
 

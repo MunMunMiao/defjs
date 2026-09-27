@@ -23,7 +23,7 @@ description: 手寫嘅 workspace package lookup — 你 import 嗰啲 functions�
 | [Client](./client.md)             | `createClient`, `with*` options, `Client`                        |
 | [HTTP](./http.md)                 | `defineRequest`, execute options, `HttpRequest` / `HttpResponse` |
 | [Struct](./struct.md)             | `struct.*`, `Infer`, `StructError`                               |
-| [Errors](./errors.md)             | `RequestError` variants 同 factories                             |
+| [Errors](./errors.md)             | `Fault` variants 同 factories                                    |
 | [Interceptors](./interceptors.md) | HTTP / SSE / WebSocket interceptor helpers                       |
 | [SSE](./sse.md)                   | `defineEventStream`, stream handle                               |
 | [WebSocket](./web-socket.md)      | `defineWebSocket`, session                                       |

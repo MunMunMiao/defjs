@@ -58,7 +58,7 @@ const notifications = defineEventStream({
 
 const [error, stream, startupOpen] = await client.execute(notifications())
 if (error) {
-  console.error(error.kind, error.code, startupOpen?.response.status)
+  console.error(error.code, startupOpen?.response.status)
 } else {
   console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
   stream.close('example-finished')
@@ -66,16 +66,16 @@ if (error) {
 }
 ```
 
-レスポンスは成功で、メディアタイプの essence が `text/event-stream` で、ボディがある必要があります。起動時の non-2xx → `HTTP_STATUS`。悪い content type や欠落ボディ → `RESPONSE_VALIDATION_FAILED`。レスポンス到着後に検証が失敗しても、レスポンススナップショットがタプルの 3 番目に残ることがあります。
+レスポンスは成功で、メディアタイプの essence が `text/event-stream` で、ボディがある必要があります。起動時の non-2xx → `HTTP_STATUS`。悪い content type や欠落ボディ → `RES_STRUCT_MISMATCH`。レスポンス到着後に検証が失敗しても、レスポンススナップショットがタプルの 3 番目に残ることがあります。
 
 `startupOpen` は初期スナップショットです。`stream.open` はライブで、後の物理 open で変わります。最初のレスポンスが重要なときはタプル側の値を残してください。
 
 ```typescript twoslash
-import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+import type { EventStreamHandle, EventStreamOpenInfo, Fault } from '@defjs/core'
 
 type StreamResult<T> =
   | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [error: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 
 const result: StreamResult<string> | undefined = undefined
 void result
@@ -149,10 +149,10 @@ SSE はネットワークや読み取りの失敗をデフォルトではリト�
 
 どちらも正の安全な整数である必要があります。オーバーフローは致命的です — 古いイベントの黙った破棄はありません。
 
-| 上限            | 守るもの                                         | 終端コード              |
-| --------------- | ------------------------------------------------ | ----------------------- |
-| `maxBufferSize` | パース中の未完了/過大な SSE 行/イベント          | `PARSER_LIMIT_EXCEEDED` |
-| `maxQueueSize`  | 1 人の消費者の読み取りより速く生産されるイベント | `QUEUE_OVERFLOW`        |
+| 上限            | 守るもの                                         | 終端コード            |
+| --------------- | ------------------------------------------------ | --------------------- |
+| `maxBufferSize` | パース中の未完了/過大な SSE 行/イベント          | `CAP_BUFFER_EXCEEDED` |
+| `maxQueueSize`  | 1 人の消費者の読み取りより速く生産されるイベント | `CAP_QUEUE_OVERFLOW`  |
 
 致命的なストリームはバッファ済みイベントも消し、アクティブなボディをキャンセルし、イテレータを reject し、`code: 'error'` で `stream.closed` を解決します。
 
@@ -176,7 +176,7 @@ const api: StreamApi<string> = handle
 void api
 ```
 
-終端コード: `eof`、`aborted`、または `error`。`error` 結果は `EventStreamErrorCode` も持ちます。`INVALID_RESPONSE`、`MESSAGE_PROCESSING_FAILED`、`PARSER_LIMIT_EXCEEDED`、`QUEUE_OVERFLOW`、`TIMEOUT`、または `TRANSPORT_ERROR`。
+終端コード: `eof`、`aborted`、または `error`。`error` 結果は `EventStreamFaultCode` も持ちます。`RES_MEDIA_TYPE_INVALID`、`EXT_OBSERVER_FAILED`、`CAP_BUFFER_EXCEEDED`、`CAP_QUEUE_OVERFLOW`、`NET_TIMEOUT`、または `TRANSPORT_ERROR`。
 
 `close(reason)` はアクティブな試行を abort し、キューを閉じ、`aborted` として確定します。ループの `break` / `return` / throw はイテレータ return を呼び、`iterator-return` で閉じます。コマンドを実行したコードが閉鎖を所有します。
 

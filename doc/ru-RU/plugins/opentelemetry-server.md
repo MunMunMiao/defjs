@@ -27,7 +27,7 @@ const readOrders = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
 
 const [error] = await client.execute(readOrders())
-if (error) console.error(error.kind, error.code)
+if (error) console.error(error.code)
 ```
 
 `tracer` обязателен. `meter` опционален — опусти, чтобы выключить metrics пакета. Нет `propagator` → adapter собирает composite W3C Trace Context + W3C Baggage propagator. Он не читает и не инициализирует global SDK config за тебя.
@@ -147,7 +147,7 @@ const client = createClient(
 
 Adapter измеряет transport lifetimes, не каждую стадию интерпретации команды.
 
-- **HTTP** — span начинается в HTTP interceptor и заканчивается, когда он получает Defjs `HttpResponse`. Status dispatch, representation checks и Struct decode идут после. Поздний `RESPONSE_VALIDATION_FAILED` или `UNDECLARED_STATUS` не может обновить уже ended transport span.
+- **HTTP** — span начинается в HTTP-interceptor и заканчивается, когда тот получает Defjs-`HttpResponse`. Проверка media type, чтение representation и декодирование Struct происходят уже после, так что более поздний `RES_*` fault не может обновить завершённый transport-span. А поскольку span живёт внутри цепочки, reject транспорта записывается классом исключения по конвенции OTel, а не тем fault-кодом, который выполнение присвоит позже.
 - **SSE** — span открыт, пока не settles `stream.closed`. Записывает `sse.connected`, потом `sse.closed` / `sse.aborted` / `sse.error`. Один логический стрим (включая reconnects) → один span. Нет per-event spans.
 - **WebSocket** — span открыт, пока не settles `session.closed`. Events: `websocket.connected`, `websocket.closed`, `websocket.error`. Reconnecting physical sockets остаются частью логической сессии. Нет per-message spans.
 
@@ -197,7 +197,7 @@ Outer span — твой. Плагин всё равно репортит lower-l
 
 Active SSE/WebSocket instruments считают логические ресурсы (включая reconnect gaps), не physical sockets или отдельные HTTP attempts.
 
-HTTP spans записывают method, resolved `url.full`, server address/port когда доступны, и response status когда получен. Default `url.full` resolve’ит `request.endpoint` относительно опционального `request.baseEndpoint` и не добавляет независимый `request.queryString`. Это граница построения, не sanitization. Используй `startSpanHook`, когда нужно собрать полный или отредактированный application-owned URL. Status `400+` → span status `ERROR` со status string как `error.type`. Status `100..399` оставляет span status unset. Status-zero transport outcome без response status; cancel оставляет status unset; timeout/other transport failures используют `TIMEOUT` или `NETWORK_ERROR`. Metrics используют стабильные dimensions: method, static operation, server address/port, response status, low-cardinality error type.
+HTTP spans записывают method, resolved `url.full`, server address/port когда доступны, и response status когда получен. Default `url.full` resolve’ит `request.endpoint` относительно опционального `request.baseEndpoint` и не добавляет независимый `request.queryString`. Это граница построения, не sanitization. Используй `startSpanHook`, когда нужно собрать полный или отредактированный application-owned URL. Status `400+` → span status `ERROR` со status string как `error.type`. Status `100..399` оставляет span status unset. Status-zero transport outcome без response status; cancel оставляет status unset; timeout/other transport failures используют `NET_TIMEOUT` или `NET_UNREACHABLE`. Metrics используют стабильные dimensions: method, static operation, server address/port, response status, low-cardinality error type.
 
 SSE/WebSocket connection metrics записывают connect time, logical connection duration, active resource count, `defjs.result`, operation, server address/port и low-cardinality failure types. По умолчанию нет request/response bodies, message payloads, queue lengths или per-message spans.
 

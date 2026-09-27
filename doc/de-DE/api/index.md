@@ -23,7 +23,7 @@ Hier schlägst du Workspace-Pakete nach. Signatures sind der Vertrag; Guides und
 | [Client](./client.md)             | `createClient`, `with*` options, `Client`                        |
 | [HTTP](./http.md)                 | `defineRequest`, execute options, `HttpRequest` / `HttpResponse` |
 | [Struct](./struct.md)             | `struct.*`, `Infer`, `StructError`                               |
-| [Errors](./errors.md)             | `RequestError`-Varianten und Factory-Funktionen                  |
+| [Errors](./errors.md)             | `Fault`-Varianten und Factory-Funktionen                         |
 | [Interceptors](./interceptors.md) | HTTP-/SSE-/WebSocket-Interceptor-Helfer                          |
 | [SSE](./sse.md)                   | `defineEventStream`, stream handle                               |
 | [WebSocket](./web-socket.md)      | `defineWebSocket`, session                                       |

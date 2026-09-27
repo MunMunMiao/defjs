@@ -17,12 +17,10 @@ describe('request http runtime', () => {
   test('should resolve success tuple for object-style request endpoints', async () => {
     const useCreateAccount = defineRequest({
       method: 'POST',
-      output: {
-        200: struct.object({
-          id: struct.number(),
-          name: struct.string(),
-        }),
-      },
+      output: struct.object({
+        id: struct.number(),
+        name: struct.string(),
+      }),
       path: '/account',
     })
 
@@ -34,31 +32,28 @@ describe('request http runtime', () => {
     expect(response?.status).toBe(200)
   })
 
-  test('should support grouped status output definitions', async () => {
+  test('should decode any non-2xx body with the declared error struct', async () => {
     const useMissingAccount = defineRequest({
       method: 'GET',
-      output: [
-        {
-          body: struct.object({
-            code: struct.string(),
-            message: struct.string(),
-          }),
-          status: [401, 403, 404],
-        },
-      ],
+      error: struct.object({
+        code: struct.string(),
+        message: struct.string(),
+      }),
       path: '/account/not-found',
     })
 
     const [error, result, response] = await client.execute(useMissingAccount())
 
     expect(result).toBeUndefined()
-    expect(response?.status).toBe(404)
-    expect(error?.kind).toBe('http')
+    expect(response).toBeUndefined()
+    expect(error?.code).toBe('HTTP_STATUS')
 
-    if (error?.kind !== 'http') {
-      throw new Error('Expected http error')
+    if (error?.code !== 'HTTP_STATUS') {
+      throw new Error('Expected an http status fault')
     }
 
+    expect(error.status).toBe(404)
+    expect(error.response.status).toBe(404)
     expect(error.data).toEqual({
       code: 'ACCOUNT_NOT_FOUND',
       message: 'Account not found',
@@ -75,11 +70,9 @@ describe('request http runtime', () => {
         ),
       }),
       method: 'POST',
-      output: {
-        200: struct.object({
-          name: struct.string().alias('user_name'),
-        }),
-      },
+      output: struct.object({
+        name: struct.string().alias('user_name'),
+      }),
       path: '/json/alias',
     })
 
@@ -102,11 +95,9 @@ describe('request http runtime', () => {
         ),
       }),
       method: 'POST',
-      output: {
-        200: struct.object({
-          name: struct.string().alias('user_name'),
-        }),
-      },
+      output: struct.object({
+        name: struct.string().alias('user_name'),
+      }),
       path: '/',
     })
 
@@ -199,11 +190,9 @@ describe('request http runtime', () => {
         }),
       }),
       method: 'POST',
-      output: {
-        200: struct.object({
-          ok: struct.boolean(),
-        }),
-      },
+      output: struct.object({
+        ok: struct.boolean(),
+      }),
       path: '/inspect/:id',
     })
 
@@ -278,11 +267,9 @@ describe('request http runtime', () => {
 
     const useInspectXsrf = defineRequest({
       method: 'GET',
-      output: {
-        200: struct.object({
-          ok: struct.boolean(),
-        }),
-      },
+      output: struct.object({
+        ok: struct.boolean(),
+      }),
       path: '/xsrf',
     })
 
@@ -308,8 +295,7 @@ describe('request http runtime', () => {
 
     const [error, result, response] = await client.execute(useRawInput())
 
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code).toBe('REQ_BUILD_FAILED')
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
   })
@@ -339,7 +325,8 @@ describe('request http runtime', () => {
     expect(error).toBeNull()
     expect(result).toBeUndefined()
     expect(response?.status).toBe(200)
-    expect(response?.body).toBeNull()
+    // Philosophy 5: with no `output` declared the body is never read, so there is no body field.
+    expect(response).not.toHaveProperty('body')
   })
 
   test('should return http error when output is omitted and response is not ok', async () => {
@@ -350,10 +337,17 @@ describe('request http runtime', () => {
 
     const [error, result, response] = await client.execute(useNoOutput())
 
-    expect(error?.kind).toBe('http')
     expect(error?.code).toBe('HTTP_STATUS')
     expect(result).toBeUndefined()
-    expect(response?.status).toBe(500)
-    expect(response?.body).toBeNull()
+    expect(response).toBeUndefined()
+
+    if (error?.code !== 'HTTP_STATUS') {
+      throw new Error('Expected an http status fault')
+    }
+
+    expect(error.status).toBe(500)
+    expect(error.data).toBeUndefined()
+    // Philosophy 5: with no `error` declared the body is never read.
+    expect(error.response).not.toHaveProperty('body')
   })
 })

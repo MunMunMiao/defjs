@@ -17,14 +17,12 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (!error) {
   console.log(data.name, response.status)
@@ -77,9 +75,7 @@ const updateUser = defineRequest({
       }),
     ),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
-  },
+  output: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
 })
 
 const [error, user] = await client.execute(
@@ -106,20 +102,22 @@ Aliases 淨係 rewrite outbound wire keys。Parsed values 同 command inputs 保
 
 Custom `build` 暴露同一套 location/codec setters。最後一次 body write 贏（value + content-type metadata）。High-level commands 唔會將 arbitrary object 變做 body — 要 declare wrapper，或者用 matching setter。
 
-## 按 status dispatch
+## body 點讀
 
-`output` 係 status → Struct map，或者 `{ status, body }[]`。有 `output` 又冇 `responseType` 時，representation 預設係 `json`。Explicit types：`json`、`text`、`blob`、`arraybuffer`。
+`output` 係 2xx body 嘅單一 Struct；`error` 係其餘一切嘅單一 Struct。任何一個聲明咗而又冇寫 `responseType`，representation 就預設係 `json`。明示類型：`json`、`text`、`blob`、`arraybuffer`。兩個都冇聲明就唔准用 `responseType`，body 亦根本唔會被讀。
 
-操作次序：
+次序：
 
-1. Status `0` → transport error。
-2. 冇 `output` → 2xx succeeds，`data === undefined`；non-2xx → `HTTP_STATUS`，`error.data === undefined`。Body 唔 decode。
-3. 有 `output` 時，exact declared status 揀佢嘅 Struct。Array form：之後嘅 match override 之前嘅 grouped match。
-4. Undeclared status → 喺 body decode **之前**就 `UNDECLARED_STATUS`。
-5. Representation failure → `RESPONSE_VALIDATION_FAILED`，冇 partial data。
-6. Decoded declared 2xx → result；decoded declared non-2xx → `HTTP_STATUS` 上嘅 typed `error.data`。
+1. `ok` 揀邊：2xx 走 `output`，其餘走 `error`。絕對唔會兩邊都走。
+2. 嗰一邊冇聲明 → body 根本唔會被讀。2xx 成功而 `data === undefined`；非 2xx 係 `HTTP_STATUS` 而 `data === undefined`。你冇聲明嗰一邊嘅 body 解唔出會被完全忽略，連「佢解唔出」呢件事都忽略。
+3. Media type 喺讀 body **之前**就查。唔對就係 `RES_MEDIA_TYPE_INVALID`，唔會 parse 亦唔會解碼。
+4. 讀 representation。失敗係 `RES_DECODE_FAILED`。
+5. Struct 解析個值。失敗係 `RES_STRUCT_MISMATCH`。
+6. 2xx → 結果加一個有 type 嘅 `response.body`；非 2xx → `HTTP_STATUS` 上面有 type 嘅 `data`。
 
-`HttpResponse` 有 `url`、`status`、`statusText`、`headers`、`body`、`error` 同 `ok`。`ok` 淨係指 `200 <= status < 300`。佢係 Defjs value，唔係 native `Response`。冇 `output` 時唔允許 `responseType`。
+解碼只發生一次，而且喺 interceptor chain 之後，所以 interceptor 用 `makeResponse(...)` 造嘅 response，同線上嚟嘅讀法一模一樣。
+
+成功嘅 response 係 `DecodedResponse<T>`：`url`、`status`、`statusText`、`headers`、`ok`，再加一個有 type 嘅 `body`。冇解碼到任何嘢嘅時候你拿到 `HttpMeta`——一樣嘅 fields，只係冇 `body`。`ok` 只表示 `200 <= status < 300`。兩者都唔係原生 `Response`。Transport failure 係 fault，所以唔存在代表佢嘅 status-0 response。
 
 ## Cancel the work {#cancel-the-work}
 
@@ -135,12 +133,12 @@ const pending = client.execute(command, { signal: controller.signal, timeout: 5_
 
 controller.abort('screen closed')
 const [error] = await pending
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancellation')
 }
 ```
 
-`timeout` 一定要係 `1..2_147_483_647` 入面嘅 positive safe integer。Recognized cancel → `ABORTED`；execution timeout → `TIMEOUT`；其他 Fetch/interceptor failures → `NETWORK_ERROR`。Server 接受咗 write 之後再 cancel，**唔**證明 write 已經 rollback。
+`timeout` 一定要係 `1..2_147_483_647` 入面嘅 positive safe integer。Recognized cancel → `NET_ABORTED`；execution timeout → `NET_TIMEOUT`；其他 Fetch/interceptor failures → `NET_UNREACHABLE`。Server 接受咗 write 之後再 cancel，**唔**證明 write 已經 rollback。
 
 ## Credentials 同 XSRF
 

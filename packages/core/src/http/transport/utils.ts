@@ -16,6 +16,23 @@ export function getContentType(headers: Headers): string {
   return headers.get('Content-Type') || ''
 }
 
+/**
+ * Whether a `Content-Type` names a JSON representation.
+ *
+ * Accepts `application/json` and every `+json` structured suffix, which is what real APIs
+ * send: `application/problem+json` (RFC 9457), `application/vnd.api+json`, and vendor media
+ * types. Parameters and case are ignored.
+ *
+ * @param contentType - Raw header value, possibly with parameters.
+ * @returns True when the essence is JSON.
+ */
+export function isJsonMediaType(contentType: string): boolean {
+  const semicolon = contentType.indexOf(';')
+  const essence = (semicolon === -1 ? contentType : contentType.slice(0, semicolon)).trim().toLowerCase()
+
+  return essence === 'application/json' || essence.endsWith('+json')
+}
+
 function toArrayBuffer(content: Uint8Array): ArrayBuffer {
   const { buffer, byteLength, byteOffset } = content
   if (buffer instanceof ArrayBuffer && byteOffset === 0 && byteLength === buffer.byteLength) {

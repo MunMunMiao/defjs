@@ -67,11 +67,11 @@ export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions
         (closeInfo: EventStreamCloseInfo) => {
           closeActiveStream()
           const closeAttributes = {
-            'sse.close.code': closeInfo.code,
-            ...(closeInfo.code === 'error' ? { 'defjs.sse.error.code': closeInfo.errorCode } : {}),
+            'sse.close.kind': closeInfo.kind,
+            ...(closeInfo.kind === 'error' ? { 'defjs.sse.fault.code': closeInfo.code } : {}),
           }
 
-          if (closeInfo.code === 'error') {
+          if (closeInfo.kind === 'error') {
             addSpanEvent(span, 'sse.error', closeAttributes)
             metrics?.connectionDuration.record(
               durationSeconds(connectedAtMs),
@@ -84,7 +84,7 @@ export function createOpenTelemetrySSEInterceptor(options: SSEInterceptorOptions
             return
           }
 
-          addSpanEvent(span, closeInfo.code === 'aborted' ? 'sse.aborted' : 'sse.closed', closeAttributes)
+          addSpanEvent(span, closeInfo.kind === 'aborted' ? 'sse.aborted' : 'sse.closed', closeAttributes)
           metrics?.connectionDuration.record(
             durationSeconds(connectedAtMs),
             createConnectionMetricAttributes(req, 'success', closeAttributes),

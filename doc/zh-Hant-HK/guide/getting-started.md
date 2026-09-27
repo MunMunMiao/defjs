@@ -66,10 +66,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -100,10 +98,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const handle: typeof fetch = async (input, init) => {
@@ -124,10 +120,10 @@ const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }
 })
 
 if (error) {
-  if (error.kind === 'http' && error.status === 404) {
+  if (error.code === 'HTTP_STATUS' && error.status === 404) {
     console.log(error.data.message)
   } else {
-    console.error(error.kind, error.code)
+    console.error(error.code)
   }
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
@@ -179,7 +175,7 @@ Loaded Ada from 200
 User not found
 ```
 
-Success 時：`error` 係 `null`，`user` 係 `200` Struct output，`response` 係 `HttpResponse`。Declared `404`：`error.kind` 係 `'http'`，`error.status` 係 `404`，`error.data` 有 typed `NotFound`。失敗時 tuple 第二項係 `undefined`。
+Success 時：`error` 係 `null`，`user` 係 `200` Struct output，`response` 係 `HttpResponse`。Declared `404`：`error.code` 係 `'http'`，`error.status` 係 `404`，`error.data` 有 typed `NotFound`。失敗時 tuple 第二項係 `undefined`。
 
 ## Step 4 — 指去真實 API
 
@@ -209,11 +205,11 @@ void realClient
 
 ## Result 唔同時
 
-- Bad input / invalid build / 衝突嘅 cancel options → `REQUEST_VALIDATION_FAILED`
-- Declared non-2xx → `HTTP_STATUS`，連 typed `error.data`
-- Declared body decode 唔到 → `RESPONSE_VALIDATION_FAILED`
-- Status 冇 declare → `UNDECLARED_STATUS`（喺 body decode 之前）
-- Fetch fail / cancel / timeout → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+- 壞 input → `REQ_INPUT_INVALID`；撞咗嘅 cancel options → `REQ_OPTIONS_INVALID`；`build` 失敗 → `REQ_BUILD_FAILED`
+- 任何 non-2xx → `HTTP_STATUS`；如果聲明過 `error`，`err.data` 就有 type
+- Media type 唔對 → `RES_MEDIA_TYPE_INVALID`，讀 body 之前就報
+- 聲明過嘅 body 解唔出 → `RES_DECODE_FAILED` 或者 `RES_STRUCT_MISMATCH`
+- Fetch fail / cancel / timeout → `NET_UNREACHABLE` / `NET_ABORTED` / `NET_TIMEOUT`
 
 `timeout` 一定要係 `1..2_147_483_647` 入面嘅 positive safe integer。唔好同時傳 `abort` 同 `timeout`；`signal` 可以同其中一個一齊用。Cancellation 淨係話你 caller 見到咩 — 唔證明 server write 有冇 commit。
 

@@ -5,7 +5,7 @@ description: نفّذ GET واحدًا وفرّع على 200 مُنوَّع مق
 
 # GET مع 404 معلَن
 
-أعلن أجسام النجاح و404 معًا. فرّع على `error.kind` و`error.status` — تحصل على `error.data` مُنوَّعًا للفقدان المعلَن.
+أعلن أجسام النجاح و404 معًا. فرّع على `error.code` و`error.status` — تحصل على `error.data` مُنوَّعًا للفقدان المعلَن.
 
 انظر [HTTP](../core/http.md) و[الأخطاء](../core/errors.md) للتفاصيل.
 
@@ -20,18 +20,16 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }))
 
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (error) {
-  console.error(error.kind, error.code)
+  console.error(error.code)
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
 }
@@ -41,4 +39,4 @@ if (error?.kind === 'http' && error.status === 404) {
 Loaded Ada from 200
 ```
 
-الحالة غير المعلَنة تصبح `UNDECLARED_STATUS` قبل فك ترميز الجسم — أعلن كل حالة تهتم بها.
+كل حالة غير-2xx هي `HTTP_STATUS`. وإعلان `error` يمنح جسمه نوعًا؛ وحذفه يترك `err.data` بقيمة `undefined` والجسم غير مقروء. و`error` واحد يغطي كل الحالات غير-2xx، فاستخدم `struct.or(...)` أو اتحادًا مُميَّزًا عندما تختلف الأشكال.

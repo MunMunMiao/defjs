@@ -17,14 +17,12 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (!error) {
   console.log(data.name, response.status)
@@ -77,9 +75,7 @@ const updateUser = defineRequest({
       }),
     ),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
-  },
+  output: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
 })
 
 const [error, user] = await client.execute(
@@ -106,20 +102,22 @@ else console.log(user.id)
 
 `build` المخصص يعرض نفس معيّنات الموقع/الترميز. كتابة الجسم النهائية تفوز (القيمة + بيانات تعريف نوع المحتوى). الأوامر عالية المستوى لا تحوّل كائنًا عشوائيًا إلى جسم — أعلن غلافًا أو استخدم المعيّن المطابق.
 
-## وزّع حسب الحالة
+## كيف يُقرأ الجسم
 
-`output` خريطة حالة → Struct أو `{ status, body }[]`. مع `output` وبلا `responseType`، التمثيل الافتراضي `json`. الأنواع الصريحة: `json`، `text`، `blob`، `arraybuffer`.
+`output` هو Struct واحد لجسم 2xx؛ و`error` هو Struct واحد لكل ما عداه. فإذا أُعلن أحدهما ولم يُذكر `responseType`، كان التمثيل الافتراضي `json`. والأنواع الصريحة: `json`، `text`، `blob`، `arraybuffer`. وإذا لم يُعلن أيٌّ منهما فلا يُسمح بـ `responseType` ولا يُقرأ الجسم أبدًا.
 
 ترتيب العمليات:
 
-1. الحالة `0` → خطأ نقل.
-2. بلا `output` → 2xx ينجح مع `data === undefined`؛ غير-2xx → `HTTP_STATUS` مع `error.data === undefined`. الجسم لا يُفك.
-3. مع `output`، الحالة المعلَنة الدقيقة تختار Structها. شكل المصفوفة: تطابق لاحق يتجاوز تطابقًا مجمّعًا سابقًا.
-4. حالة غير معلَنة → `UNDECLARED_STATUS` **قبل** فك الجسم.
-5. فشل التمثيل → `RESPONSE_VALIDATION_FAILED`، بلا بيانات جزئية.
-6. 2xx معلَن مفكوك → نتيجة؛ غير-2xx معلَن مفكوك → `error.data` مُنوَّع على `HTTP_STATUS`.
+1. `ok` يختار الطرف: `output` لـ 2xx، و`error` لكل ما عداه. لا الاثنان معًا أبدًا.
+2. لا شيء معلَن لذلك الطرف → لا يُقرأ الجسم أبدًا. فـ 2xx ينجح مع `data === undefined`؛ وغير-2xx يكون `HTTP_STATUS` مع `data === undefined`. وجسم غير قابل للقراءة في طرف لم تُعلنه يُهمَل، بما في ذلك كونه غير قابل للقراءة.
+3. يُفحَص نوع الوسائط **قبل** قراءة الجسم. وأي عدم تطابق هو `RES_MEDIA_TYPE_INVALID`، فلا يُحلَّل شيء ولا يُفكّ.
+4. يُقرأ التمثيل. والفشل هو `RES_DECODE_FAILED`.
+5. يحلّل Struct القيمة. والفشل هو `RES_STRUCT_MISMATCH`.
+6. 2xx → نتيجة و`response.body` مُنوَّع؛ وغير-2xx → `data` مُنوَّع على `HTTP_STATUS`.
 
-`HttpResponse` يملك `url` و`status` و`statusText` و`headers` و`body` و`error` و`ok`. `ok` يعني فقط `200 <= status < 300`. قيمة Defjs، وليست `Response` أصليًا. بلا `output`، `responseType` غير مسموح.
+الفكّ يحدث مرة واحدة بعد سلسلة المعترضات، فالاستجابة التي بناها معترض بـ `makeResponse(...)` تُقرأ تمامًا كتلك القادمة من الشبكة.
+
+الاستجابة الناجحة هي `DecodedResponse<T>`: `url` و`status` و`statusText` و`headers` و`ok`، مع `body` مُنوَّع. وحيث لم يُفكَّ شيء تحصل على `HttpMeta` — الحقول نفسها بلا `body`. و`ok` يعني فقط `200 <= status < 300`. وليس أيٌّ منهما كائن `Response` الأصلي. وفشل النقل خطأ (fault)، فلا توجد استجابة بحالة صفر تنوب عنه.
 
 ## ألغِ العمل {#cancel-the-work}
 
@@ -135,12 +133,12 @@ const pending = client.execute(command, { signal: controller.signal, timeout: 5_
 
 controller.abort('screen closed')
 const [error] = await pending
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancellation')
 }
 ```
 
-يجب أن يكون `timeout` عددًا صحيحًا آمنًا موجبًا في `1..2_147_483_647`. إلغاء معروف → `ABORTED`؛ مهلة التنفيذ → `TIMEOUT`؛ أعطال Fetch/معترض أخرى → `NETWORK_ERROR`. الإلغاء بعد قبول الخادم لكتابة **لا** يثبت أن الكتابة تراجعت.
+يجب أن يكون `timeout` عددًا صحيحًا آمنًا موجبًا في `1..2_147_483_647`. إلغاء معروف → `NET_ABORTED`؛ مهلة التنفيذ → `NET_TIMEOUT`؛ أعطال Fetch/معترض أخرى → `NET_UNREACHABLE`. الإلغاء بعد قبول الخادم لكتابة **لا** يثبت أن الكتابة تراجعت.
 
 ## بيانات الاعتماد وXSRF
 

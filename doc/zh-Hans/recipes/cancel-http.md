@@ -1,6 +1,6 @@
 ---
 title: 取消一次 HTTP
-description: 用 abort 或 timeout 打断 execute，读 ABORTED / TIMEOUT。
+description: 用 abort 或 timeout 打断 execute，读 NET_ABORTED / NET_TIMEOUT。
 ---
 
 # 取消一次 HTTP
@@ -24,9 +24,9 @@ const pending = client.execute(getReport(), {
 controller.abort('screen closed')
 const [error] = await pending
 
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancelled')
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+} else if (error?.code === 'NET_TIMEOUT') {
   console.log('timed out')
 } else if (error) {
   console.error(error.code)

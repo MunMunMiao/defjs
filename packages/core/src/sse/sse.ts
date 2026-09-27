@@ -1,28 +1,33 @@
 import { COMMAND_TYPE, EVENT_STREAM_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
 import type { ClientConfig, ClientSSEOptions } from '../client/config'
-import type { RequestError } from '../error'
-import { createDefinitionError, createHttpStatusError, createTransportError } from '../error'
+import type { AnyFault, Fault } from '../error'
+import {
+  createDecodeFault,
+  createHttpStatusFault,
+  createNetworkFault,
+  createPreflightFault,
+  createUndecodedHttpStatusFault,
+} from '../error'
 import type { SSEHandler } from '../interceptor/interceptor'
 import { makeChain, resolveSSEInterceptors } from '../interceptor/interceptor'
 import type { UseCancellationConfig } from '../internal/abort'
 import {
   awaitWithSignal,
-  createAbortTimeoutConflictError,
+  createAbortTimeoutConflictFault,
   hasAbortTimeoutConflict,
   mergeAbortSignals,
-  resolveAbortedTransportError,
+  resolveAbortedFault,
   snapshotCancellationConfig,
   validateTransportTimeout,
 } from '../internal/abort'
 import type { EndpointCommandBuilder } from '../internal/endpoint_command'
 import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
 import { parseEndpointInput } from '../internal/endpoint_input'
-import type { HttpResponse } from '../internal/http_response'
-import { getHttpErrorMessage } from '../internal/http_response'
+import { isTransportOrigin, markTransportOrigin } from '../internal/transport_origin'
+import type { HttpMeta, HttpResponse } from '../internal/http_response'
 import type { RequestBuildHandler } from '../internal/request_builder'
 import { createBaseTransportRequest } from '../internal/transport_request'
-import type { RequestOutputShape } from '../http/request'
 import type { AnyStruct, Infer } from '../struct'
 import { decodeJson } from '../struct/codec/json'
 import { parseStructValue } from '../struct/introspection'
@@ -67,7 +72,8 @@ interface EventStreamDefinitionBase<TEvents extends EventStructs = EventStructs>
   method?: string
   operation?: string
   /** Optional non-2xx handshake bodies; fills `error.data` when the open status is declared. */
-  output?: RequestOutputShape
+  /** Struct for a non-2xx handshake body. Omit to leave that body unread. */
+  error?: AnyStruct
   path: string
 }
 
@@ -95,7 +101,7 @@ export type EventStreamDefinition<TInput extends AnyStruct | undefined = undefin
 /** Await-result tuple from opening an SSE stream via `client.execute`. */
 export type StreamAwaitResult<TEvent> =
   | [error: null, stream: EventStreamHandle<TEvent>, open: EventStreamOpenInfo]
-  | [error: RequestError<unknown>, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [error: Fault<undefined>, stream: undefined, open: EventStreamOpenInfo | undefined]
 
 /** Executable SSE command produced by an `EventStreamCommandBuilder`. */
 export interface EventStreamCommand<TInput extends AnyStruct | undefined, TEvents extends EventStructs> extends BaseCommand<
@@ -204,42 +210,36 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
   try {
     cancellation = snapshotCancellationConfig(config)
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
-    return [definitionError, undefined, undefined]
+    return [createPreflightFault('REQ_OPTIONS_INVALID', error), undefined, undefined]
   }
 
   if (hasAbortTimeoutConflict(cancellation)) {
-    const definitionError = createAbortTimeoutConflictError()
-    return [definitionError, undefined, undefined]
+    return [createAbortTimeoutConflictFault(), undefined, undefined]
   }
 
   try {
     validateTransportTimeout(cancellation.timeout)
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
-    return [definitionError, undefined, undefined]
+    return [createPreflightFault('REQ_OPTIONS_INVALID', error), undefined, undefined]
   }
 
   // Fast path: caller already aborted before we did any struct work.
   const preAbortedSignal = [cancellation.abort, cancellation.signal].find((signal) => signal?.aborted)
   if (preAbortedSignal) {
-    const transportError = resolveAbortedTransportError(preAbortedSignal)
-    return [transportError, undefined, undefined]
+    return [resolveAbortedFault(preAbortedSignal), undefined, undefined]
   }
 
   try {
     validateEventStreamLimits(endpoint)
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
-    return [definitionError, undefined, undefined]
+    return [createPreflightFault('REQ_OPTIONS_INVALID', error), undefined, undefined]
   }
 
   let parsedInput: ParsedInput<TInput>
   try {
     parsedInput = castParsedEventStreamInput<TInput>(await parseEndpointInput(endpoint.input, input))
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
-    return [definitionError, undefined, undefined]
+    return [createPreflightFault('REQ_INPUT_INVALID', error), undefined, undefined]
   }
 
   const requestSignal = mergeAbortSignals(controller.signal, [cancellation.abort, cancellation.signal], cancellation.timeout)
@@ -257,8 +257,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
       withCredentials: clientConfig.withCredentials,
     })
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
-    return [definitionError, undefined, undefined]
+    return [createPreflightFault('REQ_BUILD_FAILED', error), undefined, undefined]
   }
 
   type OwnedStream = {
@@ -287,7 +286,7 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
         { ...req, abort: mergeAbortSignals(ownerController.signal, [req.abort]) },
         {
           fetch: clientConfig.sse.handle,
-          handshakeOutput: endpoint.output,
+          handshakeError: endpoint.error,
           async transformMessage(message, signal) {
             return await transformStreamMessage(endpoint.events, message, clientConfig.sse.onInvalidEvent, signal)
           },
@@ -295,10 +294,15 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
           maxBufferSize: endpoint.maxBufferSize,
           maxQueueSize: endpoint.maxQueueSize,
         },
-      ).then((stream) => {
-        owned.stream = stream
-        return stream
-      })
+      ).then(
+        (stream) => {
+          owned.stream = stream
+          return stream
+        },
+        (cause: unknown) => {
+          throw markTransportOrigin(cause)
+        },
+      )
       void promise.catch(() => undefined)
       return promise
     }
@@ -318,11 +322,13 @@ async function runEventStreamCommand<TInput extends AnyStruct | undefined, TEven
     chainSettled = true
     discardOwnedStreams(error)
 
-    const openInfo = getErrorOpenInfo(error)
-    const normalizedError = requestSignal.aborted
-      ? resolveAbortedTransportError(requestSignal)
-      : createEventStreamRuntimeError(error, openInfo?.response)
-    return [normalizedError, undefined, openInfo]
+    const fromTransport = isTransportOrigin(error)
+    const cause = error
+    const openInfo = getErrorOpenInfo(cause)
+    const fault = requestSignal.aborted
+      ? resolveAbortedFault(requestSignal)
+      : createEventStreamFault(cause, fromTransport, openInfo?.response)
+    return [fault as Fault<undefined>, undefined, openInfo]
   }
 
   function discardOwnedStreams(reason: unknown, delivered?: EventStreamHandle<unknown>): void {
@@ -483,18 +489,31 @@ function parseSSEJsonBody(struct: RuntimeStruct, data: string): unknown {
   return decodeJson(struct, JSON.parse(data) as unknown)
 }
 
-function createEventStreamRuntimeError(cause: unknown, response?: HttpResponse<unknown>): RequestError<unknown> {
-  if (response && !response.ok) {
-    return createHttpStatusError(response.status, getHttpErrorMessage(response), response, response.body)
+function toEventStreamMeta(response: HttpResponse<unknown>): HttpMeta {
+  return {
+    headers: response.headers,
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    url: response.url,
   }
-
-  if (isEventStreamResponseValidationError(cause)) {
-    return createDefinitionError('RESPONSE_VALIDATION_FAILED', cause, response)
-  }
-
-  return createTransportError(cause)
 }
 
-function isEventStreamResponseValidationError(cause: unknown): boolean {
-  return (cause instanceof Error && cause.name === 'StructError') || getEventStreamFatalCode(cause) === 'INVALID_RESPONSE'
+function createEventStreamFault(cause: unknown, fromTransport: boolean, response?: HttpResponse<unknown>): AnyFault {
+  if (response && !response.ok) {
+    const meta = toEventStreamMeta(response)
+    // Philosophy 5: a handshake body only exists when `error` was declared and decoded.
+    return response.body === null || response.body === undefined
+      ? createUndecodedHttpStatusFault(meta)
+      : createHttpStatusFault({ ...meta, body: response.body })
+  }
+
+  // The only fatal codes that reach startup are the handshake's `RES_*`. `CAP_*` and `EXT_*`
+  // happen after the stream opens, so they settle `closed` rather than the startup tuple.
+  const fatal = getEventStreamFatalCode(cause)
+  if (response && (fatal === 'RES_DECODE_FAILED' || fatal === 'RES_MEDIA_TYPE_INVALID')) {
+    return createDecodeFault(fatal, cause, toEventStreamMeta(response))
+  }
+
+  return fromTransport ? createNetworkFault(cause) : createPreflightFault('EXT_INTERCEPTOR_FAILED', cause)
 }

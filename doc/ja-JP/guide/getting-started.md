@@ -66,10 +66,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -100,10 +98,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const handle: typeof fetch = async (input, init) => {
@@ -124,10 +120,10 @@ const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }
 })
 
 if (error) {
-  if (error.kind === 'http' && error.status === 404) {
+  if (error.code === 'HTTP_STATUS' && error.status === 404) {
     console.log(error.data.message)
   } else {
-    console.error(error.kind, error.code)
+    console.error(error.code)
   }
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
@@ -179,7 +175,7 @@ Loaded Ada from 200
 User not found
 ```
 
-成功時は `error` が `null`、`user` が `200` の Struct 出力、`response` が `HttpResponse` です。宣言済み `404` では `error.kind` が `'http'`、`error.status` が `404`、`error.data` は型付きの `NotFound` です。失敗時、タプルの 2 番目は `undefined` です。
+成功時は `error` が `null`、`user` が `200` の Struct 出力、`response` が `HttpResponse` です。宣言済み `404` では `error.code` が `'http'`、`error.status` が `404`、`error.data` は型付きの `NotFound` です。失敗時、タプルの 2 番目は `undefined` です。
 
 ## Step 4 — 実 API に向ける
 
@@ -209,11 +205,11 @@ void realClient
 
 ## 結果が違うとき
 
-- 悪い入力 / 無効な build / 衝突するキャンセル options → `REQUEST_VALIDATION_FAILED`
-- 宣言済みの non-2xx → 型付き `error.data` 付きの `HTTP_STATUS`
-- 宣言済みボディがデコードできない → `RESPONSE_VALIDATION_FAILED`
-- 宣言のない status → `UNDECLARED_STATUS`（ボディデコードの前）
-- Fetch 失敗 / キャンセル / タイムアウト → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+- 悪い入力 → `REQ_INPUT_INVALID` / 衝突するキャンセル options → `REQ_OPTIONS_INVALID` / `build` の失敗 → `REQ_BUILD_FAILED`
+- あらゆる non-2xx → `HTTP_STATUS`。`error` を宣言していれば `err.data` に型が付きます
+- メディアタイプ違い → `RES_MEDIA_TYPE_INVALID`。ボディを読む前に報告されます
+- 宣言済みボディがデコードできない → `RES_DECODE_FAILED` または `RES_STRUCT_MISMATCH`
+- Fetch 失敗 / キャンセル / タイムアウト → `NET_UNREACHABLE` / `NET_ABORTED` / `NET_TIMEOUT`
 
 `timeout` は `1..2_147_483_647` の正の安全な整数である必要があります。`abort` と `timeout` を同時に渡さないでください。`signal` はどちらとも組み合わせられます。キャンセルは呼び出し側が何を観測したかを伝えます — サーバー側の書き込みがコミットしたかどうかではありません。
 

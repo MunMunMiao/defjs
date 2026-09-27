@@ -29,7 +29,7 @@
         "@types/react": "19.3.0",
         "oxc-minify": "^0.151.0",
         "react": "19.3.0",
-        "typescript": "6.0.2",
+        "typescript": "6.0.3",
         "vitepress": "2.0.0-alpha.20",
         "vitepress-plugin-llms": "1.14.0",
         "vitepress-plugin-tabs": "0.9.1",
@@ -54,7 +54,7 @@
     },
     "packages/opentelemetry-server": {
       "name": "@defjs/opentelemetry-server",
-      "version": "0.2.0",
+      "version": "0.0.1",
       "devDependencies": {
         "@defjs/core": "workspace:^",
         "@hono/node-server": "catalog:",
@@ -1105,7 +1105,7 @@
 
     "@vue/language-core/@vue/shared": ["@vue/shared@3.5.40", "", {}, "sha512-WxnBtruIqOoV3rA4jeKDWzrYI5h7Cp4+pjwDi8kWGHz+IslhiN+wguLVVhtv2l8VoU02rzDCVfDjgCl1lNpZVg=="],
 
-    "doc/typescript": ["typescript@6.0.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-bGdAIrZ0wiGDo5l8c++HWtbaNCWTS4UTv7RaTH/ThVIgjkveJt83m74bBHMJkuCbslY8ixgLBVZJIOiQlQTjfQ=="],
+    "doc/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "magicast/@babel/parser": ["@babel/parser@7.29.8", "", { "dependencies": { "@babel/types": "^7.29.8" }, "bin": "./bin/babel-parser.js" }, "sha512-E8lTAYNB1KW+FH+VGJuZM1ioAx2E6oVlvQFRrf5P8ZZmsiJXYAD9vTFV7yyEURNzgh1dFqMZuO6tUwcARbqFCA=="],
 

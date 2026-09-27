@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { ERR_TIMEOUT } from '../error'
 import {
   awaitWithSignal,
-  createAbortTimeoutConflictError,
+  createAbortTimeoutConflictFault,
   hasAbortTimeoutConflict,
   mergeAbortSignals,
   validateTransportTimeout,
@@ -90,11 +90,10 @@ describe('abort helpers', () => {
     expect(hasAbortTimeoutConflict({ abort: signal, timeout: undefined })).toBe(false)
   })
 
-  test('should create a request validation definition error for abort timeout conflict', () => {
-    const error = createAbortTimeoutConflictError()
+  test('should create an options fault for an abort/timeout conflict', () => {
+    const error = createAbortTimeoutConflictFault()
 
-    expect(error.kind).toBe('definition')
-    expect(error.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error.code).toBe('REQ_OPTIONS_INVALID')
     expect(error.message).toBe('abort and timeout cannot be used together')
     expect(error.cause).toBeInstanceOf(Error)
   })

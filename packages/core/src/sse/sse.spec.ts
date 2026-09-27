@@ -55,9 +55,9 @@ async function collectStreamEvents<T>(stream: AsyncIterable<T>): Promise<T[]> {
 }
 
 function createShortCircuitStream(): EventStreamHandle<unknown> {
-  let settle: ((value: { code: 'aborted'; cause?: unknown }) => void) | undefined
+  let settle: ((value: { cause?: unknown; kind: 'aborted' }) => void) | undefined
   let disposeTask: Promise<void> | undefined
-  const closed = new Promise<{ code: 'aborted'; cause?: unknown }>((resolve) => {
+  const closed = new Promise<{ cause?: unknown; kind: 'aborted' }>((resolve) => {
     settle = resolve
   })
 
@@ -65,7 +65,7 @@ function createShortCircuitStream(): EventStreamHandle<unknown> {
     open: { response: {} as never, url: 'https://short-circuit.example/events' },
     closed,
     close(reason?: unknown) {
-      settle?.({ code: 'aborted', cause: reason })
+      settle?.({ cause: reason, kind: 'aborted' })
       settle = undefined
     },
     [Symbol.asyncDispose]() {
@@ -124,7 +124,7 @@ describe('request event stream runtime', () => {
       { data: 'first', event: 'message', id: '1' },
       { data: 'second line 1\nsecond line 2', event: 'message', id: '2' },
     ])
-    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should support withCredentials for SSE', async () => {
@@ -151,7 +151,7 @@ describe('request event stream runtime', () => {
     }
 
     expect(messages.length).toBeGreaterThan(0)
-    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should send declared JSON body on POST event streams', async () => {
@@ -207,7 +207,7 @@ describe('request event stream runtime', () => {
     }
     expect(fetchMock).toHaveBeenCalledOnce()
     await expect(collectStreamEvents(stream)).resolves.toEqual([{ data: 'pong', event: 'message', id: undefined }])
-    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should handle SSE events without id', async () => {
@@ -233,7 +233,7 @@ describe('request event stream runtime', () => {
     }
 
     expect(messages).toEqual([{ data: 'no-id-message', event: 'message', id: undefined }])
-    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should handle SSE events with empty id', async () => {
@@ -259,7 +259,7 @@ describe('request event stream runtime', () => {
     }
 
     expect(messages).toEqual([{ data: 'hello', event: 'message', id: undefined }])
-    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should support default event struct parsing after selecting the event struct', async () => {
@@ -593,13 +593,13 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
-    expect(error?.kind).toBe('transport')
+    expect(error?.code).toBe('NET_ABORTED')
 
-    if (error?.kind !== 'transport') {
+    if (error?.code !== 'NET_ABORTED') {
       throw new Error('Expected transport error')
     }
 
-    expect(error.code).toBe('ABORTED')
+    expect(error.code).toBe('NET_ABORTED')
   })
 
   test('should reject with.abort and with.timeout before starting SSE transport', async () => {
@@ -632,8 +632,7 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code).toBe('REQ_OPTIONS_INVALID')
     expect(error?.message).toBe('abort and timeout cannot be used together')
     expect(interceptorCalls).toBe(0)
   })
@@ -669,7 +668,7 @@ describe('request event stream runtime', () => {
     expect(error).toBeDefined()
     expect(stream).toBeUndefined()
     expect(hiddenStream).toBeDefined()
-    await expect(hiddenStream?.closed).resolves.toMatchObject({ cause: interceptorError, code: 'aborted' })
+    await expect(hiddenStream?.closed).resolves.toMatchObject({ cause: interceptorError, kind: 'aborted' })
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
   })
 
@@ -690,7 +689,7 @@ describe('request event stream runtime', () => {
 
     const [error, stream] = await client.execute(useStream(), { signal: controller.signal })
 
-    expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_ABORTED' })
     expect(stream).toBeUndefined()
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -718,7 +717,7 @@ describe('request event stream runtime', () => {
 
     const [error, stream] = await client.execute(useStream(), { signal: controller.signal })
 
-    expect(error).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_ABORTED' })
     expect(stream).toBeUndefined()
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
   })
@@ -749,7 +748,7 @@ describe('request event stream runtime', () => {
     if (result === false) {
       throw new Error('Expected interceptor cancellation to settle')
     }
-    expect(result[0]).toMatchObject({ code: 'ABORTED', kind: 'transport' })
+    expect(result[0]).toMatchObject({ code: 'NET_ABORTED' })
     expect(result[1]).toBeUndefined()
   })
 
@@ -784,12 +783,12 @@ describe('request event stream runtime', () => {
     expect(error).toBeNull()
     expect(stream).toBeDefined()
     expect(discardedStream).toBeDefined()
-    await expect(discardedStream?.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(discardedStream?.closed).resolves.toMatchObject({ kind: 'aborted' })
     await vi.waitFor(() => expect(cancels[0]).toHaveBeenCalledOnce())
     expect(cancels[1]).not.toHaveBeenCalled()
 
     stream?.close('test complete')
-    await expect(stream?.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream?.closed).resolves.toMatchObject({ kind: 'aborted' })
   })
 
   test('should preserve a delegated wrapper returned by an interceptor', async () => {
@@ -837,7 +836,7 @@ describe('request event stream runtime', () => {
     expect(cancel).not.toHaveBeenCalled()
 
     stream?.close('test complete')
-    await expect(stream?.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream?.closed).resolves.toMatchObject({ kind: 'aborted' })
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
   })
 
@@ -873,7 +872,7 @@ describe('request event stream runtime', () => {
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
 
     stream?.close('test complete')
-    await expect(stream?.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream?.closed).resolves.toMatchObject({ kind: 'aborted' })
   })
 
   test('should reject interceptor next calls after the chain settles', async () => {
@@ -940,8 +939,7 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code).toBe('REQ_OPTIONS_INVALID')
     expect(error?.message).toBe('abort and timeout cannot be used together')
   })
 
@@ -963,7 +961,7 @@ describe('request event stream runtime', () => {
     }
 
     stream.close('user-request')
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted' })
   })
 
   test('should skip unexpected stream messages after startup', async () => {
@@ -989,7 +987,7 @@ describe('request event stream runtime', () => {
     }
 
     expect(events).toEqual([])
-    await expect(stream.closed).resolves.toMatchObject({ code: 'eof' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'eof' })
   })
 
   test('should return startup error tuple when stream open response is invalid', async () => {
@@ -1006,20 +1004,14 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open?.response?.status).toBe(200)
-    expect(error?.kind).toBe('definition')
-
-    if (error?.kind !== 'definition') {
-      throw new Error('Expected definition error')
-    }
-
-    expect(error.code).toBe('RESPONSE_VALIDATION_FAILED')
+    expect(error?.code).toBe('RES_MEDIA_TYPE_INVALID')
   })
 
   test.each([
-    [ERR_ABORTED, 'ABORTED'],
-    ['caller stopped', 'ABORTED'],
-    [new Error('Request timed out'), 'ABORTED'],
-    [new DOMException('deadline expired', 'TimeoutError'), 'TIMEOUT'],
+    [ERR_ABORTED, 'NET_ABORTED'],
+    ['caller stopped', 'NET_ABORTED'],
+    [new Error('Request timed out'), 'NET_ABORTED'],
+    [new DOMException('deadline expired', 'TimeoutError'), 'NET_TIMEOUT'],
   ] as const)('should stop before startup when signal is already aborted with %s', async (reason, expectedCode) => {
     const controller = new AbortController()
     controller.abort(reason)
@@ -1040,7 +1032,6 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
-    expect(error?.kind).toBe('transport')
     expect(error?.code).toBe(expectedCode)
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -1078,20 +1069,18 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open?.response?.status).toBe(500)
-    expect(error?.kind).toBe('http')
+    expect(error?.code).toBe('HTTP_STATUS')
     expect(error?.code).toBe('HTTP_STATUS')
   })
 
-  test('should fill error.data from declared SSE handshake output', async () => {
+  test('should fill the fault data from a declared SSE handshake error struct', async () => {
     const useStream = defineEventStream({
       maxBufferSize: 1024,
       maxQueueSize: 16,
       events: {
         message: struct.string(),
       },
-      output: {
-        401: struct.object({ code: struct.string() }),
-      },
+      error: struct.object({ code: struct.string() }),
       path: '/sse/handshake-401',
     })
 
@@ -1100,40 +1089,21 @@ describe('request event stream runtime', () => {
     const client = createClient(withEndpoint('https://example.com'), withSSEHandle(handle))
     const [error] = await client.execute(useStream())
 
-    expect(error?.kind).toBe('http')
     expect(error?.code).toBe('HTTP_STATUS')
-    if (error?.kind === 'http') {
+    if (error?.code === 'HTTP_STATUS') {
       expect(error.status).toBe(401)
       expect(error.data).toEqual({ code: 'unauthorized' })
     }
   })
 
-  test('should keep handshake error.data empty when status is undeclared in output', async () => {
+  test('should decode a declared handshake error struct for any non-2xx status', async () => {
+    // A single `error` struct applies to every non-2xx handshake; there is no status matching
+    // to miss, so a body that decodes is always reported.
     const useStream = defineEventStream({
       maxBufferSize: 1024,
       maxQueueSize: 16,
       events: { message: struct.string() },
-      output: { 403: struct.object({ code: struct.string() }) },
-      path: '/sse/handshake-401',
-    })
-
-    const handle = async () => new Response(null, { status: 401 })
-
-    const client = createClient(withEndpoint('https://example.com'), withSSEHandle(handle))
-    const [error] = await client.execute(useStream())
-    expect(error?.kind).toBe('http')
-    if (error?.kind === 'http') {
-      expect(error.status).toBe(401)
-      expect(error.data).toBeNull()
-    }
-  })
-
-  test('should cancel unread handshake body when status is undeclared but body exists', async () => {
-    const useStream = defineEventStream({
-      maxBufferSize: 1024,
-      maxQueueSize: 16,
-      events: { message: struct.string() },
-      output: { 403: struct.object({ code: struct.string() }) },
+      error: struct.object({ code: struct.string() }),
       path: '/sse/handshake-401',
     })
 
@@ -1145,19 +1115,54 @@ describe('request event stream runtime', () => {
 
     const client = createClient(withEndpoint('https://example.com'), withSSEHandle(handle))
     const [error] = await client.execute(useStream())
-    expect(error?.kind).toBe('http')
-    if (error?.kind === 'http') {
+
+    expect(error?.code).toBe('HTTP_STATUS')
+    if (error?.code === 'HTTP_STATUS') {
       expect(error.status).toBe(401)
-      expect(error.data).toBeNull()
+      expect(error.data).toEqual({ code: 'unauthorized' })
     }
   })
 
-  test('should leave handshake error.data null when declared body fails to parse', async () => {
+  test('should cancel an unread handshake body when no error struct is declared', async () => {
     const useStream = defineEventStream({
       maxBufferSize: 1024,
       maxQueueSize: 16,
       events: { message: struct.string() },
-      output: { 401: struct.object({ code: struct.string() }) },
+      path: '/sse/handshake-401',
+    })
+
+    let cancelled = false
+    const handle = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          cancel() {
+            cancelled = true
+          },
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"code":"unauthorized"}'))
+            controller.close()
+          },
+        }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      )
+
+    const client = createClient(withEndpoint('https://example.com'), withSSEHandle(handle))
+    const [error] = await client.execute(useStream())
+
+    expect(error?.code).toBe('HTTP_STATUS')
+    if (error?.code === 'HTTP_STATUS') {
+      expect(error.status).toBe(401)
+      expect(error.data).toBeUndefined()
+    }
+    expect(cancelled).toBe(true)
+  })
+
+  test('should leave the handshake fault undecoded when the declared body fails to parse', async () => {
+    const useStream = defineEventStream({
+      maxBufferSize: 1024,
+      maxQueueSize: 16,
+      events: { message: struct.string() },
+      error: struct.object({ code: struct.string() }),
       path: '/sse/handshake-401',
     })
 
@@ -1165,10 +1170,11 @@ describe('request event stream runtime', () => {
 
     const client = createClient(withEndpoint('https://example.com'), withSSEHandle(handle))
     const [error] = await client.execute(useStream())
-    expect(error?.kind).toBe('http')
-    if (error?.kind === 'http') {
+
+    expect(error?.code).toBe('HTTP_STATUS')
+    if (error?.code === 'HTTP_STATUS') {
       expect(error.status).toBe(401)
-      expect(error.data).toBeNull()
+      expect(error.data).toBeUndefined()
     }
   })
 
@@ -1387,8 +1393,8 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
-    expect(error?.kind).toBe('transport')
-    expect(error?.code).toBe('ABORTED')
+    expect(error?.code).toBe('NET_ABORTED')
+    expect(error?.code).toBe('NET_ABORTED')
   })
 
   test('should return definition error when build throws', async () => {
@@ -1409,8 +1415,7 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code).toBe('REQ_BUILD_FAILED')
   })
 
   test('should return http error on non-ok response', async () => {
@@ -1427,7 +1432,7 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open?.response?.status).toBe(500)
-    expect(error?.kind).toBe('http')
+    expect(error?.code).toBe('HTTP_STATUS')
     expect(error?.code).toBe('HTTP_STATUS')
   })
 
@@ -1449,8 +1454,7 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open?.response?.status).toBe(503)
-    expect(open?.response?.error).toBeUndefined()
-    expect(error?.kind).toBe('http')
+    expect(error?.code).toBe('HTTP_STATUS')
     expect(error?.message).toBe('Http failure response: 503')
   })
 
@@ -1738,7 +1742,7 @@ describe('request event stream runtime', () => {
     }
 
     expect(events).toEqual([])
-    await expect(stream.closed).resolves.toMatchObject({ code: 'eof' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'eof' })
   })
 
   test('should abort a hanging onInvalidEvent observer with the active attempt signal', async () => {
@@ -1790,7 +1794,7 @@ describe('request event stream runtime', () => {
     abortController.abort(new Error('stop invalid observer'))
 
     await expect(next).resolves.toEqual({ done: true, value: undefined })
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted' })
     expect(observerSignal?.aborted).toBe(true)
     expect(cancelled).toHaveBeenCalledTimes(1)
   })
@@ -1840,7 +1844,7 @@ describe('request event stream runtime', () => {
     }
 
     expect(events).toEqual([])
-    await expect(stream.closed).resolves.toMatchObject({ code: 'eof' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'eof' })
   })
 
   test.each([
@@ -1867,7 +1871,7 @@ describe('request event stream runtime', () => {
 
     const [error, stream, open] = await client.execute(useStream())
 
-    expect(error).toMatchObject({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+    expect(error).toMatchObject({ code: 'REQ_OPTIONS_INVALID' })
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
     expect(handle).not.toHaveBeenCalled()
@@ -1887,7 +1891,7 @@ describe('request event stream runtime', () => {
 
       const [error, stream, open] = await client.execute(useStream(), { timeout })
 
-      expect(error).toMatchObject({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+      expect(error).toMatchObject({ code: 'REQ_OPTIONS_INVALID' })
       expect(stream).toBeUndefined()
       expect(open).toBeUndefined()
       expect(handle).not.toHaveBeenCalled()
@@ -1906,7 +1910,7 @@ describe('request event stream runtime', () => {
 
     const [error] = await baseClient.execute(useStream(), { signal: controller.signal, timeout: 0 })
 
-    expect(error).toMatchObject({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+    expect(error).toMatchObject({ code: 'REQ_OPTIONS_INVALID' })
   })
 
   test('should snapshot SSE cancellation options before asynchronous work', async () => {
@@ -1931,7 +1935,7 @@ describe('request event stream runtime', () => {
     expect(error).toBeNull()
     expect(timeoutReads).toBe(1)
     expect(handle).toHaveBeenCalledOnce()
-    await expect(stream?.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream?.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should return a definition error when reading SSE cancellation options throws', async () => {
@@ -1944,7 +1948,7 @@ describe('request event stream runtime', () => {
 
     const [error, stream, open] = await baseClient.execute(useStream(), options as EventStreamExecuteOptions)
 
-    expect(error).toMatchObject({ code: 'REQUEST_VALIDATION_FAILED', kind: 'definition' })
+    expect(error).toMatchObject({ code: 'REQ_OPTIONS_INVALID' })
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
   })
@@ -1971,7 +1975,6 @@ describe('request event stream runtime', () => {
 
     expect(stream).toBeUndefined()
     expect(open).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code).toBe('REQ_INPUT_INVALID')
   })
 })

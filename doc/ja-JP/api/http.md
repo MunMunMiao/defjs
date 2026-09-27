@@ -13,7 +13,7 @@ description: defineRequest、execute options、HTTP の request/response 型で�
 function defineRequest(definition: RequestDefinition): RequestCommandBuilder
 ```
 
-- **definition** — `method`、`path`、任意の `input` struct、status をキーにした `output`、任意の `operation` と `build` です。
+- **definition** — `method`、`path`、任意の `input` struct、任意の `output` と `error` struct、任意の `operation` と `build`。
 - **戻り値** — ビルダーです。入力を渡すと `HttpCommand` になります。
 
 ```ts
@@ -25,13 +25,12 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 ```
 
-`output` は `{ status, body }` グループのリストにもできます（複数コードで 1 つの body struct）。
+`output` は 2xx ボディ用の単一の struct、`error` は 2xx 以外すべてのボディ用の単一の struct です。どちらも status でキー分けされません。省いた側のボディは読まれません — [宣言は断言である](/ja-JP/guide/design-decisions#宣言は断言である) を参照してください。
 
 ## executeHttpCommand() {#executeHttpCommand}
 
@@ -41,7 +40,9 @@ function executeHttpCommand(clientConfig: ClientConfig, command: HttpCommand, op
 
 `client.execute` が使う低レベル入口です。アプリコードでは `client.execute(command, options)` を呼んでください。
 
-- **戻り値** — `[null, body, response]`、または `[error, undefined, response?]` です。
+- **戻り値** `[null, data, response]` または `[fault, undefined, undefined]`。
+
+2xx 以外の status は常に `HTTP_STATUS` です。`error` を宣言していればその `data` はデコード済みのエラーボディ、していなければ `undefined` です。失敗時のタプル第三要素は `undefined` で、レスポンスのメタデータは fault が持ちます。
 
 ## fetchHandler() {#fetchHandler}
 
@@ -49,7 +50,7 @@ function executeHttpCommand(clientConfig: ClientConfig, command: HttpCommand, op
 function fetchHandler(httpRequest: HttpRequest, fetchImpl?: typeof fetch): Promise<HttpResponse<unknown>>
 ```
 
-デフォルトの HTTP トランスポートです。`withHTTPHandle` で差し替えない限り使われます。
+デフォルトの HTTP トランスポートです。`withHTTPHandle` で差し替えない限り使われます。 レスポンスがクライアントに届かなかったときは、合成レスポンスを返すのではなく reject します。
 
 ## makeResponse() {#makeResponse}
 
@@ -57,7 +58,7 @@ function fetchHandler(httpRequest: HttpRequest, fetchImpl?: typeof fetch): Promi
 function makeResponse<R>(options?: MakeResponseOptions<R>): HttpResponse<R>
 ```
 
-ネットワークなしで `HttpResponse` を作ります（インターセプター、テスト）。デフォルトの status は `0` です。`ok` は 2xx のとき true です。
+ネットワークなしで `HttpResponse` を作ります（インターセプター、テスト）。デフォルトの status は `0` です。`ok` は 2xx のとき true です。 返る値は、回線から来たレスポンスとまったく同じメディアタイプ確認と宣言 struct を通ります。信頼による短絡経路はありません。
 
 ## 実行 options
 
@@ -79,25 +80,51 @@ type HttpExecuteOptions = {
 
 ### RequestDefinition {#RequestDefinition}
 
-`method`、`path`、任意の `input`、`output`、`responseType`（`'json' | 'text' | 'blob' | 'arraybuffer'`）、`operation`、任意の `build`（独自のリクエスト組み立て。`input` が必要です）。
+`method`、`path`、任意の `input`、`output`、`error`、`responseType`（`'json' | 'text' | 'blob' | 'arraybuffer'`）、`operation`、任意の `build`（リクエストを自分で組む。`input` が必要）。
 
-### RequestOutputShape {#RequestOutputShape}
+### ResponseDeclaration {#ResponseDeclaration}
 
 ```ts
-type RequestOutputShape = { [status: number]: AnyStruct } | readonly { status: number | readonly number[]; body: AnyStruct }[]
+type ResponseDeclaration<TOutput, TError> = { output?: TOutput; error?: TError }
 ```
+
+`RequestDefinition` の `output` / `error` の側です。どちらも無い場合は `responseType` も拒否されます。何もデコードしないので、選ぶ対象がありません。
 
 ### HttpAwaitResult {#HttpAwaitResult}
 
 ```ts
-type HttpAwaitResult<TSuccess, TErrorData> =
-  | [error: null, result: TSuccess, response: HttpResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: HttpResponse<unknown> | undefined]
+type HttpAwaitResult<TData = undefined, TErrorData = undefined> =
+  | [error: null, result: TData, response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>]
+  | [error: FaultOf<TErrorData>, result: undefined, response: undefined]
 ```
+
+成功時、第三要素が `body` を持つのは `output` を宣言していたときだけです。失敗時は `undefined` で、存在したレスポンスのメタデータはすでに fault が抱えています。
 
 ### HttpRequest {#HttpRequest}
 
 正規化された送信リクエストです。`method`、`endpoint`、`headers`、`body`、`abort`、`operation`、progress フック、`baseEndpoint`、query メタデータ。
+
+### HttpMeta {#HttpMeta}
+
+```ts
+type HttpMeta = {
+  readonly headers: Headers
+  readonly ok: boolean
+  readonly status: number
+  readonly statusText: string
+  readonly url: string
+}
+```
+
+レスポンスのメタデータで、レスポンスがクライアントに届いていれば常にあります。`body` は**持ちません**。ボディは、宣言された struct がデコードしたあとにだけ存在します。
+
+### DecodedResponse {#DecodedResponse}
+
+```ts
+type DecodedResponse<TBody> = HttpMeta & { readonly body: TBody }
+```
+
+ボディが宣言された struct でデコードできたレスポンスです。この型を手にしていること自体がデコードが起きた証拠であり、だからデコード失敗は `HttpMeta` だけを報告します。
 
 ### HttpResponse {#HttpResponse}
 
@@ -108,10 +135,11 @@ type HttpResponse<R> = {
   readonly statusText: string
   readonly headers: Headers
   readonly body: R | null
-  readonly error?: unknown
   readonly ok: boolean
 }
 ```
+
+トランスポートが作り、インターセプターが見る回線上の形です。`body` はテキストかパース済みの JSON で、デコード済みの値ではありません。呼び出し側に届くのは `DecodedResponse` です。
 
 ### HttpProgressEvent {#HttpProgressEvent}
 
@@ -119,11 +147,7 @@ type HttpResponse<R> = {
 
 `loaded`、`total`、`lengthComputable` です。コールバックは async でも構いません。
 
-[HTTP ガイド](../core/http.md) と [Commands](../core/commands.md) を見てください。
-
-## ResponseGroupItem {#ResponseGroupItem}
-
-`RequestOutputShape` のリスト形の 1 行 `{ status, body }` です。`status` は 1 コードでも、同じ body struct を共有する複数コードでも構いません。
+[HTTP ガイド](../core/http.md) と [Commands](../core/commands.md) を見てください。 コールバックが throw したら `EXT_OBSERVER_FAILED` です。
 
 ## RequestCommandBuilder {#RequestCommandBuilder}
 
@@ -139,11 +163,11 @@ type HttpResponse<R> = {
 
 ## RequestSuccessData {#RequestSuccessData}
 
-宣言した 2xx の `output` から推論した成功 body です。
+宣言された `output` struct から推論される成功ボディ。宣言がなければ `undefined`。
 
 ## RequestErrorData {#RequestErrorData}
 
-宣言した非 2xx の `output` から推論したエラー body です。
+宣言された `error` struct から推論されるエラーボディ。宣言がなければ `undefined`。
 
 ## HttpResponseType {#HttpResponseType}
 
@@ -151,4 +175,4 @@ type HttpResponse<R> = {
 
 ## MakeResponseOptions {#MakeResponseOptions}
 
-`makeResponse` 用のフィールドです。`status`、`statusText`、`url`、`headers`、`body`、`error`。
+`makeResponse` 用のフィールドです。`status`、`statusText`、`url`、`headers`、`body`、`request`。

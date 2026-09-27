@@ -1,4 +1,4 @@
-import { ERR_ABORTED, ERR_TIMEOUT, type HttpRequest } from '@defjs/core'
+import type { HttpRequest } from '@defjs/core'
 import { SpanStatusCode } from '@opentelemetry/api'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { activeSpans, createMockMetrics, createMockPropagator, createMockTracer, makeHttpRequest, makeHttpResponse } from '../test-utils'
@@ -183,11 +183,9 @@ describe('createOpenTelemetryHttpInterceptor', () => {
     expect(activeSpans[0]?.status?.code).toBe(SpanStatusCode.ERROR)
   })
 
-  test.each([
-    { error: new TypeError('fetch failed'), errorType: 'NETWORK_ERROR', status: SpanStatusCode.ERROR },
-    { error: ERR_TIMEOUT, errorType: 'TIMEOUT', status: SpanStatusCode.ERROR },
-    { error: ERR_ABORTED, errorType: undefined, status: undefined },
-  ])('should classify status-0 $errorType response consistently for spans and metrics', async ({ error, errorType, status }) => {
+  test('should leave a status-0 response unattributed for spans and metrics', async () => {
+    // Transport failures reject now, so a status-0 response can only be a synthetic one an
+    // interceptor built, and it carries nothing to attribute.
     const { tracer } = createMockTracer()
     const metrics = createMockMetrics()
     const interceptor = createOpenTelemetryHttpInterceptor({
@@ -195,16 +193,15 @@ describe('createOpenTelemetryHttpInterceptor', () => {
       propagator: mockPropagator,
       metrics,
     })
-    const response = { ...makeHttpResponse(), error, status: 0 }
+    const response = { ...makeHttpResponse(), status: 0 }
 
     await expect(interceptor.fn(makeHttpRequest(), async () => response)).resolves.toBe(response)
 
     expect(activeSpans[0]?.attributes['http.response.status_code']).toBeUndefined()
-    expect(activeSpans[0]?.attributes['error.type']).toBe(errorType)
-    expect(activeSpans[0]?.status?.code).toBe(status)
+    expect(activeSpans[0]?.attributes['error.type']).toBeUndefined()
+    expect(activeSpans[0]?.status).toBeUndefined()
     expect(activeSpans[0]?.ended).toBe(true)
     expect(metrics.requestDuration.record).toHaveBeenCalledWith(expect.any(Number), {
-      ...(errorType ? { 'error.type': errorType } : {}),
       'http.request.method': 'GET',
       'server.address': 'api.example.com',
     })

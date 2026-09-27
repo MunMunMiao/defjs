@@ -27,7 +27,7 @@ const readOrders = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
 
 const [error] = await client.execute(readOrders())
-if (error) console.error(error.kind, error.code)
+if (error) console.error(error.code)
 ```
 
 `tracer` 必填。`meter` 可選 — omit 就 disable package metrics。冇 `propagator` → adapter 會 build composite W3C Trace Context + W3C Baggage propagator。佢唔會代你讀或者 initialize global SDK config。
@@ -147,7 +147,7 @@ const client = createClient(
 
 Adapter 量嘅係 transport lifetimes，唔係 command interpretation 嘅每一級。
 
-- **HTTP** — span 喺 HTTP interceptor 開始，拎到 Defjs `HttpResponse` 時完。Status dispatch、representation checks 同 Struct decode 喺之後。之後嘅 `RESPONSE_VALIDATION_FAILED` 或者 `UNDECLARED_STATUS` 唔可以 update 已經 ended 嘅 transport span。
+- **HTTP** — span 喺 HTTP interceptor 裡面開始，拿到 Defjs `HttpResponse` 就結束。Media type 檢查、representation 讀取同 Struct 解碼全部喺之後，所以之後嘅 `RES_*` fault 改唔到已經結束嘅 transport span。又因為 span 活喺 chain 裡面，transport 層嘅 reject 會照 OTel 慣例記成 exception class，而唔係執行階段之後才判定嘅 fault code。
 - **SSE** — span 開住直至 `stream.closed` settle。Record `sse.connected`，之後 `sse.closed` / `sse.aborted` / `sse.error`。一條 logical stream（包括 reconnects）→ 一個 span。冇 per-event spans。
 - **WebSocket** — span 開住直至 `session.closed` settle。Events：`websocket.connected`、`websocket.closed`、`websocket.error`。Reconnecting physical sockets 仍然係 logical session 一部分。冇 per-message spans。
 
@@ -197,7 +197,7 @@ Outer span 係你嘅。Plugin 仍然報告更低層嘅 transport span — 兩個
 
 Active SSE/WebSocket instruments 數嘅係 logical resources（包括 reconnect gaps），唔係 physical sockets 或者個別 HTTP attempts。
 
-HTTP spans record method、resolved `url.full`、有就有 server address/port，同收到時嘅 response status。Default `url.full` 會將 `request.endpoint` resolve against optional `request.baseEndpoint`，唔會 append 獨立嘅 `request.queryString`。呢個係 construction boundary，唔係 sanitization。要完整或 redact 過嘅 application-owned URL，就用 `startSpanHook` build。Status `400+` → span status `ERROR`，用 status string 做 `error.type`。Status `100..399` 留 span status unset。Status-zero transport outcome 冇 response status；cancel 留 status unset；timeout/其他 transport failures 用 `TIMEOUT` 或者 `NETWORK_ERROR`。Metrics 用 stable dimensions：method、static operation、server address/port、response status、low-cardinality error type。
+HTTP spans record method、resolved `url.full`、有就有 server address/port，同收到時嘅 response status。Default `url.full` 會將 `request.endpoint` resolve against optional `request.baseEndpoint`，唔會 append 獨立嘅 `request.queryString`。呢個係 construction boundary，唔係 sanitization。要完整或 redact 過嘅 application-owned URL，就用 `startSpanHook` build。Status `400+` → span status `ERROR`，用 status string 做 `error.type`。Status `100..399` 留 span status unset。Status-zero transport outcome 冇 response status；cancel 留 status unset；timeout/其他 transport failures 用 `NET_TIMEOUT` 或者 `NET_UNREACHABLE`。Metrics 用 stable dimensions：method、static operation、server address/port、response status、low-cardinality error type。
 
 SSE/WebSocket connection metrics record connect time、logical connection duration、active resource count、`defjs.result`、operation、server address/port，同 low-cardinality failure types。預設冇 request/response bodies、message payloads、queue lengths，或者 per-message spans。
 

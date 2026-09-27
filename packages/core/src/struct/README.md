@@ -30,7 +30,7 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [{ status: 200, body: User }] as const,
+  output: User } as const,
 })
 
 const client = createClient(withEndpoint('https://api.example.com'))
@@ -200,7 +200,7 @@ const echoUser = defineRequest({
   method: 'POST',
   path: '/users',
   input: struct.request({ body: struct.json(UserBody) }),
-  output: { 200: UserBody },
+  output: UserBody,
 })
 const client = createClient(
   withEndpoint('https://example.test'),
@@ -347,14 +347,14 @@ Path placeholder 应传入原始 scalar 值；Core 在替换时会对每个值�
 
 对象、数组、record、request、tuple 等在第一个错误处停止；不会把部分成功 output 暴露给调用方。为了兼容错误展示 API，`StructError.issues` 仍是数组，但正常解析失败只包含当前第一个 issue。内部 `parseStructValue` 是 throwing adapter；应用应使用根入口的 `struct.parse`，不要依赖 `./introspection` 等内部路径。
 
-在 endpoint runtime 中，Struct 错误会由对应 transport 再包装。例如 HTTP 输入结构失败通常成为 `definition/REQUEST_VALIDATION_FAILED`。响应错误的 status dispatch 条件见下面的 HTTP 矩阵；这一步属于 endpoint 层，不属于 Struct 本身。
+在 endpoint runtime 中，Struct 错误会由对应 transport 再包装。例如 HTTP 输入结构失败成为 `REQ_INPUT_INVALID`，响应体不合声明成为 `RES_STRUCT_MISMATCH`。分流条件见下面的 HTTP 矩阵；这一步属于 endpoint 层，不属于 Struct 本身。
 
 ```typescript
 import { StructError } from '@defjs/core'
 
 const [error, result] = await client.execute(command)
 
-if (error?.kind === 'definition' && error.code === 'RESPONSE_VALIDATION_FAILED') {
+if (error?.code === 'RES_STRUCT_MISMATCH') {
   if (error.cause instanceof StructError) {
     console.error(error.cause.flatten())
     console.error(error.cause.prettify())
@@ -366,23 +366,26 @@ if (error?.kind === 'definition' && error.code === 'RESPONSE_VALIDATION_FAILED')
 
 ### Struct 不提供 HTTP tuple
 
-`[error, result, response]`、HTTP status、`HTTP_STATUS`、`UNDECLARED_STATUS`、`HttpResponse` 以及 HTTP error 的 `data` 都是 endpoint/transport 层的合同。Struct 本身没有 status、response 或 HTTP tuple。
+`[err, data, response]`、HTTP status、`HTTP_STATUS`、`DecodedResponse` 以及 fault 的 `data` 都是 endpoint/transport 层的合同。Struct 本身没有 status、response 或 HTTP tuple。
 
-有 `output` 时，底层 Fetch 会先按 effective `responseType` 读取 body representation，并可能把 codec 异常记录在 `HttpResponse.error`。Command 随后按固定优先级分类结果：status 0 transport failure → 无 `output` → 精确 status 匹配或 `UNDECLARED_STATUS` → `response.error` → Struct parse。这个顺序描述的是结果分类优先级，不是底层读取 body 的时机；只有精确匹配的已声明 output 才会消费 representation error 并进入 Struct。声明 `output` 但省略 `responseType` 时，effective mode 是 `json`；显式 `text`、`blob`、`arraybuffer` 则使用各自的 representation，不把 JSON-looking bytes 当作 JSON syntax。无 `output` 时也不能声明 `responseType`，底层会取消响应 body，不读取或解码 representation。当前条件矩阵如下：
+`ok` 是唯一的分流点：2xx 用 `output` 解码，其余用 `error` 解码，永不两者都试。省略某一侧意味着那个 body 根本不读。声明了任一侧且省略 `responseType` 时，effective mode 是 `json`；显式 `text`、`blob`、`arraybuffer` 使用各自的 representation，不把 JSON-looking bytes 当作 JSON syntax。两侧都不声明时不能声明 `responseType`，底层会取消响应 body。
 
-| HTTP 分支                        | 条件                                                                                                                             | 当前包装                                                                                           |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 无 `output`                      | 该分支优先于 `response.error` 和 Struct；`responseType` 不允许声明，底层取消 body 且不读取或解码 representation                  | 2xx 是 success，result 为 `undefined`；非 2xx 是 `HTTP_STATUS`，data 为 `undefined`；response 保留 |
-| 有 `output` 但 status 未精确命中 | 底层 Fetch 可能已读取 representation 或记录 codec error，但 command 的 `UNDECLARED_STATUS` 分类优先；包括未声明的 2xx 和 non-2xx | `UNDECLARED_STATUS`；不执行 Struct decode                                                          |
-| 精确命中、2xx                    | representation decode 和 Struct parse 都成功                                                                                     | success result 为 parsed value，success response.body 也是 parsed value                            |
-| 精确命中、non-2xx                | representation decode 和 Struct parse 都成功                                                                                     | `HTTP_STATUS`；typed parsed value 在 `error.data`，`error.response.body` 保留原始 representation   |
-| 精确命中但 decode/shape 失败     | runtime 判定 representation 或 Struct 不能接受                                                                                   | `RESPONSE_VALIDATION_FAILED`；result 和 `error.data` 不提供，`HttpResponse` 可保留                 |
+解码只发生一次，且在拦截器链之后——拦截器用 `makeResponse(...)` 短路返回的响应，和线上真实响应走同一条解码路径。
 
-`HTTP_STATUS + error.data` 只适用于精确命中的 non-2xx 且 representation、Struct 都成功的路径；它不是所有声明响应 Struct 出错时的 fallback。HTTP 的详细结果和 response 可用性请看 [HTTP 文档](../../../../doc/core/http.md) 与 [错误文档](../../../../doc/core/errors.md)，不要把 endpoint tuple 语义反推成 Struct API。
+| HTTP 分支                               | 条件                                           | 当前包装                                                                              |
+| --------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| 该侧未声明                              | 对应的 `output` 或 `error` 缺失，body 从不读取 | 2xx 是 success，`data` 为 `undefined`；非 2xx 是 `HTTP_STATUS`，`data` 为 `undefined` |
+| media type 与声明的 representation 不符 | 在读取 body **之前**判定                       | `RES_MEDIA_TYPE_INVALID`；不读、不解析、不进 Struct                                   |
+| representation 读不出来                 | 按 effective mode 解释字节失败                 | `RES_DECODE_FAILED`；无 body                                                          |
+| Struct 校验失败                         | runtime 判定该值不被 Struct 接受               | `RES_STRUCT_MISMATCH`；无 body、无 `data`                                             |
+| 2xx 且解码成功                          | representation 与 Struct 都成功                | success；`data` 与 `response.body` 都是 parsed value                                  |
+| 非 2xx 且解码成功                       | representation 与 Struct 都成功                | `HTTP_STATUS`；typed parsed value 在 `err.data`                                       |
 
-另一个需要区分的边界是 JSON representation error：底层 Fetch 在 effective mode 为 `json` 时会尝试解析非空 body；声明 `output` 且省略 `responseType` 会得到该默认 mode。Fetch 会把原始异常保存到 `HttpResponse.error`；只有精确匹配的已声明 output 才由 command 层在调用 Struct 前将其转换为 `RESPONSE_VALIDATION_FAILED`，返回 `[error, undefined, httpResponse]`，并把 codec 异常保留为 `cause`。无 output 不读取 body，未声明 status 则走更早的分类分支。因此 malformed body 不会成为 Struct value，也不会产生 typed `error.data`。
+哲学第 5 条有一个容易忽略的推论：**未声明那一侧的 body 连「读失败」都不关心**。只声明 `output` 的 endpoint 遇到 500 且 body 是坏 JSON 时，结果是 `HTTP_STATUS` + `status: 500`，不是一个表示层错误。
 
-普通 non-2xx status 不会自动填充 `HttpResponse.error`；它由 `status` 与 `ok` 表达，并在 representation 和 Struct 都成功后成为带 typed `error.data` 的 `HTTP_STATUS`。未声明 status 与未声明 output 的 endpoint 仍遵循各自更早的分支，不被后续 representation error 覆盖。
+解码失败不留 body：`RES_*` fault 的 `response` 是 `HttpMeta`，类型上就没有 `body` 字段。出错细节在 `cause`（Struct 不匹配时是 `StructError`）。传输失败是 fault 而不是响应，所以不存在代表传输失败的 status-0 响应。
+
+HTTP 的详细结果和 response 可用性请看 [HTTP 文档](../../../../doc/core/http.md) 与 [错误文档](../../../../doc/core/errors.md)，不要把 endpoint tuple 语义反推成 Struct API。
 
 ## 现有实践与源码索引
 

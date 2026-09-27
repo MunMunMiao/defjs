@@ -27,7 +27,7 @@ const readOrders = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
 
 const [error] = await client.execute(readOrders())
-if (error) console.error(error.kind, error.code)
+if (error) console.error(error.code)
 ```
 
 `tracer` ist required. `meter` ist optional — lass ihn weg, um Package-Metrics zu disablen. Kein `propagator` → der Adapter baut einen Composite W3C Trace Context + W3C Baggage Propagator. Er liest oder initialisiert keine globale SDK-Config für dich.
@@ -147,7 +147,7 @@ Mit `queryPropagation` hängen Propagator-Fields an den Connection-Query-String.
 
 Der Adapter misst Transport-Lifetimes, nicht jede Stage der Command-Interpretation.
 
-- **HTTP** — Span beginnt im HTTP-Interceptor und endet, wenn er die Defjs-`HttpResponse` bekommt. Status-Dispatch, Representation-Checks und Struct-Decode passieren danach. Ein späteres `RESPONSE_VALIDATION_FAILED` oder `UNDECLARED_STATUS` kann den ended Transport-Span nicht updaten.
+- **HTTP** — der Span beginnt im HTTP-Interceptor und endet, sobald er die Defjs-`HttpResponse` bekommt. Media-Type-Prüfung, Representation-Read und Struct-Decode passieren alle danach, ein späterer `RES_*`-Fault kann den beendeten Transport-Span also nicht mehr aktualisieren. Und weil der Span innerhalb der Chain lebt, wird ein Transport-Rejection gemäß OTel-Konvention mit der Exception-Klasse festgehalten und nicht mit dem Fault-Code, den die Execution später zuweist.
 - **SSE** — Span bleibt offen, bis `stream.closed` settled. Recordet `sse.connected`, dann `sse.closed` / `sse.aborted` / `sse.error`. Ein logischer Stream (inklusive Reconnects) → ein Span. Keine Per-Event-Spans.
 - **WebSocket** — Span bleibt offen, bis `session.closed` settled. Events: `websocket.connected`, `websocket.closed`, `websocket.error`. Reconnecting physische Sockets bleiben Teil der logischen Session. Keine Per-Message-Spans.
 
@@ -197,7 +197,7 @@ Wenn `meter` geliefert wird:
 
 Active SSE-/WebSocket-Instruments zählen logische Resources (inklusive Reconnect-Gaps), nicht physische Sockets oder einzelne HTTP-Attempts.
 
-HTTP-Spans recorden Method, resolved `url.full`, Server-Address/Port wenn verfügbar, und Response-Status wenn received. Standardmäßig löst `url.full` nur `request.endpoint` gegen das optionale `request.baseEndpoint` auf und hängt kein separates `request.queryString` an. Das ist eine Konstruktionsgrenze, keine Redaction; erzeuge eine vollständige oder redigierte App-URL in `startSpanHook`. Status `400+` → Span-Status `ERROR` mit Status-String als `error.type`. Status `100..399` lässt Span-Status unset. Status-Zero-Transport-Outcome hat keinen Response-Status; Cancel lässt Status unset; Timeout/andere Transport-Failures nutzen `TIMEOUT` oder `NETWORK_ERROR`. Metrics nutzen stabile Dimensions: Method, static Operation, Server-Address/Port, Response-Status, low-cardinality Error-Type.
+HTTP-Spans recorden Method, resolved `url.full`, Server-Address/Port wenn verfügbar, und Response-Status wenn received. Standardmäßig löst `url.full` nur `request.endpoint` gegen das optionale `request.baseEndpoint` auf und hängt kein separates `request.queryString` an. Das ist eine Konstruktionsgrenze, keine Redaction; erzeuge eine vollständige oder redigierte App-URL in `startSpanHook`. Status `400+` → Span-Status `ERROR` mit Status-String als `error.type`. Status `100..399` lässt Span-Status unset. Status-Zero-Transport-Outcome hat keinen Response-Status; Cancel lässt Status unset; Timeout/andere Transport-Failures nutzen `NET_TIMEOUT` oder `NET_UNREACHABLE`. Metrics nutzen stabile Dimensions: Method, static Operation, Server-Address/Port, Response-Status, low-cardinality Error-Type.
 
 SSE-/WebSocket-Connection-Metrics recorden Connect-Time, logische Connection-Duration, Active-Resource-Count, `defjs.result`, Operation, Server-Address/Port und low-cardinality Failure-Types. Keine Request-/Response-Bodies, Message-Payloads, Queue-Lengths oder Per-Message-Spans defaultmäßig.
 

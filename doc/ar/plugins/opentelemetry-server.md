@@ -27,7 +27,7 @@ const readOrders = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
 
 const [error] = await client.execute(readOrders())
-if (error) console.error(error.kind, error.code)
+if (error) console.error(error.code)
 ```
 
 `tracer` مطلوب. `meter` اختياري — احذفه لتعطيل مقاييس الحزمة. بلا `propagator` → المحوّل يبني ناشرًا مركّبًا لـ W3C Trace Context + W3C Baggage. لا يقرأ أو يهيئ إعداد SDK العام نيابةً عنك.
@@ -147,7 +147,7 @@ const client = createClient(
 
 المحوّل يقيس أعمار النقل، لا كل مرحلة من تفسير الأمر.
 
-- **HTTP** — الـ span يبدأ في معترض HTTP وينتهي عندما يحصل على `HttpResponse` من Defjs. توزيع الحالة وفحوص التمثيل وفك Struct تحدث بعده. `RESPONSE_VALIDATION_FAILED` أو `UNDECLARED_STATUS` لاحق لا يمكنه تحديث span النقل المنتهي.
+- **HTTP** — يبدأ الـ span في معترض HTTP وينتهي عند حصوله على `HttpResponse` الخاص بـ Defjs. أما فحص نوع الوسائط وقراءة التمثيل وفكّ Struct فتأتي كلها بعد ذلك، فلا يستطيع خطأ `RES_*` لاحق تحديث span النقل المنتهي. ولأن الـ span يعيش داخل السلسلة، يُسجَّل رفض النقل بصنف الاستثناء وفق عُرف OTel، لا برمز الخطأ الذي يسنده التنفيذ لاحقًا.
 - **SSE** — الـ span يبقى مفتوحًا حتى يستقر `stream.closed`. يسجّل `sse.connected`، ثم `sse.closed` / `sse.aborted` / `sse.error`. تدفق منطقي واحد (بما في ذلك إعادة الاتصال) → span واحد. بلا spans لكل حدث.
 - **WebSocket** — الـ span يبقى مفتوحًا حتى يستقر `session.closed`. الأحداث: `websocket.connected` و`websocket.closed` و`websocket.error`. المقابس المادية المعيدة للاتصال تبقى جزءًا من الجلسة المنطقية. بلا spans لكل رسالة.
 
@@ -197,7 +197,7 @@ void outcome
 
 أدوات SSE/WebSocket النشطة تعدّ الموارد المنطقية (بما في ذلك فجوات إعادة الاتصال)، لا المقابس المادية أو محاولات HTTP الفردية.
 
-spans HTTP تسجّل الطريقة و`url.full` المحلول وعنوان/منفذ الخادم عند التوفر وحالة الاستجابة عند الاستلام. افتراضيًا يحل `url.full` فقط `request.endpoint` مقابل `request.baseEndpoint` الاختياري، ولا يضيف `request.queryString` مستقلًا. هذا حد بناء لا تنقيح؛ استخدم `startSpanHook` لبناء URL كامل أو منقّح يملكه التطبيق. الحالة `400+` → حالة span `ERROR` مع سلسلة الحالة كـ `error.type`. الحالة `100..399` تترك حالة الـ span غير مضبوطة. نتيجة نقل الحالة صفر بلا حالة استجابة؛ الإلغاء يترك الحالة غير مضبوطة؛ مهلة/أعطال نقل أخرى تستخدم `TIMEOUT` أو `NETWORK_ERROR`. المقاييس تستخدم أبعادًا مستقرة: الطريقة، العملية الثابتة، عنوان/منفذ الخادم، حالة الاستجابة، نوع خطأ منخفض الكاردينالية.
+spans HTTP تسجّل الطريقة و`url.full` المحلول وعنوان/منفذ الخادم عند التوفر وحالة الاستجابة عند الاستلام. افتراضيًا يحل `url.full` فقط `request.endpoint` مقابل `request.baseEndpoint` الاختياري، ولا يضيف `request.queryString` مستقلًا. هذا حد بناء لا تنقيح؛ استخدم `startSpanHook` لبناء URL كامل أو منقّح يملكه التطبيق. الحالة `400+` → حالة span `ERROR` مع سلسلة الحالة كـ `error.type`. الحالة `100..399` تترك حالة الـ span غير مضبوطة. نتيجة نقل الحالة صفر بلا حالة استجابة؛ الإلغاء يترك الحالة غير مضبوطة؛ مهلة/أعطال نقل أخرى تستخدم `NET_TIMEOUT` أو `NET_UNREACHABLE`. المقاييس تستخدم أبعادًا مستقرة: الطريقة، العملية الثابتة، عنوان/منفذ الخادم، حالة الاستجابة، نوع خطأ منخفض الكاردينالية.
 
 مقاييس اتصال SSE/WebSocket تسجّل وقت الاتصال ومدة الاتصال المنطقي وعدد الموارد النشطة و`defjs.result` والعملية وعنوان/منفذ الخادم وأنواع فشل منخفضة الكاردينالية. بلا أجسام طلب/استجابة أو حمولات رسائل أو أطوال طابور أو spans لكل رسالة افتراضيًا.
 

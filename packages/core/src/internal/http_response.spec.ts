@@ -23,16 +23,16 @@ describe('Response', () => {
     expect(res.status).toBe(500)
     expect(res.statusText).toBe('Server Error')
     expect(res.body).toBe('Server Error')
-    expect(res.error).toBeUndefined()
     expect(res.ok).toBe(false)
   })
 
-  test('should make network error response', () => {
+  test('should default to a bare status-0 response with no synthesized failure', () => {
+    // Transport failures are faults now, so a response never stands in for one.
     const res = makeResponse()
     expect(res.status).toBe(0)
     expect(res.statusText).toBe('')
-    expect(res.error).toBeInstanceOf(Error)
-    expect((res.error as Error).message).toBe('Http failure response: 0')
+    expect(res.ok).toBe(false)
+    expect(res).not.toHaveProperty('error')
   })
 
   test('should omit resolved urls from http failure messages', () => {
@@ -91,18 +91,7 @@ describe('Response', () => {
       url: '/api/users',
     })
 
-    expect(res.error).toBeUndefined()
+    expect(res).not.toHaveProperty('error')
     expect(res.ok).toBe(false)
-  })
-
-  test('should preserve custom error when provided', () => {
-    const customError = new Error('validation failed')
-    const res = makeResponse({
-      error: customError,
-      status: 500,
-    })
-
-    expect(res.error).toBe(customError)
-    expect((res.error as Error).message).toBe('validation failed')
   })
 })

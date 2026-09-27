@@ -31,7 +31,7 @@ const createUser = defineRequest({
       }),
     ),
   }),
-  output: { 201: User },
+  output: User,
 })
 
 const [parseError, user] = struct.parse(User, { id: 7, name: 'Ada', active: true })

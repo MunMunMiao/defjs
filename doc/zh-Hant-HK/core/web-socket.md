@@ -22,7 +22,7 @@ const room = defineWebSocket({
 
 const [error, session, startupConnection] = await client.execute(room())
 if (error) {
-  console.error(error.kind, error.code, startupConnection?.generation)
+  console.error(error.code, startupConnection?.generation)
 } else {
   await using ownedSession = session
   const unsubscribe = ownedSession.onRuntimeError((cause) => console.error('runtime', cause))
@@ -77,11 +77,11 @@ Message map 控制 payload，唔係 envelope discriminator。`incoming.default` 
 Startup failure → `[error, undefined, connection?]`。Pre-open constructor failure 可能冇 connection；startup 期間嘅 timeout/close 仍然可能提供 snapshot。Session return 之後，runtime errors 經 observers、`receive` 同 `closed` 行 — 唔係第二次 execute tuple。
 
 ```typescript twoslash
-import type { RequestError, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
+import type { Fault, WebSocketConnectionInfo, WebSocketSession } from '@defjs/core'
 
 type SocketResult<TIncoming, TOutgoing> =
   | [error: null, session: WebSocketSession<TIncoming, TOutgoing>, connection: WebSocketConnectionInfo]
-  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [error: Fault, session: undefined, connection: WebSocketConnectionInfo | undefined]
 
 const result: SocketResult<unknown, never> | undefined = undefined
 void result

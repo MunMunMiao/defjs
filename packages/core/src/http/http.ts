@@ -1,34 +1,43 @@
 import { COMMAND_TYPE, HTTP_COMMAND } from '../client/command'
 import type { BaseCommand } from '../client/command'
 import type { HttpClientConfig } from '../client/config'
-import type { DefinitionError, HttpStatusError, RequestError, TransportError } from '../error'
-import { createDefinitionError, createHttpStatusError, createTransportError, ERR_TIMEOUT } from '../error'
+import type { AnyFault, Fault, FaultOf } from '../error'
+import {
+  createDecodeFault,
+  createHttpStatusFault,
+  createNetworkFault,
+  createPreflightFault,
+  createUndecodedHttpStatusFault,
+  ERR_TIMEOUT,
+} from '../error'
 import { makeChain, resolveHttpInterceptors } from '../interceptor/interceptor'
 import type { UseCancellationConfig } from '../internal/abort'
 import {
   awaitWithSignal,
-  createAbortTimeoutConflictError,
+  createAbortTimeoutConflictFault,
   hasAbortTimeoutConflict,
   mergeAbortSignals,
-  resolveAbortedTransportError,
-  resolveAbortTransportError,
+  resolveAbortedFault,
+  resolveAbortFault,
+  resolveAbortCause,
   snapshotCancellationConfig,
   validateTransportTimeout,
 } from '../internal/abort'
 import type { EndpointCommandBuilder } from '../internal/endpoint_command'
+import { isTransportOrigin, markTransportOrigin } from '../internal/transport_origin'
 import type { EndpointInput, ParsedInput } from '../internal/endpoint_input'
 import { parseEndpointInput } from '../internal/endpoint_input'
 import type { HttpProgressFn, HttpResponseType } from '../internal/http_request'
-import type { HttpResponse } from '../internal/http_response'
-import { getHttpErrorMessage, makeResponse } from '../internal/http_response'
+import type { DecodedResponse, HttpMeta, HttpResponse } from '../internal/http_response'
 import type { RequestBuildHandler } from '../internal/request_builder'
 import type { AnyStruct, Infer } from '../struct'
 import { decodeJson } from '../struct/codec/json'
 import { parseStructValue } from '../struct/introspection'
 import { DEFINITION } from '../struct/symbols'
 import type { RuntimeStruct } from '../struct/types'
-import type { RequestOutputShape } from './request'
-import { createHttpRequest, resolveDefaultResponseType, resolveOutputStruct } from './request'
+import { createHttpRequest, resolveDefaultResponseType } from './request'
+import type { BodyFailure } from './transport/body_failure'
+import { isBodyFailure } from './transport/body_failure'
 import { fetchHandler } from './transport/fetch'
 import { parseJsonText } from './transport/utils'
 
@@ -45,10 +54,12 @@ export type UseRequestConfig = {
  * Executable HTTP command produced by a `defineRequest` builder.
  * Carries the request definition and optional typed input for `client.execute`.
  */
-export interface HttpCommand<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined> extends BaseCommand<
-  typeof HTTP_COMMAND
-> {
-  readonly definition: RequestDefinition<TInput, TOutput>
+export interface HttpCommand<
+  TInput extends AnyStruct | undefined,
+  TOutput extends AnyStruct | undefined,
+  TError extends AnyStruct | undefined = undefined,
+> extends BaseCommand<typeof HTTP_COMMAND> {
+  readonly definition: RequestDefinition<TInput, TOutput, TError>
   readonly input: EndpointInput<TInput> | undefined
 }
 
@@ -64,84 +75,41 @@ export type HttpExecuteOptions = UseRequestConfig & { signal?: AbortSignal }
  */
 export type RequestCommandBuilder<
   TInput extends AnyStruct | undefined,
-  TOutput extends RequestOutputShape | undefined,
-> = EndpointCommandBuilder<TInput, HttpCommand<TInput, TOutput>>
+  TOutput extends AnyStruct | undefined,
+  TError extends AnyStruct | undefined = undefined,
+> = EndpointCommandBuilder<TInput, HttpCommand<TInput, TOutput, TError>>
 
-type ResponsePairForStatus<TBody extends AnyStruct, TStatus> = TStatus extends readonly (infer U extends number)[]
-  ? U extends number
-    ? { body: TBody; status: U }
-    : never
-  : TStatus extends number
-    ? { body: TBody; status: TStatus }
-    : never
+type DeclaredBody<TStruct> = [TStruct] extends [undefined] ? undefined : Infer<TStruct>
 
-type ResponsePair<TOutput extends RequestOutputShape | undefined> =
-  NonNullable<TOutput> extends readonly (infer TItem)[]
-    ? TItem extends { body: infer TBody extends AnyStruct; status: infer TStatus }
-      ? ResponsePairForStatus<TBody, TStatus>
-      : never
-    : {
-        [K in keyof NonNullable<TOutput>]: NonNullable<TOutput>[K] extends infer TBody extends AnyStruct
-          ? K extends number
-            ? { body: TBody; status: K }
-            : K extends `${infer TStatus extends number}`
-              ? { body: TBody; status: TStatus }
-              : never
-          : never
-      }[keyof NonNullable<TOutput>]
+type DeclaredResponse<TStruct> = [TStruct] extends [undefined] ? HttpMeta : DecodedResponse<Infer<TStruct>>
 
-type HttpStatusErrorByOutput<TOutput extends RequestOutputShape | undefined> = [TOutput] extends [undefined]
-  ? HttpStatusError<undefined>
-  : ResponsePair<TOutput> extends infer TPair
-    ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
-      ? `${TStatus}` extends `2${string}`
-        ? never
-        : HttpStatusError<Infer<TBody>, TStatus>
-      : never
-    : never
+/** Inferred success body for the declared `output` struct, or `undefined` when none is declared. */
+export type RequestSuccessData<TOutput extends AnyStruct | undefined> = DeclaredBody<TOutput>
 
-type RequestErrorByOutput<TOutput extends RequestOutputShape | undefined> =
-  | HttpStatusErrorByOutput<TOutput>
-  | TransportError
-  | DefinitionError
+/** Inferred error body for the declared `error` struct, or `undefined` when none is declared. */
+export type RequestErrorData<TError extends AnyStruct | undefined> = DeclaredBody<TError>
 
-type ResponseBodyByStatus<TOutput extends RequestOutputShape | undefined, TOk extends boolean> =
-  ResponsePair<TOutput> extends infer TPair
-    ? TPair extends { body: infer TBody extends AnyStruct; status: infer TStatus extends number }
-      ? `${TStatus}` extends `2${string}`
-        ? TOk extends true
-          ? TBody
-          : never
-        : TOk extends true
-          ? never
-          : TBody
-      : never
-    : never
+type HasDeclaration<TOutput, TError> = [TOutput] extends [undefined] ? ([TError] extends [undefined] ? false : true) : true
 
-type InferResponseBodyByStatus<TOutput extends RequestOutputShape | undefined, TOk extends boolean> = [TOutput] extends [undefined]
-  ? undefined
-  : [ResponseBodyByStatus<TOutput, TOk>] extends [never]
-    ? unknown
-    : Infer<ResponseBodyByStatus<TOutput, TOk>>
-
-/** Inferred success body type for 2xx statuses declared in `TOutput`. */
-export type RequestSuccessData<TOutput extends RequestOutputShape | undefined> = InferResponseBodyByStatus<TOutput, true>
-
-/** Inferred error-body type for non-2xx statuses declared in `TOutput`. */
-export type RequestErrorData<TOutput extends RequestOutputShape | undefined> = InferResponseBodyByStatus<TOutput, false>
-
-type ResponseDeclaration<TOutput extends RequestOutputShape | undefined> = [TOutput] extends [undefined]
-  ? { output?: never; responseType?: never }
-  : { output: TOutput; responseType?: HttpResponseType }
+type ResponseDeclaration<TOutput extends AnyStruct | undefined, TError extends AnyStruct | undefined> = ([TOutput] extends [undefined]
+  ? { output?: never }
+  : { output: TOutput }) &
+  ([TError] extends [undefined] ? { error?: never } : { error: TError }) &
+  (HasDeclaration<TOutput, TError> extends true ? { responseType?: HttpResponseType } : { responseType?: never })
 
 /**
- * Contract for an HTTP endpoint: method, path, optional input struct, and status-keyed outputs.
- * Pass to `defineRequest` to get a typed command builder.
+ * Contract for an HTTP endpoint: method, path, optional input struct, and the structs that
+ * decode its bodies.
+ *
+ * `output` declares the body for a 2xx response, `error` the body for anything else. Only one
+ * of the two ever runs, and omitting one means that body is never read. Pass to `defineRequest`
+ * to get a typed command builder.
  */
 export type RequestDefinition<
   TInput extends AnyStruct | undefined = undefined,
-  TOutput extends RequestOutputShape | undefined = undefined,
-> = ResponseDeclaration<TOutput> & { operation?: string } & (
+  TOutput extends AnyStruct | undefined = undefined,
+  TError extends AnyStruct | undefined = undefined,
+> = ResponseDeclaration<TOutput, TError> & { operation?: string } & (
     | {
         method: string
         path: string
@@ -159,15 +127,18 @@ export type RequestDefinition<
   )
 
 /**
- * Await-result tuple for an HTTP call: success `[null, body, response]` or failure `[error, undefined, response?]`.
+ * Await-result tuple for an HTTP call.
+ *
+ * Success is `[null, data, response]`; failure is `[fault, undefined, undefined]` because the
+ * fault carries whatever response metadata existed.
  */
-export type HttpAwaitResult<TSuccess = unknown, TErrorData = unknown> =
-  | [error: null, result: TSuccess, response: HttpResponse<TSuccess>]
-  | [error: RequestError<TErrorData>, result: undefined, response: HttpResponse<unknown> | undefined]
+export type HttpAwaitResult<TData = undefined, TErrorData = undefined> =
+  | [error: null, result: TData, response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>]
+  | [error: FaultOf<TErrorData>, result: undefined, response: undefined]
 
-type HttpExecuteAwaitResult<TOutput extends RequestOutputShape | undefined> =
-  | [error: null, result: RequestSuccessData<TOutput>, response: HttpResponse<RequestSuccessData<TOutput>>]
-  | [error: RequestErrorByOutput<TOutput>, result: undefined, response: HttpResponse<unknown> | undefined]
+type HttpExecuteAwaitResult<TOutput extends AnyStruct | undefined, TError extends AnyStruct | undefined> =
+  | [error: null, result: RequestSuccessData<TOutput>, response: DeclaredResponse<TOutput>]
+  | [error: Fault<TError>, result: undefined, response: undefined]
 
 /**
  * Declare a typed HTTP request command builder.
@@ -184,23 +155,28 @@ type HttpExecuteAwaitResult<TOutput extends RequestOutputShape | undefined> =
  *   method: 'GET',
  *   path: '/users/:id',
  *   input: struct.request({ path: struct.object({ id: struct.number() }) }),
- *   output: [{ status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) }],
+ *   output: struct.object({ id: struct.number(), name: struct.string() }),
+ *   error: struct.object({ message: struct.string() }),
  * })
  * ```
  */
-export function defineRequest<TInput extends AnyStruct, const TOutput extends RequestOutputShape | undefined = undefined>(
-  definition: RequestDefinition<TInput, TOutput>,
-): RequestCommandBuilder<TInput, TOutput>
+export function defineRequest<
+  TInput extends AnyStruct,
+  TOutput extends AnyStruct | undefined = undefined,
+  TError extends AnyStruct | undefined = undefined,
+>(definition: RequestDefinition<TInput, TOutput, TError>): RequestCommandBuilder<TInput, TOutput, TError>
 export function defineRequest<
   TInput extends AnyStruct | undefined = undefined,
-  const TOutput extends RequestOutputShape | undefined = undefined,
->(definition: RequestDefinition<TInput, TOutput>): RequestCommandBuilder<TInput, TOutput>
+  TOutput extends AnyStruct | undefined = undefined,
+  TError extends AnyStruct | undefined = undefined,
+>(definition: RequestDefinition<TInput, TOutput, TError>): RequestCommandBuilder<TInput, TOutput, TError>
 export function defineRequest<
   TInput extends AnyStruct | undefined = undefined,
-  const TOutput extends RequestOutputShape | undefined = undefined,
->(definition: RequestDefinition<TInput, TOutput>): RequestCommandBuilder<TInput, TOutput> {
-  function create(input?: EndpointInput<TInput>): HttpCommand<TInput, TOutput> {
-    const command: HttpCommand<TInput, TOutput> = {
+  TOutput extends AnyStruct | undefined = undefined,
+  TError extends AnyStruct | undefined = undefined,
+>(definition: RequestDefinition<TInput, TOutput, TError>): RequestCommandBuilder<TInput, TOutput, TError> {
+  function create(input?: EndpointInput<TInput>): HttpCommand<TInput, TOutput, TError> {
+    const command: HttpCommand<TInput, TOutput, TError> = {
       [COMMAND_TYPE]: HTTP_COMMAND,
       definition,
       input,
@@ -209,7 +185,7 @@ export function defineRequest<
     return command
   }
 
-  return ((input?: EndpointInput<TInput>) => create(input)) as RequestCommandBuilder<TInput, TOutput>
+  return ((input?: EndpointInput<TInput>) => create(input)) as RequestCommandBuilder<TInput, TOutput, TError>
 }
 
 /**
@@ -221,16 +197,21 @@ export function defineRequest<
  * @param options - Per-request progress and cancellation options.
  * @returns An await-result tuple of success body or typed request error.
  */
-export async function executeHttpCommand<TInput extends AnyStruct | undefined, TOutput extends RequestOutputShape | undefined>(
+export async function executeHttpCommand<
+  TInput extends AnyStruct | undefined,
+  TOutput extends AnyStruct | undefined,
+  TError extends AnyStruct | undefined,
+>(
   clientConfig: HttpClientConfig,
-  command: HttpCommand<TInput, TOutput>,
+  command: HttpCommand<TInput, TOutput, TError>,
   options?: HttpExecuteOptions,
-): Promise<HttpExecuteAwaitResult<TOutput>> {
+): Promise<HttpExecuteAwaitResult<TOutput, TError>> {
   const { definition, input } = command
   const config = options ?? {}
 
-  const fail = (error: RequestErrorByOutput<TOutput>, response?: HttpResponse<unknown>): HttpExecuteAwaitResult<TOutput> => {
-    return [error, undefined, response]
+  // Faults carry their own response metadata, so the tuple's third slot belongs to success only.
+  const fail = (fault: AnyFault): HttpExecuteAwaitResult<TOutput, TError> => {
+    return [fault as Fault<TError>, undefined, undefined]
   }
 
   let cancellation
@@ -243,20 +224,17 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
       timeout: config.timeout !== undefined ? config.timeout : clientConfig.timeout,
     })
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
-    return fail(definitionError)
+    return fail(createPreflightFault('REQ_OPTIONS_INVALID', error))
   }
 
   if (hasAbortTimeoutConflict(config)) {
-    const definitionError = createAbortTimeoutConflictError()
-    return fail(definitionError)
+    return fail(createAbortTimeoutConflictFault())
   }
 
   try {
     validateTransportTimeout(cancellation.timeout)
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
-    return fail(definitionError)
+    return fail(createPreflightFault('REQ_OPTIONS_INVALID', error))
   }
 
   const controller = new AbortController()
@@ -264,22 +242,21 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
   // Fast path: caller already aborted before we did any struct work — skip parseEndpointInput.
   const preAbortedSignal = [cancellation.abort, cancellation.signal].find((signal) => signal?.aborted)
   if (preAbortedSignal) {
-    const transportError = resolveAbortedTransportError(preAbortedSignal)
-    return fail(transportError)
+    return fail(resolveAbortedFault(preAbortedSignal))
   }
 
   let parsedInput: ParsedInput<TInput>
   try {
     parsedInput = (await parseEndpointInput(definition.input, input)) as ParsedInput<TInput>
   } catch (error) {
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
-    return fail(definitionError)
+    return fail(createPreflightFault('REQ_INPUT_INVALID', error))
   }
 
   let requestSignal: AbortSignal
   let request
   let releaseRequestTimeout: () => void = () => undefined
-  const responseType = resolveDefaultResponseType(definition.output, definition.responseType)
+  const hasDeclaration = definition.output !== undefined || definition.error !== undefined
+  const responseType = resolveDefaultResponseType(hasDeclaration, definition.responseType)
   try {
     let timeoutSignal: AbortSignal | undefined
     if (typeof cancellation.timeout === 'number') {
@@ -310,8 +287,7 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
     })
   } catch (error) {
     releaseRequestTimeout()
-    const definitionError = createDefinitionError('REQUEST_VALIDATION_FAILED', error)
-    return fail(definitionError)
+    return fail(createPreflightFault('REQ_BUILD_FAILED', error))
   }
 
   const transportController = new AbortController()
@@ -334,10 +310,12 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
         abort: transportAbort,
       },
       clientConfig.http.handle,
-    ).then(
-      (value) => value,
-      (error) => makeResponse({ error: resolveAbortTransportError(transportAbort)?.cause ?? error }),
-    )
+    ).catch((error: unknown) => {
+      // Cancellation outranks whatever the transport was doing when it noticed. Tagging here is
+      // the only way to tell a dead server from an interceptor that threw the same value: both
+      // reach the chain's catch as one bare cause.
+      throw markTransportOrigin(resolveAbortCause(transportAbort) ?? error)
+    })
     inflightTransport = pending
     return pending
   }
@@ -361,7 +339,8 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
       void chainPromise.catch(() => undefined)
       response = await awaitWithSignal(() => chainPromise, requestSignal)
     } catch (error) {
-      const aborted = resolveAbortTransportError(requestSignal)
+      const fromTransport = isTransportOrigin(error)
+      const aborted = resolveAbortFault(requestSignal)
       if (aborted) {
         abortTransport()
         if (inflightTransport) {
@@ -369,11 +348,29 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
         }
         return fail(aborted)
       }
-      const transportError = createTransportError(error)
-      if (transportError.code !== 'NETWORK_ERROR') {
-        return fail(transportError)
+      // The transport tags what it knows; a representation failure only matters when the
+      // relevant side declared a struct, so it is resolved against the declaration below.
+      if (isBodyFailure(error)) {
+        if (!isRepresentationFailure(error)) {
+          return fail(fromBodyFailure(error))
+        }
+        const struct = error.meta.ok ? definition.output : definition.error
+        // Philosophy 5: an unreadable body on the side you opted out of is none of your business.
+        if (!struct) {
+          if (error.meta.ok) {
+            return [null, undefined as RequestSuccessData<TOutput>, error.meta as DeclaredResponse<TOutput>]
+          }
+          return fail(createUndecodedHttpStatusFault(error.meta))
+        }
+        return fail(fromBodyFailure(error))
       }
-      return fail(createDefinitionError('INTERCEPTOR_FAILED', error))
+      // Recognized cancellation shapes stay cancellation wherever they came from; anything else
+      // belongs to whoever produced it.
+      const networkFault = createNetworkFault(error)
+      if (networkFault.code !== 'NET_UNREACHABLE') {
+        return fail(networkFault)
+      }
+      return fail(fromTransport ? networkFault : createPreflightFault('EXT_INTERCEPTOR_FAILED', error))
     }
   } finally {
     requestSignal.removeEventListener('abort', abortTransport)
@@ -384,63 +381,60 @@ export async function executeHttpCommand<TInput extends AnyStruct | undefined, T
     releaseRequestTimeout()
   }
 
-  if (response.status === 0) {
-    const transportError = createTransportError(response.error)
-    return fail(transportError)
-  }
+  const meta = toHttpMeta(response)
 
-  if (!definition.output) {
-    const ignoredResponse = {
-      ...response,
-      body: null,
-    } as HttpResponse<undefined>
+  // Philosophy 2: `ok` is the only fork, and only one side ever decodes.
+  const struct = response.ok ? definition.output : definition.error
 
-    if (ignoredResponse.ok) {
-      return [null, undefined as RequestSuccessData<TOutput>, ignoredResponse]
-    }
-
-    const errorMessage = getHttpErrorMessage(ignoredResponse)
-    const httpError = createHttpStatusError(response.status, errorMessage, ignoredResponse) as RequestErrorByOutput<TOutput>
-
-    return fail(httpError, ignoredResponse)
-  }
-
-  const struct = resolveOutputStruct(definition.output, response.status)
+  // Philosophy 5: with nothing declared for this side, that body is never read — not even to
+  // fail on. An unreadable representation on the side you opted out of is none of your business.
   if (!struct) {
-    const definitionError = createDefinitionError('UNDECLARED_STATUS', new Error(`Undeclared status: ${response.status}`), response)
-    return fail(definitionError, response)
-  }
-
-  if (response.error !== undefined) {
-    const definitionError = createDefinitionError('RESPONSE_VALIDATION_FAILED', response.error, response)
-    return fail(definitionError, response)
-  }
-
-  let parsedBody: unknown
-  try {
-    parsedBody = await parseStructResponse(struct, response.body, resolveParseResponseType(struct, responseType, response.ok))
-  } catch (error) {
-    const definitionError = createDefinitionError('RESPONSE_VALIDATION_FAILED', error, response)
-    return fail(definitionError, response)
-  }
-
-  if (response.ok) {
-    const successResponse = {
-      ...response,
-      body: parsedBody as RequestSuccessData<TOutput>,
+    if (response.ok) {
+      return [null, undefined as RequestSuccessData<TOutput>, meta as DeclaredResponse<TOutput>]
     }
-    return [null, parsedBody as RequestSuccessData<TOutput>, successResponse]
+    return fail(createUndecodedHttpStatusFault(meta))
   }
 
-  const errorMessage = getHttpErrorMessage(response)
-  const httpError = createHttpStatusError(
-    response.status,
-    errorMessage,
-    response,
-    parsedBody as RequestErrorData<TOutput>,
-  ) as RequestErrorByOutput<TOutput>
+  let decoded: unknown
+  try {
+    decoded = await parseStructResponse(struct, response.body, resolveParseResponseType(struct, responseType, response.ok))
+  } catch (error) {
+    // Philosophy 3 + 4: the declaration did not hold, and a failed decode has no body.
+    return fail(createDecodeFault('RES_STRUCT_MISMATCH', error, meta))
+  }
 
-  return fail(httpError, response)
+  const decodedResponse: DecodedResponse<unknown> = { ...meta, body: decoded }
+  if (response.ok) {
+    return [null, decoded as RequestSuccessData<TOutput>, decodedResponse as DeclaredResponse<TOutput>]
+  }
+
+  return fail(createHttpStatusFault(decodedResponse))
+}
+
+function toHttpMeta(response: HttpResponse<unknown>): HttpMeta {
+  return {
+    headers: response.headers,
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    url: response.url,
+  }
+}
+
+/** Whether a tagged body failure is about interpreting a body rather than obtaining one. */
+function isRepresentationFailure(failure: BodyFailure): boolean {
+  return failure.code === 'RES_DECODE_FAILED' || failure.code === 'RES_MEDIA_TYPE_INVALID'
+}
+
+/** Map a transport-tagged body failure onto the fault it was classified as. */
+function fromBodyFailure(failure: BodyFailure): AnyFault {
+  const { cause, code, meta } = failure
+
+  if (code === 'RES_DECODE_FAILED' || code === 'RES_MEDIA_TYPE_INVALID') {
+    return createDecodeFault(code, cause, meta)
+  }
+
+  return createPreflightFault(code, cause, meta)
 }
 
 function resolveParseResponseType(

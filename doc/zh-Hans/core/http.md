@@ -17,14 +17,12 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (!error) {
   console.log(data.name, response.status)
@@ -77,9 +75,7 @@ const updateUser = defineRequest({
       }),
     ),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
-  },
+  output: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
 })
 
 const [error, user] = await client.execute(
@@ -106,20 +102,22 @@ Alias 只改写出线上的 key。解析值和 command 输入仍用逻辑名。
 
 自定义 `build` 暴露同样的 location/codec setter。最后一次 body 写入胜出（值 + content-type 元数据）。高层 command 不会把任意对象变成 body——声明 wrapper，或用匹配的 setter。
 
-## 按状态分派
+## body 怎么读
 
-`output` 是 status → Struct 映射或 `{ status, body }[]`。有 `output` 且没写 `responseType` 时，表示默认是 `json`。显式类型：`json`、`text`、`blob`、`arraybuffer`。
+`output` 是 2xx body 的单一 Struct；`error` 是其余一切的单一 Struct。任一个声明了而没写 `responseType` 时，表示默认是 `json`。显式类型：`json`、`text`、`blob`、`arraybuffer`。两个都没声明时不允许 `responseType`，body 也根本不会被读。
 
 顺序：
 
-1. 状态 `0` → 传输错误。
-2. 无 `output` → 2xx 成功且 `data === undefined`；非 2xx → `HTTP_STATUS` 且 `error.data === undefined`。Body 不解码。
-3. 有 `output` 时，精确声明状态选中其 Struct。数组形式：后面的匹配覆盖前面的分组匹配。
-4. 未声明状态 → body 解码**之前**就是 `UNDECLARED_STATUS`。
-5. 表示失败 → `RESPONSE_VALIDATION_FAILED`，没有半成品 data。
-6. 解码后的声明 2xx → 结果；解码后的声明非 2xx → `HTTP_STATUS` 上的类型化 `error.data`。
+1. `ok` 挑边：2xx 走 `output`，其余走 `error`。永不两者都走。
+2. 那一侧没声明 → body 根本不会被读。2xx 成功且 `data === undefined`；非 2xx 是 `HTTP_STATUS` 且 `data === undefined`。你没声明的那一侧 body 读不出来会被整个忽略，连「它读不出来」这件事也忽略。
+3. 媒体类型在读 body **之前**就检查。不匹配就是 `RES_MEDIA_TYPE_INVALID`，不解析也不解码。
+4. 读取表示。失败是 `RES_DECODE_FAILED`。
+5. Struct 解析值。失败是 `RES_STRUCT_MISMATCH`。
+6. 2xx → 结果加一个带类型的 `response.body`；非 2xx → `HTTP_STATUS` 上带类型的 `data`。
 
-`HttpResponse` 有 `url`、`status`、`statusText`、`headers`、`body`、`error`、`ok`。`ok` 只表示 `200 <= status < 300`。这是 Defjs 值，不是原生 `Response`。没有 `output` 时不允许 `responseType`。
+解码只发生一次，且在拦截器链之后，所以拦截器用 `makeResponse(...)` 造的响应，和线上来的读法完全一样。
+
+成功的响应是 `DecodedResponse<T>`：`url`、`status`、`statusText`、`headers`、`ok`，外加一个带类型的 `body`。什么都没解码时你拿到 `HttpMeta`——同样的字段，只是没有 `body`。`ok` 只表示 `200 <= status < 300`。两者都不是原生 `Response`。传输失败是 fault，所以不存在代表它的 status-0 响应。
 
 ## 取消工作 {#cancel-the-work}
 
@@ -135,12 +133,12 @@ const pending = client.execute(command, { signal: controller.signal, timeout: 5_
 
 controller.abort('screen closed')
 const [error] = await pending
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancellation')
 }
 ```
 
-`timeout` 必须是 `1..2_147_483_647` 的正 safe integer。识别出的取消 → `ABORTED`；执行超时 → `TIMEOUT`；其他 Fetch/interceptor 失败 → `NETWORK_ERROR`。服务端已接受写入后的取消，**不能**证明写入回滚了。
+`timeout` 必须是 `1..2_147_483_647` 的正 safe integer。识别出的取消 → `NET_ABORTED`；执行超时 → `NET_TIMEOUT`；其他 Fetch/interceptor 失败 → `NET_UNREACHABLE`。服务端已接受写入后的取消，**不能**证明写入回滚了。
 
 ## Credentials 与 XSRF
 

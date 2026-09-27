@@ -52,7 +52,7 @@ describe('Client', () => {
       input: struct.request({
         headers: struct.object({ override: struct.string().alias('X-Override') }),
       }),
-      output: { 200: struct.object({ ok: struct.boolean() }) },
+      output: struct.object({ ok: struct.boolean() }),
     })
 
     const [headerError] = await client.execute(usePing({ headers: { override: 'command' } }), { timeout: 5_000 })
@@ -61,8 +61,7 @@ describe('Client', () => {
     expect(seen[0]?.headers.get('X-Override')).toBe('command')
 
     const [timeoutError] = await client.execute(usePing({ headers: { override: 'command' } }))
-    expect(timeoutError?.kind).toBe('transport')
-    expect(timeoutError?.code).toBe('TIMEOUT')
+    expect(timeoutError?.code).toBe('NET_TIMEOUT')
   })
 
   test('withTimeout rejects invalid zero', () => {
@@ -84,7 +83,7 @@ describe('Client', () => {
 
     const usePing = defineRequest({
       method: 'GET',
-      output: { 200: struct.object({ ok: struct.boolean() }) },
+      output: struct.object({ ok: struct.boolean() }),
       path: '/ping',
     })
     const [error] = await client.execute(usePing())
@@ -134,7 +133,7 @@ describe('Client', () => {
       method: 'POST',
       path: '/items',
       input: struct.request({ query: struct.object({ q: struct.string() }) }),
-      output: { 200: struct.object({ ok: struct.boolean() }) },
+      output: struct.object({ ok: struct.boolean() }),
     })
     const [error, data] = await client.execute(request({ query: { q: 'zen' } }))
     expect(error).toBeNull()

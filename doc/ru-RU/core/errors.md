@@ -1,11 +1,13 @@
 ---
-title: Ошибки
-description: Ветвись по kind и code для 404, таймаутов, необъявленных статусов и сбоев транспорта.
+title: Errors
+description: Ветвись по замкнутому набору fault-кодов для 404, таймаутов, нечитаемых тел и transport failure.
 ---
 
-# Ошибки
+# Errors
 
-Обрабатывай объявленный 404, таймаут или необъявленный статус через error-first кортеж — не через catch throws. `RequestError` остаётся union по `kind` / `code` и при этом является нативным `Error` (`instanceof Error` возвращает true). Начинай с `kind`, потом `code`.
+Обрабатывай 404, таймаут или нечитаемое тело, читая error-first кортеж, а не отлавливая throw. `Fault` — это нативный `Error` (`instanceof Error` истинно), размеченный одним полем: `code`.
+
+Никакого `kind` нет. Класс провала — это отрезок до первого `_` в его коде, так что `NET_TIMEOUT` — провал класса `NET`, а `RES_STRUCT_MISMATCH` — класса `RES`. Читай префикс для грубой сортировки и код целиком для точного случая.
 
 ## Базовая настройка
 
@@ -17,148 +19,254 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
-const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
-  console.log(error.data.message)
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+const [err, user, response] = await client.execute(getUser({ path: { id: 7 } }))
+if (err?.code === 'HTTP_STATUS' && err.status === 404) {
+  console.log(err.data.message)
+} else if (err?.code === 'NET_TIMEOUT') {
   console.log('timed out')
-} else if (error?.kind === 'definition' && error.code === 'UNDECLARED_STATUS') {
-  console.log('status not in output map', error.response?.status)
-} else if (!error) {
+} else if (err?.code === 'RES_STRUCT_MISMATCH') {
+  console.log('the response did not match what we declared', err.response.status)
+} else if (!err) {
   console.log(user.name, response.status)
 }
 ```
 
-```typescript twoslash
-import { createTransportError, ERR_ABORTED, type RequestError } from '@defjs/core'
+Поскольку набор замкнут, `switch` по `code` исчерпывающий:
 
-function classify(error: RequestError): string {
-  if (error.kind === 'http') return `status:${error.status}`
-  if (error.kind === 'transport') return `transport:${error.code}`
-  return `definition:${error.code}`
+```typescript twoslash
+import { createNetworkFault, ERR_ABORTED, type Fault } from '@defjs/core'
+
+function triage(fault: Fault): string {
+  switch (fault.code) {
+    case 'HTTP_STATUS':
+      return `status ${fault.status}`
+    case 'RES_MEDIA_TYPE_INVALID':
+    case 'RES_DECODE_FAILED':
+    case 'RES_STRUCT_MISMATCH':
+      return 'the contract did not hold'
+    case 'NET_TIMEOUT':
+    case 'NET_ABORTED':
+    case 'NET_UNREACHABLE':
+    case 'NET_BODY_INCOMPLETE':
+      return 'retryable'
+    case 'REQ_INPUT_INVALID':
+    case 'REQ_OPTIONS_INVALID':
+    case 'REQ_BUILD_FAILED':
+      return 'fix the call'
+    case 'EXT_INTERCEPTOR_FAILED':
+    case 'EXT_HOOK_FAILED':
+    case 'EXT_OBSERVER_FAILED':
+      return 'fix the code you attached'
+    case 'CAP_BUFFER_EXCEEDED':
+    case 'CAP_QUEUE_OVERFLOW':
+      return 'raise a declared limit or read faster'
+    case 'ENV_UNSUPPORTED':
+      return 'the host runtime is missing something'
+  }
 }
 
-const example: RequestError = createTransportError(ERR_ABORTED)
-console.log(classify(example))
+const example: Fault = createNetworkFault(ERR_ABORTED)
+console.log(triage(example))
 ```
 
 ## Стабильные коды
 
-| `kind`       | Codes                                                                                                | Смысл                                                                                                              |
-| ------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `http`       | `HTTP_STATUS`                                                                                        | Non-2xx дошёл до HTTP-границы. Держит `status`, `response` и любые декодированные status-specific `data`.          |
-| `transport`  | `ABORTED`, `TIMEOUT`, `NETWORK_ERROR`                                                                | Cancel, timeout или сбой Fetch/transport блокировал нормальный результат.                                          |
-| `definition` | `REQUEST_VALIDATION_FAILED`, `RESPONSE_VALIDATION_FAILED`, `UNDECLARED_STATUS`, `INTERCEPTOR_FAILED` | Сбой input, сборки запроса, representation ответа, Struct-decode, status-контракта или `throw` внутри interceptor. |
+| Класс  | Коды                                                                   | Кому придётся меняться                             |
+| ------ | ---------------------------------------------------------------------- | -------------------------------------------------- |
+| `HTTP` | `HTTP_STATUS`                                                          | Пир ответил non-2xx; обрабатывай как бизнес-логику |
+| `REQ`  | `REQ_INPUT_INVALID`, `REQ_OPTIONS_INVALID`, `REQ_BUILD_FAILED`         | Вызов или объявление endpoint                      |
+| `NET`  | `NET_ABORTED`, `NET_TIMEOUT`, `NET_UNREACHABLE`, `NET_BODY_INCOMPLETE` | Никому, или ретрай                                 |
+| `RES`  | `RES_MEDIA_TYPE_INVALID`, `RES_DECODE_FAILED`, `RES_STRUCT_MISMATCH`   | Объявление и пир нужно согласовать                 |
+| `EXT`  | `EXT_INTERCEPTOR_FAILED`, `EXT_HOOK_FAILED`, `EXT_OBSERVER_FAILED`     | Код, который ты подключил к конвейеру              |
+| `CAP`  | `CAP_BUFFER_EXCEEDED`, `CAP_QUEUE_OVERFLOW`                            | Объявленный предел или темп потребителя            |
+| `ENV`  | `ENV_UNSUPPORTED`                                                      | Хостовая runtime                                   |
 
-`cause` опционален на transport и definition ошибках. `response` всегда на HTTP status ошибках; на definition ошибках может появиться, если ответ уже был.
+Набор замкнут намеренно: именно это держит `switch` исчерпывающим. Расширения сообщают свою деталь через `cause`, а не через новый код.
 
-## Формы кортежа по транспорту
+### Поля по форме
+
+| Код           | `status`    | `response`                                                           | `data`                                      |
+| ------------- | ----------- | -------------------------------------------------------------------- | ------------------------------------------- |
+| `HTTP_STATUS` | Всегда      | Всегда; `body` есть только если `error` был объявлен и декодировался | Декодированное `error`-тело или `undefined` |
+| `RES_*`       | Всегда      | Всегда, только метаданные — **без `body`**                           | Отсутствует                                 |
+| Всё остальное | Отсутствует | Только там, где у транспорта уже были метаданные                     | Отсутствует                                 |
+
+`cause` несёт нижележащее значение: `StructError` при расхождении struct, провал парсера при нечитаемой representation, всё, что бросило расширение.
+
+## Формы кортежа по транспортам
 
 ```typescript twoslash
 import type {
+  DecodedResponse,
   EventStreamHandle,
   EventStreamOpenInfo,
-  HttpResponse,
-  RequestError,
+  Fault,
+  HttpMeta,
   WebSocketConnectionInfo,
   WebSocketSession,
 } from '@defjs/core'
 
 type HttpResult =
-  | [error: null, data: unknown, response: HttpResponse<unknown>]
-  | [error: RequestError, data: undefined, response: HttpResponse<unknown> | undefined]
+  [err: null, data: unknown, response: DecodedResponse<unknown> | HttpMeta] | [err: Fault, data: undefined, response: undefined]
 type SseResult =
-  | [error: null, stream: EventStreamHandle<unknown>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [err: null, stream: EventStreamHandle<unknown>, open: EventStreamOpenInfo]
+  | [err: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 type SocketResult =
-  | [error: null, session: WebSocketSession<unknown>, connection: WebSocketConnectionInfo]
-  | [error: RequestError, session: undefined, connection: WebSocketConnectionInfo | undefined]
+  | [err: null, session: WebSocketSession<unknown>, connection: WebSocketConnectionInfo]
+  | [err: Fault, session: undefined, connection: WebSocketConnectionInfo | undefined]
 
 const results: [HttpResult, SseResult, SocketResult] | undefined = undefined
 void results
 ```
 
-Ошибка старта → второй элемент `undefined`. Третий — только если транспорт успел выдать ответ/снимок. После возврата SSE handle или WebSocket session поздние сбои живут на lifecycle этого handle — они не переписывают settled startup кортеж.
+При HTTP-провале третий слот — `undefined`: fault уже несёт те метаданные response, которые были. Это важно потому, что именно fault ты передаёшь в handler, логируешь или перебрасываешь, — значит, метаданные должны путешествовать _вместе_ с ним, а не рядом.
 
-## HTTP status и data
+У SSE и WebSocket третий слот — снимок старта, и он может присутствовать даже когда старт провалился. После того как handle или session вернулись, дальнейшие провалы живут в их жизненном цикле — они никогда не перезаписывают уже устоявшийся кортеж старта.
 
-Сначала exact-status. С `output` Defjs выбирает matching Struct до decode тела, так что `error.status` и `error.data` остаются согласованными.
+## Как читается тело
 
-| Ситуация                                    | Исход кортежа                      | Поведение тела                                              |
-| ------------------------------------------- | ---------------------------------- | ----------------------------------------------------------- |
-| 2xx с matching объявленным статусом         | Success                            | Selected Struct → `data`                                    |
-| Non-2xx с matching объявленным статусом     | `HTTP_STATUS`                      | Selected Struct → типизированный `error.data`               |
-| Любой статус без matching объявления        | `UNDECLARED_STATUS`                | Статус выигрывает **до** decode тела                        |
-| Matching статус, representation тела падает | `RESPONSE_VALIDATION_FAILED`       | Нет частичного типизированного значения                     |
-| `output` опущен                             | 2xx успех; non-2xx → `HTTP_STATUS` | Тело не декодируется; `data` — `undefined`                  |
-| Response status `0`                         | Transport error                    | `response.error` → `NETWORK_ERROR`, `ABORTED` или `TIMEOUT` |
+`ok` — единственная развилка, и декодирует всегда одна сторона. `output` читает тело 2xx; `error` читает всё остальное. Пропустить один значит, что это тело не прочитают.
 
-`HttpResponse.ok` значит только `200 <= status < 300`. Нормальный non-2xx не ставит `HttpResponse.error` — это свойство для transport на Fetch-границе или сбоя body-representation.
+| Ситуация                                               | Итог                                                    |
+| ------------------------------------------------------ | ------------------------------------------------------- |
+| 2xx, `output` объявлен, тело декодировалось            | Успех; `data` и `response.body` типизированы            |
+| 2xx, `output` пропущен                                 | Успех; `data` — `undefined`, у response нет `body`      |
+| Non-2xx, `error` объявлен, тело декодировалось         | `HTTP_STATUS` с типизированным `data`                   |
+| Non-2xx, `error` пропущен                              | `HTTP_STATUS` с `data: undefined`                       |
+| Media type не тот, который нужен representation        | `RES_MEDIA_TYPE_INVALID`, сообщается **до** чтения тела |
+| Байты не являются этой representation                  | `RES_DECODE_FAILED`                                     |
+| Значение не соответствует этому struct                 | `RES_STRUCT_MISMATCH`                                   |
+| Нечитаемое тело на стороне, которую ты **не** объявлял | Игнорируется целиком — см. ниже                         |
 
-## Startup vs post-open
+Последняя строка — та, которую стоит запомнить. Если ты объявил `output`, но не `error`, то 500 с битым JSON в теле сообщается как `HTTP_STATUS` со `status: 500`. Ты сказал, что тела ошибок тебя не интересуют, — и это включает то, что тебя не интересует и сам факт нечитаемости.
 
-SSE валидирует status, `text/event-stream` и body до resolve handle. Плохой status → `HTTP_STATUS`. Плохой content type или нет body → `RESPONSE_VALIDATION_FAILED`. Opening snapshot всё ещё может лечь в третий слот кортежа.
+Декодирование происходит один раз, после цепочки interceptor’ов. Response, собранный interceptor’ом через `makeResponse(...)`, проходит ту же проверку media type и тот же struct, что и пришедший по сети.
 
-WebSocket startup покрывает handshake + первое физическое open. Сбой конструктора, pre-open close, timeout или cancel → startup кортеж. Снимок connection может быть даже если сокет никогда не дошёл до `open`.
+`HttpResponse.ok` значит только `200 <= status < 300`. Transport failure — это fault, а никогда не response: никакого response со status 0 вместо него нет.
 
-| Транспорт | После старта                                                                                                                                                 |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| SSE       | Iterator reject на fatal error; `stream.closed` resolves с `code: 'error'` и `EventStreamErrorCode`                                                          |
-| WebSocket | `onRuntimeError` для message/queue/heartbeat/runtime сбоев; `receive` падает на terminal errors; `session.closed` → `kind: 'error' \| 'aborted' \| 'closed'` |
-| HTTP      | Execute promise settles один раз. Код interceptor/callback всё ещё может throw вне нормализации кортежа                                                      |
+## Сужение объединения тел ошибок
 
-`ABORTED` / `TIMEOUT` описывают caller-facing startup результат. Возвращённый stream/session всё равно нужно закрыть и дождаться terminal promise.
+Один struct `error` покрывает все non-2xx статусы, поэтому при разных формах ты объявляешь объединение. Что ты сможешь делать с `fault.data` дальше, полностью зависит от того, как ты объявил это объединение: library возвращает ровно тот тип, который ты запросил.
 
-## Логирование native Error и cause
-
-Все варианты `RequestError` — нативные экземпляры `Error`, поэтому diagnostic adapter не нужен. `String(error)` использует стабильную нативную форму `<name>: <message>`. `kind`, `code` и поля варианта вроде `status`, `response` и `data` остаются enumerable для структурированных логов; `name` и нативная цепочка `cause` — non-enumerable.
+`struct.or(...)` даёт обычное объединение, которое TypeScript сам сузить не может. Проверяй нужное поле:
 
 ```typescript twoslash
-import { StructError, type RequestError } from '@defjs/core'
+import { struct, type Fault } from '@defjs/core'
 
-export function logRequestError(error: RequestError): void {
-  console.error(String(error), { code: error.code, kind: error.kind })
-  if (error.cause instanceof StructError) {
-    console.error(error.cause.prettify())
+const ApiError = struct.or(struct.object({ message: struct.string() }), struct.object({ retryAfter: struct.number() }))
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS' && 'retryAfter' in fault.data) {
+  console.log(fault.data.retryAfter)
+}
+```
+
+`struct.discriminatedUnion(...)` сужает по полю, которое тело действительно несёт, — удобная форма, когда API уже размечает свои ошибки:
+
+```typescript twoslash
+import { struct, type Fault } from '@defjs/core'
+
+const ApiError = struct.discriminatedUnion('kind', [
+  struct.object({ kind: struct.literal('validation'), fields: struct.array(struct.string()) }),
+  struct.object({ kind: struct.literal('rateLimit'), retryAfter: struct.number() }),
+])
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS') {
+  switch (fault.data.kind) {
+    case 'validation':
+      console.log(fault.data.fields.length)
+      break
+    case 'rateLimit':
+      console.log(fault.data.retryAfter)
+      break
   }
 }
 ```
 
-Перед вызовом `format()`, `flatten()` или `prettify()` сузь тип через `error.cause instanceof StructError`. Эти helpers остаются на Struct cause и не копируются на внешний `DefinitionError`. Не разбирай `message` или `String(error)` для управления потоком — контрактом остаются `kind`, `code` и проверенный status.
+Когда API кладёт статус **внутрь** тела, размечай по нему, а не по `fault.status`:
+
+```typescript twoslash
+import { struct, type Fault } from '@defjs/core'
+
+const ApiError = struct.discriminatedUnion('status', [
+  struct.object({ status: struct.literal(404), resource: struct.string() }),
+  struct.object({ status: struct.literal(429), retryAfter: struct.number() }),
+])
+
+declare const fault: Fault<typeof ApiError>
+
+if (fault.code === 'HTTP_STATUS' && fault.data.status === 429) {
+  console.log(fault.data.retryAfter)
+}
+```
+
+Последнюю форму стоит предпочитать там, где API её поддерживает. `fault.status` — число HTTP-слоя, которое может перезаписать proxy, gateway или CDN; а `data.status` был декодирован из тела, которое утвердил твой struct `error`, так что добраться до него — доказательство, что его выдал backend.
+
+Неразмеченное объединение, которое не сужается, — свойство объявления, а не library: она отдаёт тебе тот тип, который ты объявил. Хочешь сужения — добавь в struct размечающее поле.
+
+## Старт и после открытия
+
+SSE проверяет статус, `text/event-stream` и наличие тела до того, как resolve’ит handle. Non-2xx → `HTTP_STATUS`. Неверный media type → `RES_MEDIA_TYPE_INVALID`. Тела нет → `RES_DECODE_FAILED`. Снимок открытия всё равно может попасть в третий слот кортежа.
+
+Старт WebSocket покрывает handshake плюс первое физическое open. Провал конструктора, закрытие до открытия, таймаут или отмена — всё это даёт кортеж старта. Снимок соединения может существовать, даже если socket так и не дошёл до `open`.
+
+| Транспорт | После старта                                                                                                                                                     |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SSE       | Итератор реджектит на фатальной ошибке; `stream.closed` резолвится с `kind: 'error'` и `code` fault’а                                                            |
+| WebSocket | `onRuntimeError` для провалов сообщения/очереди/heartbeat; `receive` падает на терминальных ошибках; `session.closed` → `kind: 'closed' \| 'aborted' \| 'error'` |
+| HTTP      | Promise от execute settle’ится один раз. Код interceptor’ов и колбэков всё ещё может throw’ить вне нормализации кортежа                                          |
+
+`NET_ABORTED` / `NET_TIMEOUT` описывают то, что вызывающий увидел на старте. Возвращённый stream или session ты всё равно закрываешь и await’ишь его терминальный promise.
+
+## Логирование нативного Error и cause
+
+Fault’ы — это экземпляры нативного `Error`, поэтому диагностический адаптер не нужен. `String(fault)` даёт стабильную нативную форму `DefjsFault: <message>`. `code` и поля вариантов — `status`, `response`, `data` — остаются перечислимыми для структурированного логирования; `name` и нативная цепочка `cause` — нет.
+
+```typescript twoslash
+import { StructError, type Fault } from '@defjs/core'
+
+export function logFault(fault: Fault): void {
+  console.error(String(fault), { code: fault.code })
+  if (fault.cause instanceof StructError) {
+    console.error(fault.cause.prettify())
+  }
+}
+```
+
+Сузь `fault.cause instanceof StructError` до вызова `format()`, `flatten()` или `prettify()`. Эти helper’ы живут на cause у Struct и не копируются на fault. Не заставляй поток управления парсить `message` или `String(fault)` — контракт это `code` и проверенный `status`.
 
 ## Справка
 
-| Ветка                  | Control-flow check                           | Полезные стабильные поля                       | Обычно нет / чувствительно        |
-| ---------------------- | -------------------------------------------- | ---------------------------------------------- | --------------------------------- |
-| HTTP status policy     | `error.kind === 'http'`                      | `error.status`, проверенный `error.data`       | Body, headers, URL, `cause`       |
-| Caller cancellation    | `kind === 'transport' && code === 'ABORTED'` | `kind`, `code`                                 | Abort reason и stack              |
-| Timeout                | `kind === 'transport' && code === 'TIMEOUT'` | `kind`, `code`                                 | Request URL и underlying cause    |
-| Contract failure       | `error.kind === 'definition'`                | `kind`, `code`, проверенный `response?.status` | Struct issues, body, input values |
-| Stream/session runtime | `stream.closed` / `session.closed`           | Terminal code/kind, проверенный close status   | Event payloads, frames, causes    |
+| Ветка                       | Проверка в потоке управления       | Полезные стабильные поля                    | Обычно отсутствует / чувствительно   |
+| --------------------------- | ---------------------------------- | ------------------------------------------- | ------------------------------------ |
+| Политика HTTP-статуса       | `fault.code === 'HTTP_STATUS'`     | `fault.status`, проверенный `fault.data`    | Тело, headers, URL, `cause`          |
+| Отмена вызывающим           | `fault.code === 'NET_ABORTED'`     | `code`                                      | Причина отмены и стек                |
+| Таймаут                     | `fault.code === 'NET_TIMEOUT'`     | `code`                                      | URL запроса и нижележащая cause      |
+| Контракт сломался           | `fault.code.startsWith('RES_')`    | `code`, проверенный `fault.response.status` | Struct issue, тело, входные значения |
+| Твой собственный код бросил | `fault.code.startsWith('EXT_')`    | `code`, `cause`                             | Всё, что приложило расширение        |
+| Runtime потока/сессии       | `stream.closed` / `session.closed` | Терминальные `kind` и `code`                | Payload событий, фреймы, cause       |
 
-Не выводи CORS из status `0` — ветвись по `kind` и `code`.
-
-Считай `cause`, `data`, response headers/bodies, URL, Struct issues, input values и stacks чувствительными. Консервативное резюме:
+Считай `cause`, `data`, headers и тела response, URL, Struct issue, входные значения и стеки чувствительными. Консервативная сводка:
 
 ```typescript twoslash
-import type { RequestError } from '@defjs/core'
+import type { Fault } from '@defjs/core'
 
-export function summarize(error: RequestError): { kind: RequestError['kind']; code: RequestError['code']; status?: number } {
+export function summarize(fault: Fault): { code: Fault['code']; status?: number } {
   return {
-    kind: error.kind,
-    code: error.code,
-    status: error.kind === 'http' ? error.status : error.kind === 'definition' ? error.response?.status : undefined,
+    code: fault.code,
+    status: 'status' in fault ? fault.status : undefined,
   }
 }
 ```
 
-`createTransportError`, `createDefinitionError` и `createHttpStatusError` создают эти нативные Error values. Обычные ошибки запроса по-прежнему возвращаются в кортеже; наследование native Error само по себе не превращает их в throws. `ERR_ABORTED` и `ERR_TIMEOUT` — shared causes, которые узнаёт transport normalizer.
+`createNetworkFault`, `createPreflightFault`, `createDecodeFault`, `createHttpStatusFault` и `createUndecodedHttpStatusFault` собирают эти нативные Error-значения. Обычные провалы запроса по-прежнему возвращаются в кортеже; их не бросают лишь потому, что они наследуют поведение нативного Error. `ERR_ABORTED` и `ERR_TIMEOUT` — общие cause, которые распознаёт нормализатор транспорта.
 
 ## Связанные рецепты
 

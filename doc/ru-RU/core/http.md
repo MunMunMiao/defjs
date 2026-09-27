@@ -17,14 +17,12 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (!error) {
   console.log(data.name, response.status)
@@ -77,9 +75,7 @@ const updateUser = defineRequest({
       }),
     ),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
-  },
+  output: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
 })
 
 const [error, user] = await client.execute(
@@ -106,20 +102,22 @@ else console.log(user.id)
 
 Кастомный `build` даёт те же location/codec setters. Финальная запись тела побеждает (value + content-type metadata). High-level команды не превращают произвольный объект в body — объяви wrapper или используй matching setter.
 
-## Диспатч по статусу
+## Как читается тело
 
-`output` — map статус → Struct или `{ status, body }[]`. С `output` и без `responseType` representation по умолчанию `json`. Явные типы: `json`, `text`, `blob`, `arraybuffer`.
+`output` — один Struct для тела 2xx; `error` — один Struct для всего остального. Если объявлено любое из двух и `responseType` не задан, representation по умолчанию `json`. Явные типы: `json`, `text`, `blob`, `arraybuffer`. Если не объявлено ни одно, `responseType` не допускается, а тело не читают вовсе.
 
 Порядок операций:
 
-1. Status `0` → transport error.
-2. Нет `output` → 2xx успех с `data === undefined`; non-2xx → `HTTP_STATUS` с `error.data === undefined`. Тело не декодируется.
-3. С `output` точный объявленный статус выбирает свой Struct. Array form: более поздний match перекрывает более ранний grouped match.
-4. Необъявленный статус → `UNDECLARED_STATUS` **до** decode тела.
-5. Сбой representation → `RESPONSE_VALIDATION_FAILED`, без partial data.
-6. Декодированный объявленный 2xx → результат; декодированный объявленный non-2xx → типизированный `error.data` на `HTTP_STATUS`.
+1. `ok` выбирает сторону: `output` для 2xx, `error` для всего остального. Никогда обе.
+2. Для этой стороны ничего не объявлено → тело не читают. 2xx успешен с `data === undefined`; non-2xx — это `HTTP_STATUS` с `data === undefined`. Нечитаемое тело на стороне, которую ты не объявлял, игнорируется — вместе с самим фактом, что его не удалось прочитать.
+3. Media type проверяют **до** чтения тела. Несовпадение — это `RES_MEDIA_TYPE_INVALID`, и ничего не парсится и не декодируется.
+4. Читают representation. Неудача — `RES_DECODE_FAILED`.
+5. Struct парсит значение. Неудача — `RES_STRUCT_MISMATCH`.
+6. 2xx → результат и типизированный `response.body`; non-2xx → типизированный `data` на `HTTP_STATUS`.
 
-У `HttpResponse` есть `url`, `status`, `statusText`, `headers`, `body`, `error` и `ok`. `ok` значит только `200 <= status < 300`. Это значение Defjs, не native `Response`. Без `output` `responseType` не разрешён.
+Декодирование происходит один раз, после цепочки interceptor’ов, так что response, собранный interceptor’ом через `makeResponse(...)`, читается точно так же, как пришедший по сети.
+
+Успешный response — это `DecodedResponse<T>`: `url`, `status`, `statusText`, `headers`, `ok` и типизированный `body`. Там, где ничего не декодировали, ты получаешь `HttpMeta` — те же поля без `body`. `ok` значит только `200 <= status < 300`. Ни то, ни другое не является нативным `Response`. Transport failure — это fault, поэтому никакого response со status 0 вместо него нет.
 
 ## Отмени работу {#cancel-the-work}
 
@@ -135,12 +133,12 @@ const pending = client.execute(command, { signal: controller.signal, timeout: 5_
 
 controller.abort('screen closed')
 const [error] = await pending
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancellation')
 }
 ```
 
-`timeout` — положительное safe integer в `1..2_147_483_647`. Узнанная отмена → `ABORTED`; execution timeout → `TIMEOUT`; другие сбои Fetch/interceptor → `NETWORK_ERROR`. Cancel после того, как сервер принял write, **не** доказывает откат записи.
+`timeout` — положительное safe integer в `1..2_147_483_647`. Узнанная отмена → `NET_ABORTED`; execution timeout → `NET_TIMEOUT`; другие сбои Fetch/interceptor → `NET_UNREACHABLE`. Cancel после того, как сервер принял write, **не** доказывает откат записи.
 
 ## Credentials и XSRF
 

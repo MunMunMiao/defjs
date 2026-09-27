@@ -50,15 +50,13 @@ const getUser = defineRequest({
       id: struct.number(),
     }),
   }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, user] = await client.execute(getUser({ path: { id: 1 } }))
 if (error) {
-  console.error(error.kind, error.code)
+  console.error(error.code)
 } else {
   console.log(user.name)
 }

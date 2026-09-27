@@ -58,7 +58,7 @@ const notifications = defineEventStream({
 
 const [error, stream, startupOpen] = await client.execute(notifications())
 if (error) {
-  console.error(error.kind, error.code, startupOpen?.response.status)
+  console.error(error.code, startupOpen?.response.status)
 } else {
   console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
   stream.close('example-finished')
@@ -66,16 +66,16 @@ if (error) {
 }
 ```
 
-Response must be successful, media type essence `text/event-stream`, and have a body. Non-2xx startup → `HTTP_STATUS`. Bad content type or missing body → `RESPONSE_VALIDATION_FAILED`. A response snapshot can still sit in the third tuple slot when validation fails after the response arrives.
+Response must be successful, media type essence `text/event-stream`, and have a body. Non-2xx startup → `HTTP_STATUS`. Bad content type or missing body → `RES_STRUCT_MISMATCH`. A response snapshot can still sit in the third tuple slot when validation fails after the response arrives.
 
 `startupOpen` is the initial snapshot. `stream.open` is live and changes on later physical opens. Keep the tuple value when the first response matters.
 
 ```typescript twoslash
-import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+import type { EventStreamHandle, EventStreamOpenInfo, Fault } from '@defjs/core'
 
 type StreamResult<T> =
   | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [error: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 
 const result: StreamResult<string> | undefined = undefined
 void result
@@ -149,10 +149,10 @@ Latest parsed event ID becomes `Last-Event-ID` on a later attempt. A later attem
 
 Both must be positive safe integers. Overflow is fatal — no silent discard of older events.
 
-| Limit           | Protects                                           | Terminal code           |
-| --------------- | -------------------------------------------------- | ----------------------- |
-| `maxBufferSize` | Incomplete/oversized SSE line/event while parsing  | `PARSER_LIMIT_EXCEEDED` |
-| `maxQueueSize`  | Events produced faster than the one consumer reads | `QUEUE_OVERFLOW`        |
+| Limit           | Protects                                           | Terminal code         |
+| --------------- | -------------------------------------------------- | --------------------- |
+| `maxBufferSize` | Incomplete/oversized SSE line/event while parsing  | `CAP_BUFFER_EXCEEDED` |
+| `maxQueueSize`  | Events produced faster than the one consumer reads | `CAP_QUEUE_OVERFLOW`  |
 
 Fatal stream also clears buffered events, cancels the active body, rejects the iterator, and resolves `stream.closed` with `code: 'error'`.
 
@@ -175,7 +175,7 @@ const api: StreamApi<string> = handle
 void api
 ```
 
-Terminal codes: `eof`, `aborted`, or `error`. An `error` result also carries an `EventStreamErrorCode`: `INVALID_RESPONSE`, `MESSAGE_PROCESSING_FAILED`, `PARSER_LIMIT_EXCEEDED`, `QUEUE_OVERFLOW`, `TIMEOUT`, or `TRANSPORT_ERROR`.
+Terminal codes: `eof`, `aborted`, or `error`. An `error` result also carries an `EventStreamFaultCode`: `RES_MEDIA_TYPE_INVALID`, `EXT_OBSERVER_FAILED`, `CAP_BUFFER_EXCEEDED`, `CAP_QUEUE_OVERFLOW`, `NET_TIMEOUT`, or `TRANSPORT_ERROR`.
 
 `close(reason)` aborts the active attempt, closes the queue, settles as `aborted`. Loop `break` / `return` / throw invokes iterator return and closes with `iterator-return`. The code that executes the command owns closure.
 

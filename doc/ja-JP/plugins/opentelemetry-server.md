@@ -27,7 +27,7 @@ const readOrders = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
 
 const [error] = await client.execute(readOrders())
-if (error) console.error(error.kind, error.code)
+if (error) console.error(error.code)
 ```
 
 `tracer` は必須です。`meter` は任意 — 省略するとパッケージメトリクスは無効です。`propagator` なし → アダプタは複合の W3C Trace Context + W3C Baggage propagator を作ります。グローバル SDK 設定の読み取りや初期化はしません。
@@ -147,7 +147,7 @@ const client = createClient(
 
 アダプタが測るのはトランスポート寿命であり、コマンド解釈の全段階ではありません。
 
-- **HTTP** — span は HTTP インターセプター内で始まり、Defjs の `HttpResponse` を得たときに終わります。status 振り分け、表現検査、Struct デコードはその後です。後の `RESPONSE_VALIDATION_FAILED` や `UNDECLARED_STATUS` は、終わったトランスポート span を更新できません。
+- **HTTP** — span は HTTP インターセプターで始まり、Defjs の `HttpResponse` を得た時点で終わります。メディアタイプの確認、表現の読み取り、Struct のデコードはすべてそのあとなので、後から出た `RES_*` fault は終了済みのトランスポート span を更新できません。また span はチェーンの内側で生きているため、トランスポートの reject は OTel の慣例どおり例外クラスとして記録され、実行があとで割り当てる fault コードにはなりません。
 - **SSE** — span は `stream.closed` が確定するまで開いたままです。`sse.connected`、その後 `sse.closed` / `sse.aborted` / `sse.error` を記録します。1 論理ストリーム（再接続含む）→ 1 span。イベント単位の span はありません。
 - **WebSocket** — span は `session.closed` が確定するまで開いたままです。イベント: `websocket.connected`、`websocket.closed`、`websocket.error`。再接続する物理ソケットは論理セッションの一部のままです。メッセージ単位の span はありません。
 
@@ -197,7 +197,7 @@ void outcome
 
 アクティブな SSE/WebSocket 計測は論理リソース（再接続ギャップ含む）を数え、物理ソケットや個別 HTTP 試行は数えません。
 
-HTTP span は method、解決済み `url.full`、利用可能ならサーバー address/port、受信時のレスポンス status を記録します。デフォルトの `url.full` は任意の `request.baseEndpoint` に対して `request.endpoint` を解決するだけで、独立した `request.queryString` を追加しません。これは構築境界であって redaction ではありません。完全またはマスク済みの application URL は `startSpanHook` で作ります。status `400+` → span status `ERROR`、status 文字列を `error.type` に。status `100..399` は span status を未設定のまま。status 0 のトランスポート結果にはレスポンス status がありません。キャンセルは status 未設定のまま。タイムアウト/その他のトランスポート失敗は `TIMEOUT` または `NETWORK_ERROR` を使います。メトリクスの次元は安定したものです。method、静的 operation、サーバー address/port、レスポンス status、低カーディナリティの error type。
+HTTP span は method、解決済み `url.full`、利用可能ならサーバー address/port、受信時のレスポンス status を記録します。デフォルトの `url.full` は任意の `request.baseEndpoint` に対して `request.endpoint` を解決するだけで、独立した `request.queryString` を追加しません。これは構築境界であって redaction ではありません。完全またはマスク済みの application URL は `startSpanHook` で作ります。status `400+` → span status `ERROR`、status 文字列を `error.type` に。status `100..399` は span status を未設定のまま。status 0 のトランスポート結果にはレスポンス status がありません。キャンセルは status 未設定のまま。タイムアウト/その他のトランスポート失敗は `NET_TIMEOUT` または `NET_UNREACHABLE` を使います。メトリクスの次元は安定したものです。method、静的 operation、サーバー address/port、レスポンス status、低カーディナリティの error type。
 
 SSE/WebSocket の接続メトリクスは接続時間、論理接続寿命、アクティブリソース数、`defjs.result`、operation、サーバー address/port、低カーディナリティの失敗型を記録します。リクエスト/レスポンスボディ、メッセージペイロード、キュー長、メッセージ単位 span はデフォルトではありません。
 

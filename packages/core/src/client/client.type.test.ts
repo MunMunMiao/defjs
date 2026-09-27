@@ -91,7 +91,7 @@ type ClientAsyncDisposeCase = Expect<typeof Symbol.asyncDispose extends keyof Cl
 const useGetUser = defineRequest({
   method: 'GET',
   path: '/users',
-  output: { 200: struct.object({ name: struct.string() }) },
+  output: struct.object({ name: struct.string() }),
 })
 const httpCommand = useGetUser()
 

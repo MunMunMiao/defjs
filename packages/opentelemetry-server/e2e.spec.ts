@@ -54,9 +54,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
       method: 'POST',
       path: '/echo-headers',
       input: struct.object({}),
-      output: {
-        200: struct.object({ headers: struct.record(struct.string()) }),
-      },
+      output: struct.object({ headers: struct.record(struct.string()) }),
     })
 
     const [error, result] = await client.execute(useEchoHeaders({}))
@@ -98,7 +96,7 @@ describe('e2e: opentelemetry-server with real test server', () => {
     expect(span.ended).toBe(true)
   })
 
-  test('HTTP transport rejection returns NETWORK_ERROR and records a response-less error span', async () => {
+  test('HTTP transport rejection returns NET_UNREACHABLE and records the exception class on the span', async () => {
     const { tracer, spans } = createMockTracer()
     const client = createClient(
       withEndpoint('https://example.invalid'),
@@ -109,14 +107,16 @@ describe('e2e: opentelemetry-server with real test server', () => {
 
     const [error, result, response] = await client.execute(useUnavailable())
 
-    expect(error).toMatchObject({ code: 'NETWORK_ERROR', kind: 'transport' })
+    expect(error).toMatchObject({ code: 'NET_UNREACHABLE' })
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
 
     const span = onlySpan(spans)
     expect(span.name).toBe('GET')
     expect(span.attributes['http.response.status_code']).toBeUndefined()
-    expect(span.attributes['error.type']).toBe('NETWORK_ERROR')
+    // An in-chain observer sees the raw rejection; fault classification happens outside the
+    // chain, so the span carries the exception class per OTel convention.
+    expect(span.attributes['error.type']).toBe('TypeError')
     expect(span.status?.code).toBe(SpanStatusCode.ERROR)
     expect(span.ended).toBe(true)
   })

@@ -1,14 +1,15 @@
 import type { FetchHandle } from '../../client/config'
-import { ERR_ABORTED, ERR_TIMEOUT } from '../../error'
-import { resolveOutputStruct, type RequestOutputShape } from '../../http/request'
+import type { FaultCode } from '../../error'
+import { ERR_TIMEOUT } from '../../error'
 import { createFetchInitBase } from '../../http/transport/fetch_init'
-import { awaitWithSignal, mergeAbortSignals, resolveAbortedTransportError } from '../../internal/abort'
+import { awaitWithSignal, mergeAbortSignals, resolveAbortedCause } from '../../internal/abort'
 import { AsyncQueue } from '../../internal/async_queue'
 import { computeReconnectDelay, wait } from '../../internal/backoff'
 import type { HttpRequest } from '../../internal/http_request'
 import type { HttpResponse } from '../../internal/http_response'
 import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
+import type { AnyStruct } from '../../struct'
 import { parseStructValue } from '../../struct/introspection'
 import type { EventStreamMessage } from './parser'
 import { createLineParser, createMessageParser, readStreamBytes, SSEParserLimitError } from './parser'
@@ -23,25 +24,37 @@ export interface EventStreamOpenInfo {
   url: string
 }
 
-/** Fatal or recoverable error codes reported when an SSE stream closes with `code: 'error'`. */
-export type EventStreamErrorCode =
-  | 'INVALID_RESPONSE'
-  | 'MESSAGE_PROCESSING_FAILED'
-  | 'PARSER_LIMIT_EXCEEDED'
-  | 'QUEUE_OVERFLOW'
-  | 'TIMEOUT'
-  | 'TRANSPORT_ERROR'
+/**
+ * Fault codes an event stream can end with, drawn from the one shared `FaultCode` namespace.
+ *
+ * SSE used to carry a parallel set with no mapping to the request error model.
+ */
+export type EventStreamFaultCode = Extract<
+  FaultCode,
+  | 'CAP_BUFFER_EXCEEDED'
+  | 'CAP_QUEUE_OVERFLOW'
+  | 'EXT_HOOK_FAILED'
+  | 'EXT_OBSERVER_FAILED'
+  | 'NET_TIMEOUT'
+  | 'NET_UNREACHABLE'
+  | 'RES_DECODE_FAILED'
+  | 'RES_MEDIA_TYPE_INVALID'
+>
 
 interface EventStreamCloseInfoBase {
   reason?: string
   cause?: unknown
 }
 
-/** How an SSE stream ended: clean EOF, abort, or an error with `errorCode`. */
+/**
+ * How an SSE stream ended: clean EOF, abort, or an error carrying its fault `code`.
+ *
+ * The discriminant is `kind` so that `code` can mean the same thing it means on a fault.
+ */
 export type EventStreamCloseInfo =
-  | (EventStreamCloseInfoBase & { code: 'eof' })
-  | (EventStreamCloseInfoBase & { code: 'aborted' })
-  | (EventStreamCloseInfoBase & { code: 'error'; errorCode: EventStreamErrorCode })
+  | (EventStreamCloseInfoBase & { kind: 'eof' })
+  | (EventStreamCloseInfoBase & { kind: 'aborted' })
+  | (EventStreamCloseInfoBase & { code: EventStreamFaultCode; kind: 'error' })
 
 /** Open SSE stream: iterate events, inspect open metadata, and close early. */
 export interface EventStreamHandle<TEvent = EventStreamMessage> extends AsyncIterable<TEvent>, AsyncDisposable {
@@ -67,8 +80,8 @@ export interface SSEReconnectOptions {
 
 export interface FetchEventStreamOptions<TEvent = EventStreamMessage> {
   fetch?: FetchHandle
-  /** Optional handshake status→body map for non-2xx opens; fills `error.data` when declared. */
-  handshakeOutput?: RequestOutputShape
+  /** Optional struct for a non-2xx handshake body; fills the fault's `data` when declared. */
+  handshakeError?: AnyStruct
   onopen?: (open: EventStreamOpenInfo) => void | Promise<void>
   onclose?: (open: EventStreamOpenInfo) => void | Promise<void>
   onerror?: (error: unknown, context: FetchEventStreamErrorContext) => number | null | undefined | Promise<number | null | undefined>
@@ -86,7 +99,7 @@ export interface FetchEventStreamErrorContext {
   open?: EventStreamOpenInfo
 }
 
-type EventStreamFatalCode = Exclude<EventStreamErrorCode, 'TIMEOUT' | 'TRANSPORT_ERROR'>
+type EventStreamFatalCode = Exclude<EventStreamFaultCode, 'NET_TIMEOUT' | 'NET_UNREACHABLE'>
 
 class EventStreamFatalError extends Error {
   readonly code: EventStreamFatalCode
@@ -109,7 +122,7 @@ function toEventStreamFatalError(error: unknown): EventStreamFatalError | undefi
     return error
   }
   if (error instanceof SSEParserLimitError) {
-    return new EventStreamFatalError('PARSER_LIMIT_EXCEEDED', error.message, { cause: error })
+    return new EventStreamFatalError('CAP_BUFFER_EXCEEDED', error.message, { cause: error })
   }
   return undefined
 }
@@ -206,7 +219,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
     closeController.abort(reason)
     queue.close()
     settleClosed({
-      code: 'aborted',
+      kind: 'aborted',
       reason: toCloseReason(reason),
       cause: reason,
     })
@@ -224,13 +237,13 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
           new Request(resolveRequestUrl(request), createEventStreamRequestInit(request, headers, attemptAbort)),
           attemptAbort,
         )
-        const open = await createOpenInfo(response, options.handshakeOutput)
+        const open = await createOpenInfo(response, options.handshakeError)
         latestOpen = open
 
         validateOpenResponse(open)
 
         if (!response.body) {
-          throw new EventStreamFatalError('INVALID_RESPONSE', 'Missing response body for event stream')
+          throw new EventStreamFatalError('RES_DECODE_FAILED', 'Missing response body for event stream')
         }
 
         await runFatalHook(() => options.onopen?.(open), attemptAbort, 'Event stream onopen callback failed')
@@ -245,7 +258,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
         await runFatalHook(() => options.onclose?.(open), attemptAbort, 'Event stream onclose callback failed')
 
         queue.close()
-        settleClosed({ code: 'eof' })
+        settleClosed({ kind: 'eof' })
         return
       } catch (error) {
         if (response?.body && !readerStarted) {
@@ -327,7 +340,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
           if (signal.aborted) {
             throw error
           }
-          throw new EventStreamFatalError('MESSAGE_PROCESSING_FAILED', 'Failed to process event stream message', { cause: error })
+          throw new EventStreamFatalError('EXT_OBSERVER_FAILED', 'Failed to process event stream message', { cause: error })
         }
 
         if (typeof transformed !== 'undefined') {
@@ -335,7 +348,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
             queue.push(transformed)
           } catch (error) {
             // AsyncQueue.push has one failure mode: exceeding its configured bound.
-            throw new EventStreamFatalError('QUEUE_OVERFLOW', 'Event stream queue exceeded maxQueueSize', {
+            throw new EventStreamFatalError('CAP_QUEUE_OVERFLOW', 'Event stream queue exceeded maxQueueSize', {
               cause: error,
             })
           }
@@ -349,7 +362,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       await readStreamBytes(stream, parseLine, signal)
     } catch (error) {
       if (error instanceof SSEParserLimitError) {
-        throw new EventStreamFatalError('PARSER_LIMIT_EXCEEDED', error.message, { cause: error })
+        throw new EventStreamFatalError('CAP_BUFFER_EXCEEDED', error.message, { cause: error })
       }
       throw error
     }
@@ -442,7 +455,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
       if (signal.aborted) {
         throw error
       }
-      throw new EventStreamFatalError('MESSAGE_PROCESSING_FAILED', error instanceof Error ? error.message : fallback, { cause: error })
+      throw new EventStreamFatalError('EXT_HOOK_FAILED', error instanceof Error ? error.message : fallback, { cause: error })
     }
   }
 
@@ -463,7 +476,7 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
     }
 
     settleClosed({
-      code: 'aborted',
+      kind: 'aborted',
       reason: toCloseReason(closeCause),
       cause: closeCause,
     })
@@ -479,10 +492,10 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
     }
 
     settleClosed({
-      code: 'error',
-      errorCode: getEventStreamErrorCode(error),
-      reason: toCloseReason(error),
       cause: error,
+      code: getEventStreamFaultCode(error),
+      kind: 'error',
+      reason: toCloseReason(error),
     })
   }
 
@@ -496,8 +509,8 @@ export async function fetchEventStream<TEvent = EventStreamMessage>(
   }
 }
 
-function getEventStreamErrorCode(error: unknown): EventStreamErrorCode {
-  return getEventStreamFatalCode(error) ?? (error === ERR_TIMEOUT ? 'TIMEOUT' : 'TRANSPORT_ERROR')
+function getEventStreamFaultCode(error: unknown): EventStreamFaultCode {
+  return getEventStreamFatalCode(error) ?? (error === ERR_TIMEOUT ? 'NET_TIMEOUT' : 'NET_UNREACHABLE')
 }
 
 async function fetchWithSignal(fetchImpl: FetchHandle, request: Request, signal: AbortSignal): Promise<Response> {
@@ -506,7 +519,7 @@ async function fetchWithSignal(fetchImpl: FetchHandle, request: Request, signal:
     void pending
       .then((response) => {
         if (signal.aborted && response.body) {
-          void response.body.cancel(signal.reason).catch(() => undefined)
+          discardStreamBody(response.body, signal.reason)
         }
       })
       .catch(() => undefined)
@@ -514,21 +527,24 @@ async function fetchWithSignal(fetchImpl: FetchHandle, request: Request, signal:
   }, signal)
 }
 
-async function createOpenInfo(response: Response, handshakeOutput?: RequestOutputShape): Promise<EventStreamOpenInfo> {
+/** Release a body we will not read, ignoring a cancellation the provider refuses. */
+function discardStreamBody(body: ReadableStream<Uint8Array>, reason?: unknown): void {
+  void body.cancel(reason).catch(() => undefined)
+}
+
+async function createOpenInfo(response: Response, handshakeError?: AnyStruct): Promise<EventStreamOpenInfo> {
   let body: unknown = null
 
-  if (!response.ok && handshakeOutput) {
-    const struct = resolveOutputStruct(handshakeOutput, response.status)
-    if (struct) {
-      try {
-        const raw = await response.json()
-        body = parseStructValue(struct, raw)
-      } catch {
-        body = null
-      }
-    } else if (response.body) {
-      void response.body.cancel()
+  if (!response.ok && handshakeError) {
+    try {
+      body = parseStructValue(handshakeError, await response.json())
+    } catch {
+      // Philosophy 5 at the handshake: a body we could not read as declared is reported as an
+      // undecoded status fault, not as a second failure about the body.
+      body = null
     }
+  } else if (!response.ok && response.body) {
+    discardStreamBody(response.body)
   }
 
   const openResponse = makeResponse<unknown>({
@@ -556,14 +572,16 @@ function createEventStreamRequestInit(request: HttpRequest, headers: Headers, ab
 
 function validateOpenResponse(open: EventStreamOpenInfo): void {
   const { response } = open
-  if (!response.ok || response.error !== undefined) {
-    throw new EventStreamFatalError('INVALID_RESPONSE', 'Event stream request failed', { cause: response.error })
+  // A non-2xx handshake is a status fault, which `executeEventStreamCommand` builds from the open
+  // info; the code here is only the fallback for a response that never carried a status.
+  if (!response.ok) {
+    throw new EventStreamFatalError('RES_DECODE_FAILED', 'Event stream request failed')
   }
 
   const contentType = response.headers.get('content-type') || ''
   if (parseMediaTypeEssence(contentType) !== EVENT_STREAM_CONTENT_TYPE) {
     throw new EventStreamFatalError(
-      'INVALID_RESPONSE',
+      'RES_MEDIA_TYPE_INVALID',
       `Expected content-type to start with ${EVENT_STREAM_CONTENT_TYPE}, got ${contentType || '(empty)'}`,
     )
   }
@@ -685,7 +703,7 @@ function normalizeAbortError(error: unknown, requestAbort?: AbortSignal, closeAb
 }
 
 function normalizeAbortReason(signal: AbortSignal): Error {
-  return resolveAbortedTransportError(signal).code === 'TIMEOUT' ? ERR_TIMEOUT : ERR_ABORTED
+  return resolveAbortedCause(signal)
 }
 
 function toCloseReason(reason: unknown): string | undefined {

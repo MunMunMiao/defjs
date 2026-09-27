@@ -17,14 +17,12 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (!error) {
   console.log(data.name, response.status)
@@ -77,9 +75,7 @@ const updateUser = defineRequest({
       }),
     ),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
-  },
+  output: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
 })
 
 const [error, user] = await client.execute(
@@ -106,20 +102,22 @@ else console.log(user.id)
 
 커스텀 `build`도 같은 위치/코덱 setter를 노출해요. 최종 body 쓰기가 이겨요 (값 + content-type 메타데이터). 고수준 명령은 임의 객체를 body로 바꾸지 않아요 — 래퍼를 선언하거나 맞는 setter를 쓰세요.
 
-## status로 디스패치하기
+## body를 읽는 방법
 
-`output`은 status → Struct 맵이거나 `{ status, body }[]`예요. `output`이 있고 `responseType`이 없으면 representation 기본값은 `json`이에요. 명시 타입: `json`, `text`, `blob`, `arraybuffer`.
+`output`은 2xx body를 위한 하나의 Struct이고, `error`는 그 밖의 모든 것을 위한 하나의 Struct예요. 둘 중 하나를 선언하고 `responseType`을 쓰지 않으면 표현은 `json`이 기본이에요. 명시 타입은 `json`, `text`, `blob`, `arraybuffer`. 둘 다 선언하지 않으면 `responseType`은 허용되지 않고, body도 읽히지 않아요.
 
-동작 순서:
+순서:
 
-1. status `0` → 전송 오류.
-2. `output` 없음 → 2xx는 `data === undefined`로 성공; non-2xx → `error.data === undefined`인 `HTTP_STATUS`. body는 디코딩하지 않아요.
-3. `output`이 있으면 정확히 선언된 status가 Struct를 고르요. 배열 형태: 나중 매치가 앞선 그룹 매치를 덮어요.
-4. 미선언 status → body 디코딩 **전에** `UNDECLARED_STATUS`.
-5. representation 실패 → `RESPONSE_VALIDATION_FAILED`, 부분 data 없음.
-6. 디코딩된 선언 2xx → 결과; 디코딩된 선언 non-2xx → `HTTP_STATUS`의 타입이 잡힌 `error.data`.
+1. `ok`가 쪽을 골라요. 2xx는 `output`, 나머지는 `error`. 둘 다인 경우는 없어요.
+2. 그쪽에 선언이 없으면 → body는 읽히지 않아요. 2xx는 `data === undefined`로 성공하고, non-2xx는 `data === undefined`인 `HTTP_STATUS`예요. 선언하지 않은 쪽의 body를 읽을 수 없었다는 사실까지 통째로 무시돼요.
+3. 미디어 타입은 body를 읽기 **전에** 확인해요. 맞지 않으면 `RES_MEDIA_TYPE_INVALID`이고, 파싱도 디코딩도 하지 않아요.
+4. 표현을 읽어요. 실패는 `RES_DECODE_FAILED`.
+5. Struct가 값을 파싱해요. 실패는 `RES_STRUCT_MISMATCH`.
+6. 2xx → 결과와 타입이 잡힌 `response.body`. non-2xx → `HTTP_STATUS`의 타입이 잡힌 `data`.
 
-`HttpResponse`에는 `url`, `status`, `statusText`, `headers`, `body`, `error`, `ok`가 있어요. `ok`는 `200 <= status < 300`만 의미해요. Defjs 값이지 네이티브 `Response`가 아니에요. `output`이 없으면 `responseType`은 허용되지 않아요.
+디코딩은 인터셉터 체인 뒤에서 딱 한 번 일어나요. 그래서 인터셉터가 `makeResponse(...)`로 만든 응답도 회선에서 온 것과 똑같이 읽혀요.
+
+성공한 응답은 `DecodedResponse<T>`예요. `url`, `status`, `statusText`, `headers`, `ok`, 그리고 타입이 잡힌 `body`. 아무것도 디코딩하지 않은 곳에서는 `HttpMeta`를 받아요 — 같은 필드에 `body`만 없어요. `ok`는 `200 <= status < 300`만 뜻해요. 둘 다 네이티브 `Response`가 아니에요. 전송 실패는 fault니까, 그 자리를 대신하는 status 0 응답은 없어요.
 
 ## 작업 취소하기 {#cancel-the-work}
 
@@ -135,12 +133,12 @@ const pending = client.execute(command, { signal: controller.signal, timeout: 5_
 
 controller.abort('screen closed')
 const [error] = await pending
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancellation')
 }
 ```
 
-`timeout`은 `1..2_147_483_647` 범위의 양의 안전 정수여야 해요. 인식된 취소 → `ABORTED`; 실행 타임아웃 → `TIMEOUT`; 다른 Fetch/인터셉터 실패 → `NETWORK_ERROR`. 서버가 쓰기를 받아들인 뒤의 취소는 쓰기가 롤백됐다는 증명이 **아니에요**.
+`timeout`은 `1..2_147_483_647` 범위의 양의 안전 정수여야 해요. 인식된 취소 → `NET_ABORTED`; 실행 타임아웃 → `NET_TIMEOUT`; 다른 Fetch/인터셉터 실패 → `NET_UNREACHABLE`. 서버가 쓰기를 받아들인 뒤의 취소는 쓰기가 롤백됐다는 증명이 **아니에요**.
 
 ## 자격 증명과 XSRF
 

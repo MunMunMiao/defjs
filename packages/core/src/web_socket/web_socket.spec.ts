@@ -73,7 +73,7 @@ describe('web socket runtime', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('transport')
+    expect(error?.code.startsWith('NET_')).toBe(true)
   })
 
   test('should reject with abort and timeout before starting websocket transport', async () => {
@@ -96,8 +96,8 @@ describe('web socket runtime', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code.startsWith('REQ_')).toBe(true)
+    expect(error?.code).toBe('REQ_OPTIONS_INVALID')
     expect(error?.message).toBe('abort and timeout cannot be used together')
     expect(beforeConnectCalls).toBe(0)
   })
@@ -119,8 +119,8 @@ describe('web socket runtime', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code.startsWith('REQ_')).toBe(true)
+    expect(error?.code).toBe('REQ_OPTIONS_INVALID')
     expect(error?.message).toBe('abort and timeout cannot be used together')
   })
 
@@ -143,8 +143,8 @@ describe('web socket runtime', () => {
 
     const [error, socket, connection] = await isolated.execute(useSocket(), options as never)
 
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code.startsWith('REQ_')).toBe(true)
+    expect(error?.code).toBe('REQ_OPTIONS_INVALID')
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
     expect(constructorCalls).toBe(0)
@@ -528,8 +528,8 @@ describe('web socket runtime', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('transport')
-    expect(error?.code).toBe('ABORTED')
+    expect(error?.code.startsWith('NET_')).toBe(true)
+    expect(error?.code).toBe('NET_ABORTED')
   })
 
   test('should return definition error when input validation fails', async () => {
@@ -546,8 +546,8 @@ describe('web socket runtime', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code).toBe('REQ_INPUT_INVALID')
+    expect(error?.code).toBe('REQ_INPUT_INVALID')
   })
 
   test('should return definition error when build throws', async () => {
@@ -565,8 +565,8 @@ describe('web socket runtime', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code).toBe('REQ_BUILD_FAILED')
+    expect(error?.code).toBe('REQ_BUILD_FAILED')
   })
 
   test('should return definition error when websocket url creation fails', async () => {
@@ -581,11 +581,11 @@ describe('web socket runtime', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('REQUEST_VALIDATION_FAILED')
+    expect(error?.code).toBe('REQ_BUILD_FAILED')
+    expect(error?.code).toBe('REQ_BUILD_FAILED')
   })
 
-  test('should return transport error when beforeConnect throws', async () => {
+  test('should report a throwing beforeConnect as an extension hook fault', async () => {
     const useSocket = defineWebSocket({
       maxIncomingQueueSize: 16,
       incoming: {},
@@ -601,7 +601,7 @@ describe('web socket runtime', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('transport')
+    expect(error?.code).toBe('EXT_HOOK_FAILED')
   })
 
   test('should support reconnect, queued sends, and abort during reconnect delay', async () => {
@@ -778,7 +778,8 @@ describe('web socket runtime', () => {
 
     const [error, socket] = await clientWithInterceptor.execute(useSocket())
 
-    expect(error).toBe(interceptorFailure)
+    // The startup catch classifies an unclassified throw and keeps the original on `cause`.
+    expect(error).toMatchObject({ cause: interceptorFailure, code: 'EXT_INTERCEPTOR_FAILED' })
     expect(socket).toBeUndefined()
     expect(createdSessions).toHaveLength(1)
     const terminal = await Promise.race([

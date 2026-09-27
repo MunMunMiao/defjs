@@ -152,7 +152,7 @@ describe('createOpenTelemetrySSEInterceptor', () => {
     expect(second).toBe(first)
     await expect(settleWithin(Promise.resolve(first))).resolves.toBeUndefined()
     expect(close).toHaveBeenCalledOnce()
-    await expect(deferred.stream.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(deferred.stream.closed).resolves.toMatchObject({ kind: 'aborted' })
   })
 
   test('should propagate the original rejection when disposing a rejected SSE fake', async () => {
@@ -176,7 +176,7 @@ describe('createOpenTelemetrySSEInterceptor', () => {
     stream.close('eof')
     await waitForSettledPromises()
 
-    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('sse.closed', { 'sse.close.code': 'eof' })
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('sse.closed', { 'sse.close.kind': 'eof' })
     expect(activeSpans[0]?.status?.code).toBe(1)
     expect(activeSpans[0]?.ended).toBe(true)
     expect(metrics.connectionDuration.record).toHaveBeenCalledWith(
@@ -184,7 +184,7 @@ describe('createOpenTelemetrySSEInterceptor', () => {
       expect.objectContaining({
         'defjs.result': 'success',
         'server.address': 'api.example.com',
-        'sse.close.code': 'eof',
+        'sse.close.kind': 'eof',
       }),
     )
   })
@@ -199,14 +199,14 @@ describe('createOpenTelemetrySSEInterceptor', () => {
     stream.close('aborted')
     await waitForSettledPromises()
 
-    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('sse.aborted', { 'sse.close.code': 'aborted' })
+    expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('sse.aborted', { 'sse.close.kind': 'aborted' })
     expect(activeSpans[0]?.recordException).not.toHaveBeenCalled()
     expect(activeSpans[0]?.status?.code).toBe(1)
     expect(metrics.connectionDuration.record).toHaveBeenCalledWith(
       expect.any(Number),
       expect.objectContaining({
         'defjs.result': 'success',
-        'sse.close.code': 'aborted',
+        'sse.close.kind': 'aborted',
       }),
     )
   })
@@ -218,12 +218,12 @@ describe('createOpenTelemetrySSEInterceptor', () => {
     const interceptor = createOpenTelemetrySSEInterceptor({ tracer, propagator: mockPropagator, metrics })
 
     await interceptor.fn(makeSSERequest(), async () => stream.stream)
-    stream.close('error', new Error('stream broken'), 'QUEUE_OVERFLOW')
+    stream.close('error', new Error('stream broken'), 'CAP_QUEUE_OVERFLOW')
     await waitForSettledPromises()
 
     expect(activeSpans[0]?.addEvent).toHaveBeenCalledWith('sse.error', {
-      'defjs.sse.error.code': 'QUEUE_OVERFLOW',
-      'sse.close.code': 'error',
+      'defjs.sse.fault.code': 'CAP_QUEUE_OVERFLOW',
+      'sse.close.kind': 'error',
     })
     expect(activeSpans[0]?.recordException).toHaveBeenCalled()
     expect(activeSpans[0]?.status?.code).toBe(2)
@@ -232,9 +232,9 @@ describe('createOpenTelemetrySSEInterceptor', () => {
       expect.any(Number),
       expect.objectContaining({
         'defjs.result': 'error',
-        'defjs.sse.error.code': 'QUEUE_OVERFLOW',
+        'defjs.sse.fault.code': 'CAP_QUEUE_OVERFLOW',
         'error.type': 'Error',
-        'sse.close.code': 'error',
+        'sse.close.kind': 'error',
       }),
     )
   })

@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,14 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## أشكال مخرج الحالة
+## أشكال `output` و`error`
 
-`output` يمكن أن يكون خريطة حالة → Struct أو مصفوفة `{ status, body }[]`. الحالة الدقيقة تفوز. إدخالات المصفوفة: تطابق لاحق يتجاوز تطابقًا مجمّعًا سابقًا. بلا إعلان مطابق → `UNDECLARED_STATUS` قبل فك الجسم.
+`output` هو Struct واحد لجسم 2xx؛ و`error` هو Struct واحد لكل ما عداه. و`ok` هو نقطة التفرّع الوحيدة، ولا يُفكّ إلا طرف واحد. وحذف أحد الطرفين يعني أن ذلك الجسم لا يُقرأ أبدًا: الخطأ يحمل الحالة، و`data` يبقى `undefined`.
 
 ## وصفات ذات صلة
 

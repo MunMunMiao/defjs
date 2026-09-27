@@ -170,9 +170,14 @@ const retrySafeReads = createHttpInterceptor(async (request, next) => {
 })
 ```
 
-这个循环不会重试 interceptor/Fetch 抛出的错误。状态 `0` 是 Fetch 边界的传输失败响应。重试 `POST` / `PUT` / `PATCH` / `DELETE` 需要可重放字节、服务端支持、幂等契约，以及审过的状态政策。
+这个循环不会重试 interceptor/Fetch 抛出的错误——传输失败是 reject，根本不会产出一个能让这个循环去匹配的状态。重试 `POST` / `PUT` / `PATCH` / `DELETE` 需要可重放字节、服务端支持、幂等契约，以及审过的状态政策。重试归你管——Core 不导出 `retryAfter()`。
 
-Interceptor 在此示例之外抛错或 reject 时，会作为 `kind: 'definition'` / `INTERCEPTOR_FAILED` 返回给调用方——参见 [Errors](./errors.md)。
+在这个示例之外抛错（或 reject）的 interceptor，会以 `EXT_INTERCEPTOR_FAILED` 回到调用方，抛出的值挂在
+`cause` 上——见 [Errors](./errors.md)。想表达取消，就改成抛 `ERR_ABORTED` 或 `ERR_TIMEOUT`。
+
+`next(request)` 可能 reject。传输失败是 fault，不是 status 0 的响应，所以想观察它的 interceptor 要在
+`next` 外面套 `try` / `catch`。Defjs 的归因照样是对的：来自传输层的 reject 仍然是 `NET_*` fault，不会
+算到你的 interceptor 头上。
 
 ## 包装 WebSocket session
 
@@ -221,7 +226,7 @@ const preserveSession = createWebSocketInterceptor(async (request, next) => {
 
 Factory 返回带标签的传输值：
 
-- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createHttpInterceptor(fn)` → `{ fn }`
 - `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
 - `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
 - `basicAuthHttpInterceptor(provider, options?)` — HTTP 上的 Basic 凭证

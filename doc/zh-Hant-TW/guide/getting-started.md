@@ -66,10 +66,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -100,10 +98,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const handle: typeof fetch = async (input, init) => {
@@ -124,10 +120,10 @@ const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }
 })
 
 if (error) {
-  if (error.kind === 'http' && error.status === 404) {
+  if (error.code === 'HTTP_STATUS' && error.status === 404) {
     console.log(error.data.message)
   } else {
-    console.error(error.kind, error.code)
+    console.error(error.code)
   }
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
@@ -179,7 +175,7 @@ Loaded Ada from 200
 User not found
 ```
 
-成功時：`error` 是 `null`，`user` 是 `200` Struct 輸出，`response` 是 `HttpResponse`。已宣告的 `404`：`error.kind` 是 `'http'`，`error.status` 是 `404`，`error.data` 是型別化的 `NotFound`。失敗時第二項是 `undefined`。
+成功時：`error` 是 `null`，`user` 是 `200` Struct 輸出，`response` 是 `HttpResponse`。已宣告的 `404`：`error.code` 是 `'http'`，`error.status` 是 `404`，`error.data` 是型別化的 `NotFound`。失敗時第二項是 `undefined`。
 
 ## Step 4 — 指向真實 API
 
@@ -209,11 +205,11 @@ void realClient
 
 ## 結果不一樣時
 
-- 壞 input / 無效 build / 互相衝突的取消選項 → `REQUEST_VALIDATION_FAILED`
-- 已宣告的非 2xx → `HTTP_STATUS`，帶型別化的 `error.data`
-- 已宣告但解碼失敗的 body → `RESPONSE_VALIDATION_FAILED`
-- 沒宣告的狀態碼 → `UNDECLARED_STATUS`（在 body 解碼之前）
-- Fetch 失敗 / 取消 / 逾時 → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+- 壞輸入 → `REQ_INPUT_INVALID`；衝突的取消 options → `REQ_OPTIONS_INVALID`；`build` 失敗 → `REQ_BUILD_FAILED`
+- 任何非 2xx → `HTTP_STATUS`；若宣告過 `error`，`err.data` 就有型別
+- 媒體類型不對 → `RES_MEDIA_TYPE_INVALID`，在讀 body 之前就回報
+- 宣告過的 body 解不出來 → `RES_DECODE_FAILED` 或 `RES_STRUCT_MISMATCH`
+- Fetch 失敗 / 取消 / 逾時 → `NET_UNREACHABLE` / `NET_ABORTED` / `NET_TIMEOUT`
 
 `timeout` 必須是 `1..2_147_483_647` 的正 safe integer。不要同時傳 `abort` 跟 `timeout`；`signal` 可以跟其中一個搭配。取消只告訴你呼叫端看到什麼 — 不代表伺服器寫入有沒有提交。
 

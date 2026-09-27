@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,16 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## Status output shapes
+## Output and error shapes
 
-`output` can be a status → Struct map or an `{ status, body }[]`. Exact status wins. Array entries: a later match overrides an earlier grouped match. No matching declaration → `UNDECLARED_STATUS` (`kind: 'definition'`). `error.response` may still be present; that body is not Struct-decoded as success.
+`output` is one Struct for the 2xx body; `error` is one Struct for everything else. `ok` is the only
+fork, and only one side ever decodes. Omitting a side means that body is never read: the fault
+carries the status and `data` stays `undefined`.
 
 ## Related recipes
 

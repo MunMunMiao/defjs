@@ -1,3 +1,5 @@
+import rootManifest from '../package.json' with { type: 'json' }
+
 const repositoryRoot = `${import.meta.dir}/..`
 const packedDirectory = `${repositoryRoot}/test-out/packed-packages`
 const consumerDirectory = `${repositoryRoot}/test-out/packed-consumer`
@@ -65,7 +67,9 @@ const dependencies: Record<string, string> = {
   '@opentelemetry/core': '2.10.0',
   '@types/react': '19.2.17',
   react: '19.2.8',
-  typescript: '7.0.2',
+  // Follow the repo's compiler rather than pinning a second one, so the consumer check never
+  // silently lags behind the TypeScript the packages are built and typechecked with.
+  typescript: rootManifest.workspaces.catalog.typescript,
   vue: '3.5.40',
 }
 const sourceManifests = new Map<string, Manifest>()
@@ -174,15 +178,16 @@ const client = core.createClient(
   core.withHTTPHandle(async (input) => {
     assert(input instanceof Request, 'Core did not pass a standard Request to the fetch handle')
     receivedRequest = input
-    return new Response(JSON.stringify({ ok: true }), {
+    const missing = new URL(input.url).pathname === '/missing'
+    return new Response(JSON.stringify(missing ? { message: 'nope' } : { ok: true }), {
       headers: { 'content-type': 'application/json' },
-      status: 200,
+      status: missing ? 404 : 200,
     })
   }),
 )
 const readHealth = core.defineRequest({
   method: 'GET',
-  output: { 200: core.struct.object({ ok: core.struct.literal(true) }) },
+  output: core.struct.object({ ok: core.struct.literal(true) }),
   path: '/health',
   responseType: 'json',
 })
@@ -192,6 +197,19 @@ assert(error === null, 'Core request failed')
 assert(result?.ok === true, 'Core request returned the wrong body')
 assert(response?.status === 200, 'Core request returned the wrong status')
 assert(receivedRequest?.url === 'https://example.test/health', 'Core request used the wrong URL')
+
+const readMissing = core.defineRequest({
+  error: core.struct.object({ message: core.struct.string() }),
+  method: 'GET',
+  output: core.struct.object({ ok: core.struct.literal(true) }),
+  path: '/missing',
+  responseType: 'json',
+})
+const [missingError] = await client.execute(readMissing())
+
+assert(missingError?.code === 'HTTP_STATUS', 'Core did not report a non-2xx status as HTTP_STATUS')
+assert(missingError.status === 404, 'Core reported the wrong status')
+assert(missingError.data.message === 'nope', 'Core did not decode the declared error body')
 `,
 )
 

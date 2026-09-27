@@ -23,7 +23,7 @@ const room = defineWebSocket({
 
 const [error, session] = await client.execute(room())
 if (error) {
-  console.error(error.kind, error.code)
+  console.error(error.code)
 } else {
   const unsubscribe = session.onRuntimeError((cause) => console.error('runtime', cause))
   try {

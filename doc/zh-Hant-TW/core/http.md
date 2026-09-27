@@ -17,14 +17,12 @@ const getUser = defineRequest({
   method: 'GET',
   path: '/users/:id',
   input: struct.request({ path: struct.object({ id: struct.number() }) }),
-  output: [
-    { status: 200, body: struct.object({ id: struct.number(), name: struct.string() }) },
-    { status: 404, body: struct.object({ message: struct.string() }) },
-  ],
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const [error, data, response] = await client.execute(getUser({ path: { id: 7 } }))
-if (error?.kind === 'http' && error.status === 404) {
+if (error?.code === 'HTTP_STATUS' && error.status === 404) {
   console.log(error.data.message)
 } else if (!error) {
   console.log(data.name, response.status)
@@ -77,9 +75,7 @@ const updateUser = defineRequest({
       }),
     ),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
-  },
+  output: struct.object({ id: struct.number(), displayName: struct.string().alias('display_name') }),
 })
 
 const [error, user] = await client.execute(
@@ -106,20 +102,22 @@ Aliases 只改 outbound wire keys。剖析後的值與 command inputs 仍用邏�
 
 自訂 `build` 暴露同樣的 location／codec setters。最後一次 body write 勝出（value + content-type metadata）。高階 commands 不會把任意物件變成 body — 宣告 wrapper，或用對應的 setter。
 
-## 依 status 分派
+## body 怎麼讀
 
-`output` 是 status → Struct map 或 `{ status, body }[]`。有 `output` 且沒有 `responseType` 時，representation 預設是 `json`。明確型別：`json`、`text`、`blob`、`arraybuffer`。
+`output` 是 2xx body 的單一 Struct；`error` 是其餘一切的單一 Struct。任一個宣告了而沒寫 `responseType` 時，表示預設是 `json`。顯式類型：`json`、`text`、`blob`、`arraybuffer`。兩個都沒宣告時不允許 `responseType`，body 也根本不會被讀。
 
-作業順序：
+順序：
 
-1. Status `0` → 傳輸錯誤。
-2. 沒有 `output` → 2xx 成功且 `data === undefined`；非 2xx → `HTTP_STATUS` 且 `error.data === undefined`。Body 不解碼。
-3. 有 `output` 時，精確的已宣告 status 選出其 Struct。陣列形式：較晚的 match 覆寫較早的 grouped match。
-4. 未宣告 status → 在 body 解碼**之前**得到 `UNDECLARED_STATUS`。
-5. Representation 失敗 → `RESPONSE_VALIDATION_FAILED`，沒有部分資料。
-6. 解碼後的已宣告 2xx → 結果；解碼後的已宣告非 2xx → `HTTP_STATUS` 上的型別化 `error.data`。
+1. `ok` 挑邊：2xx 走 `output`，其餘走 `error`。絕不兩邊都走。
+2. 那一側沒宣告 → body 根本不會被讀。2xx 成功且 `data === undefined`；非 2xx 是 `HTTP_STATUS` 且 `data === undefined`。你沒宣告的那一側 body 解不出來會被整個忽略，連「它解不出來」這件事也忽略。
+3. 媒體類型在讀 body **之前**就檢查。不匹配就是 `RES_MEDIA_TYPE_INVALID`，不解析也不解碼。
+4. 讀取表示。失敗是 `RES_DECODE_FAILED`。
+5. Struct 解析值。失敗是 `RES_STRUCT_MISMATCH`。
+6. 2xx → 結果加一個有型別的 `response.body`；非 2xx → `HTTP_STATUS` 上有型別的 `data`。
 
-`HttpResponse` 有 `url`、`status`、`statusText`、`headers`、`body`、`error`、`ok`。`ok` 只代表 `200 <= status < 300`。它是 Defjs 值，不是原生 `Response`。沒有 `output` 時，不允許 `responseType`。
+解碼只發生一次，而且在 interceptor 鏈之後，所以 interceptor 用 `makeResponse(...)` 造的回應，和線上來的讀法完全一樣。
+
+成功的回應是 `DecodedResponse<T>`：`url`、`status`、`statusText`、`headers`、`ok`，外加一個有型別的 `body`。什麼都沒解碼時你拿到 `HttpMeta`——同樣的欄位，只是沒有 `body`。`ok` 只表示 `200 <= status < 300`。兩者都不是原生 `Response`。傳輸失敗是 fault，所以不存在代表它的 status-0 回應。
 
 ## 取消工作 {#cancel-the-work}
 
@@ -135,12 +133,12 @@ const pending = client.execute(command, { signal: controller.signal, timeout: 5_
 
 controller.abort('screen closed')
 const [error] = await pending
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancellation')
 }
 ```
 
-`timeout` 必須是 `1..2_147_483_647` 的正 safe integer。認得的取消 → `ABORTED`；執行逾時 → `TIMEOUT`；其他 Fetch／interceptor 失敗 → `NETWORK_ERROR`。伺服器已接受寫入後再取消，**不能**證明寫入已回滾。
+`timeout` 必須是 `1..2_147_483_647` 的正 safe integer。認得的取消 → `NET_ABORTED`；執行逾時 → `NET_TIMEOUT`；其他 Fetch／interceptor 失敗 → `NET_UNREACHABLE`。伺服器已接受寫入後再取消，**不能**證明寫入已回滾。
 
 ## Credentials 與 XSRF
 

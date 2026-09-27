@@ -58,7 +58,7 @@ const notifications = defineEventStream({
 
 const [error, stream, startupOpen] = await client.execute(notifications())
 if (error) {
-  console.error(error.kind, error.code, startupOpen?.response.status)
+  console.error(error.code, startupOpen?.response.status)
 } else {
   console.log(stream.open.response.status, startupOpen.response.status, stream.open.url)
   stream.close('example-finished')
@@ -66,16 +66,16 @@ if (error) {
 }
 ```
 
-응답은 성공이어야 하고, media type essence가 `text/event-stream`이어야 하며 body가 있어야 해요. non-2xx 시작 → `HTTP_STATUS`. 잘못된 content type이나 없는 body → `RESPONSE_VALIDATION_FAILED`. 응답이 도착한 뒤 검증이 실패해도 응답 스냅샷이 튜플 세 번째에 남을 수 있어요.
+응답은 성공이어야 하고, media type essence가 `text/event-stream`이어야 하며 body가 있어야 해요. non-2xx 시작 → `HTTP_STATUS`. 잘못된 content type이나 없는 body → `RES_STRUCT_MISMATCH`. 응답이 도착한 뒤 검증이 실패해도 응답 스냅샷이 튜플 세 번째에 남을 수 있어요.
 
 `startupOpen`은 초기 스냅샷이에요. `stream.open`은 live이고 이후 물리 open에서 바뀌어요. 첫 응답이 중요하면 튜플 값을 유지하세요.
 
 ```typescript twoslash
-import type { EventStreamHandle, EventStreamOpenInfo, RequestError } from '@defjs/core'
+import type { EventStreamHandle, EventStreamOpenInfo, Fault } from '@defjs/core'
 
 type StreamResult<T> =
   | [error: null, stream: EventStreamHandle<T>, open: EventStreamOpenInfo]
-  | [error: RequestError, stream: undefined, open: EventStreamOpenInfo | undefined]
+  | [error: Fault, stream: undefined, open: EventStreamOpenInfo | undefined]
 
 const result: StreamResult<string> | undefined = undefined
 void result
@@ -149,10 +149,10 @@ SSE는 기본적으로 네트워크/읽기 실패를 재시도하지 않습니�
 
 둘 다 양의 안전 정수여야 해요. 오버플로는 치명적이에요 — 오래된 이벤트를 조용히 버리지 않아요.
 
-| Limit           | Protects                             | Terminal code           |
-| --------------- | ------------------------------------ | ----------------------- |
-| `maxBufferSize` | 파싱 중 불완전/과대 SSE 줄/이벤트    | `PARSER_LIMIT_EXCEEDED` |
-| `maxQueueSize`  | 소비자 하나보다 빠르게 생산된 이벤트 | `QUEUE_OVERFLOW`        |
+| Limit           | Protects                             | Terminal code         |
+| --------------- | ------------------------------------ | --------------------- |
+| `maxBufferSize` | 파싱 중 불완전/과대 SSE 줄/이벤트    | `CAP_BUFFER_EXCEEDED` |
+| `maxQueueSize`  | 소비자 하나보다 빠르게 생산된 이벤트 | `CAP_QUEUE_OVERFLOW`  |
 
 치명적 스트림은 버퍼된 이벤트도 비우고, 활성 body를 취소하고, iterator를 reject하고, `stream.closed`를 `code: 'error'`로 resolve해요.
 
@@ -175,7 +175,7 @@ const api: StreamApi<string> = handle
 void api
 ```
 
-종료 코드: `eof`, `aborted`, 또는 `error`. `error` 결과에는 `EventStreamErrorCode`도 있어요. `INVALID_RESPONSE`, `MESSAGE_PROCESSING_FAILED`, `PARSER_LIMIT_EXCEEDED`, `QUEUE_OVERFLOW`, `TIMEOUT`, 또는 `TRANSPORT_ERROR`예요.
+종료 코드: `eof`, `aborted`, 또는 `error`. `error` 결과에는 `EventStreamFaultCode`도 있어요. `RES_MEDIA_TYPE_INVALID`, `EXT_OBSERVER_FAILED`, `CAP_BUFFER_EXCEEDED`, `CAP_QUEUE_OVERFLOW`, `NET_TIMEOUT`, 또는 `TRANSPORT_ERROR`예요.
 
 `close(reason)`은 활성 시도를 abort하고, 큐를 닫고, `aborted`로 settle해요. 루프 `break` / `return` / throw는 iterator return을 호출하고 `iterator-return`으로 닫아요. 명령을 실행한 코드가 닫기를 소유해요.
 

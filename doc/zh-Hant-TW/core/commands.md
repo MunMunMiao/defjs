@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,14 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## Status output 形狀
+## `output` 與 `error` 的形狀
 
-`output` 可以是 status → Struct map，或 `{ status, body }[]`。精確 status 優先。陣列項目：較晚的 match 會覆寫較早的 grouped match。沒有相符宣告 → 在 body 解碼前得到 `UNDECLARED_STATUS`。
+`output` 是 2xx body 的單一 Struct；`error` 是其餘一切的單一 Struct。`ok` 是唯一分流點，而且只有一邊會解碼。省略一邊意味著那個 body 根本不會被讀：fault 帶著 status，`data` 保持 `undefined`。
 
 ## 相關 recipes
 

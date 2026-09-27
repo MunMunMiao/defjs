@@ -42,9 +42,10 @@ function parseStableVersion(value: unknown, source: string): string {
 
 export function parseReleaseTag(tag: string, coreVersion?: unknown): ReleaseTarget {
   const match = RELEASE_TAG.exec(tag)
-  if (!match) throw new Error(`Invalid release tag: ${JSON.stringify(tag)}`)
+  const packageKey = match?.[1]
+  const rawVersion = match?.[2]
+  if (packageKey === undefined || rawVersion === undefined) throw new Error(`Invalid release tag: ${JSON.stringify(tag)}`)
 
-  const [, packageKey, rawVersion] = match
   const version = parseStableVersion(rawVersion, 'release tag')
   const manifestVersion = parseStableVersion(arguments.length === 2 ? coreVersion : coreManifest.version, 'Core package manifest')
   const definition = PACKAGES[packageKey]
@@ -66,10 +67,10 @@ export function validateReleaseManifest(target: ReleaseTarget, manifest: unknown
   }
 
   const candidate = manifest as Record<string, unknown>
-  if (candidate.name !== target.packageName) {
+  if (candidate['name'] !== target.packageName) {
     throw new Error(`Package manifest name does not match ${target.packageName}`)
   }
-  if (candidate.version !== target.version) {
+  if (candidate['version'] !== target.version) {
     throw new Error(`Package manifest version does not match ${target.version}`)
   }
   return candidate as PackageManifest
@@ -93,7 +94,7 @@ function githubOutput(target: ReleaseTarget): string {
 }
 
 async function writeGitHubOutput(output: string): Promise<void> {
-  const outputPath = Bun.env.GITHUB_OUTPUT
+  const outputPath = Bun.env['GITHUB_OUTPUT']
   if (!outputPath) {
     await Bun.write(Bun.stdout, output)
     return

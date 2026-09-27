@@ -1,10 +1,11 @@
 import type { FetchHandle } from '../../client/config'
-import { awaitWithSignal, resolveAbortTransportError } from '../../internal/abort'
+import { awaitWithSignal, resolveAbortCause } from '../../internal/abort'
 import type { HttpProgressFn, HttpRequest } from '../../internal/http_request'
-import type { HttpResponse } from '../../internal/http_response'
+import type { HttpMeta, HttpResponse } from '../../internal/http_response'
 import { makeResponse } from '../../internal/http_response'
 import { resolveRequestUrl } from '../../internal/url'
 import { applyRequestContentType } from './body'
+import { BodyFailure, isBodyFailure } from './body_failure'
 import {
   __resetStreamingRequestBodySupportForTests,
   createFetchInitBase,
@@ -12,7 +13,7 @@ import {
   isReadableStreamBody,
   supportsStreamingRequestBody,
 } from './fetch_init'
-import { concatChunks, getContentLength, getContentType, parseBytesBody } from './utils'
+import { concatChunks, getContentLength, getContentType, isJsonMediaType, parseBytesBody } from './utils'
 
 export { __resetStreamingRequestBodySupportForTests, ERR_STREAMING_REQUEST_UNSUPPORTED, isReadableStreamBody, supportsStreamingRequestBody }
 
@@ -233,19 +234,34 @@ export function createFetchRequest(request: HttpRequest): Request {
   }
 }
 
+/** Release a body we will not read, ignoring a cancellation the provider refuses. */
+function discardBody(body: ReadableStream<Uint8Array>): void {
+  void body.cancel().catch(() => undefined)
+}
+
 async function parseFetchResponse(httpRequest: HttpRequest, response: Response, fallbackUrl: string): Promise<HttpResponse<unknown>> {
   const downloadProgress = httpRequest.downloadProgress
   const { headers, status, statusText } = response
   const url = response.url || fallbackUrl
 
   if (response.body && httpRequest.responseType === undefined) {
-    void response.body.cancel().catch(() => undefined)
+    discardBody(response.body)
     return makeResponse({ status, statusText, headers, url, body: null })
   }
 
   const contentLength = getContentLength(headers)
   const contentType = getContentType(headers)
+  const meta: HttpMeta = { headers, ok: status >= 200 && status < 300, status, statusText, url }
   let body: unknown = null
+
+  // Philosophy 3: the declared representation is part of the assertion. Checking it before the
+  // body is read turns "I asked for JSON and got HTML" into one precise fault, and skips the
+  // read, the parse, and the struct entirely.
+  if (response.body && httpRequest.responseType === 'json' && !isJsonMediaType(contentType)) {
+    discardBody(response.body)
+    const cause = new TypeError(`Expected a JSON media type, received ${contentType || '<none>'}`)
+    throw new BodyFailure('RES_MEDIA_TYPE_INVALID', cause, meta)
+  }
 
   if (response.body) {
     const chunks: Uint8Array[] = []
@@ -265,15 +281,21 @@ async function parseFetchResponse(httpRequest: HttpRequest, response: Response, 
 
         if (downloadProgress) {
           const event = { lengthComputable: contentLength > 0, loaded: receivedLength, total: contentLength }
-          await (signal ? awaitWithSignal(() => downloadProgress(event), signal) : downloadProgress(event))
+          try {
+            await (signal ? awaitWithSignal(() => downloadProgress(event), signal) : downloadProgress(event))
+          } catch (error) {
+            throw new BodyFailure('EXT_OBSERVER_FAILED', error, meta)
+          }
         }
       }
     } catch (error) {
-      void reader.cancel(error).catch(() => undefined)
-      if (downloadProgress || signal?.aborted) {
+      // The stream is cancelled with the original reason; the tag is ours, not its concern.
+      void reader.cancel(isBodyFailure(error) ? error.cause : error).catch(() => undefined)
+      // Cancellation outranks body classification, and `fetchHandler` turns it into an abort result.
+      if (signal?.aborted) {
         throw error
       }
-      return makeResponse({ error, status, statusText, headers, url })
+      throw isBodyFailure(error) ? error : new BodyFailure('NET_BODY_INCOMPLETE', error, meta)
     } finally {
       reader.releaseLock()
     }
@@ -281,7 +303,7 @@ async function parseFetchResponse(httpRequest: HttpRequest, response: Response, 
     try {
       body = parseBytesBody(httpRequest.responseType, concatChunks(chunks, receivedLength), contentType)
     } catch (error) {
-      return makeResponse({ error, status, statusText, headers, url })
+      throw new BodyFailure('RES_DECODE_FAILED', error, meta)
     }
   }
 
@@ -300,7 +322,8 @@ async function parseFetchResponse(httpRequest: HttpRequest, response: Response, 
  *
  * @param httpRequest - Normalized request (URL, headers, body, abort, progress hooks).
  * @param fetchImpl - Fetch implementation; defaults to global `fetch`.
- * @returns Parsed `HttpResponse`, or a status-0 response when the network/abort fails.
+ * @returns Parsed `HttpResponse`. Rejects when no response reached the client, or when reading the
+ *   body failed — a transport failure is a fault, never a response.
  */
 export async function fetchHandler(
   httpRequest: HttpRequest,
@@ -317,17 +340,13 @@ export async function fetchHandler(
     response = await fetchWithSignal(fetchImpl, request, abortSignal)
   } catch (error) {
     cancelWrappedUploadBody(prepared, request?.body, error)
-    return makeResponse({ error: (abortSignal && resolveAbortTransportError(abortSignal)?.cause) ?? error })
+    throw (abortSignal && resolveAbortCause(abortSignal)) ?? error
   }
 
   try {
     return await parseFetchResponse(httpRequest, response, request.url)
   } catch (error) {
-    const transportError = abortSignal && resolveAbortTransportError(abortSignal)
-    if (transportError) {
-      return makeResponse({ error: transportError.cause })
-    }
-    throw error
+    throw (abortSignal && resolveAbortCause(abortSignal)) ?? error
   }
 }
 

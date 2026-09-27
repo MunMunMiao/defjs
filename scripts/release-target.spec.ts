@@ -2,18 +2,17 @@ import { describe, expect, test } from 'bun:test'
 import coreManifest from '../packages/core/package.json' with { type: 'json' }
 import { parseReleaseTag, validateReleaseManifest, type ReleaseTarget } from './release-target'
 
+const coreTarget: ReleaseTarget = {
+  packageKey: 'core',
+  packageName: '@defjs/core',
+  packageDir: 'packages/core',
+  version: '0.4.0',
+  tarballFile: 'defjs-core-0.4.0.tgz',
+  coreVersion: coreManifest.version,
+}
+
 const validTags: Array<[string, ReleaseTarget]> = [
-  [
-    'release-core-v0.4.0',
-    {
-      packageKey: 'core',
-      packageName: '@defjs/core',
-      packageDir: 'packages/core',
-      version: '0.4.0',
-      tarballFile: 'defjs-core-0.4.0.tgz',
-      coreVersion: coreManifest.version,
-    },
-  ],
+  ['release-core-v0.4.0', coreTarget],
   [
     'release-opentelemetry-server-v0.2.0',
     {
@@ -80,7 +79,7 @@ describe('parseReleaseTag', () => {
 })
 
 describe('validateReleaseManifest', () => {
-  const target = validTags[0][1]
+  const target = coreTarget
 
   test('returns a validated package manifest', () => {
     expect(
@@ -107,8 +106,8 @@ describe('validateReleaseManifest', () => {
 describe('release-target CLI', () => {
   async function runCli(tag: string, outputPath?: string) {
     const env = { ...Bun.env }
-    if (outputPath) env.GITHUB_OUTPUT = outputPath
-    else delete env.GITHUB_OUTPUT
+    if (outputPath) env['GITHUB_OUTPUT'] = outputPath
+    else delete env['GITHUB_OUTPUT']
     const process = Bun.spawn(['bun', 'scripts/release-target.ts', tag], {
       cwd: new URL('..', import.meta.url).pathname,
       env,

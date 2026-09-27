@@ -481,16 +481,14 @@ const getUserInfo = defineRequest({
       withProfile: struct.boolean(),
     }),
   }),
-  output: {
-    200: struct.object({
-      id: struct.number(),
-      name: struct.string(),
-    }),
-    404: struct.object({
-      code: struct.string(),
-      message: struct.string(),
-    }),
-  },
+  output: struct.object({
+    id: struct.number(),
+    name: struct.string(),
+  }),
+  error: struct.object({
+    code: struct.string(),
+    message: struct.string(),
+  }),
 })
 ```
 
@@ -572,7 +570,7 @@ const [error, data, response] = await getUserInfo({
 
 `timeout` 与 `abort` 互斥。`timeout` 是便捷超时入口；`abort` 接收外部 `AbortSignal`。如果需要组合外部取消和超时，请自行构造组合后的 `AbortSignal` 并只传 `abort`。
 
-HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQ_INPUT_INVALID`。
 
 ### 返回值
 
@@ -602,9 +600,7 @@ const downloadAvatar = defineRequest({
   method: 'GET',
   path: '/avatar',
   responseType: 'blob',
-  output: {
-    200: struct.blob(),
-  },
+  output: struct.blob(),
 })
 ```
 
@@ -626,16 +622,10 @@ output: {
 ```
 
 ```ts
-output: [
-  {
-    status: [200, 201],
-    body: userStruct,
+output: userStruct,
   },
-  {
-    status: 404,
-    body: errorStruct,
-  },
-]
+error: errorStruct,
+  }
 ```
 
 ## SSE
@@ -663,7 +653,7 @@ const watchUserInfo = defineEventStream({
       name: struct.string(),
     }),
     default: struct.unknown(),
-  },
+
 })
 ```
 
@@ -700,7 +690,7 @@ const [error, stream, open] = await watchUserInfo({
 
 `timeout` 与 `abort` 互斥。SSE 的 `fetch` 只在 client 的 `sse` 配置中设置；需要动态切换 fetch 时，创建或 clone 对应 client，然后通过 `.with({ client })` 切换。
 
-HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQ_INPUT_INVALID`。
 
 ### 返回值
 
@@ -807,7 +797,7 @@ const [error, socket, connection] = await chatSocket({
 
 `timeout` 与 `abort` 互斥。需要组合多个取消来源时，请自行构造组合后的 `AbortSignal` 并只传 `abort`。
 
-HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQUEST_VALIDATION_FAILED`。
+HTTP、SSE 和 WebSocket execution 的 `timeout` 必须是 `1..2_147_483_647` 范围内的正安全整数；`0`、负数、小数、`NaN`、`Infinity` 或超上限值会在创建 request、stream 或 socket 资源前返回 `REQ_INPUT_INVALID`。
 
 ### 返回值
 

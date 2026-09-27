@@ -167,7 +167,7 @@ HTTP span status and `error.type` follow these rules:
 
 - status `100` through `399` leaves span status unset and does not set `error.type`;
 - status `400` and above marks the client span `ERROR` and sets `error.type` to the status code string;
-- a Defjs status-0 transport result does not set `http.response.status_code`; caller cancellation leaves status unset, timeout uses `ERROR` / `TIMEOUT`, and other transport failures use `ERROR` / `NETWORK_ERROR`;
+- a transport failure rejects rather than producing a response, so `http.response.status_code` stays unset; caller cancellation leaves span status unset, timeout uses `ERROR` / `NET_TIMEOUT`, and other transport failures use `ERROR` / `NET_UNREACHABLE`;
 - an error thrown through the interceptor marks the span `ERROR`, records the exception, and uses its `Error.name` or another low-cardinality type fallback as `error.type`.
 
 In the current implementation, `url.full` is resolved from `req.endpoint` and the optional `req.baseEndpoint`; it does not append `req.queryString`. This is an implementation boundary, not sanitization, an identity source, or a guarantee that URLs are safe. Applications that need a complete or redacted URL can override the initial value explicitly:
@@ -201,7 +201,7 @@ The metric applies the same response-status and `error.type` classification as t
 
 ### Transport span boundary
 
-The HTTP span ends when the interceptor receives the Defjs `HttpResponse`. Exact output-status dispatch and Struct decoding happen afterward, so a later `RESPONSE_VALIDATION_FAILED` or `UNDECLARED_STATUS` cannot update that transport span.
+The HTTP span ends when the interceptor receives the Defjs `HttpResponse`. The media-type check and Struct decoding happen afterward, so a later `RES_MEDIA_TYPE_INVALID` or `RES_STRUCT_MISMATCH` cannot update that transport span.
 
 When telemetry must represent the final command outcome, create an application span around `client.execute(...)` and classify the returned tuple:
 

@@ -170,9 +170,15 @@ const retrySafeReads = createHttpInterceptor(async (request, next) => {
 })
 ```
 
-던져진 인터셉터/Fetch 오류는 이 루프에서 재시도하지 않아요. status `0`은 Fetch 경계의 전송 실패 응답이에요. `POST` / `PUT` / `PATCH` / `DELETE` 재시도에는 재생 가능한 바이트, 서버 지원, 멱등성 계약, 검토된 status 정책이 필요해요.
+던져진 인터셉터/Fetch 오류는 이 루프에서 재시도하지 않아요. 전송 실패는 reject 되니까, 이 루프가 맞춰볼 status 자체가 나오지 않아요. `POST` / `PUT` / `PATCH` / `DELETE` 재시도에는 재생 가능한 바이트, 서버 지원, 멱등성 계약, 검토된 status 정책이 필요해요. 재시도는 당신 몫이에요 — Core는 `retryAfter()`를 내보내지 않아요.
 
-이 샘플 밖에서 interceptor가 throw하거나 reject하면 호출자에게 `kind: 'definition'` / `INTERCEPTOR_FAILED`로 반환돼요. [오류](./errors.md)를 참고하세요.
+이 예시 밖에서 throw(또는 reject)한 인터셉터는 `EXT_INTERCEPTOR_FAILED`로 호출한 쪽에 돌아가고,
+던진 값은 `cause`에 실려요 — [오류](./errors.md)를 보세요. 취소를 표현하려면 대신 `ERR_ABORTED`나
+`ERR_TIMEOUT`을 throw 해요.
+
+`next(request)`는 reject 할 수 있어요. 전송 실패는 fault이고 status 0 응답이 아니니까, 관찰하려는
+인터셉터는 `next`를 `try` / `catch`로 감싸요. 그래도 Defjs의 귀속은 정확해요. 전송에서 온 reject는
+`NET_*` fault로 남고, 당신의 인터셉터 탓이 되지 않아요.
 
 ## WebSocket 세션 감싸기
 
@@ -221,7 +227,7 @@ const preserveSession = createWebSocketInterceptor(async (request, next) => {
 
 팩토리는 태그가 달린 전송 값을 돌려줘요.
 
-- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createHttpInterceptor(fn)` → `{ fn }`
 - `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
 - `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
 - `basicAuthHttpInterceptor(provider, options?)` — HTTP용 Basic 자격 증명

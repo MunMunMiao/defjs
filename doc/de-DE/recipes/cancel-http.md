@@ -1,6 +1,6 @@
 ---
 title: HTTP-Aufruf abbrechen
-description: Abort oder Timeout eines execute-Aufrufs und ABORTED / TIMEOUT lesen.
+description: Abort oder Timeout eines execute-Aufrufs und NET_ABORTED / NET_TIMEOUT lesen.
 ---
 
 # HTTP-Aufruf abbrechen
@@ -24,9 +24,9 @@ const pending = client.execute(getReport(), {
 controller.abort('screen closed')
 const [error] = await pending
 
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancelled')
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+} else if (error?.code === 'NET_TIMEOUT') {
   console.log('timed out')
 } else if (error) {
   console.error(error.code)

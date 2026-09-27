@@ -27,7 +27,7 @@ const readOrders = defineRequest({
 const client = createClient(withEndpoint('https://api.example.com'), withOpenTelemetryServer({ tracer, meter }))
 
 const [error] = await client.execute(readOrders())
-if (error) console.error(error.kind, error.code)
+if (error) console.error(error.code)
 ```
 
 `tracer` 必填。`meter` 選填 — 省略就關掉套件 metrics。沒有 `propagator` → adapter 會建 composite W3C Trace Context + W3C Baggage propagator。它不會替你讀或初始化全域 SDK 設定。
@@ -147,7 +147,7 @@ const client = createClient(
 
 Adapter 量的是傳輸生命週期，不是 command 解讀的每一階段。
 
-- **HTTP** — span 在 HTTP interceptor 開始，拿到 Defjs `HttpResponse` 時結束。Status 分派、representation 檢查、Struct 解碼在之後。稍後的 `RESPONSE_VALIDATION_FAILED` 或 `UNDECLARED_STATUS` 無法更新已結束的傳輸 span。
+- **HTTP** — span 在 HTTP interceptor 裡開始，拿到 Defjs `HttpResponse` 就結束。媒體類型檢查、表示讀取與 Struct 解碼都在之後，所以後續的 `RES_*` fault 改不了已結束的傳輸 span。又因為 span 活在鏈內，傳輸層的 reject 會按 OTel 慣例記成例外類別，而不是執行階段之後才判定的 fault code。
 - **SSE** — span 維持開啟直到 `stream.closed` settle。記錄 `sse.connected`，然後 `sse.closed`／`sse.aborted`／`sse.error`。一個邏輯串流（含重連）→ 一個 span。沒有 per-event spans。
 - **WebSocket** — span 維持開啟直到 `session.closed` settle。事件：`websocket.connected`、`websocket.closed`、`websocket.error`。重連中的實體 sockets 仍屬邏輯 session。沒有 per-message spans。
 
@@ -197,7 +197,7 @@ void outcome
 
 Active SSE／WebSocket instruments 計的是邏輯資源（含重連空檔），不是實體 sockets 或個別 HTTP attempts。
 
-HTTP spans 記錄 method、解析後的 `url.full`、可用時的 server address／port，以及收到時的回應 status。預設 `url.full` 會把 `request.endpoint` 相對於選填的 `request.baseEndpoint` 解析，不會附加獨立的 `request.queryString`。這是建構邊界，不是脫敏。需要完整或脫敏後的應用程式自有 URL 時，請用 `startSpanHook` 建構。Status `400+` → span status `ERROR`，並以 status string 當 `error.type`。Status `100..399` 不設 span status。Status-zero 傳輸結果沒有回應 status；取消不設 status；逾時／其他傳輸失敗用 `TIMEOUT` 或 `NETWORK_ERROR`。Metrics 用穩定維度：method、static operation、server address／port、回應 status、低基數錯誤型別。
+HTTP spans 記錄 method、解析後的 `url.full`、可用時的 server address／port，以及收到時的回應 status。預設 `url.full` 會把 `request.endpoint` 相對於選填的 `request.baseEndpoint` 解析，不會附加獨立的 `request.queryString`。這是建構邊界，不是脫敏。需要完整或脫敏後的應用程式自有 URL 時，請用 `startSpanHook` 建構。Status `400+` → span status `ERROR`，並以 status string 當 `error.type`。Status `100..399` 不設 span status。Status-zero 傳輸結果沒有回應 status；取消不設 status；逾時／其他傳輸失敗用 `NET_TIMEOUT` 或 `NET_UNREACHABLE`。Metrics 用穩定維度：method、static operation、server address／port、回應 status、低基數錯誤型別。
 
 SSE／WebSocket connection metrics 記錄 connect 時間、邏輯連線持續時間、active 資源數、`defjs.result`、operation、server address／port、低基數失敗型別。預設沒有 request／response bodies、訊息 payloads、queue 長度，或 per-message spans。
 

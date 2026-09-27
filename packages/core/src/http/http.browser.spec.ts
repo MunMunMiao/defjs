@@ -19,11 +19,9 @@ describe('http browser runtime', () => {
   test('should resolve request tuples in real browsers', async () => {
     const useGetAccount = defineRequest({
       method: 'GET',
-      output: {
-        200: struct.object({
-          id: struct.number(),
-        }),
-      },
+      output: struct.object({
+        id: struct.number(),
+      }),
       path: '/json',
     })
 
@@ -34,22 +32,25 @@ describe('http browser runtime', () => {
     expect(response?.ok).toBe(true)
   })
 
-  test('should preserve malformed declared responses in the fixed error tuple', async () => {
+  test('should reject a non-JSON body for a declared JSON output in real browsers', async () => {
     const useMalformedResponse = defineRequest({
       method: 'GET',
-      output: {
-        200: struct.object({ id: struct.number() }),
-      },
+      output: struct.object({ id: struct.number() }),
       path: '/text',
     })
 
     const [error, result, response] = await baseClient.execute(useMalformedResponse())
 
-    expect(error?.kind).toBe('definition')
-    expect(error?.code).toBe('RESPONSE_VALIDATION_FAILED')
+    expect(error?.code).toBe('RES_MEDIA_TYPE_INVALID')
     expect(result).toBeUndefined()
-    expect(response?.status).toBe(200)
-    expect(response?.error).toBeInstanceOf(SyntaxError)
+    expect(response).toBeUndefined()
+
+    if (error?.code !== 'RES_MEDIA_TYPE_INVALID') {
+      throw new Error('Expected a media type fault')
+    }
+
+    expect(error.response.status).toBe(200)
+    expect(error.cause).toBeInstanceOf(TypeError)
   })
 
   test('should support fetch download progress hooks in real browsers', async () => {
@@ -61,7 +62,7 @@ describe('http browser runtime', () => {
       },
       input: struct.request({ body: struct.arrayBuffer() }),
       method: 'POST',
-      output: { 200: struct.arrayBuffer() },
+      output: struct.arrayBuffer(),
       path: '/',
       responseType: 'arraybuffer',
     })
@@ -95,13 +96,7 @@ describe('http browser runtime', () => {
 
     expect(result).toBeUndefined()
     expect(response).toBeUndefined()
-    expect(error?.kind).toBe('transport')
-
-    if (error?.kind !== 'transport') {
-      throw new Error('Expected transport error')
-    }
-
-    expect(error.code).toBe('TIMEOUT')
+    expect(error?.code).toBe('NET_TIMEOUT')
   })
 
   test('should inject xsrf header from document.cookie on same-origin mutating requests', async () => {
@@ -135,10 +130,8 @@ describe('http browser runtime', () => {
 
     const useValidate = defineRequest({
       method: 'POST',
-      output: {
-        200: struct.object({ ok: struct.boolean() }),
-        403: struct.object({ ok: struct.boolean(), reason: struct.string() }),
-      },
+      output: struct.object({ ok: struct.boolean() }),
+      error: struct.object({ ok: struct.boolean(), reason: struct.string() }),
       path: '/xsrf-validate',
     })
 
@@ -157,18 +150,23 @@ describe('http browser runtime', () => {
 
     const useValidate = defineRequest({
       method: 'POST',
-      output: {
-        200: struct.object({ ok: struct.boolean() }),
-        403: struct.object({ ok: struct.boolean(), reason: struct.string() }),
-      },
+      output: struct.object({ ok: struct.boolean() }),
+      error: struct.object({ ok: struct.boolean(), reason: struct.string() }),
       path: '/xsrf-validate',
     })
 
     const [error, result, response] = await client.execute(useValidate())
 
-    expect(error).not.toBeNull()
     expect(result).toBeUndefined()
-    expect(response?.ok).toBe(false)
-    expect(response?.status).toBe(403)
+    expect(response).toBeUndefined()
+    expect(error?.code).toBe('HTTP_STATUS')
+
+    if (error?.code !== 'HTTP_STATUS') {
+      throw new Error('Expected an http status fault')
+    }
+
+    expect(error.response.ok).toBe(false)
+    expect(error.status).toBe(403)
+    expect(error.data.ok).toBe(false)
   })
 })

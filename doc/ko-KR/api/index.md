@@ -23,7 +23,7 @@ description: 워크스페이스 패키지 조회예요. import하는 함수, 옵
 | [Client](./client.md)             | `createClient`, `with*` options, `Client`                        |
 | [HTTP](./http.md)                 | `defineRequest`, execute options, `HttpRequest` / `HttpResponse` |
 | [Struct](./struct.md)             | `struct.*`, `Infer`, `StructError`                               |
-| [Errors](./errors.md)             | `RequestError` 종류와 팩토리                                     |
+| [Errors](./errors.md)             | `Fault` 종류와 팩토리                                            |
 | [Interceptors](./interceptors.md) | HTTP / SSE / WebSocket interceptor 헬퍼                          |
 | [SSE](./sse.md)                   | `defineEventStream`, stream handle                               |
 | [WebSocket](./web-socket.md)      | `defineWebSocket`, session                                       |

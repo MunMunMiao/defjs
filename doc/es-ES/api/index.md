@@ -23,7 +23,7 @@ Aquí consultas los paquetes del workspace. Las firmas son el contrato; las guí
 | [Client](./client.md)             | `createClient`, `with*` options, `Client`                        |
 | [HTTP](./http.md)                 | `defineRequest`, execute options, `HttpRequest` / `HttpResponse` |
 | [Struct](./struct.md)             | `struct.*`, `Infer`, `StructError`                               |
-| [Errors](./errors.md)             | variantes y factorías de `RequestError`                          |
+| [Errors](./errors.md)             | variantes y factorías de `Fault`                                 |
 | [Interceptors](./interceptors.md) | helpers de interceptor HTTP / SSE / WebSocket                    |
 | [SSE](./sse.md)                   | `defineEventStream`, stream handle                               |
 | [WebSocket](./web-socket.md)      | `defineWebSocket`, session                                       |

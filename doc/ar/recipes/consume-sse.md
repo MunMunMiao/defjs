@@ -25,7 +25,7 @@ const notifications = defineEventStream({
 
 const [error, stream] = await client.execute(notifications())
 if (error) {
-  console.error(error.kind, error.code)
+  console.error(error.code)
 } else {
   try {
     for await (const event of stream) {

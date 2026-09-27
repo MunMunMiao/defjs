@@ -55,7 +55,7 @@ describe('fetchEventStream advanced', () => {
       events.push(event as unknown as EventStreamMessage)
     }
     expect(events).toEqual([])
-    await expect(stream.closed).resolves.toEqual({ code: 'eof' })
+    await expect(stream.closed).resolves.toEqual({ kind: 'eof' })
   })
 
   test('should stop retry when onerror returns null', async () => {
@@ -124,7 +124,7 @@ describe('fetchEventStream advanced', () => {
     stream.close()
     stream.close() // should not throw
 
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted' })
   })
 
   test('should throw for non-ok response with error body', async () => {
@@ -188,7 +188,7 @@ describe('fetchEventStream advanced', () => {
     const stream = await fetchEventStream(createRequest('/sse/basic'))
     stream.close('custom-reason')
 
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted', reason: 'custom-reason' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted', reason: 'custom-reason' })
   })
 
   test('should not override existing Accept header', async () => {
@@ -212,7 +212,7 @@ describe('fetchEventStream advanced', () => {
     timeoutError.name = 'TimeoutError'
     stream.close(timeoutError)
 
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted', reason: 'timeout' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted', reason: 'timeout' })
   })
 
   test('should abort via request signal during fetch', async () => {
@@ -346,7 +346,7 @@ describe('fetchEventStream advanced', () => {
 
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toMatch(/Expected content-type/)
-    expect(getEventStreamFatalCode(error)).toBe('INVALID_RESPONSE')
+    expect(getEventStreamFatalCode(error)).toBe('RES_MEDIA_TYPE_INVALID')
     expect(fetch).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledOnce()
     expect(onerror).toHaveBeenCalledOnce()
@@ -408,7 +408,7 @@ describe('fetchEventStream advanced', () => {
 
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toBe('onopen failed')
-    expect(getEventStreamFatalCode(error)).toBe('MESSAGE_PROCESSING_FAILED')
+    expect(getEventStreamFatalCode(error)).toBe('EXT_HOOK_FAILED')
     expect(cancel).toHaveBeenCalledOnce()
   })
 
@@ -422,7 +422,7 @@ describe('fetchEventStream advanced', () => {
 
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toBe('Event stream onopen callback failed')
-    expect(getEventStreamFatalCode(error)).toBe('MESSAGE_PROCESSING_FAILED')
+    expect(getEventStreamFatalCode(error)).toBe('EXT_HOOK_FAILED')
   })
 
   test('should retain the original fatal error when its observer fails', async () => {
@@ -446,7 +446,7 @@ describe('fetchEventStream advanced', () => {
 
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toBe('Missing response body for event stream')
-    expect(getEventStreamFatalCode(error)).toBe('INVALID_RESPONSE')
+    expect(getEventStreamFatalCode(error)).toBe('RES_DECODE_FAILED')
   })
 
   test('should cancel upstream and terminate on a parser limit even when callbacks request retry', async () => {
@@ -472,7 +472,7 @@ describe('fetchEventStream advanced', () => {
     const iterator = stream[Symbol.asyncIterator]()
 
     await expect(iterator.next()).rejects.toThrow('SSE parser buffer exceeded maxBufferSize')
-    await expect(stream.closed).resolves.toMatchObject({ code: 'error', errorCode: 'PARSER_LIMIT_EXCEEDED' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'error', code: 'CAP_BUFFER_EXCEEDED' })
     expect(fetch).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledOnce()
     expect(onerror).toHaveBeenCalledOnce()
@@ -492,7 +492,7 @@ describe('fetchEventStream advanced', () => {
       reconnect: { shouldReconnect },
     }).catch((cause: unknown) => cause)
 
-    expect(getEventStreamFatalCode(error)).toBe('PARSER_LIMIT_EXCEEDED')
+    expect(getEventStreamFatalCode(error)).toBe('CAP_BUFFER_EXCEEDED')
     expect(fetch).toHaveBeenCalledOnce()
     expect(onerror).toHaveBeenCalledOnce()
     expect(shouldReconnect).not.toHaveBeenCalled()
@@ -550,7 +550,7 @@ describe('fetchEventStream advanced', () => {
     })
 
     await expect(stream[Symbol.asyncIterator]().next()).rejects.toThrow('Failed to process event stream message')
-    await expect(stream.closed).resolves.toMatchObject({ code: 'error', errorCode: 'MESSAGE_PROCESSING_FAILED' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'error', code: 'EXT_OBSERVER_FAILED' })
     expect(fetch).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledOnce()
     expect(onerror).toHaveBeenCalledOnce()
@@ -576,7 +576,7 @@ describe('fetchEventStream advanced', () => {
       reconnect: { attempts: 2, delayMs: 0 },
     })
 
-    await expect(stream.closed).resolves.toMatchObject({ code: 'error', errorCode: 'QUEUE_OVERFLOW' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'error', code: 'CAP_QUEUE_OVERFLOW' })
     await expect(stream[Symbol.asyncIterator]().next()).rejects.toThrow('Event stream queue exceeded maxQueueSize')
     expect(fetch).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledOnce()
@@ -610,7 +610,7 @@ describe('fetchEventStream advanced', () => {
 
     setTimeout(() => stream.close(), 50)
 
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted' })
   })
 
   test('should cancel active response body when stream is closed', async () => {
@@ -642,7 +642,7 @@ describe('fetchEventStream advanced', () => {
     await vi.waitFor(() => {
       expect(cancel).toHaveBeenCalledWith('stop')
     })
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted' })
   })
 
   test.each([
@@ -677,7 +677,7 @@ describe('fetchEventStream advanced', () => {
     expect(second).toBe(first)
     await expect(Promise.resolve(first)).rejects.toBe(closeError)
     expect(close).toHaveBeenCalledOnce()
-    await expect(settleWithin(stream.closed)).resolves.toMatchObject({ code: 'aborted' })
+    await expect(settleWithin(stream.closed)).resolves.toMatchObject({ kind: 'aborted' })
     expect(cancel).toHaveBeenCalledOnce()
     expect(body.locked).toBe(false)
   })
@@ -712,7 +712,7 @@ describe('fetchEventStream advanced', () => {
     expect(cancel).toHaveBeenCalledOnce()
     expect(fetch).toHaveBeenCalledOnce()
     expect(body.locked).toBe(false)
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted' })
 
     const pullCount = pull.mock.calls.length
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -735,8 +735,8 @@ describe('fetchEventStream advanced', () => {
     sourceController?.error(failure)
     const terminal = await settleWithin(stream.closed)
     expect(terminal).toEqual({
-      code: 'error',
-      errorCode: 'TRANSPORT_ERROR',
+      kind: 'error',
+      code: 'NET_UNREACHABLE',
       cause: failure,
       reason: failure.message,
     })
@@ -768,7 +768,7 @@ describe('fetchEventStream advanced', () => {
     await expect(iterator.return?.()).resolves.toEqual({ done: true, value: undefined })
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
 
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted', reason: 'iterator-return' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted', reason: 'iterator-return' })
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith('iterator-return'))
   })
 
@@ -834,7 +834,7 @@ describe('fetchEventStream advanced', () => {
     abortController.abort(ERR_ABORTED)
 
     await expect(next).resolves.toEqual({ done: true, value: undefined })
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted', cause: ERR_ABORTED })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted', cause: ERR_ABORTED })
     expect(transformSignal?.aborted).toBe(true)
     expect(cancel).toHaveBeenCalledOnce()
   })
@@ -862,7 +862,7 @@ describe('fetchEventStream advanced', () => {
     await started
     abortController.abort(ERR_ABORTED)
 
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted', cause: ERR_ABORTED })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted', cause: ERR_ABORTED })
   })
 
   test.each([
@@ -892,8 +892,8 @@ describe('fetchEventStream advanced', () => {
 
     await expect(next).rejects.toBe(ERR_TIMEOUT)
     await expect(stream.closed).resolves.toEqual({
-      code: 'error',
-      errorCode: 'TIMEOUT',
+      kind: 'error',
+      code: 'NET_TIMEOUT',
       cause: ERR_TIMEOUT,
       reason: ERR_TIMEOUT.message,
     })
@@ -906,7 +906,7 @@ describe('fetchEventStream advanced', () => {
 
     stream.close(timeoutError)
 
-    await expect(stream.closed).resolves.toEqual({ code: 'aborted', cause: timeoutError, reason: timeoutError.message })
+    await expect(stream.closed).resolves.toEqual({ kind: 'aborted', cause: timeoutError, reason: timeoutError.message })
   })
 
   test('should abort while onerror never settles', async () => {
@@ -988,7 +988,7 @@ describe('fetchEventStream advanced', () => {
     expect(() => stream[Symbol.asyncIterator]()).toThrow('AsyncQueue supports one consumer')
 
     stream.close('test complete')
-    await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+    await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted' })
   })
 
   test('should retry with default interval when fetch throws network error', async () => {
@@ -1264,7 +1264,7 @@ describe('fetchEventStream advanced', () => {
       expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(2_147_483_647)
 
       stream.close('test complete')
-      await expect(stream.closed).resolves.toMatchObject({ code: 'aborted' })
+      await expect(stream.closed).resolves.toMatchObject({ kind: 'aborted' })
     } finally {
       setTimeoutSpy.mockRestore()
       vi.useRealTimers()

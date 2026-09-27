@@ -25,19 +25,14 @@ const runViewer = defineRequest({
       }),
     ),
   }),
-  output: [
-    {
-      status: 200,
-      body: struct.object({
-        data: struct
-          .object({
-            viewer: struct.object({ id: struct.string(), login: struct.string() }).null(),
-          })
-          .optional(),
-        errors: struct.array(struct.object({ message: struct.string() })).optional(),
-      }),
-    },
-  ],
+  output: struct.object({
+    data: struct
+      .object({
+        viewer: struct.object({ id: struct.string(), login: struct.string() }).null(),
+      })
+      .optional(),
+    errors: struct.array(struct.object({ message: struct.string() })).optional(),
+  }),
 })
 
 async function loadViewer(client: Client) {

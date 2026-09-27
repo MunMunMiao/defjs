@@ -1,6 +1,6 @@
 ---
 title: HTTP 呼び出しをキャンセルする
-description: execute を abort またはタイムアウトさせ、ABORTED / TIMEOUT を読み取ります。
+description: execute を abort またはタイムアウトさせ、NET_ABORTED / NET_TIMEOUT を読み取ります。
 ---
 
 # HTTP 呼び出しをキャンセルする
@@ -24,9 +24,9 @@ const pending = client.execute(getReport(), {
 controller.abort('screen closed')
 const [error] = await pending
 
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancelled')
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+} else if (error?.code === 'NET_TIMEOUT') {
   console.log('timed out')
 } else if (error) {
   console.error(error.code)

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { ERR_ABORTED, ERR_TIMEOUT } from '../error'
-import { resolveAbortTransportError } from '../internal/abort'
+import { resolveAbortCause } from '../internal/abort'
 import { struct } from '../struct'
 import { extractCloseInfo, isRecord, serializeOutgoingWebSocketMessage, transformWebSocketMessage } from './codec'
 import type { WebSocketIncomingNormalizer, WebSocketOutgoingNormalizer } from './web_socket'
@@ -42,59 +42,59 @@ describe('codec helpers', () => {
     expect(info).toEqual({ code: undefined, reason: undefined, wasClean: undefined })
   })
 
-  test('resolveAbortTransportError returns undefined when not aborted', () => {
+  test('resolveAbortCause returns undefined when not aborted', () => {
     const signal = new AbortController().signal
-    expect(resolveAbortTransportError(signal)).toBeUndefined()
+    expect(resolveAbortCause(signal)).toBeUndefined()
   })
 
-  test('resolveAbortTransportError returns ERR_ABORTED for manual close', () => {
+  test('resolveAbortCause returns ERR_ABORTED for manual close', () => {
     const controller = new AbortController()
     controller.abort({ kind: 'manual-web-socket-close' })
-    const error = resolveAbortTransportError(controller.signal)
-    expect(error?.code).toBe('ABORTED')
+    const cause = resolveAbortCause(controller.signal)
+    expect(cause).toBe(ERR_ABORTED)
   })
 
-  test('resolveAbortTransportError returns ERR_TIMEOUT for timeout reason', () => {
+  test('resolveAbortCause returns ERR_TIMEOUT for timeout reason', () => {
     const controller = new AbortController()
     controller.abort(ERR_TIMEOUT)
-    const error = resolveAbortTransportError(controller.signal)
-    expect(error?.code).toBe('TIMEOUT')
+    const cause = resolveAbortCause(controller.signal)
+    expect(cause).toBe(ERR_TIMEOUT)
   })
 
-  test('resolveAbortTransportError returns ERR_ABORTED for ERR_ABORTED reason', () => {
+  test('resolveAbortCause returns ERR_ABORTED for ERR_ABORTED reason', () => {
     const controller = new AbortController()
     controller.abort(ERR_ABORTED)
-    const error = resolveAbortTransportError(controller.signal)
-    expect(error?.code).toBe('ABORTED')
+    const cause = resolveAbortCause(controller.signal)
+    expect(cause).toBe(ERR_ABORTED)
   })
 
-  test('resolveAbortTransportError classifies an explicit abort with a string reason as ABORTED', () => {
+  test('resolveAbortCause classifies an explicit abort with a string reason as ABORTED', () => {
     const controller = new AbortController()
     controller.abort('some reason')
-    const error = resolveAbortTransportError(controller.signal)
-    expect(error?.code).toBe('ABORTED')
+    const cause = resolveAbortCause(controller.signal)
+    expect(cause).toBe(ERR_ABORTED)
   })
 
-  test('resolveAbortTransportError handles DOMException timeout', () => {
+  test('resolveAbortCause handles DOMException timeout', () => {
     const controller = new AbortController()
     controller.abort(new DOMException('timeout', 'TimeoutError'))
-    const error = resolveAbortTransportError(controller.signal)
-    expect(error?.code).toBe('TIMEOUT')
+    const cause = resolveAbortCause(controller.signal)
+    expect(cause).toBe(ERR_TIMEOUT)
   })
 
-  test('resolveAbortTransportError falls back to ERR_ABORTED when reason is undefined', () => {
+  test('resolveAbortCause falls back to ERR_ABORTED when reason is undefined', () => {
     const signal = Object.create(AbortSignal.prototype)
     Object.defineProperty(signal, 'aborted', { value: true })
     Object.defineProperty(signal, 'reason', { value: undefined })
-    const error = resolveAbortTransportError(signal as AbortSignal)
-    expect(error?.code).toBe('ABORTED')
+    const cause = resolveAbortCause(signal as AbortSignal)
+    expect(cause).toBe(ERR_ABORTED)
   })
 
-  test('resolveAbortTransportError treats a plain Error with a timeout-like message as ABORTED', () => {
+  test('resolveAbortCause treats a plain Error with a timeout-like message as ABORTED', () => {
     const controller = new AbortController()
     controller.abort(new Error(ERR_TIMEOUT.message))
-    const error = resolveAbortTransportError(controller.signal)
-    expect(error?.code).toBe('ABORTED')
+    const cause = resolveAbortCause(controller.signal)
+    expect(cause).toBe(ERR_ABORTED)
   })
 })
 

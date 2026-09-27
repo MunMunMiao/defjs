@@ -12,7 +12,7 @@ import type { FetchEventStreamErrorContext } from '../index'
 // @ts-expect-error low-level transport options are not part of the public barrel.
 import type { FetchEventStreamOptions } from '../index'
 
-import { createClient, defineEventStream, struct, type EventStreamData, type EventStreamErrorCode, type EventStructs } from '../index'
+import { createClient, defineEventStream, struct, type EventStreamData, type EventStreamFaultCode, type EventStructs } from '../index'
 import type { EventStreamHandle, EventStreamOpenInfo } from './transport/event_stream'
 
 // @ts-expect-error SSE definitions require an endpoint-owned queue limit.
@@ -129,8 +129,8 @@ async function assertAsyncDisposableEventStream(handle: EventStreamHandle<unknow
 
 void assertAsyncDisposableEventStream
 
-const closeErrorCode: EventStreamErrorCode = 'QUEUE_OVERFLOW'
-void closeErrorCode
+const closeFaultCode: EventStreamFaultCode = 'CAP_QUEUE_OVERFLOW'
+void closeFaultCode
 
 type CatalogEvent = EventStreamData<typeof catalogEventStructs>
 declare const catalogEvent: CatalogEvent

@@ -7,6 +7,38 @@ description: 為什麼 Defjs 要把契約、command、傳輸結果、解碼與�
 
 Defjs 做了幾項刻意取捨。便利 API 常把「誰擁有 request、stream、session」藏起來。Defjs 把這條邊界留在視線內，讓你能重用同一份 endpoint 契約，卻不會默默多出快取、重試排程器或資源管理器。
 
+## 宣告即斷言
+
+這六條規則決定了「回應怎麼讀」的所有問題。編上號，方便以後討論時直接引用，不必重新推導一遍。
+
+### 1. 你宣告的就是你斷言的
+
+`output` 的意思是「`ok` 為 true 時，body **就是**這個形狀」。`error` 的意思是「`ok` 為 false 時，body **就是**這個形狀」。宣告不是提示，也不是盡力而為的期望，而是對「會收到什麼」的主張。
+
+### 2. `ok` 是唯一分流點，而且只走一邊
+
+2xx 用 `output` 讀。其他一律用 `error` 讀。絕不兩邊都試，也不會拿另一邊來墊底。
+
+### 3. 現實與斷言不符就是失敗，而且明確回報
+
+不猜格式、不降級、不沉默。是後端改了、閘道器插手了，還是有人動過回應，**都不影響結論**——函式庫分辨不出來，也不該裝作分辨得出來。
+
+這條最常被人希望放寬，所以值得把情況講明白。假設有個壞蛋能改寫你頁面本該按 `output` 解析的 `200`，而你收到的是 `3xx`、`4xx` 或 `5xx`。報錯不是麻煩，而是唯一安全的結果。「以防萬一」把原始 body 交給你，等於給任何能注入回應的人一條繞過你所要求的驗證的路。
+
+### 4. 解碼失敗就沒有 body
+
+body **就是**解碼後的值。解碼失敗就沒有值——不存在半成品 body 供你檢查。出錯細節在 `cause` 上；回應只保留 metadata，其他都沒有。
+
+這條由型別系統強制，不靠約定：解碼 fault 的 `response` 是 `HttpMeta`，根本沒有 `body` 欄位，去取它就是編譯錯誤。
+
+### 5. 不想被斷言約束，就不要宣告
+
+省略 `output` 的意思是「我不在乎 2xx 的 body」——它根本不會被讀。省略 `error` 對其餘狀態同理。這是明確的 opt-out，不是漏掉，而且徹底：你 opt out 那一側的 body 讀不出來，不是你的事，連「它讀不出來」這件事本身都不是。
+
+### 6. 3xx 不是錯誤碼區間
+
+如果你知道某個端點會回傳重新導向狀態，就不要給 `output` 傳對應的 schema，或者宣告一個能接受空值的 schema。否則報錯是預期結果，不是缺口。
+
 ## 明確的 client
 
 `createClient(...)` 把 endpoint 設定當成明確的值。不同環境或請求範圍可以有不同的 endpoint、憑證、interceptors、serializers、傳輸 handles。
@@ -28,10 +60,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -53,7 +83,19 @@ const command = getUser({ path: { id: 7 } })
 
 TypeScript 推導描述的是你期待的形狀；它無法在執行階段檢查伺服器回應。Struct 剖析是契約的另一半。Defjs 會在建構請求前驗證 command input，解碼選定的 representation，再剖析對應的 Struct。
 
-這個順序讓 status 與 body 維持為分開的事實。精確的已宣告狀態碼選擇發生在 body 解碼**之前**。已宣告的非 2xx → 型別化的 `error.data`。畸形的已宣告 body → `RESPONSE_VALIDATION_FAILED`。未宣告狀態碼 → `UNDECLARED_STATUS`（不是無型別的成敗）。比「隨便來個 JSON」更嚴，但你能做安全決策。
+解碼**只發生一次，而且在 interceptor 鏈之後**。Interceptor 用 `makeResponse(...)` 造出來的回應，和線上真實來的回應被完全一樣地解讀：回應從哪來，不影響它怎麼被讀，所以不存在「信任 interceptor」這條需要推敲的岔路。
+
+順序是：媒體類型，然後表示，然後 Struct。
+
+| 沒守住的是                       | Fault                                              |
+| -------------------------------- | -------------------------------------------------- |
+| 媒體類型不是所宣告表示需要的那個 | `RES_MEDIA_TYPE_INVALID`——在讀 body **之前**就回報 |
+| bytes 不是那個表示               | `RES_DECODE_FAILED`                                |
+| 值不符合那個 Struct              | `RES_STRUCT_MISMATCH`                              |
+| 非 2xx，且 `error` 解出來了      | `HTTP_STATUS`，`data` 有型別                       |
+| 非 2xx，且沒宣告 `error`         | `HTTP_STATUS`，`data: undefined`                   |
+
+先檢查媒體類型，就是把「我要的是 JSON，收到的是 HTML」變成一個精確的 fault 而不是一個 parser 錯誤，而且整個跳過讀取、解析和 Struct。
 
 ## `build` 的界線
 
@@ -83,7 +125,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: { 202: struct.object({ accepted: struct.number() }) },
+  output: struct.object({ accepted: struct.number() }),
 })
 
 const command = createBatch({

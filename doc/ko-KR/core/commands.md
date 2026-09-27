@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,14 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## status 출력 형태
+## `output`과 `error`의 모양
 
-`output`은 status → Struct 맵이거나 `{ status, body }[]`예요. 정확한 status가 이겨요. 배열 항목에서는 나중 매치가 앞선 그룹 매치를 덮어요. 맞는 선언이 없으면 body 디코딩 전에 `UNDECLARED_STATUS`예요.
+`output`은 2xx body를 위한 하나의 Struct이고, `error`는 그 밖의 모든 것을 위한 하나의 Struct예요. `ok`가 유일한 분기점이고, 디코딩하는 쪽은 항상 한쪽뿐이에요. 한쪽을 빼면 그 body는 읽히지 않아요. fault가 status를 나르고, `data`는 `undefined`로 남아요.
 
 ## 관련 레시피
 

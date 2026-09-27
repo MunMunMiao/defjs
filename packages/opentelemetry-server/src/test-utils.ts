@@ -1,6 +1,6 @@
 import type {
   EventStreamCloseInfo,
-  EventStreamErrorCode,
+  EventStreamFaultCode,
   EventStreamHandle,
   HttpRequest,
   HttpResponse,
@@ -229,8 +229,8 @@ export function makeDeferredSSEStream() {
 
   return {
     stream,
-    close(code: SSECloseCode = 'eof', cause?: unknown, errorCode?: EventStreamErrorCode) {
-      closed.resolve(makeSSECloseInfo(code, cause, errorCode))
+    close(kind: SSECloseCode = 'eof', cause?: unknown, code?: EventStreamFaultCode) {
+      closed.resolve(makeSSECloseInfo(kind, cause, code))
     },
     reject(error: unknown) {
       closed.reject(error)
@@ -238,8 +238,8 @@ export function makeDeferredSSEStream() {
   }
 }
 
-function makeSSECloseInfo(code: SSECloseCode, cause?: unknown, errorCode: EventStreamErrorCode = 'TRANSPORT_ERROR'): EventStreamCloseInfo {
-  return code === 'error' ? { code, cause, errorCode, reason: '' } : { code, cause, reason: '' }
+function makeSSECloseInfo(kind: SSECloseCode, cause?: unknown, code: EventStreamFaultCode = 'NET_UNREACHABLE'): EventStreamCloseInfo {
+  return kind === 'error' ? { cause, code, kind, reason: '' } : { cause, kind, reason: '' }
 }
 
 export function makeSSEStreamError(error: unknown): EventStreamHandle<unknown> {

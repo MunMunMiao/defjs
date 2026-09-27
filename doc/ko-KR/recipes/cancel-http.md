@@ -1,6 +1,6 @@
 ---
 title: HTTP 호출 취소하기
-description: execute 호출을 abort하거나 타임아웃하고 ABORTED / TIMEOUT을 읽어요.
+description: execute 호출을 abort하거나 타임아웃하고 NET_ABORTED / NET_TIMEOUT을 읽어요.
 ---
 
 # HTTP 호출 취소하기
@@ -24,9 +24,9 @@ const pending = client.execute(getReport(), {
 controller.abort('screen closed')
 const [error] = await pending
 
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancelled')
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+} else if (error?.code === 'NET_TIMEOUT') {
   console.log('timed out')
 } else if (error) {
   console.error(error.code)

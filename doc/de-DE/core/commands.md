@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,14 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## Status-Output-Shapes
+## Output- und Error-Shapes
 
-`output` kann eine Status → Struct-Map oder ein `{ status, body }[]` sein. Exakter Status gewinnt. Array-Einträge: ein späterer Match überschreibt einen früheren gruppierten Match. Keine passende Deklaration → `UNDECLARED_STATUS` vor Body-Decode.
+`output` ist ein Struct für den 2xx-Body; `error` ist ein Struct für alles andere. `ok` ist die einzige Verzweigung, und es dekodiert immer nur eine Seite. Eine Seite auszulassen heißt, dass dieser Body nie gelesen wird: der Fault trägt den Status, und `data` bleibt `undefined`.
 
 ## Verwandte Rezepte
 

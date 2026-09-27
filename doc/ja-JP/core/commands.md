@@ -43,7 +43,7 @@ const createUser = defineRequest({
   input: struct.request({
     body: struct.json(struct.object({ name: struct.string() })),
   }),
-  output: { 201: struct.object({ id: struct.number(), name: struct.string() }) },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
 })
 void createUser
 ```
@@ -64,14 +64,14 @@ const search = defineRequest({
   build(request, input) {
     request.setQueryParams({ q: input.q, page: input.page })
   },
-  output: { 200: struct.object({ items: struct.array(struct.string()) }) },
+  output: struct.object({ items: struct.array(struct.string()) }),
 })
 void search
 ```
 
-## status 出力の形
+## `output` と `error` の形
 
-`output` は status → Struct のマップ、または `{ status, body }[]` です。厳密な status が勝ちます。配列エントリでは、後の一致が先のグループ一致を上書きします。一致する宣言がなければ、ボディデコードの前に `UNDECLARED_STATUS` です。
+`output` は 2xx ボディ用の単一の Struct、`error` はそれ以外すべて用の単一の Struct です。`ok` だけが分岐点で、デコードするのは常に片側だけです。片側を省くと、そのボディは読まれません。fault が status を運び、`data` は `undefined` のままです。
 
 ## 関連レシピ
 

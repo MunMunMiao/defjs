@@ -1,11 +1,13 @@
 ---
-title: Revalidate with ETag and declared 304
-description: Treat 304 as a declared HTTP outcome; keep the cache Map outside execute.
+title: Revalidate with ETag and a 304
+description: Treat 304 as an HTTP status fault; keep the cache Map outside execute.
 ---
 
-# Revalidate with ETag and declared 304
+# Revalidate with ETag and a 304
 
-`ok` means 2xx. A `304` is not success slot data — declare `struct.null()` (or another empty body), keep the cache Map around `execute`, and return the cached product yourself.
+`ok` means 2xx, so a `304` arrives as an `HTTP_STATUS` fault. A redirect status is not an error
+body either, so leave `error` undeclared: the body is never read, the fault carries the status,
+and you return the cached product yourself.
 
 See [HTTP](../core/http.md).
 
@@ -29,10 +31,7 @@ const readProduct = defineRequest({
       etag: struct.string().optional().alias('If-None-Match'),
     }),
   }),
-  output: [
-    { status: 200, body: Product },
-    { status: 304, body: struct.null() },
-  ],
+  output: Product,
 })
 
 function createReader(client: ReturnType<typeof createClient>) {
@@ -42,7 +41,7 @@ function createReader(client: ReturnType<typeof createClient>) {
     const cached = cache.get(sku)
     const [error, product, response] = await client.execute(readProduct({ path: { sku }, headers: { etag: cached?.etag } }))
 
-    if (error?.kind === 'http' && error.status === 304 && cached) {
+    if (error?.code === 'HTTP_STATUS' && error.status === 304 && cached) {
       return cached.product
     }
     if (error) throw error

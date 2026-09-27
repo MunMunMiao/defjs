@@ -1,110 +1,149 @@
 ---
 title: 錯誤
-description: RequestError 變體與工廠 helpers。
+description: Fault 的各個變體與工廠 helper。
 ---
 
-# 錯誤
+# Errors
 
-HTTP execute 會在 tuple 第一格回傳用 kind 區分的 `RequestError` — 已宣告的失敗不是 throw。
+Execute 把一個可判別的 `Fault` 放在 tuple 第一項——宣告過的失敗不丟例外。
 
-## RequestError {#RequestError}
+## FaultCode {#FaultCode}
 
 ```ts
-type RequestError<TErrorData = unknown> = HttpStatusError<TErrorData> | TransportError | DefinitionError
+type FaultCode =
+  | 'CAP_BUFFER_EXCEEDED'
+  | 'CAP_QUEUE_OVERFLOW'
+  | 'ENV_UNSUPPORTED'
+  | 'EXT_HOOK_FAILED'
+  | 'EXT_INTERCEPTOR_FAILED'
+  | 'EXT_OBSERVER_FAILED'
+  | 'HTTP_STATUS'
+  | 'NET_ABORTED'
+  | 'NET_BODY_INCOMPLETE'
+  | 'NET_TIMEOUT'
+  | 'NET_UNREACHABLE'
+  | 'REQ_BUILD_FAILED'
+  | 'REQ_INPUT_INVALID'
+  | 'REQ_OPTIONS_INVALID'
+  | 'RES_DECODE_FAILED'
+  | 'RES_MEDIA_TYPE_INVALID'
+  | 'RES_STRUCT_MISMATCH'
 ```
 
-用 `error.kind` 分支：`'http' | 'transport' | 'definition'`。
+一個封閉集合。第一個 `_` 之前那段就是類別；沒有獨立的 `kind` 欄位。集合保持封閉，`switch (fault.code)` 才能窮盡——擴充報自己的細節走 `cause`，不是加新 code。
 
-### HttpStatusError {#HttpStatusError}
+## FaultClass {#FaultClass}
 
 ```ts
-interface HttpStatusError<TErrorData = unknown, TStatus extends number = number> extends Error {
-  kind: 'http'
-  code: 'HTTP_STATUS'
-  status: TStatus
-  message: string
-  data: TErrorData
-  response: HttpResponse<unknown>
-}
+type FaultClass<C extends string> = C extends `${infer TClass}_${string}` ? TClass : never
 ```
 
-這是已宣告 error status 的回應。未宣告 status 不是 `HttpStatusError`，而是 `DefinitionError` / `UNDECLARED_STATUS`。
+`FaultClass<FaultCode>` 是 `'CAP' | 'ENV' | 'EXT' | 'HTTP' | 'NET' | 'REQ' | 'RES'`。
 
-### TransportError {#TransportError}
+## Fault {#Fault}
 
 ```ts
-interface TransportError extends Error {
-  kind: 'transport'
-  code: 'ABORTED' | 'TIMEOUT' | 'NETWORK_ERROR'
-  message: string
-  cause?: unknown
-}
+type Fault<TErr extends AnyStruct | undefined = undefined> = DecodeFault | HttpStatusFault<TErr> | PreflightFault
 ```
 
-### DefinitionError {#DefinitionError}
+對 `fault.code` 做 switch。
+
+每個變體都是名為 `DefjsFault` 的原生 `Error`，所以 `String(fault)` 直接給出可寫 log 的 `DefjsFault: <message>`。`code` 與各變體 metadata——`status`、`response`、`data`——都是可列舉的自有屬性。原生 `cause` 鏈不可列舉。
 
 ```ts
-type DefinitionError =
-  | (Error & {
-      kind: 'definition'
-      code: 'REQUEST_VALIDATION_FAILED' | 'RESPONSE_VALIDATION_FAILED' | 'INTERCEPTOR_FAILED'
-      cause?: unknown
-      response?: HttpResponse<unknown>
-    })
-  | (Error & {
-      kind: 'definition'
-      code: 'UNDECLARED_STATUS'
-      cause?: unknown
-      response: HttpResponse<unknown>
-      status: number
-    })
-```
+import { StructError, type Fault } from '@defjs/core'
 
-三種變體都是原生 `Error`，可以直接記錄 `String(error)`。`kind`、`code`、`status`、`response`、`data` 等 Defjs metadata 是可列舉的自有屬性；`name` 與原生 `cause` 不可列舉。支援 cause chain 的 logger 可以繼續沿著 `cause` 記錄。
-
-Struct helpers 不會複製到外層 `DefinitionError`；必須先縮窄 cause：
-
-```ts
-import { StructError, type RequestError } from '@defjs/core'
-
-function logStructCause(error: RequestError): void {
-  if (error.cause instanceof StructError) {
-    console.error(error.cause.prettify())
+function logFault(fault: Fault): void {
+  console.error(String(fault), { code: fault.code })
+  if (fault.cause instanceof StructError) {
+    console.error(fault.cause.prettify())
   }
 }
 ```
 
-## 工廠函式
+只有把 `fault.cause` 窄化到 `StructError` 之後，才能呼叫 `format()`、`flatten()` 或 `prettify()`；這些 helper 不會被複製到 fault 上。
 
-## createHttpStatusError() {#createHttpStatusError}
-
-## createTransportError() {#createTransportError}
-
-## createDefinitionError() {#createDefinitionError}
+### HttpStatusFault {#HttpStatusFault}
 
 ```ts
-declare function createHttpStatusError(status: number, message: string, response: HttpResponse<unknown>, data?: unknown): HttpStatusError
+type HttpStatusFaultOf<TData> = Error & {
+  code: 'HTTP_STATUS'
+  data: TData
+  response: [TData] extends [undefined] ? HttpMeta : DecodedResponse<TData>
+  status: number
+}
 
-declare function createTransportError(cause: unknown): TransportError
-
-declare function createDefinitionError(
-  code: 'UNDECLARED_STATUS',
-  cause: unknown,
-  response: HttpResponse<unknown>,
-): Extract<DefinitionError, { code: 'UNDECLARED_STATUS' }>
-
-declare function createDefinitionError(
-  code: Exclude<DefinitionError['code'], 'UNDECLARED_STATUS'>,
-  cause: unknown,
-  response?: HttpResponse<unknown>,
-): Extract<DefinitionError, { code: Exclude<DefinitionError['code'], 'UNDECLARED_STATUS'> }>
+type HttpStatusFault<TErr extends AnyStruct | undefined = undefined> = HttpStatusFaultOf<
+  [TErr] extends [undefined] ? undefined : Infer<TErr>
+>
 ```
 
-`createTransportError` 會把 abort／timeout 哨兵對到 `ABORTED`／`TIMEOUT`，其餘都是 `NETWORK_ERROR`。
+任何非 2xx 狀態。端點宣告過 `error` 且 body 解碼成功時，`data` 就是那個 body，`response` 也帶著它。省略了 `error` 時 body 根本不會被讀，於是 `data` 是 `undefined`，`response` 只有 metadata。
 
-`UNDECLARED_STATUS` 呼叫 `createDefinitionError` 時少了 `response`，會拋出 `TypeError('UNDECLARED_STATUS requires a response')`。
+### DecodeFault {#DecodeFault}
 
-## 哨兵值
+```ts
+type DecodeFault = Error & {
+  cause: unknown
+  code: 'RES_DECODE_FAILED' | 'RES_MEDIA_TYPE_INVALID' | 'RES_STRUCT_MISMATCH'
+  response: HttpMeta
+  status: number
+}
+```
+
+回應到了，但沒法按宣告讀出來。`response` 只有 metadata：body 就是解碼後的值，而解碼本身失敗了，所以沒有 `body` 欄位可取。出錯細節在 `cause` 上——struct 不匹配時是 `StructError`，表示讀不出來時是 parser 的失敗。
+
+### PreflightFault {#PreflightFault}
+
+```ts
+type PreflightFault = Error & {
+  cause?: unknown
+  code: PreflightFaultCode
+  response?: HttpMeta
+}
+```
+
+所有可能在回應存在之前就失敗的情況：`REQ_*`、`NET_*`、`EXT_*`、`CAP_*`、`ENV_UNSUPPORTED`。只有傳輸層當時確實有 metadata 可報時才帶 `response`，例如下載中途被截斷的 body。
+
+### AnyFault {#AnyFault}
+
+```ts
+type AnyFault = DecodeFault | HttpStatusFaultOf<undefined> | HttpStatusFaultOf<unknown> | PreflightFault
+```
+
+任何 fault，不論它解碼後的錯誤 body 是什麼型別。寫那種只做分類、不在乎是哪個端點產出的 handler 時用它；body 型別要緊的地方優先用 `Fault<typeof yourErrorStruct>`。
+
+## 工廠
+
+## createHttpStatusFault() {#createHttpStatusFault}
+
+## createUndecodedHttpStatusFault() {#createUndecodedHttpStatusFault}
+
+## createDecodeFault() {#createDecodeFault}
+
+## createNetworkFault() {#createNetworkFault}
+
+## createPreflightFault() {#createPreflightFault}
+
+```ts
+declare function createHttpStatusFault<TData>(response: DecodedResponse<TData>): HttpStatusFaultOf<TData>
+
+declare function createUndecodedHttpStatusFault(response: HttpMeta): HttpStatusFaultOf<undefined>
+
+declare function createDecodeFault(code: DecodeFaultCode, cause: unknown, response: HttpMeta): DecodeFault
+
+declare function createNetworkFault(cause: unknown, response?: HttpMeta): PreflightFault
+
+declare function createPreflightFault(code: PreflightFaultCode, cause?: unknown, response?: HttpMeta): PreflightFault
+```
+
+`createHttpStatusFault` 收一個已經帶著解碼後 body 的回應；`createUndecodedHttpStatusFault` 只收 metadata，給那些沒宣告 `error` 的端點用。
+
+`createNetworkFault` 把 abort 與 timeout 哨兵對應到 `NET_ABORTED` / `NET_TIMEOUT`，其餘一律對應到 `NET_UNREACHABLE`。`createPreflightFault` 直接收 code；不給 `cause` 時，code 就成了 message。
+
+所有工廠都回傳帶上述結構化欄位的原生 `Error` 實例；它們不造普通物件錯誤，`String(fault)` 也不需要 adapter。
+
+## 哨兵
 
 ## ERR_ABORTED {#ERR_ABORTED}
 
@@ -115,6 +154,6 @@ const ERR_ABORTED: Error // message: 'Request was aborted'
 const ERR_TIMEOUT: Error // message: 'Request timed out'
 ```
 
-abort 與 timeout 共用的 `cause`／message。
+abort 與 timeout 共享的 `cause` / message 值。從 interceptor 裡丟一個出來，就是 interceptor 表達取消的方式。
 
-見 [錯誤指南](../core/errors.md)。
+見 [Errors 指南](/zh-Hant-TW/core/errors)。

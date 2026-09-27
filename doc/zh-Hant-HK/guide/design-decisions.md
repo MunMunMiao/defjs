@@ -7,6 +7,38 @@ description: 點解 Defjs 要將 contracts、commands、transport results、deco
 
 Defjs 刻意做咗幾個 trade-offs。Convenience APIs 好多時會隱藏邊個 own 住 request、stream 或者 session。Defjs 要呢條 boundary 睇得見，等你可以 reuse 同一個 endpoint contract，又唔會靜靜雞拎住 cache、retry scheduler 或者 resource manager。
 
+## 聲明即斷言
+
+呢六條規則決定咗「response 點讀」嘅所有問題。編咗號，方便日後討論時直接引用，唔使重新推導一次。
+
+### 1. 你聲明嘅就係你斷言嘅
+
+`output` 嘅意思係「`ok` 係 true 嘅時候，body **就係**呢個形狀」。`error` 嘅意思係「`ok` 係 false 嘅時候，body **就係**呢個形狀」。聲明唔係提示，亦唔係盡力而為嘅期望，而係對「會收到啲咩」嘅斷言。
+
+### 2. `ok` 係唯一分流點，而且只走一邊
+
+2xx 用 `output` 讀。其他一律用 `error` 讀。絕對唔會兩邊都試，亦唔會拿另一邊嚟墊底。
+
+### 3. 現實同斷言唔一致就係失敗，而且要明確報
+
+唔猜 format、唔降級、唔靜靜雞。係後端改咗、gateway 插手，抑或有人改過個 response，**都唔影響結論**——library 分唔出，亦唔應該裝到分得出。
+
+呢條最多人想放寬，所以值得將情況講清楚。假設有個壞蛋可以改寫你個頁面本應按 `output` 解析嘅 `200`，而你收到嘅係 `3xx`、`4xx` 或者 `5xx`。報錯唔係麻煩，而係唯一安全嘅結果。「以防萬一」將原始 body 交俾你，等於俾任何可以注入 response 嘅人一條路，繞過你自己要求嘅 validation。
+
+### 4. 解碼失敗就冇 body
+
+body **就係**解碼之後嘅值。解碼失敗就冇值——唔存在半成品 body 俾你睇。出錯細節喺 `cause` 上面；response 只保留 metadata，其他冇。
+
+呢條由 type system 強制，唔靠約定：解碼 fault 嘅 `response` 係 `HttpMeta`，根本冇 `body` field，去拿佢就係 compile error。
+
+### 5. 唔想被斷言綁住，就唔好聲明
+
+唔寫 `output` 意思係「我唔關心 2xx 嘅 body」——佢根本唔會被讀。唔寫 `error` 對其餘 status 同理。呢個係明示 opt-out，唔係漏咗，而且徹底：你 opt out 嗰一邊嘅 body 讀唔出，唔係你嘅事，連「佢讀唔出」呢件事本身都唔係。
+
+### 6. 3xx 唔係 error code 區間
+
+如果你知道某個 endpoint 會回 redirect status，就唔好俾 `output` 傳對應嘅 schema，或者聲明一個接受空值嘅 schema。否則報錯係預期結果，唔係缺陷。
+
 ## Explicit clients
 
 代價：冇 process-wide default。呢個代價喺 server 上面好有用 — 當 options 或者 closures capture auth、cookies、users、tenants 或者 request metadata 時，喺 request boundary 入面 create client。Explicit client 都唔會 isolate interceptor capture 嘅 state，而 `struct.parse(..., { errorMap })` 只覆蓋嗰一次 parse 嘅文案。Client identity 本身唔係 security boundary。
@@ -26,10 +58,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -51,7 +81,19 @@ Background job 同 UI owner 可以用唔同 cancel/retry policy 去 execute 同�
 
 TypeScript inference 描述你 expect 嘅嘢；佢唔可以喺 runtime check server response。Struct parsing 係 contract 嘅另一半。Defjs 會喺 request construction 之前 validate command input，decode 揀中嘅 representation，再 parse 對應嘅 Struct。
 
-呢個次序令 status 同 body 保持分開嘅 facts。Exact declared status selection 發生喺 body decode **之前**。Declared non-2xx → typed `error.data`。Malformed declared body → `RESPONSE_VALIDATION_FAILED`。Undeclared status → `UNDECLARED_STATUS`（唔係 untyped success/failure）。比起「收到咩 JSON 就係咩」更嚴，但你可以做安全決策。
+解碼**只發生一次，而且係喺 interceptor chain 之後**。Interceptor 用 `makeResponse(...)` 造出嚟嘅 response，同線上真實嚟嘅 response 會被一模一樣地解讀：response 由邊嚟，唔影響佢點被讀，所以唔存在「信 interceptor」呢條要考慮嘅岔路。
+
+次序係：media type，然後 representation，然後 Struct。
+
+| 冇守住嘅係                                | Fault                                          |
+| ----------------------------------------- | ---------------------------------------------- |
+| Media type 唔係所聲明 representation 要嘅 | `RES_MEDIA_TYPE_INVALID`——讀 body **之前**就報 |
+| Bytes 唔係嗰個 representation             | `RES_DECODE_FAILED`                            |
+| 值唔符合嗰個 Struct                       | `RES_STRUCT_MISMATCH`                          |
+| 非 2xx，而 `error` 解到                   | `HTTP_STATUS`，`data` 有 type                  |
+| 非 2xx，而冇聲明 `error`                  | `HTTP_STATUS`，`data: undefined`               |
+
+先查 media type，就係將「我要 JSON，收到 HTML」變成一個精確嘅 fault，而唔係一個 parser error，而且完全跳過讀取、解析同 Struct。
 
 ## `build` 嘅界限
 
@@ -81,7 +123,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: { 202: struct.object({ accepted: struct.number() }) },
+  output: struct.object({ accepted: struct.number() }),
 })
 
 const command = createBatch({

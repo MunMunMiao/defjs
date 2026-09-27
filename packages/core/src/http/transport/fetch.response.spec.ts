@@ -91,7 +91,6 @@ describe('Fetch handler responses', () => {
     )
 
     expect(response.body).toBeNull()
-    expect(response.error).toBeUndefined()
   })
 
   test('should ignore an unused response body cancellation failure', async () => {
@@ -111,7 +110,6 @@ describe('Fetch handler responses', () => {
     )
 
     expect(response.body).toBeNull()
-    expect(response.error).toBeUndefined()
   })
 
   test('should not wait for unused response body cancellation to settle', async () => {
@@ -157,7 +155,7 @@ describe('Fetch handler responses', () => {
       async () => new Response(body),
     )
 
-    await expect(settleWithin(pending)).rejects.toBe(observerError)
+    await expect(settleWithin(pending)).rejects.toMatchObject({ cause: observerError, code: 'EXT_OBSERVER_FAILED' })
     expect(cancel).toHaveBeenCalledExactlyOnceWith(observerError)
     expect(body.locked).toBe(false)
   })
@@ -170,7 +168,7 @@ describe('Fetch handler responses', () => {
       },
     })
 
-    const response = await fetchHandler(
+    const failure = await fetchHandler(
       {
         baseEndpoint: 'https://example.com',
         endpoint: '/read-error',
@@ -178,9 +176,9 @@ describe('Fetch handler responses', () => {
         responseType: 'text',
       },
       async () => new Response(body),
-    )
+    ).catch((cause: unknown) => cause)
 
-    expect(response.error).toBe(readError)
+    expect(failure).toMatchObject({ cause: readError, code: 'NET_BODY_INCOMPLETE' })
     expect(body.locked).toBe(false)
   })
 
@@ -209,8 +207,7 @@ describe('Fetch handler responses', () => {
       abort.abort()
     }, 0)
 
-    const { error } = await fetchHandler(requestConfig)
-    expect(error).toBe(ERR_ABORTED)
+    await expect(fetchHandler(requestConfig)).rejects.toBe(ERR_ABORTED)
   })
 
   test('should settle an ignored fetch abort and cancel a late response body', async () => {
@@ -237,7 +234,7 @@ describe('Fetch handler responses', () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
     controller.abort()
 
-    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    await expect(settleWithin(pending)).rejects.toBe(ERR_ABORTED)
     resolveFetch(new Response(new ReadableStream<Uint8Array>({ cancel })))
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason))
   })
@@ -273,7 +270,7 @@ describe('Fetch handler responses', () => {
     await pullStarted
     controller.abort()
 
-    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    await expect(settleWithin(pending)).rejects.toBe(ERR_ABORTED)
     expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
     expect(body.locked).toBe(false)
   })
@@ -310,7 +307,7 @@ describe('Fetch handler responses', () => {
     await pullStarted
     controller.abort()
 
-    await expect(settleWithin(pending)).resolves.toMatchObject({ error: ERR_ABORTED })
+    await expect(settleWithin(pending)).rejects.toBe(ERR_ABORTED)
     expect(cancel).toHaveBeenCalledExactlyOnceWith(controller.signal.reason)
     expect(body.locked).toBe(false)
   })
@@ -325,8 +322,7 @@ describe('Fetch handler responses', () => {
       queryParams: new URLSearchParams({ ms: '10000' }),
     }
 
-    const { error } = await fetchHandler(requestConfig)
-    expect(error).toBe(ERR_TIMEOUT)
+    await expect(fetchHandler(requestConfig)).rejects.toBe(ERR_TIMEOUT)
   })
 
   test('should return error when get request set body', async () => {
@@ -337,8 +333,7 @@ describe('Fetch handler responses', () => {
       body: 'Hello World!',
     }
 
-    const { error } = await fetchHandler(requestConfig)
-    expect(error).toBeInstanceOf(Error)
+    await expect(fetchHandler(requestConfig)).rejects.toBeInstanceOf(Error)
   })
 
   test('should parse json text arraybuffer and blob bodies', async () => {
@@ -382,7 +377,6 @@ describe('Fetch handler responses', () => {
     }
 
     const response = await fetchHandler(requestConfig)
-    expect(response.error).toBeUndefined()
     expect(response.ok).toBe(false)
   })
 
@@ -394,9 +388,7 @@ describe('Fetch handler responses', () => {
       responseType: 'json',
     }
 
-    const response = await fetchHandler(requestConfig)
-    expect(response.body).toBeNull()
-    expect(response.error).toBeInstanceOf(Error)
+    await expect(fetchHandler(requestConfig)).rejects.toBeInstanceOf(Error)
   })
 
   test('should call downloadProgress', async () => {
@@ -424,9 +416,7 @@ describe('Fetch handler responses', () => {
       body: 'hello',
     }
 
-    const response = await fetchHandler(requestConfig)
-    expect(response.body).toBeNull()
-    expect(response.error).toBeInstanceOf(Error)
+    await expect(fetchHandler(requestConfig)).rejects.toBeInstanceOf(Error)
   })
 
   test('should keep explicit accept header', async () => {

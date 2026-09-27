@@ -1,6 +1,6 @@
 ---
 title: Отменить HTTP-вызов
-description: Abort или timeout execute и читай ABORTED / TIMEOUT.
+description: Abort или timeout execute и читай NET_ABORTED / NET_TIMEOUT.
 ---
 
 # Отменить HTTP-вызов
@@ -24,9 +24,9 @@ const pending = client.execute(getReport(), {
 controller.abort('screen closed')
 const [error] = await pending
 
-if (error?.kind === 'transport' && error.code === 'ABORTED') {
+if (error?.code === 'NET_ABORTED') {
   console.log('caller cancelled')
-} else if (error?.kind === 'transport' && error.code === 'TIMEOUT') {
+} else if (error?.code === 'NET_TIMEOUT') {
   console.log('timed out')
 } else if (error) {
   console.error(error.code)

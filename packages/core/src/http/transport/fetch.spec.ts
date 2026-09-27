@@ -597,10 +597,7 @@ describe('Fetch handler request creation', () => {
       method: 'GET',
     }
 
-    const response = await fetchHandler(requestConfig)
-
-    expect(response.error).toBeInstanceOf(TypeError)
-    expect(response.status).toBe(0)
+    await expect(fetchHandler(requestConfig)).rejects.toBeInstanceOf(TypeError)
   })
 
   test('should handle upload progress stream cancel', async () => {

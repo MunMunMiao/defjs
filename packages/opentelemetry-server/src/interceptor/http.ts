@@ -54,7 +54,7 @@ export function createOpenTelemetryHttpInterceptor(options: HttpInterceptorOptio
       const durationS = durationSeconds(startTime)
 
       runSpanHook(span, 'responseHook', () => responseHook?.(span, response, req))
-      setSpanHttpResponse(span, response.status, response.error)
+      setSpanHttpResponse(span, response.status)
 
       metrics?.requestDuration.record(durationS, createHttpMetricAttributes(req, response))
 

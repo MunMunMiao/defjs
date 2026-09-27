@@ -7,6 +7,56 @@ description: Why Defjs keeps contracts, commands, transport results, decoding, a
 
 Defjs makes a few deliberate trade-offs. Convenience APIs often hide who owns a request, stream, or session. Defjs keeps that boundary visible so you can reuse the same endpoint contract without silently picking up a cache, retry scheduler, or resource manager.
 
+## Declaration is an assertion
+
+These six rules decide every question about how a response is read. They are numbered so that a
+later discussion can cite one instead of re-deriving it.
+
+### 1. What you declare is what you assert
+
+`output` means "when `ok` is true, the body _is_ this shape". `error` means "when `ok` is false,
+the body _is_ this shape". A declaration is not a hint or a best-effort hope; it is a claim about
+what will arrive.
+
+### 2. `ok` is the only fork, and only one side ever decodes
+
+A 2xx response is read with `output`. Anything else is read with `error`. Never both, never the
+other one as a fallback.
+
+### 3. Reality that differs from the assertion is a failure, reported loudly
+
+No guessing at formats, no degrading to something weaker, no silence. Whether the backend
+changed, a gateway intervened, or someone tampered with the response **does not change the
+conclusion** — the library cannot tell those apart and should not pretend to.
+
+This is the rule people most often want softened, so it is worth stating the case plainly.
+Suppose an attacker can rewrite a `200` your page was about to read with `output`, and instead
+you receive a `3xx`, `4xx`, or `5xx`. Failing is not an inconvenience; it is the only safe
+outcome. Handing you the raw body "just in case" would give anyone who can inject a response a
+way around the validation you asked for.
+
+### 4. A failed decode has no body
+
+A body _is_ a decoded value. If decoding failed, there is no value — there is no half-decoded
+body to inspect. The offending detail lives on `cause`; the response keeps its metadata and
+nothing more.
+
+This one is enforced by the type system rather than by convention: a decode fault's `response` is
+`HttpMeta`, which has no `body` field at all, so reaching for one is a compile error.
+
+### 5. If you do not want the assertion, do not declare
+
+Omitting `output` means "I do not care about the 2xx body" — it is never read. Omitting `error`
+says the same for everything else. This is an explicit opt-out, not an oversight, and it goes all
+the way: an unreadable body on the side you opted out of is none of your business, not even the
+fact that it could not be read.
+
+### 6. 3xx is not an error-code range
+
+If you know an endpoint answers with a redirect status, do not hand `output` a schema for it, or
+declare one that accepts an empty value. Reporting a failure otherwise is the expected outcome,
+not a gap.
+
 ## Explicit clients
 
 `createClient(...)` makes endpoint config an explicit value. Different environments or request scopes get different endpoints, credentials, interceptors, serializers, and transport handles.
@@ -17,7 +67,7 @@ A client dispatches commands. It doesn’t own active work. Whoever starts an HT
 
 ## Definitions, builders, and commands
 
-The definition is the stable contract: method, path, input Struct, output mapping, transport limits. The builder is the callable view. Calling it creates one opaque command for a single execution.
+The definition is the stable contract: method, path, input Struct, the structs that decode each side of `ok`, transport limits. The builder is the callable view. Calling it creates one opaque command for a single execution.
 
 ```typescript twoslash
 import { defineRequest, struct } from '@defjs/core'
@@ -28,10 +78,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: {
-    200: struct.object({ id: struct.number(), name: struct.string() }),
-    404: struct.object({ message: struct.string() }),
-  },
+  output: struct.object({ id: struct.number(), name: struct.string() }),
+  error: struct.object({ message: struct.string() }),
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -43,17 +91,38 @@ A background job and a UI owner can execute the same `getUser` shape with differ
 
 All three transports use an error-first tuple. A single generic “response” would erase lifecycle facts.
 
-- HTTP → `[error, data, response]` — decoded output + `HttpResponse`
-- SSE → `[error, stream, open]` — one logical stream + startup response snapshot
-- WebSocket → `[error, session, connection]` — logical session + startup connection snapshot
+- HTTP → `[err, data, response]` — decoded output + the response that produced it
+- SSE → `[err, stream, open]` — one logical stream + startup response snapshot
+- WebSocket → `[err, session, connection]` — logical session + startup connection snapshot
 
-The third value is a snapshot, not a promise that future reconnects keep the same physical connection. Startup failure can still include a response/snapshot when the transport produced one first. After startup, lifecycle control belongs to the returned handle or session.
+On success the third value is always present. On failure it is `undefined`, because a fault
+already carries whatever response metadata existed — and a fault is what gets passed to a handler,
+logged, or rethrown, so the metadata has to travel with it rather than beside it.
+
+For SSE and WebSocket the third value is a snapshot, not a promise that future reconnects keep the
+same physical connection. After startup, lifecycle control belongs to the returned handle or
+session.
 
 ## Runtime decoding
 
-TypeScript inference describes what you expect; it can’t check a server response at runtime. Struct parsing is the second half of the contract. Defjs validates command input before request construction, decodes the selected representation, then parses the matching Struct.
+TypeScript inference describes what you expect; it can’t check a server response at runtime. Struct parsing is the second half of the contract. Defjs validates command input before request construction, checks the representation, then parses the struct for whichever side of `ok` applies.
 
-That order keeps status and body as separate facts. Exact declared status selection happens **before** body decode. Declared non-2xx → typed `error.data`. Malformed declared body → `RESPONSE_VALIDATION_FAILED`. Undeclared status → `UNDECLARED_STATUS` (not an untyped success/failure). Stricter than “whatever JSON arrived,” but you can make a safe decision.
+Decoding happens **once, after the interceptor chain**. A response that an interceptor built with
+`makeResponse(...)` is interpreted exactly like one that came off the wire: where a response came
+from does not change how it is read, so there is no "trust the interceptor" path to reason about.
+
+The order is: media type, then representation, then struct.
+
+| What did not hold                                               | Fault                                                         |
+| --------------------------------------------------------------- | ------------------------------------------------------------- |
+| The media type is not the one the declared representation needs | `RES_MEDIA_TYPE_INVALID` — reported _before_ the body is read |
+| The bytes are not that representation                           | `RES_DECODE_FAILED`                                           |
+| The value is not that struct                                    | `RES_STRUCT_MISMATCH`                                         |
+| Non-2xx, and `error` decoded                                    | `HTTP_STATUS` with typed `data`                               |
+| Non-2xx, and `error` was not declared                           | `HTTP_STATUS` with `data: undefined`                          |
+
+Checking the media type first is what turns "I asked for JSON and received HTML" into one precise
+fault instead of a parser error, and it skips the read, the parse, and the struct entirely.
 
 ## The limits of `build`
 
@@ -83,7 +152,7 @@ const createBatch = defineRequest({
       })),
     })
   },
-  output: { 202: struct.object({ accepted: struct.number() }) },
+  output: struct.object({ accepted: struct.number() }),
 })
 
 const command = createBatch({

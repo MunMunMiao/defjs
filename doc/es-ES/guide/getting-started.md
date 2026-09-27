@@ -66,10 +66,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const command = getUser({ path: { id: 7 } })
@@ -100,10 +98,8 @@ const getUser = defineRequest({
   input: struct.request({
     path: struct.object({ id: struct.number() }),
   }),
-  output: [
-    { status: 200, body: User },
-    { status: 404, body: NotFound },
-  ],
+  output: User,
+  error: NotFound,
 })
 
 const handle: typeof fetch = async (input, init) => {
@@ -124,10 +120,10 @@ const [error, user, response] = await client.execute(getUser({ path: { id: 7 } }
 })
 
 if (error) {
-  if (error.kind === 'http' && error.status === 404) {
+  if (error.code === 'HTTP_STATUS' && error.status === 404) {
     console.log(error.data.message)
   } else {
-    console.error(error.kind, error.code)
+    console.error(error.code)
   }
 } else {
   console.log(`Loaded ${user.name} from ${response.status}`)
@@ -179,7 +175,7 @@ Prueba un usuario que falta — cambia el id del path a `8` y vuelve a ejecutar:
 User not found
 ```
 
-En éxito: `error` es `null`, `user` es la salida Struct del `200`, `response` es un `HttpResponse`. En un `404` declarado: `error.kind` es `'http'`, `error.status` es `404` y `error.data` está tipado como `NotFound`. El segundo elemento de la tupla es `undefined` en fallo.
+En éxito: `error` es `null`, `user` es la salida Struct del `200`, `response` es un `HttpResponse`. En un `404` declarado: `error.code` es `'http'`, `error.status` es `404` y `error.data` está tipado como `NotFound`. El segundo elemento de la tupla es `undefined` en fallo.
 
 ## Step 4 — Apuntar a una API real
 
@@ -209,11 +205,11 @@ Mismo comando. Cliente distinto.
 
 ## Cuando el resultado cambia
 
-- Entrada mala / build inválido / opciones de cancel conflictivas → `REQUEST_VALIDATION_FAILED`
-- No-2xx declarado → `HTTP_STATUS` con `error.data` tipado
-- Cuerpo declarado que no decodifica → `RESPONSE_VALIDATION_FAILED`
-- Estado sin declaración → `UNDECLARED_STATUS` (antes de decodificar el cuerpo)
-- Fallo de Fetch / cancel / timeout → `NETWORK_ERROR` / `ABORTED` / `TIMEOUT`
+- Entrada mala → `REQ_INPUT_INVALID`; opciones de cancel conflictivas → `REQ_OPTIONS_INVALID`; un `build` que falla → `REQ_BUILD_FAILED`
+- Cualquier no-2xx → `HTTP_STATUS`, con `err.data` tipado si declaraste `error`
+- Media type incorrecto → `RES_MEDIA_TYPE_INVALID`, avisado antes de leer el cuerpo
+- Cuerpo declarado que no decodifica → `RES_DECODE_FAILED` o `RES_STRUCT_MISMATCH`
+- Fallo de Fetch / cancel / timeout → `NET_UNREACHABLE` / `NET_ABORTED` / `NET_TIMEOUT`
 
 `timeout` debe ser un entero seguro positivo en `1..2_147_483_647`. No pases `abort` y `timeout` juntos; `signal` puede combinarse con cualquiera de los dos. La cancelación te dice lo que vio el llamador — no si una escritura en el servidor se confirmó.
 

@@ -170,7 +170,16 @@ const retrySafeReads = createHttpInterceptor(async (request, next) => {
 })
 ```
 
-Les erreurs d’intercepteur/Fetch throwées ne sont pas relancées par cette boucle. Le statut `0` est la réponse d’échec de transport à la frontière Fetch. Relancer `POST` / `PUT` / `PATCH` / `DELETE` demande des octets rejouables, le support serveur, un contrat d’idempotence et une politique de statut revue.
+Les erreurs d’intercepteur/Fetch throwées ne sont pas relancées par cette boucle — un échec de transport reject au lieu de produire un statut que cette boucle pourrait matcher. Relancer `POST` / `PUT` / `PATCH` / `DELETE` demande des octets rejouables, le support serveur, un contrat d’idempotence et une politique de statut revue. Le retry t’appartient : Core n’exporte pas `retryAfter()`.
+
+Un intercepteur qui throw (ou reject) en dehors de cet exemple revient à l’appelant en
+`EXT_INTERCEPTOR_FAILED`, avec la valeur jetée sur `cause` — voir [Erreurs](./errors.md). Thrower
+`ERR_ABORTED` ou `ERR_TIMEOUT` est au contraire la façon dont un intercepteur exprime une annulation.
+
+`next(request)` peut reject. Un échec de transport est un fault, pas une réponse au statut 0 : un
+intercepteur qui veut en observer un met donc `try` / `catch` autour de `next`. Defjs l’attribue quand
+même correctement — un reject venu du transport reste un fault `NET_*` et n’est pas mis sur le dos de
+ton intercepteur.
 
 ## Wrapper des sessions WebSocket
 
@@ -219,7 +228,7 @@ Spreader une session snapshot `state` / `connection` / `bufferedAmount` une fois
 
 Les factories renvoient des valeurs de transport taguées :
 
-- `createHttpInterceptor(fn)` → `{ kind: 'http', fn }`
+- `createHttpInterceptor(fn)` → `{ fn }`
 - `createSSEInterceptor(fn)` → `{ kind: 'sse', fn }`
 - `createWebSocketInterceptor(fn)` → `{ kind: 'web-socket', fn }`
 - `basicAuthHttpInterceptor(provider, options?)` — credentials Basic sur HTTP

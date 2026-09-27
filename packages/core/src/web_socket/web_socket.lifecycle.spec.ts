@@ -50,13 +50,13 @@ describe('web socket runtime lifecycle', () => {
 
     expect(socket).toBeUndefined()
     expect(connection).toBeUndefined()
-    expect(error?.kind).toBe('transport')
+    expect(error?.code.startsWith('NET_')).toBe(true)
 
-    if (error?.kind !== 'transport') {
+    if (!error?.code.startsWith('NET_')) {
       throw new Error('Expected transport error')
     }
 
-    expect(error.code).toBe('ABORTED')
+    expect(error.code).toBe('NET_ABORTED')
   })
 
   test('should skip unexpected websocket messages after startup', async () => {
